@@ -4265,6 +4265,7 @@ const applyRemoteRename = async (from, to) => {
   if (rwUndoName === from) rwUndoName = to;
   if (loaded) {
     currentOriginalName = to;
+    syncBarGame();
     if (heroCard && !heroCard.hidden) drawPausedHero();
   }
   // Collided pairs: identical bytes drop the old-name copy; anything else
@@ -6423,8 +6424,7 @@ const HOME_PICTURES_MAX_MS = 400;
 let libHint = null;
 try { libHint = localStorage.getItem(LIB_HINT_KEY); } catch {}
 let homePending = !!document.documentElement.classList?.contains("home-pending");
-// A library's side of the page - no drop box, the account in the bar -
-// from the start. (index.html's body script has set it already; this is
+// A library's side of the page - no drop box - from the start. (index.html's body script has set it already; this is
 // for a page whose inline scripts did not run, as the tests' vm.)
 if (homePending) document.body.classList.add("lib-has-games");
 // Set by a launch: from then on the page is headed by that game's hero
@@ -15011,6 +15011,7 @@ const cancelFlight = () => {
 // alone. Nothing can overshoot, because nothing but the logo moves - and the
 // logo is being aimed.
 const flyBrand = (up) => {
+  if (up) syncBarGame(true);
   cancelFlight();
   if (!barBrand.animate) return;
   if (matchMedia("(prefers-reduced-motion: reduce)").matches) return;
@@ -15091,6 +15092,38 @@ const flyBrand = (up) => {
   };
   Promise.all(made.map((a) => a.finished)).then(settle, settle);
 };
+
+// --- The game in the bar, and in the tab ---
+// Over a running game the bar's middle names the game, with its system chip,
+// where the brand's word was (desktop; styles.css, #bar-game), and the tab is
+// titled "<game> · dingbat" for as long as one is loaded, paused on the home
+// screen too. Driven off body's classes, so every way in and out of a game
+// (a launch, Main Menu, Resume, a close, the link modes) is covered by one
+// observer; flyBrand(true) also calls it first, with `opening`, so the bar
+// is already in its in-game shape when the flight measures where the logo
+// lands.
+const barGameName = document.getElementById("bar-game-name");
+const barGameSys = document.getElementById("bar-game-sys");
+const loadedGameName = () =>
+  currentOriginalName || (linkMode && linkRomEntry ? linkRomEntry.name : null);
+
+const syncBarGame = (opening = false) => {
+  const body = document.body.classList;
+  const name = opening || body.contains("has-game") ? loadedGameName() : null;
+  const inGame = !!name && (opening || body.contains("running"));
+  if (name) {
+    const label = displayName(name);
+    if (barGameName.textContent !== label) barGameName.textContent = label;
+    const system = systemOf(name);
+    barGameSys.className = "sys-chip badge-" + system.toLowerCase();
+    barGameSys.textContent = system;
+  }
+  brandBarSlot.classList.toggle("game", inGame);
+  const title = name ? displayName(name) + " · dingbat" : "dingbat";
+  if (document.title !== title) document.title = title;
+};
+new MutationObserver(() => syncBarGame())
+  .observe(document.body, { attributes: true, attributeFilter: ["class"] });
 
 // In a game the brand is the way home, the same as Main Menu (desktop only in
 // practice: phones drop the bar's brand while a game runs). On the home screen

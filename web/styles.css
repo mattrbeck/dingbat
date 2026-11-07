@@ -1249,6 +1249,22 @@ body:not(.running).has-game:not(.home-card) #settings-btn {
   display: none;
 }
 
+/* Wider than a phone, Settings stays in the bar on every screen - over a
+   game and beside a 2P session's menu too - with the volume and the account,
+   so the bar's right-hand end is the same group wherever you are. The menu's
+   copy stands down. Phones keep it in the hamburger over a game: at 375-390
+   the playback group, a tilt cart's button, the mute and full screen leave
+   28px. */
+@media (min-width: 561px) {
+  body.running #settings-btn,
+  body:not(.running).has-game:not(.home-card) #settings-btn {
+    display: flex;
+  }
+  #open-settings {
+    display: none;
+  }
+}
+
 /* Slow motion is a MODE the menu toggles — show its live state in place */
 #slow-motion.active {
   color: var(--accent);
@@ -1637,73 +1653,58 @@ body:not(.running) #channels-indicator {
   flex: 1 1 auto;
 }
 
-/* --- The account slot (home screen only) ---------------------------------
-   Signed out, a quiet worded button; signed in, the account's initial in a
-   circle with a badge for how sync is doing. Either opens #account-pop. */
+/* --- The account slot -----------------------------------------------------
+   One of the bar's icon buttons (.icon-btn: the same 36px rounded square as
+   its neighbours). Signed out, a person's outline like the other icons;
+   signed in, the account's initial in a disc inside it, with a badge for how
+   sync is doing. Either opens #account-pop. */
 #account-slot {
   flex: 0 0 auto;
   display: flex;
   align-items: center;
 }
 
-/* ...and not in the empty state, whose own Sign in with Google is on the
-   page already. */
-#account-slot[hidden],
-body.running #account-slot,
-body:not(.lib-has-games) #account-slot {
+/* On every screen, the empty one too. Phones drop it over a game, with
+   Settings: the width there is the game's controls'. */
+#account-slot[hidden] {
   display: none;
+}
+
+@media (max-width: 560px) {
+  body.running #account-slot {
+    display: none;
+  }
 }
 
 #account-btn {
   position: relative;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 40px;
-  height: 40px;
-  padding: 0;
   font: inherit;
-  color: var(--chrome-ink);
-  background: transparent;
-  border: 0;
-  border-radius: 50%;
-  cursor: pointer;
 }
 
 #account-avatar {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 32px;
-  height: 32px;
+  width: 24px;
+  height: 24px;
   border-radius: 50%;
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 650;
   color: var(--badge-gba-fg);
   background: var(--badge-gba-bg);
   box-shadow: inset 0 0 0 1px rgba(var(--hi-rgb), 0.08);
 }
 
-/* Signed out: the outline alone, dimmer than the wordmark, brightening
-   under the pointer. */
+/* Signed out: the outline alone, in the button's own ink. */
 #account-btn:not(.signed-in) #account-avatar {
-  color: var(--chrome-ink);
+  color: inherit;
   background: transparent;
-  box-shadow: inset 0 0 0 1.5px currentColor;
-  opacity: 0.55;
-  transition: opacity 0.12s;
-}
-
-@media (hover: hover) {
-  #account-btn:not(.signed-in):hover #account-avatar {
-    opacity: 0.9;
-  }
+  box-shadow: none;
 }
 
 #account-btn:not(.signed-in) #account-avatar svg {
-  width: 66%;
-  height: 66%;
-  margin-top: 3px;
+  width: 22px;
+  height: 22px;
 }
 
 #account-avatar svg,
@@ -1721,8 +1722,8 @@ body:not(.lib-has-games) #account-slot {
 #account-badge {
   display: none;
   position: absolute;
-  right: 1px;
-  bottom: 1px;
+  right: -3px;
+  bottom: -3px;
   width: 15px;
   height: 15px;
   border-radius: 50%;
@@ -1745,7 +1746,7 @@ body:not(.lib-has-games) #account-slot {
 #account-btn[data-sync="syncing"]::after {
   content: "";
   position: absolute;
-  inset: 2px;
+  inset: 3px;
   border-radius: 50%;
   border: 2px solid transparent;
   border-top-color: var(--accent);
@@ -1756,13 +1757,6 @@ body:not(.lib-has-games) #account-slot {
 @keyframes acct-spin {
   to {
     transform: rotate(360deg);
-  }
-}
-
-@media (max-width: 560px) {
-  #account-btn {
-    width: 44px;
-    height: 44px;
   }
 }
 
@@ -3056,6 +3050,10 @@ body.home-card .home-recent-head {
    rest of the time. */
 #brand-slot {
   --brand-p: 0;
+  /* What either side of the bar takes in a game (the wider: the right-hand
+     group with the fps readout, 333px; a DS game's two screen buttons add
+     88), plus a margin. */
+  --bar-side: 380px;
   flex: 0 0 auto;
   display: flex;
   align-items: center;
@@ -3117,12 +3115,50 @@ body.home-card .home-recent-head {
    colour and re-point this token at ink that reads on it, while --text stays
    the colour for the dark stage below. On DMG's grey bar the wordmark in
    --text was grey on grey. */
-#bar-brand span {
+#bar-word,
+#bar-game-name {
   font-size: 15px;
   font-weight: 700;
   letter-spacing: 0.01em;
   white-space: nowrap;
   color: var(--chrome-ink);
+}
+
+/* In a game the word gives way to the game: its name and its system chip
+   beside the logo (index.js syncBarGame sets .game). Desktop only - phones
+   drop the bar's brand over a game - and only where the middle has room
+   between the playback group and the right-hand group: the name ellipsizes,
+   and under 1024px the logo is left on its own. */
+#bar-game {
+  display: none;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  max-width: max(0px, calc(100vw - 2 * var(--bar-side)));
+}
+
+body.nds-mode #brand-slot {
+  --bar-side: 470px;
+}
+
+#brand-slot.game #bar-word {
+  display: none;
+}
+
+#brand-slot.game #bar-game {
+  display: flex;
+}
+
+#bar-game-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+@media (max-width: 1023px) {
+  #brand-slot.game #bar-game {
+    display: none;
+  }
 }
 
 #home-brand {
