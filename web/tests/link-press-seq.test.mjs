@@ -2,7 +2,7 @@
 // past the highest its side has seen, and both sides keep the highest (the
 // host's on a tie), so they agree once nothing is in flight; a "now" state
 // message, the last to arrive wins, left one side paused and the other
-// stalled at "waiting for friend" (formal/WebState/LinkResume.lean
+// stalled at "Waiting for your friend" (formal/WebState/LinkResume.lean
 // pause_presses_cross; the fix is proved by presses_agree there).
 // Two pages, A the host and B the guest, each a helpers.mjs vm context with
 // sdputil.js + netplay.js evaluated in index.html's script order; what one

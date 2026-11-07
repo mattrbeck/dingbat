@@ -2,7 +2,7 @@
 // - the home screen and Report a Bug freeze the friend's game too, and
 //   giving the game back runs both (iOS showMainMenu / openSheet relay the
 //   pause; the web froze only this side, and the friend stalled at the
-//   prediction window with "waiting for friend");
+//   prediction window with "Waiting for your friend");
 // - a session starts at normal speed (iOS linkWillStart): a 2x left on from
 //   before Connect ran this side alone at it.
 // sdputil.js + netplay.js are evaluated in the helpers.mjs vm context, in

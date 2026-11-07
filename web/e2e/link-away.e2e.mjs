@@ -199,7 +199,7 @@ test("a cable that really goes quiet still ends the link at the idle window", { 
   for (const s of idled) assert.ok((await toastsSeen(s)).includes("Link idle — disconnected"));
   for (const s of [a, b]) {
     const t = await toastsSeen(s);
-    assert.ok(t.includes("Link idle — disconnected") || t.some((m) => m.startsWith("Peer disconnected")), t.join(" | "));
+    assert.ok(t.includes("Link idle — disconnected") || t.some((m) => m.startsWith("Your friend disconnected")), t.join(" | "));
   }
   await done();
 });
@@ -221,7 +221,7 @@ test("Disconnect from the card while the friend is away: they hear it on return"
   assert.ok(!(await a.page.evaluate(() => rollbackMode || paused)), "A plays on solo");
   await until(async () => !(await linked(b)), "B's session ended while away", 10000);
   await setHidden(b, false);
-  await until(async () => (await toastsSeen(b)).some((t) => t.startsWith("Peer disconnected while you were away")),
+  await until(async () => (await toastsSeen(b)).some((t) => t.startsWith("Your friend disconnected while you were away")),
     async () => "B's toast: " + (await toastsSeen(b)).join(" | "), 5000);
   assert.ok(!(await toastsSeen(b)).some((t) => t.startsWith("Your game was paused")), "no 'friend waited' on a dead link");
   assert.ok(!(await b.page.evaluate(() => rollbackMode || paused)), "B plays on solo");
@@ -237,8 +237,8 @@ test("the friend closes the page while away: the card goes and the game plays on
   await b.page.close({ runBeforeUnload: true });
   await until(async () => !(await linked(a)), "A's session ended", 15000);
   assert.ok(!(await cardShown(a)));
-  assert.ok((await toastsSeen(a)).some((t) => t.startsWith("Peer disconnected")), (await toastsSeen(a)).join(" | "));
-  assert.ok((await netLog(a)).some((t) => t.includes("netplay: Peer disconnected")));
+  assert.ok((await toastsSeen(a)).some((t) => t.startsWith("Your friend disconnected")), (await toastsSeen(a)).join(" | "));
+  assert.ok((await netLog(a)).some((t) => t.includes("netplay: Your friend disconnected")));
   await done();
 });
 
@@ -251,7 +251,7 @@ test("a stall with no away message shows the badge and still outlives the idle w
   await sleep(AWAY_MS);
   assert.ok(await linked(a), "A kept the session: " + (await netLog(a)).join(" | "));
   assert.match(await a.page.evaluate(() => document.getElementById("net-stall-text").textContent),
-               /^waiting for friend · 0:2\d$/);
+               /^Waiting for your friend · 0:2\d$/);
   await setHidden(b, false, false);
   await until(async () => !(await badgeShown(a)), "A's badge gone", 5000);
   assert.ok((await linked(a)) && (await linked(b)));

@@ -197,7 +197,7 @@ test("a deliberate Disconnect sends BYE: the friend is told, no redial", { skip,
   await a.page.evaluate(() => document.getElementById("rb-disconnect").click());
   await a.page.evaluate(() => document.getElementById("rb-disconnect").click());
   await until(async () => !(await linked(b)), "B's session ended", 10000);
-  assert.ok((await toasts(b)).some((t) => t.startsWith("Peer disconnected")), (await toasts(b)).join(" | "));
+  assert.ok((await toasts(b)).some((t) => t.startsWith("Your friend disconnected")), (await toasts(b)).join(" | "));
   assert.ok(!(await netLog(b)).some((t) => t.includes("redialing")), "B didn't redial");
   await done();
 });
@@ -284,7 +284,7 @@ test("Disconnect while reconnecting is heard: the friend's redial gets the goodb
   await a.page.click("#net-away-disconnect");
   await until(async () => !(await linked(b)), "B told", 10000);
   assert.ok(Date.now() - t0 < 10000, "well inside B's 180 s give-up");
-  assert.ok((await toasts(b)).some((t) => t.startsWith("Peer disconnected")), (await toasts(b)).join(" | "));
+  assert.ok((await toasts(b)).some((t) => t.startsWith("Your friend disconnected")), (await toasts(b)).join(" | "));
   assert.ok((await netLog(b)).some((t) => t.includes("redial: the friend left")), (await netLog(b)).join(" | "));
   assert.ok((await netLog(a)).some((t) => t.includes("goodbye note on the retry code (left)")));
   assert.ok(!(await b.page.evaluate(() => rollbackMode)), "B plays on solo");
@@ -299,7 +299,7 @@ test("closing the tab while reconnecting is heard too (the note is a beacon)",
   await until(() => waitingOnCode(b), "B waiting on the retry code", 20000);
   await a.page.close({ runBeforeUnload: true });
   await until(async () => !(await linked(b)), "B told", 10000);
-  assert.ok((await toasts(b)).some((t) => t.startsWith("Peer disconnected")), (await toasts(b)).join(" | "));
+  assert.ok((await toasts(b)).some((t) => t.startsWith("Your friend disconnected")), (await toasts(b)).join(" | "));
   await done();
 });
 
@@ -318,7 +318,7 @@ test("a friend's give-up is heard: \"Couldn't reconnect\" at once, not 3 minutes
 
 // A give-up just after the new channel opened says BYE on it; the BYE says
 // why, so the friend that just resumed reads "Couldn't reconnect" too, not
-// "Peer disconnected" (formal/WebState/LinkResume.lean
+// "Your friend disconnected" (formal/WebState/LinkResume.lean
 // give_up_reads_as_disconnect, bye_reason_heard). A never takes B's RESUME
 // here, so it stays redialing with the channel open until its give-up.
 test("a give-up after the new channel opened reads as one on the friend's side",
@@ -342,7 +342,7 @@ test("a give-up after the new channel opened reads as one on the friend's side",
   await until(async () => !(await linked(a)), "A gave up", 15000);
   await until(async () => !(await linked(b)), "B told", 5000);
   assert.ok((await toasts(b)).some((t) => t.startsWith("Couldn't reconnect")), (await toasts(b)).join(" | "));
-  assert.ok(!(await toasts(b)).some((t) => t.startsWith("Peer disconnected")), (await toasts(b)).join(" | "));
+  assert.ok(!(await toasts(b)).some((t) => t.startsWith("Your friend disconnected")), (await toasts(b)).join(" | "));
   assert.ok(!(await netLog(b)).some((t) => t.includes("redial: the friend gave up")), "by the BYE, not the note");
   await done();
 });
@@ -362,7 +362,7 @@ test("a page killed mid-session leaves its goodbye at the tab's next load",
   await a.page.reload();
   await until(async () => !(await linked(b)), "B told", 30000);
   console.log(`  told in ${((Date.now() - t0) / 1000).toFixed(1)} s`);
-  assert.ok((await toasts(b)).some((t) => t.startsWith("Peer disconnected")), (await toasts(b)).join(" | "));
+  assert.ok((await toasts(b)).some((t) => t.startsWith("Your friend disconnected")), (await toasts(b)).join(" | "));
   assert.ok((await netLog(b)).some((t) => t.includes("redial: the friend left")),
     "by the goodbye note, while redialing: " + (await netLog(b)).slice(-4).join(" | "));
   assert.ok(await a.page.evaluate(() => [...document.querySelectorAll("#log-entries p")]
@@ -400,7 +400,7 @@ test("while reconnecting the game holds: Pause and 2x are off, then back", { ski
 });
 
 // Parity with the iOS app: the home screen freezes the friend's game too
-// (it used to leave the friend stalled on "waiting for friend"), and a
+// (it used to leave the friend stalled on "Waiting for your friend"), and a
 // session starts at normal speed (a 2x left on before Connect ran one side
 // alone at it).
 test("the home screen pauses the friend too, and Resume runs both", { skip, timeout: 120000 }, async () => {

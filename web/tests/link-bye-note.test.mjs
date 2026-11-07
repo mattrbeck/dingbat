@@ -116,12 +116,12 @@ test("without sendBeacon the note goes by a keepalive fetch", async () => {
 });
 
 // The friend's side: a redial whose rendezvous finds the goodbye.
-for (const [why, toast] of [["left", "Peer disconnected"], ["gave-up", "Couldn't reconnect"]]) {
+for (const [why, toast] of [["left", "Your friend disconnected"], ["gave-up", "Couldn't reconnect"]]) {
   test(`a redial told "bye" (${why}) ends with "${toast}" and leaves no note of its own`, async () => {
     const { app, sockets, beacons, session, toasts } = await setup();
     session();
     const before = sockets.length;
-    app.runIn(`rbDropped("channel closed", "Peer disconnected")`);
+    app.runIn(`rbDropped("channel closed", "Your friend disconnected")`);
     assert.equal(app.runIn("net.rb.reconnecting"), true, "redialing");
     assert.equal(sockets.length, before + 1, "on the retry code");
     const ws = sockets[before];

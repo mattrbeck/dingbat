@@ -125,7 +125,7 @@ test("a pairing that never opens goes back to waiting and links on the next, no 
     "a side back to waiting after the 20 s deadline", 40000);
   await until(async () => (await linked(a)) && (await linked(b)),
     async () => "both linked: A " + (await status(a)) + " / B " + (await status(b)), 60000);
-  const errors = [await status(a), await status(b)].filter((t) => /peer-to-peer|left|in use/.test(t));
+  const errors = [await status(a), await status(b)].filter((t) => /connect directly|left|in use/.test(t));
   assert.deepEqual(errors, [], "nobody was shown an error");
   await a.ctx.close(); await b.ctx.close();
 });

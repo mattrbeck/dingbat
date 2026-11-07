@@ -114,11 +114,11 @@ test("back from away to a link that died while suspended: no 'your friend waited
   await hide(true);
   advance(60000);
   await hide(false);
-  app.runIn('netPeerGone("Peer connection lost")'); // the woken page finds it dead
+  app.runIn('netPeerGone("Lost the connection to your friend")'); // the woken page finds it dead
   await flush();
   advance(1500);
   assert.ok(!app.toasts.some((m) => m.includes("paused for")), app.toasts.join(" | "));
-  assert.ok(app.toasts.some((m) => m.startsWith("Peer connection lost")));
+  assert.ok(app.toasts.some((m) => m.startsWith("Lost the connection to your friend")));
 });
 
 test("a quick alt-tab sends away/back but toasts nothing", async () => {
@@ -155,7 +155,7 @@ test("an unexplained stall (no away message) shows the badge after 2 s", async (
   assert.equal(el(app, "net-stall").hidden, true);
   app.runIn("window.rbNoteStall(4200)");
   assert.equal(el(app, "net-stall").hidden, false);
-  assert.equal(el(app, "net-stall-text").textContent, "waiting for friend · 0:04");
+  assert.equal(el(app, "net-stall-text").textContent, "Waiting for your friend · 0:04");
   app.runIn("window.rbNoteStall(0)");
   assert.equal(el(app, "net-stall").hidden, true);
 });
@@ -177,9 +177,9 @@ test("the card's Disconnect takes two taps and ends the session", async () => {
 test("a session that ends while this player is away is told on return", async () => {
   const { app, hide } = await setup();
   await hide(true);
-  app.runIn('netPeerGone("Peer disconnected")');
+  app.runIn('netPeerGone("Your friend disconnected")');
   await flush();
   await hide(false);
-  assert.ok(app.toasts.some((m) => m.startsWith("Peer disconnected while you were away")),
+  assert.ok(app.toasts.some((m) => m.startsWith("Your friend disconnected while you were away")),
             app.toasts.join(" | "));
 });

@@ -115,7 +115,7 @@ try {
   const log = await page.evaluate(() => [...document.querySelectorAll("#log-entries p")].map((e) => e.textContent).filter((t) => t.includes("netplay")));
   console.log("browser log: " + log.slice(-3).join(" | "));
   console.log("browser toasts: " + toasts.join(" | "));
-  if (!toasts.some((t) => t.startsWith("Peer disconnected while you were away"))) { ok = false; console.log("MISSING the away toast"); }
+  if (!toasts.some((t) => t.startsWith("Your friend disconnected while you were away"))) { ok = false; console.log("MISSING the away toast"); }
   if (await page.evaluate(() => rollbackMode || paused)) { ok = false; console.log("browser not back to solo play"); }
   const r = await xc;
   const summary = r.out.split("\n").filter((l) => /Test Case|error:|TEST (SUCCEEDED|FAILED)|XCTAssert/.test(l));

@@ -30,7 +30,7 @@
 //     the app, back, ends at once instead of redialing a friend long gone.
 //   - the app killed mid-session (SIGKILL: nothing runs, no BYE, no note):
 //     the browser redials; the app's next launch leaves the goodbye it
-//     couldn't, and the browser ends with "Peer disconnected".
+//     couldn't, and the browser ends with "Your friend disconnected".
 //   - the game held while reconnecting, on the app: its game doesn't
 //     advance and its Pause and 2x do nothing until the resume;
 //   - crossing presses: pause and 2x messages slowed at the browser so the
@@ -345,7 +345,7 @@ const cases = {
     simctl("launch", "--stderr=" + log2, UDID, BUNDLE, "-audio.muted", "YES", "-signal", "ws://127.0.0.1:" + PORT);
     await until(async () => !(await s.linked()), "the browser told", 20000);
     console.log(`  told ${((Date.now() - t0) / 1000).toFixed(1)} s after the relaunch`);
-    assert.ok((await s.toasts()).some((t) => t.startsWith("Peer disconnected")), (await s.toasts()).join(" | "));
+    assert.ok((await s.toasts()).some((t) => t.startsWith("Your friend disconnected")), (await s.toasts()).join(" | "));
     const relaunch = existsSync(log2) ? readFileSync(log2, "utf8") : "";
     assert.ok(relaunch.includes("the last session never ended"), "the app's goodbye on launch");
     await s.end();
@@ -465,7 +465,7 @@ const cases = {
     console.log("  app: " + s.netlink().slice(-3).join(" | ") + "; browser: " + toasts.slice(-2).join(" | "));
     assert.ok(s.netlink().some((l) => l.startsWith("no reconnect in 8 s")), "the app gave up");
     assert.ok(toasts.some((t) => t.startsWith("Couldn't reconnect")), toasts.join(" | "));
-    assert.ok(!toasts.some((t) => t.startsWith("Peer disconnected")), toasts.join(" | "));
+    assert.ok(!toasts.some((t) => t.startsWith("Your friend disconnected")), toasts.join(" | "));
     assert.ok(!(await s.webLog()).some((t) => t.includes("redial: the friend gave up")), "by the BYE, not the note");
     await s.end();
   },
