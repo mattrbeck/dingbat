@@ -3311,21 +3311,38 @@ body.runtime-ready #boot-progress {
   color: var(--danger);
 }
 
-.home-manage-link {
-  white-space: nowrap;
-  padding: 0;
-  border: none;
-  background: none;
-  font: inherit;
-  font-size: 11px;
-  color: var(--text-faint);
-  text-decoration: underline;
-  text-underline-offset: 2px;
-  cursor: pointer;
+/* Empty, it leaves the row: its gap alone would wrap a phone's head. */
+#storage-info:empty {
+  display: none;
 }
 
-.home-manage-link:hover {
-  color: var(--text);
+/* Add pictures, beside Add a game while some game has no picture: a ghost
+   button (.button-ghost: no fill), smaller and without a glyph, so it reads
+   as the lesser of the two. On touch its hit area reaches 44px tall without
+   drawing any taller. .button's own rules come later in this file, hence
+   the doubled class. */
+.button.lib-thumbs {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 0 12px;
+  font-size: 12px;
+  white-space: nowrap;
+  box-shadow: none;
+  z-index: 1; /* the touch area below reaches over the grid's first row */
+}
+
+.button.lib-thumbs[hidden] {
+  display: none;
+}
+
+@media (pointer: coarse) {
+  .lib-thumbs::before {
+    content: "";
+    position: absolute;
+    inset: -9px -3px; /* from the padding box: 26 + 18 = 44px */
+  }
 }
 
 /* The library's way in from a file: in its head, or under the hero while the

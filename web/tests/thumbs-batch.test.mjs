@@ -189,7 +189,7 @@ test("signed out, the boot offer does not wait at all", async () => {
 
 // ── The way in, above the library ───────────────────────────────────────────
 
-test("the Add pictures link shows only while a game is missing one", async () => {
+test("the Add pictures button shows only while a game is missing one", async () => {
   const app = await loadApp();
   seedLibrary(app, ["A.gba", "B.gba"]);
   const btn = app.document.getElementById("home-thumbs");
