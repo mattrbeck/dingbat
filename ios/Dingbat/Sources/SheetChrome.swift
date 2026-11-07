@@ -248,10 +248,12 @@ struct SheetButtonStyle: ButtonStyle {
 }
 
 /// Two-step inline confirm (web makeConfirmButton): the first tap arms it
-/// (red, `confirmLabel`), a second within 3.5 s runs `action`.
+/// (red, `confirmLabel`), a second within 3.5 s runs `action`. Armed, it
+/// says one thing: its own action again, as a question ("Disconnect?",
+/// "Reset all settings?"), so there is no default.
 struct SheetConfirmButton: View {
     let label: String
-    var confirmLabel = "Confirm?"
+    let confirmLabel: String
     var kind: SheetButtonKind = .normal
     var fill = false
     let action: () -> Void

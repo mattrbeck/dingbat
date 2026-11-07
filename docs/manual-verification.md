@@ -250,9 +250,9 @@ still need the phone (docs/ios-app.md, Native differences).
       ROM, the delete in Save States) and the search cursor wear the theme's
       accent, not blue.
 - [ ] **Haptics.** Quick Save: a success tap. Delete in a tile's menu,
-      Manage Saves' Reset, Disconnect: a warning tap when it turns to "Are
-      you sure?" or "Confirm reset?". A Settings switch ticks. Haptic
-      feedback off: none of them.
+      Manage Saves' Reset, Disconnect: a warning tap when it turns to its
+      question ("Delete this game?", "Reset save file?", "Disconnect?").
+      A Settings switch ticks. Haptic feedback off: none of them.
 - [ ] **Small buttons.** The toast's ×, the search's ×, the sheet's close ×
       and Settings' back and section arrows take a tap a little outside the
       drawn icon; nothing moved.

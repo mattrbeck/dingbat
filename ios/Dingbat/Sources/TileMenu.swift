@@ -130,7 +130,7 @@ struct TileMenuView: View {
         let hasSaves = library.hasSaveData(entry)
         item("reset", "Reset save data", icon: "eraser",
              disabled: busy ?? (hasSaves ? nil : "No save data yet"),
-             confirm: "Delete all save data?") {
+             confirm: "Reset save data?", confirmSub: "Every save for this game is deleted") {
             model.sheet = nil
             HomeActions.resetSaveData(entry)
         }
@@ -138,7 +138,7 @@ struct TileMenuView: View {
             item("restore", "Restore old save", icon: "arrow.uturn.backward", disabled: busy,
                  sub: kept.why == "replaced" ? "The save you replaced"
                     : "From before you deleted it" + (kept.at > 0 ? " · saved " + Self.fmtTime(kept.at) : ""),
-                 confirm: "Replace the current save?") {
+                 confirm: "Restore old save?", confirmSub: "It replaces the current save") {
                 model.sheet = nil
                 drive.restoreKeptSave(entry.fileName)
             }
@@ -146,7 +146,8 @@ struct TileMenuView: View {
         if local && drive.linked {
             item("remove", "Remove from this device", icon: Self.removeGlyph,
                  disabled: busy ?? (onDrive ? nil : "Not backed up to Drive yet — this is your only copy"),
-                 confirm: loaded ? "Close and remove?" : "Remove from this device?") {
+                 confirm: "Remove from this device?",
+                 confirmSub: (loaded ? "Closes the game; " : "") + "Drive keeps a copy") {
                 model.sheet = nil
                 Task { @MainActor in await drive.removeFromDevice(entry.fileName) }
             }
@@ -154,8 +155,9 @@ struct TileMenuView: View {
         // Set apart by a rule: the one that cannot be undone.
         Rectangle().fill(palette.border).frame(height: 1).padding(.horizontal, 6).padding(.vertical, 4)
         item("delete", "Delete", icon: "trash", danger: true, disabled: busy,
-             confirm: loaded ? "Close and delete everything?"
-                : !local && !onDrive ? "Delete this game and its save?" : "Delete ROM and save data?") {
+             confirm: "Delete this game?",
+             confirmSub: loaded ? "Closes it; the ROM and its save data go"
+                : !local && !onDrive ? "Its save data goes too" : "The ROM and its save data go") {
             model.sheet = nil
             HomeActions.delete(entry)
         }
@@ -176,7 +178,7 @@ struct TileMenuView: View {
         return CGFloat(130 + rows * 46)
     }
 
-    /// An armed row's sub-line: 12 pt and its spacing.
+    /// An armed row's sub-line (what goes): 12 pt and its spacing.
     private static let armReserve: CGFloat = 18
 
     /// This device, struck out: an iPad's own where it has one (16.1 on).
@@ -256,9 +258,12 @@ struct TileMenuView: View {
 
     /// web tileMenuItem: a glyph, then the label; a disabled item says why
     /// under its label; a destructive one asks for a second tap within 3.5 s.
+    /// Armed, the label asks the action back (`confirm`) and the sub-line
+    /// says what goes (`confirmSub`).
     private func item(_ id: String, _ label: String, icon: String, danger: Bool = false,
                       disabled: String? = nil, sub: String? = nil, confirm: String? = nil,
-                      dot: Bool = false, run: @escaping () -> Void) -> some View {
+                      confirmSub: String? = nil, dot: Bool = false,
+                      run: @escaping () -> Void) -> some View {
         let isArmed = armed == id
         let tap = {
             if confirm != nil, armed != id {
@@ -295,7 +300,7 @@ struct TileMenuView: View {
                             .foregroundColor(ink)
                         if dot { Circle().fill(palette.accent).frame(width: 6, height: 6) }
                     }
-                    if let sub = isArmed ? "Tap again to confirm" : (disabled ?? sub) {
+                    if let sub = isArmed ? confirmSub : (disabled ?? sub) {
                         Text(sub)
                             .font(.system(size: 12))
                             .foregroundColor(isArmed ? palette.dangerInk : palette.textDim)

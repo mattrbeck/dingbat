@@ -163,7 +163,7 @@ struct AccountMenu: View {
                         drive.signOut()
                     }
                     Spacer()
-                    Button(everywhereArmed ? "Tap again to sign out everywhere" : "Sign out everywhere") {
+                    Button(everywhereArmed ? "Sign out everywhere?" : "Sign out everywhere") {
                         if !everywhereArmed {
                             everywhereArmed = true
                             DispatchQueue.main.asyncAfter(deadline: .now() + 4) { everywhereArmed = false }
@@ -333,7 +333,7 @@ struct DriveSettingsBlock: View {
                 }
                 .font(.system(size: 14, weight: .semibold))
                 .foregroundColor(palette.text)
-                Button(everywhereArmed ? "Tap again to sign out everywhere" : "Sign out everywhere") {
+                Button(everywhereArmed ? "Sign out everywhere?" : "Sign out everywhere") {
                     if !everywhereArmed {
                         everywhereArmed = true
                         DispatchQueue.main.asyncAfter(deadline: .now() + 4) { everywhereArmed = false }

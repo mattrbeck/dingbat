@@ -14,7 +14,9 @@
 //   nim c -d:emscripten src/dingbat_wasm.nim       # web/em.wasm
 //   node ios/e2e/link-away-ui.mjs <dd> [simulator udid]
 //
-// The test's screenshots (card, armed, after) are in $SHOTS/link-away-ui.xcresult.
+// The test's screenshots (card, armed, after) are in $SHOTS/link-away-ui.xcresult;
+// BAR=1 holds the browser 25 s once linked so the test first pictures the
+// bar's and the menu's Disconnect armed (bar-armed, menu-armed).
 
 import { spawn, execFileSync } from "node:child_process";
 import { readFileSync, copyFileSync, mkdirSync, rmSync, existsSync } from "node:fs";
@@ -26,6 +28,7 @@ const DD = process.argv[2];
 const UDID = process.argv[3] || process.env.SIMDEV || "20B3E400-B140-4C0D-A981-A87BDBEDAEF9";
 const ROOT = new URL("../..", import.meta.url).pathname;
 const SHOTS = process.env.SHOTS || "/tmp";
+const BAR = process.env.BAR === "1";
 if (!DD) { console.error("usage: node ios/e2e/link-away-ui.mjs <derivedData> [udid]"); process.exit(2); }
 if (!builtWeb()) { console.error("web/em.wasm not built"); process.exit(2); }
 const playwright = createRequire(join(WEB, "package.json"))("playwright");
@@ -78,9 +81,10 @@ try {
   if (existsSync(result)) rmSync(result, { recursive: true });
   xc = new Promise((resolve) => {
     const p = spawn("xcodebuild", ["test-without-building", "-project", join(ROOT, "ios/DingbatUITest.xcodeproj"),
-      "-scheme", "DingbatUITest", "-destination", "id=" + UDID, "-derivedDataPath", DD, "-resultBundlePath", result],
+      "-scheme", "DingbatUITest", "-destination", "id=" + UDID, "-derivedDataPath", DD, "-resultBundlePath", result,
+      "-only-testing:DingbatUITests/LinkAwayUITests"],
       { env: { ...process.env, TEST_RUNNER_DB_GAME: "linktest.gba", TEST_RUNNER_DB_SIGNAL: "ws://127.0.0.1:" + PORT,
-               TEST_RUNNER_DB_CODE: code }, stdio: ["ignore", "pipe", "pipe"] });
+               TEST_RUNNER_DB_CODE: code, TEST_RUNNER_DB_BAR: BAR ? "1" : "0" }, stdio: ["ignore", "pipe", "pipe"] });
     let out = "";
     p.stdout.on("data", (d) => { out += d; });
     p.stderr.on("data", (d) => { out += d; });
@@ -93,6 +97,8 @@ try {
   await page.waitForFunction(() => rollbackMode && !!net?.started, null, { timeout: 120000 });
   console.log("linked");
   await until(() => page.evaluate(() => rbLinkWasActive), "cable in use", 10000);
+  // BAR=1: the test pictures the bar's and the menu's armed Disconnect first.
+  if (BAR) await sleep(25000);
 
   // The browser goes away; the UI test finds the card and disconnects.
   await page.evaluate(() => {

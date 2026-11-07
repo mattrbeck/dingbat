@@ -309,7 +309,7 @@ final class NativeTouchesUITests: XCTestCase {
             let delete = app.buttons["Delete"].firstMatch
             XCTAssertTrue(delete.waitForExistence(timeout: 5), "\(theme): the game's menu")
             delete.tap()
-            XCTAssertTrue(armed(app, "Close and delete everything?").waitForExistence(timeout: 2),
+            XCTAssertTrue(armed(app, "Delete this game?").waitForExistence(timeout: 2),
                           "\(theme): Delete armed")
             snap(app, "armed-menu-\(theme)")
             app.terminate()
@@ -319,7 +319,7 @@ final class NativeTouchesUITests: XCTestCase {
             again.swipeUp()
             again.swipeUp()
             reset.tap()
-            XCTAssertTrue(armed(again, "Confirm reset?").waitForExistence(timeout: 2),
+            XCTAssertTrue(armed(again, "Reset all settings?").waitForExistence(timeout: 2),
                           "\(theme): Reset all settings armed")
             snap(again, "armed-button-\(theme)")
             again.terminate()
@@ -343,7 +343,7 @@ final class NativeTouchesUITests: XCTestCase {
         print("NATIVE: settings unarmed \(before), email \(email.frame)")
         snap(app, "signout-settings")
         out.tap()
-        let armed = app.buttons["Tap again to sign out everywhere"].firstMatch
+        let armed = app.buttons["Sign out everywhere?"].firstMatch
         XCTAssertTrue(armed.waitForExistence(timeout: 2), "armed")
         print("NATIVE: settings armed \(armed.frame)")
         XCTAssertEqual(armed.frame.minX, before.minX, accuracy: 0.5, "the text does not move")
@@ -370,7 +370,7 @@ final class NativeTouchesUITests: XCTestCase {
         print("NATIVE: popover unarmed \(popBefore), sync \(sync.frame)")
         snap(app, "signout-popover")
         pop.tap()
-        let popArmed = app.buttons["Tap again to sign out everywhere"].firstMatch
+        let popArmed = app.buttons["Sign out everywhere?"].firstMatch
         XCTAssertTrue(popArmed.waitForExistence(timeout: 2), "armed in the popover")
         print("NATIVE: popover armed \(popArmed.frame)")
         XCTAssertEqual(popArmed.frame.minY, popBefore.minY, accuracy: 0.5, "the row does not move")
@@ -405,8 +405,10 @@ final class NativeTouchesUITests: XCTestCase {
         XCTAssertTrue(delete.isHittable, "Delete fits on screen")
         delete.tap()
         let armed = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@",
-                                                     "Close and delete everything?")).firstMatch
+                                                     "Delete this game?")).firstMatch
         XCTAssertTrue(armed.waitForExistence(timeout: 2), "one tap arms Delete")
+        XCTAssertTrue(armed.label.contains("Closes it; the ROM and its save data go"),
+                      "the line under it says what goes: \(armed.label)")
         snap(app, "game-menu-armed")
         XCTAssertTrue(delete.waitForExistence(timeout: 5), "and it disarms")
         XCTAssertFalse(armed.exists, "its question gone")

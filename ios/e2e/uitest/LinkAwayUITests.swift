@@ -11,14 +11,37 @@ final class LinkAwayUITests: XCTestCase {
                                "-link-busy-cable", "1000000000"]
         app.launch()
 
+        // DB_BAR (node holds the browser here a while): the bar's Disconnect
+        // and the menu's, each armed by one tap, pictured, left to disarm.
+        if env["DB_BAR"] == "1" {
+            let pill = app.buttons["Disconnect link cable"].firstMatch
+            XCTAssertTrue(pill.waitForExistence(timeout: 120), "linked: the bar's Disconnect")
+            let menu = app.buttons["Menu"].firstMatch
+            if !pill.isHittable { app.otherElements["Game screen"].firstMatch.tap(); sleep(1) }
+            pill.tap()
+            usleep(500_000)
+            snap(app, "bar-armed")
+            sleep(4)
+            menu.tap()
+            let item = app.buttons["Disconnect"].firstMatch
+            XCTAssertTrue(item.waitForExistence(timeout: 3), "the menu's Disconnect")
+            item.tap()
+            XCTAssertTrue(app.buttons["Disconnect?"].firstMatch.waitForExistence(timeout: 2), "one tap arms it")
+            snap(app, "menu-armed")
+            sleep(4)
+            XCTAssertTrue(item.waitForExistence(timeout: 2), "and it disarms")
+            menu.tap()
+            sleep(1)
+        }
+
         let title = app.staticTexts["Friend switched away"]
         XCTAssertTrue(title.waitForExistence(timeout: 120), "the away card")
-        let disconnect = app.buttons["Disconnect…"]
+        let disconnect = app.buttons["Disconnect"]
         XCTAssertTrue(disconnect.exists, "its Disconnect button")
         snap(app, "card")
 
         disconnect.tap()
-        let armed = app.buttons["Are you sure?"]
+        let armed = app.buttons["Disconnect?"]
         XCTAssertTrue(armed.waitForExistence(timeout: 3), "one tap arms it")
         XCTAssertTrue(title.exists, "still linked after one tap")
         snap(app, "armed")
