@@ -8858,6 +8858,7 @@ body.running.sync-shown #status {
        and the × below stays at its top (a short in-app browser left the
        sheet the whole screen, and nothing to close it with). */
     max-height: calc(100dvh - 72px - var(--safe-t));
+    overflow-x: hidden; /* a sheet scrolls down, never sideways */
   }
   /* Held at the sheet's top while its rows scroll under it, taking no
      room of its own (the head's right padding leaves it the corner). */
@@ -8869,12 +8870,12 @@ body.running.sync-shown #status {
     z-index: 1;
     width: 44px;
     height: 44px;
-    margin: -4px -6px -44px auto;
+    margin: -4px 0 -44px auto; /* no negative side margin: it would scroll the sheet sideways */
     background: var(--surface-1);
   }
   .tile-menu-head {
     margin-bottom: 6px;
-    padding: 4px 44px 12px 6px;
+    padding: 4px 50px 12px 6px;
   }
   .tile-menu-pic {
     display: flex;
