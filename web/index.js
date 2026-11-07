@@ -19352,8 +19352,9 @@ var Module = {
       if (usual || mode !== lastFpsMode) {
         fpsDiv.textContent = "";
       } else {
-        // The unit rides in its own span so phones can drop it.
-        fpsDiv.innerHTML = frameCount + '<span class="fps-unit"> fps</span>';
+        // The unit always shows (a bare number is not a reading), in its own
+        // span so a narrow phone's bar can set it smaller.
+        fpsDiv.innerHTML = frameCount + '<span class="fps-unit">fps</span>';
       }
       lastFpsMode = mode;
       frameCount = 0;
