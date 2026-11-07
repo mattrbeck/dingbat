@@ -3256,21 +3256,51 @@ body.runtime-ready #boot-progress {
   color: var(--danger);
 }
 
-.home-manage-link {
+/* Fill in pictures, beside Add a game while some game has no picture: the
+   same button, smaller and without a fill, so it reads as the lesser of the
+   two. On touch its hit area reaches 44px tall without drawing any taller.
+   .button's own rules come later in this file, hence the doubled class. */
+.button.lib-thumbs {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  padding: 0 12px 0 9px;
+  font-size: 12px;
   white-space: nowrap;
-  padding: 0;
-  border: none;
-  background: none;
-  font: inherit;
-  font-size: 11px;
-  color: var(--text-faint);
-  text-decoration: underline;
-  text-underline-offset: 2px;
-  cursor: pointer;
+  color: var(--text-dim);
+  background: transparent;
+  border-color: var(--border);
+  box-shadow: none;
+  z-index: 1; /* the touch area below reaches over the grid's first row */
 }
 
-.home-manage-link:hover {
+.button.lib-thumbs[hidden] {
+  display: none;
+}
+
+.button.lib-thumbs:hover {
   color: var(--text);
+  background: rgba(var(--hi-rgb), 0.05);
+}
+
+.lib-thumbs svg {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+@media (pointer: coarse) {
+  .lib-thumbs::before {
+    content: "";
+    position: absolute;
+    inset: -9px -3px; /* from the padding box: 26 + 18 = 44px */
+  }
 }
 
 /* The library's way in from a file, in its head. */

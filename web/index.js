@@ -15720,7 +15720,7 @@ const offerThumbnailsAfterBoot = async (maxWait = THUMBS_PULL_WAIT_MS) => {
 
 // The manual entry: the same box, from the library head. A loaded game
 // (paused at home, say) has to close first: the batch takes the core.
-// The library head's "Add pictures", which is shown only while there is
+// The library head's "Fill in pictures", which is shown only while there is
 // something to picture (refreshHomeRecent).
 const openThumbsRun = async () => {
   if (currentRomName || linkMode || rollbackMode || netActive()) {

@@ -606,7 +606,11 @@
                 <span id="storage-info"></span>
                 <!-- Shown only while some game has no picture; index.js
                      "Library pictures, in one go" hides it again once none do. -->
-                <button type="button" class="home-manage-link" id="home-thumbs" hidden>Add pictures</button>
+                <button type="button" class="button lib-thumbs" id="home-thumbs" hidden
+                        title="Take a picture of each game that has none">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="5.5" width="17" height="13" rx="2"/><circle cx="9" cy="10" r="1.6"/><path d="M20.5 15.5l-5-5-8 8"/></svg>
+                  <span>Fill in pictures</span>
+                </button>
                 <button type="button" class="button lib-add" id="lib-add">
                   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
                   <span>Add a game</span>
@@ -716,7 +720,7 @@
         <h2 id="thumbs-title">Add pictures to your library?</h2>
         <div id="thumbs-offer">
           <p>dingbat can open each game, pick up where you left off, take a picture of the screen for its library card, and close it again. It takes a few seconds a game. Your games and saves are not changed.</p>
-          <p class="modal-hint">You can do this later from <b>Add pictures</b>, above your library.</p>
+          <p class="modal-hint">You can do this later from <b>Fill in pictures</b>, above your library.</p>
           <div class="modal-toggle-row" id="thumbs-drive-row">
             <div>
               <span class="modal-row-label">Include games kept only on Drive</span>
