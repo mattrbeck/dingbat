@@ -1370,7 +1370,7 @@ structure Out where
 def Side.down (me : Side) : Side := { me with linked := false, blocked := false, bye := true }
 
 /-- Phase 1 with a linked frame due (2452-2467): the frame, the peer's BYE
-    (`peer_done`), EOF ("peer disconnected"), or a park on the peer. -/
+    (`peer_done`), EOF ("your friend disconnected"), or a park on the peer. -/
 def frameS (me o : Side) : Out :=
   if me.linked = false ∨ me.gone = true ∨ me.paused = true ∨ me.blocked = true then ⟨me, false, false⟩
   else if o.bye = true then ⟨me.down, false, false⟩
@@ -1451,7 +1451,7 @@ theorem bug_peer_pause_freezes_other_window :
       pstep p (.quit true) = p ∧ pstep p (.disconnect true) = p ∧ pstep p (.pause true) = p := by
   decide
 
-/-- ...and after 30 s B drops the link ("stalled waiting for peer"), though A
+/-- ...and after 30 s B drops the link ("stalled waiting for your friend"), though A
     only paused. A reads the BYE when it unpauses. -/
 theorem bug_peer_pause_ends_link :
     let p := prun {} [.pause false, .frame true, .frame true, .timeout true]
@@ -1469,7 +1469,7 @@ theorem bug_quit_ends_peer_link_without_bye :
   the peer, it returns to the main loop with the frame still in progress
   (`try_advance` resumes it) and the stall deadline kept in the NetLink
   across calls. The loop keeps handling input and drawing; the Link Cable
-  window says "Waiting for the other player...". The harness keeps the
+  window says "Waiting for your friend...". The harness keeps the
   blocking `step_frame`. So a blocked side takes input: `evSF` lets Pause,
   Quit and Disconnect act while `blocked`.
 * While paused the loop still pumps the socket (`service_netlink`:

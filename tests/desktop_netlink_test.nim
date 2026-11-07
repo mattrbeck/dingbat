@@ -138,7 +138,7 @@ block:
   except NetLinkError:
     lost = true
   check not lost, "a peer paused for 1 s (over 3x the stall timeout) keeps the link"
-  check nl.peer_paused, "the window can say the other player paused"
+  check nl.peer_paused, "the window can say your friend paused"
   # The peer resumes but never advances: now it is a lost peer.
   peer.clock(0)
   let t1 = getMonoTime()
@@ -186,7 +186,7 @@ block:
   let busy_before = (gba.serial.siocnt and 0x80) != 0
   check nl.stalled and busy_before,
         "the parent's transfer is parked waiting for the REPLY (SIOCNT busy)"
-  lc.teardown(nl, "peer connection lost")
+  lc.teardown(nl, "lost the connection to your friend")
   check nl == nil, "the link is gone"
   check (gba.serial.siocnt and 0x80) == 0,
         "the parked transfer completed as a pulled cable (SIOCNT not busy)"
