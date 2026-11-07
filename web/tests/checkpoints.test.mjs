@@ -446,6 +446,7 @@ test("going back within the same save keeps nothing aside", async () => {
 test("the game's menu offers Resume from earlier only when there are earlier moments", async () => {
   const app = await loadApp();
   const labels = (moments) => app.runIn(`tileMenuEntries('A.gba', { moments: ${moments} })`)
+    .filter((b) => b.classList.contains("tile-menu-item")) // not the rule above Delete
     .map((b) => b.children.find((c) => c.classList.contains("tile-menu-label")).textContent);
   assert.ok(!labels(false).includes("Resume from earlier"));
   assert.ok(labels(true).includes("Resume from earlier"));

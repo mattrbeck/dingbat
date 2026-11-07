@@ -35,7 +35,11 @@ const tileOf = (app, name) =>
   tiles(app).find((t) => t.children[0].title.startsWith(name));
 const moreBtn = (tile) => tile.children.find((c) => c.classList.contains("home-tile-more"));
 const menu = (app) => app.document.getElementById("tile-menu");
-const items = (app) => app.document.getElementById("tile-menu-items").children;
+// The rows, without the group headings and the rule above Delete.
+const items = (app) => app.document.getElementById("tile-menu-items").children
+  .filter((c) => c.classList.contains("tile-menu-item"));
+const groups = (app) => app.document.getElementById("tile-menu-items").children
+  .filter((c) => c.classList.contains("tile-menu-group")).map((c) => c.textContent);
 // The session items carry a glyph in front of the label, so a row's children
 // are not [label, sub] at fixed indexes any more. By class, then.
 const kid = (b, cls) => b.children.find((c) => c.classList.contains(cls));
@@ -538,40 +542,51 @@ test("Download to this device fetches the ROM, and the tile turns local", async 
 
 
 // ── The paused card's ⋯ is this same menu ───────────────────────────────────
-// One menu per game, opened from two places. The card's entry point adds the
-// session section on top; the grid's tiles never do, so the library menu is
-// exactly what it always was.
+// One menu per game, wherever its ⋯ is. While the paused card is up for a
+// game, that game's menu gains a Play group on top; otherwise it is the file
+// items alone. Context hides rows; it never swaps the menu.
 
-test("the card's ⋯ is the session's; a tile's is the file's; neither is both", async () => {
+test("one menu per game: Play while its card is paused, then Game, then Delete", async () => {
   const app = await loadApp();
-  seed(app, ["Zelda.gbc"], { saves: ["Zelda.gbc"] });
+  seed(app, ["Zelda.gbc", "Kirby.gbc"], { saves: ["Zelda.gbc"] });
   await boot(app);
+  app.api.currentOriginalName = "Zelda.gbc";
+  app.api.currentRomName = "Zelda.gbc";
+  app.api.setHeroShown(true);
 
-  await app.api.openTileMenu("Zelda.gbc", app.document.createElement("button"),
-                             null, null, true);
+  await app.api.openTileMenu("Zelda.gbc", app.document.createElement("button"), null);
   await settle();
+  eq(groups(app), ["Play", "Game"]);
   eq(labels(app),
-     ["Save states", "Manage saves", "Link cable", "Cheats", "Report a bug"],
-     "what you do to the game you are in the middle of");
+     ["Save states", "Manage saves", "Link cable", "Cheats", "Report a bug",
+      "Rename", "Export…", "Reset save data", "Delete"],
+     "the session's items, then the file's");
   // Screenshot and Clip that! are about the frame going past, and the
   // frame here is the card's own picture of a game that stopped.
   for (const gone of ["Screenshot", "Clip that!"]) {
     assert.ok(!labels(app).includes(gone), gone + " is a running-game action");
   }
-  assert.equal(app.document.getElementById("tile-menu-head").hidden, true,
-               "the card said which game, an inch above");
-  assert.ok(items(app).every((b) => kid(b, "tile-menu-icon")),
-            "every session item wears the glyph the hamburger gives it");
+  assert.equal(app.document.getElementById("tile-menu-head").hidden, false,
+               "the head names the game wherever the menu opens");
+  assert.ok(items(app).every((b) => kid(b, "tile-menu-icon")), "a glyph on every row");
   app.api.closeTileMenu();
 
-  await open(app, "Zelda.gbc");
+  // Another game, with this one's card up: no Play group, no group headings.
+  await open(app, "Kirby.gbc");
+  eq(groups(app), []);
   eq(labels(app), ["Rename", "Export…", "Reset save data", "Delete"],
-     "what you do to its file, and nothing about the session");
-  assert.ok(items(app).every((b) => !kid(b, "tile-menu-icon")),
-            "the file items have never had a glyph anywhere");
-  assert.equal(app.document.getElementById("tile-menu-head").hidden, false,
-               "a tile in a grid of them still has to name its game");
+     "what you do to its file, and nothing about another game's session");
+  assert.ok(items(app).every((b) => kid(b, "tile-menu-icon")), "a glyph on every row");
   app.api.closeTileMenu();
+
+  // The card gone, the same game is just a library game.
+  app.api.setHeroShown(false);
+  await open(app, "Zelda.gbc");
+  eq(groups(app), []);
+  eq(labels(app), ["Rename", "Export…", "Reset save data", "Delete"]);
+  app.api.closeTileMenu();
+  app.api.currentOriginalName = null;
+  app.api.currentRomName = null;
 });
 
 // The bug this pins: the library keys a game by the name it was added under

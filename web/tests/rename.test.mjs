@@ -342,7 +342,8 @@ test("a game whose bytes are only on Drive still renames", async () => {
   const f = app.api.gameFlags(OLD, new Set(), new Set([OLD]));
   assert.equal(f.driveOnly, true);
   const items = app.api.tileMenuEntries(OLD, f)
-    .filter((b) => b.children[0].textContent === "Rename");
+    .filter((b) => b.children.some((c) => c.classList.contains("tile-menu-label") &&
+                                           c.textContent === "Rename"));
   assert.equal(items.length, 1);
   assert.equal(items[0].disabled, false,
     "Drive renames its files in place, so the bytes never need to be here");
