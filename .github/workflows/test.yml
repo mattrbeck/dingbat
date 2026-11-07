@@ -264,7 +264,8 @@ jobs:
         # notice.nim in a real ImGui context with no window: Return, keypad
         # Enter and Escape close a notice as OK does; the press it appears
         # on, or the one that closed the notice before it, does not; a held
-        # key closes one; the keyboard is ImGui's while one is up. Skipped
+        # key closes one; the keyboard is ImGui's while one is up. Every UI
+        # string's characters are in ImGui's built-in font. Skipped
         # only where imguin could not be installed (install-test-deps.sh).
         if: env.DINGBAT_NO_IMGUIN != '1'
         shell: bash

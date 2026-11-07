@@ -643,7 +643,7 @@ proc handle_hello(nc: NetCore; m: LinkMsg) =
   elif m.rom_crc != nc.rom_crc and nc.strict_crc:
     nc.reject_hello("ROM mismatch (your CRC32 " & $nc.rom_crc &
                     ", your friend's " & $m.rom_crc &
-                    ") — both sides must run the same ROM")
+                    "); both sides must run the same ROM")
   else:
     nc.crc_mismatch = m.rom_crc != nc.rom_crc
     nc.hello = hsDone
