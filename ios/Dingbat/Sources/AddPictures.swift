@@ -13,8 +13,13 @@ final class AddPictures: ObservableObject {
     static let shared = AddPictures()
 
     static let resumeFrames = 2
+    /// No session: through the logo to a title (10 s of play). Frames end
+    /// a run, so the picture is the same however fast the core runs;
+    /// `safetySeconds` is only a net for a core that hangs (web
+    /// THUMBS_SAFETY_MS).
     static let bootFrames = 600
-    static let bootSeconds = 2.5
+    static let safetySeconds = 10.0
+    /// Frames between looks (for a blank screen, a launch, Stop).
     static let chunk = 30
     static let offeredKey = "thumbs_offered"
 
@@ -130,28 +135,53 @@ final class AddPictures: ObservableObject {
         let rc = fm.fileExists(atPath: bios.path) ? dingbat_load_rom(rom.path, bios.path) : dingbat_load_rom(rom.path, nil)
         guard rc == 0 else { return false }
         var frames = Self.bootFrames
-        var deadline = CACurrentMediaTime() + Self.bootSeconds
+        var deadline = CACurrentMediaTime() + Self.safetySeconds
         if c.local, let s = try? Data(contentsOf: e.sessionURL), !s.isEmpty,
            s.withUnsafeBytes({ dingbat_load_state($0.baseAddress, Int32($0.count), 0) }) == 1 {
             frames = Self.resumeFrames
             deadline = .infinity
         }
-        var ran = 0
-        while ran < frames && CACurrentMediaTime() < deadline {
-            // A launch takes the core: this one gives way.
-            guard !cancelled, GameSession.shared.game == nil else { return false }
-            for _ in 0..<min(Self.chunk, frames - ran) { dingbat_run_frame() }
-            ran += Self.chunk
-            dingbat_audio_clear()
-            await Task.yield()
-            try? await Task.sleep(nanoseconds: 1_000_000)
+        guard await advance(frames, deadline) else { return false }
+        // A blank screen (still on a boot's white, or in a fade): run on to
+        // the next one that isn't, for up to as long again, in frames;
+        // still blank, no picture, and the tile keeps its cartridge.
+        if Self.coreBlank() {
+            guard await advance(Self.bootFrames, CACurrentMediaTime() + Self.safetySeconds,
+                                until: { !Self.coreBlank() }) else { return false }
+            if Self.coreBlank() { return false }
         }
-        guard !cancelled, GameSession.shared.game == nil,
-              let jpg = GameSession.coreImage()?.jpegData(compressionQuality: 0.75) else { return false }
+        guard let jpg = GameSession.coreImage()?.jpegData(compressionQuality: 0.75) else { return false }
         try? RomLibrary.ensureDir(e.dir)
         guard (try? jpg.write(to: e.shotURL, options: .atomic)) != nil else { return false }
         DriveSync.shared.markUpload("frame:" + e.fileName)
         return true
+    }
+
+    /// Run the pictures core on: up to `frames` frames or until `deadline`,
+    /// whichever comes first, in chunks so the app stays responsive,
+    /// stopping early once `until()` holds (web thumbsAdvance). False when
+    /// the run was stopped or a launch took the core meanwhile.
+    @MainActor
+    private func advance(_ frames: Int, _ deadline: CFTimeInterval, until: () -> Bool = { false }) async -> Bool {
+        var ran = 0
+        while ran < frames && CACurrentMediaTime() < deadline {
+            // A launch takes the core: this one gives way.
+            guard !cancelled, GameSession.shared.game == nil else { return false }
+            let n = min(Self.chunk, frames - ran)
+            for _ in 0..<n { dingbat_run_frame() }
+            ran += n
+            dingbat_audio_clear()
+            await Task.yield()
+            try? await Task.sleep(nanoseconds: 1_000_000)
+            if until() { break }
+        }
+        return !cancelled && GameSession.shared.game == nil
+    }
+
+    /// The pictures core's screen is one colour (GameSession.framebufferBlank).
+    private static func coreBlank() -> Bool {
+        guard let p = dingbat_framebuffer_rgba() else { return true }
+        return GameSession.framebufferBlank(p, width: Int(dingbat_fb_width()), height: Int(dingbat_fb_height()))
     }
 }
 

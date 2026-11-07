@@ -2,6 +2,7 @@
 // search / chips / sort bar, the grid of tiles and the sums that size it.
 import SwiftUI
 import UIKit
+import CoreImage
 
 // MARK: - Pictures
 
@@ -35,6 +36,35 @@ final class HomePictures {
         return img
     }
 
+    /// The picture made small and soft, for the bars beside a frame
+    /// narrower than the 3:2 box (GamePicture fillBars): drawn once per
+    /// picture, so a big library pays for no live blur.
+    func bars(_ e: RomEntry, from img: UIImage) -> UIImage? {
+        sync()
+        let key = "b:" + e.fileName
+        if let hit = pictures[key] { return hit }
+        let out = Self.soften(img)
+        pictures[key] = .some(out)
+        return out
+    }
+
+    private static let ciContext = CIContext()
+
+    /// 24 px wide (scale 1), then a Gaussian blur with its edges clamped (so it does
+    /// not fade out at the sides; web inset -16px).
+    static func soften(_ img: UIImage) -> UIImage? {
+        let w: CGFloat = 24, h = max(1, (w * img.size.height / max(1, img.size.width)).rounded())
+        let fmt = UIGraphicsImageRendererFormat()
+        fmt.scale = 1
+        let small = UIGraphicsImageRenderer(size: CGSize(width: w, height: h), format: fmt).image { _ in
+            img.draw(in: CGRect(x: 0, y: 0, width: w, height: h))
+        }
+        guard let ci = CIImage(image: small) else { return small }
+        let blurred = ci.clampedToExtent().applyingGaussianBlur(sigma: 1.5).cropped(to: ci.extent)
+        guard let cg = Self.ciContext.createCGImage(blurred, from: ci.extent) else { return small }
+        return UIImage(cgImage: cg)
+    }
+
     func art(_ e: RomEntry) -> UIImage? {
         sync()
         let key = "a:" + e.fileName
@@ -65,6 +95,11 @@ struct GamePicture: View {
     /// The hero's closed look: a picture of a game not in memory reads a
     /// little like a memory (web saturate(.75) brightness(.82)).
     var dimmed = false
+    /// A library tile: a frame narrower than 3:2 (GB, GBC, DS) gets the same
+    /// picture, blurred and dimmed, in the bars beside it instead of black
+    /// (web .home-tile-thumb::before). A GBA frame fills the box, and box
+    /// art covers it: no layer for either.
+    var fillBars = false
 
     var body: some View {
         GeometryReader { geo in
@@ -72,6 +107,16 @@ struct GamePicture: View {
             if let img = pics.picture(entry, preferSession: preferSession) {
                 ZStack {
                     Color.black
+                    if fillBars && !entry.isGBA, let soft = pics.bars(entry, from: img) {
+                        Image(uiImage: soft)
+                            .resizable()
+                            .interpolation(.high)
+                            .aspectRatio(contentMode: .fill)
+                            .frame(width: geo.size.width, height: geo.size.height)
+                            .clipped()
+                            .overlay(Color.black.opacity(0.45))  // web brightness(0.55)
+                            .accessibilityHidden(true)
+                    }
                     Image(uiImage: img)
                         .resizable()
                         .interpolation(.none)
@@ -503,7 +548,7 @@ struct LibraryTile: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            GamePicture(entry: entry)
+            GamePicture(entry: entry, fillBars: true)
                 .aspectRatio(3 / 2, contentMode: .fit)
                 .clipped()
                 .flightAnchor("tile:" + entry.id)
