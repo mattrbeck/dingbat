@@ -295,6 +295,70 @@ final class NativeTouchesUITests: XCTestCase {
         XCTAssertLessThanOrEqual(picture.frame.maxY, w.height, "the picture fits on screen")
     }
 
+    /// The in-game bar, held upright (portrait only), with the fps readout
+    /// up (fast-forward), and whatever else DB_BAR_ARGS adds (`-drive-stub`
+    /// for the sync icon; DB_GAME a tilt cart for its button; DB_MUTE the
+    /// channel-mute pill): nothing overlaps and all of it is on screen.
+    /// DB_TIGHT: the row with no room for a reading, where none showing is
+    /// right. Prints every item's frame (NATIVE: bar …) for comparing builds.
+    func testTopBarFits() {
+        let extra = (ProcessInfo.processInfo.environment["DB_BAR_ARGS"] ?? "")
+            .split(separator: " ").map(String.init)
+        let env = ProcessInfo.processInfo.environment
+        var app = launch(["-speed", "ff"] + extra)
+        // DB_MUTE: a channel muted (never saved, so through Settings › Audio),
+        // for the bar's channel-mute pill beside the readout.
+        if env["DB_MUTE"] == "1" {
+            app.terminate()
+            app = launch(["-speed", "ff", "-sheet", "settings:audio"] + extra)
+            let channels = app.buttons["Channels"].firstMatch
+            XCTAssertTrue(channels.waitForExistence(timeout: 5), "Settings › Audio › Channels")
+            channels.tap()
+            let muteAll = app.buttons["Mute all"].firstMatch
+            XCTAssertTrue(muteAll.waitForExistence(timeout: 3), "a channel group's Mute all")
+            muteAll.tap()
+            app.buttons.matching(NSPredicate(format: "label == 'Close'")).allElementsBoundByIndex
+                .last { $0.isHittable }?.tap()
+            sleep(1)
+        }
+        let menu = app.buttons["Menu"].firstMatch
+        XCTAssertTrue(menu.waitForExistence(timeout: 10), "the bar")
+        if !menu.isHittable { app.otherElements["Game screen"].firstMatch.tap(); sleep(1) }
+        let bar = menu.frame
+        let width = app.windows.firstMatch.frame.width
+        let inBar = { (e: XCUIElement) -> Bool in
+            let f = e.frame
+            return f.height > 0 && f.midY > bar.minY - 4 && f.midY < bar.maxY + 4
+        }
+        // The buttons (the sync icon is one), left to right, and the readout.
+        // Any reading, with or without its unit (an older build's bare number).
+        let readout = app.staticTexts.matching(NSPredicate(format: "label MATCHES '[0-9,]+( fps)?'")).firstMatch
+        _ = readout.waitForExistence(timeout: 10)
+        print("NATIVE: bar text '\(readout.label)' \(readout.frame)")
+        let buttons = app.buttons.allElementsBoundByIndex.filter(inBar).sorted { $0.frame.minX < $1.frame.minX }
+        var last: CGRect?
+        for b in buttons {
+            print("NATIVE: bar button '\(b.label)' \(b.frame)")
+            XCTAssertGreaterThanOrEqual(b.frame.minX, 0, "\(b.label) on screen")
+            XCTAssertLessThanOrEqual(b.frame.maxX, width, "\(b.label) on screen")
+            if let l = last { XCTAssertLessThanOrEqual(l.maxX, b.frame.minX + 0.5, "\(b.label) clear of the one before") }
+            last = b.frame
+            // The readout sits between buttons, touching none.
+            XCTAssertFalse(b.frame.insetBy(dx: 0.5, dy: 0.5).intersects(readout.frame), "the readout clear of \(b.label)")
+        }
+        // Nothing overflows: the bar keeps its 10 pt ends (an overflowing
+        // HStack spills both ways and every button moves).
+        if let first = buttons.first, let end = buttons.last {
+            XCTAssertEqual(first.frame.minX, 10, accuracy: 0.5, "the bar's left end")
+            XCTAssertEqual(end.frame.maxX, width - 10, accuracy: 0.5, "the bar's right end")
+        }
+        XCTAssertTrue(readout.label.hasSuffix(" fps"), "the readout says fps: \(readout.label)")
+        if ProcessInfo.processInfo.environment["DB_TIGHT"] != "1" {
+            XCTAssertGreaterThan(readout.frame.width, 0, "the reading shows")
+        }
+        snap(app, "topbar")
+    }
+
     /// One armed look in every theme (web :root .armed): the game menu's
     /// Delete and Settings' Reset all settings, armed, pictured per theme.
     /// The fill and its ink are the same in each (Theme.swift dangerFill).

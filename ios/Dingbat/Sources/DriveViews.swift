@@ -219,7 +219,7 @@ struct SyncIndicator: View {
                 }
                 if hSize == .regular {
                     Text(drive.status.word)
-                        .font(.system(size: 11, design: .monospaced))
+                        .font(.system(size: 11))  // a word, not a live number
                 }
             }
             .foregroundColor(drive.status.stalled ? palette.accent : palette.statusInk)

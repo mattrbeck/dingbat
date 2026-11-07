@@ -507,7 +507,10 @@ struct TopBar: View {
                     Peripherals.shared.cameraButton()
                 }
             }
-            Spacer(minLength: 2)
+            // 0, not 2: in the tightest row (an SE with a tilt cart's
+            // button, the sync icon and the channel-mute pill) those 2 pt
+            // are what the bar is short of.
+            Spacer(minLength: 0)
             if link.linked { LinkDisconnectPill(wide: wide) }
             SyncIndicator()
             StatusReadout()
@@ -828,6 +831,7 @@ struct StatusReadout: View {
     @EnvironmentObject var session: GameSession
     @Environment(\.palette) var palette
     @Environment(\.horizontalSizeClass) var hSize
+    @ObservedObject private var drive = DriveSync.shared
 
     var body: some View {
         if session.sleeping {
@@ -835,10 +839,58 @@ struct StatusReadout: View {
                 .font(.system(size: 10, weight: .semibold, design: .monospaced))
                 .foregroundColor(palette.accent)
         } else if session.fpsUnusual {
-            Text(hSize == .regular ? "\(session.fps) fps" : "\(session.fps)")
-                .font(.system(size: 11, design: .monospaced))
-                .foregroundColor(palette.statusInk)
-                .fixedSize()
+            // The unit always shows: a bare number is not a reading (web
+            // .fps-unit). A phone's bar sets it smaller beside the number,
+            // or under it beside the sync icon or wherever the bar is short
+            // of room (an SE with a tilt cart's button and the channel-mute
+            // pill), so no button moves. Each form is as wide as four
+            // digits whatever the reading, so the room alone picks it: 999
+            // and 1000 never flip it, nor move what sits beside it.
+            let n = String(session.fps)
+            ZStack {
+                if hSize == .regular {
+                    Text(n + " fps").font(.system(size: 11, design: .monospaced))
+                } else if drive.linked && drive.status != .idle {
+                    sized(stacked) { stacked(n) }
+                } else {
+                    ViewThatFits(in: .horizontal) {
+                        sized(inline) { inline(n) }
+                        sized(stacked) { stacked(n) }
+                    }
+                }
+            }
+            .foregroundColor(palette.statusInk)
+            .lineLimit(1)
+            .fixedSize(horizontal: hSize == .regular, vertical: true)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(n + " fps")
+            .accessibilityAddTraits(.isStaticText)
+        }
+    }
+
+    /// The unit beside the number, a size smaller.
+    private func inline(_ n: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 2) {
+            Text(n).font(.system(size: 11, design: .monospaced))
+            Text("fps").font(.system(size: 10, design: .monospaced))
+        }
+    }
+
+    /// The unit under the number, smaller and fainter.
+    private func stacked(_ n: String) -> some View {
+        VStack(spacing: 0) {
+            Text(n).font(.system(size: 11, design: .monospaced))
+            Text("fps").font(.system(size: 9, design: .monospaced))
+                .foregroundColor(palette.textFaint)
+        }
+    }
+
+    /// A form at the width of its four-digit reading (a hidden template),
+    /// the real one right-aligned in it.
+    private func sized<V: View>(_ form: (String) -> V, _ real: () -> V) -> some View {
+        ZStack(alignment: .trailing) {
+            form("0000").hidden().accessibilityHidden(true)
+            real()
         }
     }
 }
