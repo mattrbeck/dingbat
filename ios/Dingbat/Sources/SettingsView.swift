@@ -249,7 +249,7 @@ struct SettingsView: View {
             AppModel.shared.toast("Copied " + text)
         } label: {
             Text(text)
-                .font(.system(size: 11.5, design: .monospaced))
+                .font(.system(size: 11.5))
                 .foregroundColor(palette.textFaint)
                 .frame(maxWidth: .infinity)
         }

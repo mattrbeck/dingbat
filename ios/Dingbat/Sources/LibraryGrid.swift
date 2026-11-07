@@ -263,8 +263,10 @@ struct LibraryHead: View {
                     .font(.system(size: 11, weight: .semibold))
                     .tracking(0.9)
                     .foregroundColor(palette.textFaint)
+                // The UI's font: monospace is for numbers that change while
+                // you watch.
                 Text(countText)
-                    .font(.system(size: 11, weight: .medium, design: .monospaced))
+                    .font(.system(size: 11, weight: .medium))
                     .foregroundColor(palette.textFaint)
             }
             .lineLimit(1)
