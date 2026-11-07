@@ -278,23 +278,7 @@ struct LibraryHead: View {
                     .foregroundColor(palette.textDim)
                     .padFocus("thumbs") { AddPictures.shared.open() }
             }
-            Button(action: add) {
-                HStack(spacing: 6) {
-                    Image(systemName: "plus").font(.system(size: 12, weight: .semibold))
-                    Text("Add a game").font(.system(size: 13))
-                }
-                .lineLimit(1)
-                .fixedSize()
-                .foregroundColor(palette.text)
-                .padding(.leading, 11)
-                .padding(.trailing, 14)
-                .frame(minHeight: 34)
-                .background(Capsule().fill(LinearGradient(colors: [palette.surface3, palette.surface2],
-                                                          startPoint: .top, endPoint: .bottom)))
-                .overlay(Capsule().stroke(palette.border2, lineWidth: 1))
-            }
-            .buttonStyle(PressStyle())
-            .padFocus("add", radius: 17, press: add)
+            LibAddButton(add: add)
         }
         .padding(.top, underHero ? 20 : 0)
         .overlay(alignment: .top) {
@@ -302,6 +286,37 @@ struct LibraryHead: View {
             if underHero { Rectangle().fill(palette.border).frame(height: 1) }
         }
         .padding(.bottom, 10)
+    }
+}
+
+/// The library's way in from a file (web .lib-add): in its head, or under
+/// the hero while the hero is the whole library. One look for adding a game
+/// wherever there is a library; the filled pill is the empty state's alone.
+struct LibAddButton: View {
+    @Environment(\.palette) var palette
+    /// Its own key under the solo hero (web #home-solo-add), so a flip
+    /// between the two never unregisters the other's.
+    var focusID = "add"
+    let add: () -> Void
+
+    var body: some View {
+        Button(action: add) {
+            HStack(spacing: 6) {
+                Image(systemName: "plus").font(.system(size: 12, weight: .semibold))
+                Text("Add a game").font(.system(size: 13))
+            }
+            .lineLimit(1)
+            .fixedSize()
+            .foregroundColor(palette.text)
+            .padding(.leading, 11)
+            .padding(.trailing, 14)
+            .frame(minHeight: 34)
+            .background(Capsule().fill(LinearGradient(colors: [palette.surface3, palette.surface2],
+                                                      startPoint: .top, endPoint: .bottom)))
+            .overlay(Capsule().stroke(palette.border2, lineWidth: 1))
+        }
+        .buttonStyle(PressStyle())
+        .padFocus(focusID, radius: 17, press: add)
     }
 }
 

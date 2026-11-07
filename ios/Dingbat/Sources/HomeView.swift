@@ -166,8 +166,10 @@ struct HomeView: View {
                     HeroView(entry: hero, wide: wide, viewport: screen, solo: solo)
                         .frame(maxWidth: solo ? .infinity : layout.width, alignment: solo ? .center : .leading)
                         .frame(maxWidth: .infinity)
+                    // The library head's button, standing in for the head
+                    // while the hero is the whole library.
                     if solo {
-                        AddPill { importing = true }
+                        LibAddButton(focusID: "solo-add") { importing = true }
                     }
                 } else {
                     brandBlock
@@ -384,8 +386,6 @@ struct EmptyStart: View {
     }
 }
 
-/// A quiet dashed pill under a hero that is the whole library (web
-/// #home-solo-add): a second game is a thing to offer, not to push.
 /// web #home-resume: back to a session the hero cannot draw (an online
 /// link, local 2P).
 struct ResumeSessionButton: View {
@@ -407,27 +407,6 @@ struct ResumeSessionButton: View {
         }
         .buttonStyle(PressStyle())
         .padFocus("home-resume", radius: 22) { AppModel.shared.resumeFromHero() }
-    }
-}
-
-struct AddPill: View {
-    @Environment(\.palette) var palette
-    let add: () -> Void
-
-    var body: some View {
-        Button(action: add) {
-            HStack(spacing: 8) {
-                Image(systemName: "plus").font(.system(size: 13, weight: .semibold))
-                Text("Add a game").font(.system(size: 14, weight: .medium))
-            }
-            .foregroundColor(palette.textDim)
-            .padding(.leading, 16)
-            .padding(.trailing, 20)
-            .padding(.vertical, 10)
-            .overlay(Capsule().strokeBorder(palette.border2, style: StrokeStyle(lineWidth: 1.5, dash: [5, 4])))
-            .contentShape(Capsule())
-        }
-        .buttonStyle(PressStyle())
     }
 }
 
