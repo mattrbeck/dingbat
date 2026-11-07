@@ -1,13 +1,16 @@
 // A 32 KB Game Boy ROM (MBC1 + RAM + battery) that stands in for a game.
 // It keeps one counter, c, in work RAM, and every frame it shows it: the
-// boot logo (left in the background by the boot, and copied at boot 128
-// pixels right and 128 down, so that wherever the background scrolls a logo
-// is on screen) scrolls to (4c, c), and the colours cycle through four
-// schemes with c / 2. So every value of c is its own picture, and the
-// picture says how far the game has got; two moments a couple of frames
-// apart look nothing alike, the whole background having changed colour; and
-// the screen is never one colour (the app keeps no blank screen as a game's
-// picture).
+// boot logo (left on screen by the boot) scrolls to (4c, 2c), and the
+// colours cycle through four schemes with c / 2. So while the logo is on
+// screen every value of c is its own picture, and the picture says how far
+// the game has got (off it, the colour scheme still tells moments apart); and two
+// moments a couple of frames apart look nothing alike, the whole background
+// having changed colour. And the screen is never one colour (the app keeps
+// no blank screen as a game's picture), even with the logo scrolled off it:
+// twelve sprites, made of the logo's first six tiles in each of its rows,
+// stay put below the screen's centre, in the logo's colour. They do not
+// scroll, so the background (the top-left corner, say) is still the
+// background colour.
 //
 //   A held: c goes up one a frame and is written to the battery save
 //           (0xA000) - playing and saving.
@@ -53,13 +56,15 @@ export const synctestRom = () => {
     [0x3e, 0x0a, 0xea, 0x00, 0x00],             // ld a,$0A ; ld ($0000),a   RAM on
     "vblank",
     [0xf0, 0x44, 0xfe, 0x90, 0x20, rel("vblank")], // wait for LY == 144
-    [0xf0, 0x40, 0x4f, 0xaf, 0xe0, 0x40],       // c' = LCDC ; LCD off, in VBlank: the map is free
-    // The logo is map rows 8-9, columns 4-15 (and the (R) at row 8, column 16,
-    // which stays out of the right-hand copies: 16 columns on is the next row).
-    [0x21, 0x04, 0x99, 0x11, 0x14, 0x99, 0x06, 0x0c, 0xcd, abs("copy")], // row 8's, 128 px right
-    [0x21, 0x24, 0x99, 0x11, 0x34, 0x99, 0x06, 0x0c, 0xcd, abs("copy")], // row 9's
-    [0x21, 0x00, 0x99, 0x11, 0x00, 0x9b, 0x06, 0x40, 0xcd, abs("copy")], // rows 8-9, 128 px down
-    [0x79, 0xe0, 0x40],                         // LCD back on
+    [0xf0, 0x40, 0xf6, 0x02, 0x4f],             // c' = LCDC | sprites on
+    [0xaf, 0xe0, 0x40],                         // LCD off, in VBlank: OAM is free
+    [0x21, 0x00, 0xfe, 0x06, 0xa0],             // hl = OAM ; b = 160
+    "clear",
+    [0x22, 0x05, 0x20, rel("clear")],           // every sprite off screen (y 0)
+    [0x21, abs("sprites"), 0x11, 0x00, 0xfe, 0x06, 0x30], // hl = sprites ; de = OAM ; b = 48
+    "copy",
+    [0x2a, 0x12, 0x13, 0x05, 0x20, rel("copy")],
+    [0x79, 0xe0, 0x40],                         // LCD back on, with the sprites
     [0xfa, 0x00, 0xa0, 0xea, 0x00, 0xc0],       // c = save
     [0xcd, abs("show")],
     "loop",
@@ -78,18 +83,20 @@ export const synctestRom = () => {
     [0xf0, 0x44, 0xfe, 0x90, 0x28, rel("next")], // wait for LY != 144
     [0x18, rel("loop")],
     "show",
-    [0xfa, 0x00, 0xc0, 0xe0, 0x42],             // SCY = c
-    [0x87, 0x87, 0xe0, 0x43],                   // SCX = 4c
+    [0xfa, 0x00, 0xc0, 0x87, 0xe0, 0x42],       // SCY = 2c
+    [0x87, 0xe0, 0x43],                         // SCX = 4c
     // The scheme from c's bits 1-2, not 0-1: a browser that runs two frames
     // an animation frame moves c in even steps, and would only ever reach
     // two of the four schemes by the low bits.
     [0xfa, 0x00, 0xc0, 0xcb, 0x3f, 0xe6, 0x03, 0x5f, 0x16, 0x00], // de = (c >> 1) & 3
     [0x21, abs("palettes"), 0x19, 0x7e, 0xe0, 0x47],  // BGP = palettes[de]
+    [0xe0, 0x48],                               // OBP0 = BGP: the sprites in the logo's colour
     [0xc9],
-    "copy",                                     // b bytes from hl to de
-    [0x2a, 0x12, 0x13, 0x05, 0x20, rel("copy"), 0xc9],
     "palettes",                                 // background, logo
     [0xfc, 0x03, 0xa9, 0x56],                   // light/dark, dark/light, 1/2, 2/1
+    "sprites",                                  // y + 16, x + 8, tile, flags
+    ...[0, 1].flatMap((row) => [0, 1, 2, 3, 4, 5].map((i) =>
+      [104 + 8 * row, 64 + 8 * i, 1 + 12 * row + i, 0x00])), // screen (56-103, 88-103)
   ], 0x150);
   rom.set(code, 0x150);
   let chk = 0;
