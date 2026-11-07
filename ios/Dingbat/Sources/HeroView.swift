@@ -237,33 +237,27 @@ struct HeroView: View {
         .padFocus("hero:" + label, radius: 24, press: action)
     }
 
-    /// ⋯: the session menu while paused (web sessionMenuEntries), the
-    /// game's file menu once closed.
-    @ViewBuilder private var more: some View {
-        let label = Image(systemName: "ellipsis")
-            .font(.system(size: 17, weight: .bold))
-            .foregroundColor(palette.textDim)
-            .frame(width: 48, height: 48)
-            .background(Capsule().fill(LinearGradient(colors: [palette.surface3, palette.surface2],
-                                                      startPoint: .top, endPoint: .bottom)))
-            .overlay(Capsule().stroke(palette.border2, lineWidth: 1))
-        if paused {
-            Menu {
-                SessionMenuItems()
-            } label: {
-                label.overlay(alignment: .topTrailing) {
-                    if model.newPrints {
+    /// ⋯: the game's one menu (TileMenuView), as a tile's; while paused it
+    /// leads with the session's Play group.
+    private var more: some View {
+        Button { model.openSheet(.tileMenu(entry)) } label: {
+            Image(systemName: "ellipsis")
+                .font(.system(size: 17, weight: .bold))
+                .foregroundColor(palette.textDim)
+                .frame(width: 48, height: 48)
+                .background(Capsule().fill(LinearGradient(colors: [palette.surface3, palette.surface2],
+                                                          startPoint: .top, endPoint: .bottom)))
+                .overlay(Capsule().stroke(palette.border2, lineWidth: 1))
+                .overlay(alignment: .topTrailing) {
+                    // New printed photos: their row is in the Play group.
+                    if paused && model.newPrints {
                         Circle().fill(palette.accent).frame(width: 8, height: 8).offset(x: -6, y: 6)
                     }
                 }
-            }
-                .accessibilityLabel("More for this game")
-        } else {
-            Button { model.openSheet(.tileMenu(entry)) } label: { label }
-                .buttonStyle(PressStyle())
-                .accessibilityLabel("More for this game")
-                .padFocus("hero:more", radius: 24) { model.openSheet(.tileMenu(entry)) }
         }
+        .buttonStyle(PressStyle())
+        .accessibilityLabel("More for this game")
+        .padFocus("hero:more", radius: 24) { model.openSheet(.tileMenu(entry)) }
     }
 }
 

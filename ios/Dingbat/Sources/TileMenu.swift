@@ -1,10 +1,14 @@
-// The game's menus. The file menu (web #tile-menu: a tile's ⋯ or long
-// press, the closed hero's ⋯) as a bottom sheet headed by the picture; the
-// session menu (the paused hero's ⋯); and the Rename sheet.
+// The game's menu (web #tile-menu), one wherever its ⋯ is (a tile's ⋯ or
+// long press, the closed hero's, the paused hero's): a bottom sheet headed
+// by the picture; and the Rename sheet.
 import SwiftUI
 
-// MARK: - File menu
+// MARK: - The game's menu
 
+/// One menu per game (web openTileMenu): the head says which game, then
+/// Play - the session's own items, only while the paused hero is up for
+/// this very game - then Game, the file items that apply, then Delete set
+/// apart. Context hides rows; it never swaps the menu.
 struct TileMenuView: View {
     let entry: RomEntry
     @ObservedObject private var model = AppModel.shared
@@ -13,101 +17,174 @@ struct TileMenuView: View {
     /// The item waiting for its second tap (web confirmLabel), and when.
     @State private var armed: String?
     @State private var armedAt = Date.distantPast
+    /// The rows' height as laid out unarmed: the sheet's (an armed row's
+    /// sub-line takes the reserve below, so arming never moves the sheet).
+    @State private var contentHeight: CGFloat?
 
     private var loaded: Bool { GameSession.shared.game == entry }
     /// web tileMenuEntries' busy: the loaded game's files wait for its
     /// link or 2P session to end.
     private var busy: String? { loaded && model.sessionBusy ? "Exit the online session first" : nil }
+    /// web openTileMenu's `session`: the paused hero is up for this game.
+    /// `!sessionBusy` is the hero's own guard (HomeView's `hero`: none is
+    /// drawn for a link or 2P session), so the Play rows never wait.
+    private var session: Bool {
+        loaded && model.screen == .home && model.heroGame == entry && !model.sessionBusy
+    }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            head
-            Rectangle().fill(palette.border).frame(height: 1).padding(.bottom, 6)
-            let drive = DriveSync.shared
-            let local = entry.isLocal
-            let onDrive = drive.driveHasRom(entry.fileName)
-            if !local && !onDrive {
-                item("find", "Find the file…") {
-                    model.sheet = nil
-                    model.relinkLaunch = false
-                    model.relinking = entry
-                }
+        ScrollViewReader { proxy in
+            ScrollView {
+                rows
+                    .background(GeometryReader { g in
+                        Color.clear.preference(key: TileMenuHeightKey.self, value: g.size.height)
+                    })
             }
-            if !local && onDrive {
-                item("download", "Download to this device",
-                     disabled: drive.downloading[entry.fileName] != nil ? "Downloading…" : nil) {
-                    model.sheet = nil
-                    model.downloadOnly(entry)
-                }
-            }
-            // Earlier moments of play, kept on this device: the way back when
-            // where the game stopped is what keeps stopping it.
-            if local && Checkpoints.hasAny(entry) {
-                item("moments", "Resume from earlier", disabled: busy) {
-                    model.sheet = .moments(entry, crash: false)
-                }
-            }
-            item("rename", "Rename", disabled: busy) {
-                model.sheet = .rename(entry)
-            }
-            // It only reads, so an online session does not hold it up.
-            if !local && onDrive {
-                item("export", "Download and export…",
-                     disabled: drive.downloading[entry.fileName] != nil ? "Downloading…" : nil) {
-                    model.sheet = nil
-                    model.downloadThenExport(entry)
-                }
-            } else {
-                item("export", "Export…") { model.sheet = .export(entry) }
-            }
-            let hasSaves = library.hasSaveData(entry)
-            item("reset", "Reset save data",
-                 disabled: busy ?? (hasSaves ? nil : "No save data yet"),
-                 confirm: "Delete all save data?") {
-                model.sheet = nil
-                HomeActions.resetSaveData(entry)
-            }
-            if let kept = drive.keptSave(entry.fileName) {
-                item("restore", "Restore old save", disabled: busy,
-                     sub: kept.why == "replaced" ? "The save you replaced"
-                        : "From before you deleted it" + (kept.at > 0 ? " · saved " + Self.fmtTime(kept.at) : ""),
-                     confirm: "Replace the current save?") {
-                    model.sheet = nil
-                    drive.restoreKeptSave(entry.fileName)
-                }
-            }
-            if local && drive.linked {
-                item("remove", "Remove from this device",
-                     disabled: busy ?? (onDrive ? nil : "Not backed up to Drive yet — this is your only copy"),
-                     confirm: loaded ? "Close and remove?" : "Remove from this device?") {
-                    model.sheet = nil
-                    Task { @MainActor in await drive.removeFromDevice(entry.fileName) }
-                }
-            }
-            item("delete", "Delete", danger: true, disabled: busy,
-                 confirm: loaded ? "Close and delete everything?"
-                    : !local && !onDrive ? "Delete this game and its save?" : "Delete ROM and save data?") {
-                model.sheet = nil
-                HomeActions.delete(entry)
-            }
-            Spacer(minLength: 0)
+            .bounceOnlyIfScrolling()
+            .padScrollFollow(proxy)
         }
-        .padding(.horizontal, 12)
-        .padding(.top, 18)
+        .onPreferenceChange(TileMenuHeightKey.self) { h in
+            if armed == nil && h > 0 { contentHeight = h }
+        }
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(palette.surface1.ignoresSafeArea())
-        .presentationDetents([.height(hasSavesHeight)])
+        .presentationDetents([.height(sheetHeight)])
         .presentationDragIndicator(.visible)
     }
 
-    private var hasSavesHeight: CGFloat {
+    private var rows: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            head
+            Rectangle().fill(palette.border).frame(height: 1).padding(.bottom, 6)
+            if session {
+                group("Play")
+                playRows
+                group("Game")
+            }
+            fileRows
+        }
+        .padding(.horizontal, 12)
+        .padding(.top, 18)
+        .padding(.bottom, 8)
+    }
+
+    /// The loaded game's own controls (web sessionMenuEntries), without
+    /// Screenshot or Clip that! (the frame here is the hero's picture of a
+    /// game that stopped). A DS game has no link cable or cheats, as in the
+    /// game's own menu. Link Cable goes through NetLink's own sheet opener.
+    @ViewBuilder private var playRows: some View {
+        item("states", "Save states", icon: "square.grid.2x2") { model.openSheet(.states) }
+        item("saves", "Manage saves", icon: "folder") { model.openSheet(.saves) }
+        if !PrintStore.all().isEmpty {
+            item("prints", "Printed photos", icon: "printer", dot: model.newPrints) {
+                model.openSheet(.prints)
+            }
+        }
+        if !GameSession.shared.isNDS {
+            item("link", "Link cable", icon: "cable.connector") { NetLink.shared.openSheet() }
+            item("cheats", "Cheats", icon: "star") { model.openSheet(.cheats) }
+        }
+        item("report", "Report a bug", icon: "ladybug") { model.openSheet(.report) }
+    }
+
+    /// The file items (web tileMenuEntries). Order: get it, name it, wipe
+    /// its saves, free the space, and last - set apart - delete it.
+    @ViewBuilder private var fileRows: some View {
+        let drive = DriveSync.shared
+        let local = entry.isLocal
+        let onDrive = drive.driveHasRom(entry.fileName)
+        if !local && !onDrive {
+            item("find", "Find the file…", icon: "magnifyingglass") {
+                model.sheet = nil
+                model.relinkLaunch = false
+                model.relinking = entry
+            }
+        }
+        if !local && onDrive {
+            item("download", "Download to this device", icon: "arrow.down",
+                 disabled: drive.downloading[entry.fileName] != nil ? "Downloading…" : nil) {
+                model.sheet = nil
+                model.downloadOnly(entry)
+            }
+        }
+        // Earlier moments of play, kept on this device: the way back when
+        // where the game stopped is what keeps stopping it.
+        if local && Checkpoints.hasAny(entry) {
+            item("moments", "Resume from earlier", icon: "clock.arrow.circlepath", disabled: busy) {
+                model.sheet = .moments(entry, crash: false)
+            }
+        }
+        item("rename", "Rename", icon: "pencil", disabled: busy) {
+            model.sheet = .rename(entry)
+        }
+        // It only reads, so an online session does not hold it up.
+        if !local && onDrive {
+            item("export", "Download and export…", icon: "arrow.up.forward.square",
+                 disabled: drive.downloading[entry.fileName] != nil ? "Downloading…" : nil) {
+                model.sheet = nil
+                model.downloadThenExport(entry)
+            }
+        } else {
+            item("export", "Export…", icon: "arrow.up.forward.square") { model.sheet = .export(entry) }
+        }
+        let hasSaves = library.hasSaveData(entry)
+        item("reset", "Reset save data", icon: "eraser",
+             disabled: busy ?? (hasSaves ? nil : "No save data yet"),
+             confirm: "Delete all save data?") {
+            model.sheet = nil
+            HomeActions.resetSaveData(entry)
+        }
+        if let kept = drive.keptSave(entry.fileName) {
+            item("restore", "Restore old save", icon: "arrow.uturn.backward", disabled: busy,
+                 sub: kept.why == "replaced" ? "The save you replaced"
+                    : "From before you deleted it" + (kept.at > 0 ? " · saved " + Self.fmtTime(kept.at) : ""),
+                 confirm: "Replace the current save?") {
+                model.sheet = nil
+                drive.restoreKeptSave(entry.fileName)
+            }
+        }
+        if local && drive.linked {
+            item("remove", "Remove from this device", icon: Self.removeGlyph,
+                 disabled: busy ?? (onDrive ? nil : "Not backed up to Drive yet — this is your only copy"),
+                 confirm: loaded ? "Close and remove?" : "Remove from this device?") {
+                model.sheet = nil
+                Task { @MainActor in await drive.removeFromDevice(entry.fileName) }
+            }
+        }
+        // Set apart by a rule: the one that cannot be undone.
+        Rectangle().fill(palette.border).frame(height: 1).padding(.horizontal, 6).padding(.vertical, 4)
+        item("delete", "Delete", icon: "trash", danger: true, disabled: busy,
+             confirm: loaded ? "Close and delete everything?"
+                : !local && !onDrive ? "Delete this game and its save?" : "Delete ROM and save data?") {
+            model.sheet = nil
+            HomeActions.delete(entry)
+        }
+    }
+
+    /// The rows as measured, plus room for an armed row's sub-line. Until
+    /// they are measured, a guess from the row count. Taller than the
+    /// screen is the screen's height, and the rows scroll.
+    private var sheetHeight: CGFloat {
+        if let contentHeight { return contentHeight + Self.armReserve }
         let drive = DriveSync.shared
         var rows = 4
         if !entry.isLocal { rows += 1 }
         if drive.keptSave(entry.fileName) != nil { rows += 1 }
         if entry.isLocal && drive.linked { rows += 1 }
         if entry.isLocal && Checkpoints.hasAny(entry) { rows += 1 }
-        return CGFloat(150 + rows * 50)
+        if session { rows += 7 }
+        return CGFloat(130 + rows * 46)
+    }
+
+    /// An armed row's sub-line: 12 pt and its spacing.
+    private static let armReserve: CGFloat = 18
+
+    /// This device, struck out: an iPad's own where it has one (16.1 on).
+    private static var removeGlyph: String {
+        if #available(iOS 16.1, *), UIDevice.current.userInterfaceIdiom == .pad {
+            return "ipad.and.iphone.slash"
+        }
+        return "iphone.slash"
     }
 
     static func fmtTime(_ ms: Double) -> String {
@@ -164,10 +241,24 @@ struct TileMenuView: View {
         .padding(.bottom, 12)
     }
 
-    /// web tileMenuItem: a disabled item says why under its label; a
-    /// destructive one asks for a second tap within 3.5 s.
-    private func item(_ id: String, _ label: String, danger: Bool = false, disabled: String? = nil,
-                      sub: String? = nil, confirm: String? = nil, run: @escaping () -> Void) -> some View {
+    /// A group's heading (web .tile-menu-group): the library head's small
+    /// caps. Not an item: the pad passes over it.
+    private func group(_ text: String) -> some View {
+        Text(text.uppercased())
+            .font(.system(size: 11, weight: .semibold))
+            .tracking(0.9)
+            .foregroundColor(palette.textFaint)
+            .padding(.horizontal, 10)
+            .padding(.top, 8)
+            .padding(.bottom, 3)
+            .accessibilityAddTraits(.isHeader)
+    }
+
+    /// web tileMenuItem: a glyph, then the label; a disabled item says why
+    /// under its label; a destructive one asks for a second tap within 3.5 s.
+    private func item(_ id: String, _ label: String, icon: String, danger: Bool = false,
+                      disabled: String? = nil, sub: String? = nil, confirm: String? = nil,
+                      dot: Bool = false, run: @escaping () -> Void) -> some View {
         let isArmed = armed == id
         let tap = {
             if confirm != nil, armed != id {
@@ -183,17 +274,31 @@ struct TileMenuView: View {
             armed = nil
             run()
         }
+        // The glyph follows its label: faint when blocked, red on Delete,
+        // ink when armed (web .tile-menu-icon).
+        let ink = isArmed ? palette.accentInk
+            : disabled != nil ? palette.textFaint
+            : danger ? palette.danger : palette.text
         return Button(action: tap) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(isArmed ? (confirm ?? label) : label)
+            // The glyph centred on the label and its sub-line, as the web's.
+            HStack(alignment: .center, spacing: 12) {
+                Image(systemName: icon)
                     .font(.system(size: 15))
-                    .foregroundColor(isArmed ? palette.accentInk
-                                     : disabled != nil ? palette.textFaint
-                                     : danger ? palette.danger : palette.text)
-                if let sub = isArmed ? "Tap again to confirm" : (disabled ?? sub) {
-                    Text(sub)
-                        .font(.system(size: 12))
-                        .foregroundColor(isArmed ? palette.accentInk : palette.textDim)
+                    .frame(width: 22)
+                    .foregroundColor(isArmed || disabled != nil || danger ? ink : palette.textDim)
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 8) {
+                        Text(isArmed ? (confirm ?? label) : label)
+                            .font(.system(size: 15))
+                            .foregroundColor(ink)
+                        if dot { Circle().fill(palette.accent).frame(width: 6, height: 6) }
+                    }
+                    if let sub = isArmed ? "Tap again to confirm" : (disabled ?? sub) {
+                        Text(sub)
+                            .font(.system(size: 12))
+                            .foregroundColor(isArmed ? palette.accentInk : palette.textDim)
+                    }
                 }
             }
             .padding(.horizontal, 10)
@@ -209,26 +314,20 @@ struct TileMenuView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .padFocus("item:" + id, press: tap)
         .disabled(disabled != nil)
     }
 }
 
-// MARK: - Session menu
+private struct TileMenuHeightKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
+}
 
-/// The paused hero's ⋯ (web sessionMenuEntries): the menu's game-wide
-/// items, without Screenshot (the frame here is the card's picture).
-struct SessionMenuItems: View {
-    @ObservedObject private var model = AppModel.shared
-
-    var body: some View {
-        Button { model.openSheet(.states) } label: { Label("Save states", systemImage: "square.grid.2x2") }
-        Button { model.openSheet(.saves) } label: { Label("Manage saves", systemImage: "folder") }
-        if !PrintStore.all().isEmpty {
-            Button { model.openSheet(.prints) } label: { Label("Printed photos", systemImage: "printer") }
-        }
-        Button { NetLink.shared.openSheet() } label: { Label("Link cable", systemImage: "cable.connector") }
-        Button { model.openSheet(.cheats) } label: { Label("Cheats", systemImage: "star") }
-        Button { model.openSheet(.report) } label: { Label("Report a bug", systemImage: "ladybug") }
+private extension View {
+    /// Rows that fit do not bounce (iOS 16.4 on; before, they do).
+    @ViewBuilder func bounceOnlyIfScrolling() -> some View {
+        if #available(iOS 16.4, *) { scrollBounceBehavior(.basedOnSize) } else { self }
     }
 }
 

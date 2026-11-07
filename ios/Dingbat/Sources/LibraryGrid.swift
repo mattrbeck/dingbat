@@ -597,15 +597,16 @@ struct LibraryTile: View {
     }
 
     /// ↓ for a Drive-only game, a magnifier for a missing one, a check for a
-    /// download that just landed.
+    /// download that just landed. Both corners' chips are circles, as the
+    /// hero's ⋯ is: the same button wherever a game's menu opens.
     @ViewBuilder private var cornerButton: some View {
         let name = entry.fileName
         if model.tileDone.contains(name) {
             Image(systemName: "checkmark")
                 .font(.system(size: 12, weight: .bold))
                 .foregroundColor(palette.live)
-                .frame(width: 28, height: 26)
-                .background(RoundedRectangle(cornerRadius: 6).fill(Color.black.opacity(0.55)))
+                .frame(width: 28, height: 28)
+                .background(Circle().fill(Color.black.opacity(0.55)))
                 .padding(6)
         } else if local && TwoPlayer.enabled && !entry.isNDS {
             // web ?2p: two linked cores of this game on one screen.
@@ -613,8 +614,8 @@ struct LibraryTile: View {
                 Text("2P")
                     .font(.system(size: 11, weight: .heavy, design: .monospaced))
                     .foregroundColor(Color.white.opacity(0.9))
-                    .frame(width: 28, height: 26)
-                    .background(RoundedRectangle(cornerRadius: 6).fill(Color.black.opacity(0.55)))
+                    .frame(width: 28, height: 28)
+                    .background(Circle().fill(Color.black.opacity(0.55)))
             }
             .padding(6)
             .accessibilityLabel("Start 2-player link: \(entry.name)")
@@ -628,8 +629,8 @@ struct LibraryTile: View {
                 }
                 .font(.system(size: 13, weight: .bold))
                 .foregroundColor(Color.white.opacity(0.85))
-                .frame(width: 28, height: 26)
-                .background(RoundedRectangle(cornerRadius: 6).fill(Color.black.opacity(0.55)))
+                .frame(width: 28, height: 28)
+                .background(Circle().fill(Color.black.opacity(0.55)))
             }
             .padding(6)
             .disabled(drive.downloading[name] != nil)
@@ -644,8 +645,8 @@ struct LibraryTile: View {
             Image(systemName: "ellipsis")
                 .font(.system(size: 14, weight: .bold))
                 .foregroundColor(palette.isLight ? Color.white.opacity(0.85) : palette.textDim)
-                .frame(width: 28, height: 26)
-                .background(RoundedRectangle(cornerRadius: 6).fill(Color.black.opacity(0.55)))
+                .frame(width: 28, height: 28)
+                .background(Circle().fill(Color.black.opacity(0.55)))
         }
         .padding(6)
         .accessibilityLabel("More for \(entry.name)")
