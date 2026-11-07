@@ -26,7 +26,7 @@ proc render*(v: VideoWidget) =
               "screen's own structure instead of smoothing (the grid is the " &
               "pixel matrix every Game Boy LCD shows; RGB subpixels imitates " &
               "the GBC/GBA TFT's stripe triads — a DMG panel has no " &
-              "subpixels, so there it is a stylised look). None keeps crisp " &
+              "subpixels, so there it is a stylized look). None keeps crisp " &
               "nearest-neighbor pixels. Color correction still applies on top.")
   igIndent(ui_px(106))
   discard igRadioButton_IntPtr("None (crisp)", addr v.filter, 0)
@@ -55,11 +55,11 @@ proc render*(v: VideoWidget) =
   igText("Super Game Boy:")
   igSameLine(0, -1)
   help_marker("Run monochrome carts whose header unlocks SGB functions on the " &
-              "Super Game Boy adapter: per-region colour palettes and, where " &
+              "Super Game Boy adapter: per-region color palettes and, where " &
               "the cart ships one, a 256x224 border. Carts without the SGB " &
               "header bits are unaffected, and a Game Boy Color cart always " &
               "runs as a Game Boy Color even if it is also SGB-enhanced. " &
-              "Off by default — stock Game Boy behaviour until you ask for it.")
+              "Off by default — stock Game Boy behavior until you ask for it.")
   igIndent(ui_px(106))
   discard igCheckbox("Super Game Boy mode", addr v.sgb_enable)
   # Kept visible: the adapter is chosen at cartridge insertion, so ticking
