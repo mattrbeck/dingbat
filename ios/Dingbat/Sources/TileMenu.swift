@@ -174,7 +174,7 @@ struct TileMenuView: View {
         Rectangle().fill(palette.border).frame(height: 1).padding(.horizontal, 6).padding(.vertical, 4)
         item("delete", "Delete", icon: "trash", danger: true, disabled: busy,
              confirm: "Delete this game?",
-             confirmSub: loaded ? "Closes it; the ROM and its save data go"
+             confirmSub: loaded ? "Closes the game; the ROM and its save data go"
                 : !local && !onDrive ? "Its save data goes too" : "The ROM and its save data go") {
             model.sheet = nil
             HomeActions.delete(entry)
@@ -361,7 +361,7 @@ private extension View {
 
 // MARK: - Per-game actions
 
-/// What the file menu's items do (web resetGameAction, deleteGameAction,
+/// What the game's menu's items do (web resetGameAction, deleteGameAction,
 /// renameGame), the game in memory included.
 enum HomeActions {
     /// Reset save data (web resetGameAction). The game in memory is let go

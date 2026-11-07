@@ -367,7 +367,8 @@ final class NativeTouchesUITests: XCTestCase {
     /// The library head's Add pictures (web .lib-thumbs): drawn 28 pt tall,
     /// smaller than Add a game (34), its touch area 44 pt (what VoiceOver
     /// and this test see as its frame), so a tap 5 pt under the drawn
-    /// capsule still lands.
+    /// capsule still lands. It relies on linktest.gba never getting a
+    /// picture (its screen is blank white), so the button is always up.
     func testAddPicturesButton() {
         let app = XCUIApplication()
         app.launchArguments = ["-audio.muted", "YES"]
@@ -457,6 +458,7 @@ final class NativeTouchesUITests: XCTestCase {
         sleep(1)
         let lead = barMenu.frame.minX - 10, trail = mute.frame.maxX + 10
         print("NATIVE: sideways safe region \(lead)…\(trail), toast \(side.frame)")
+        // 134: ToastStack.sidewaysClear (6 in, L/R up to 120 wide, 8 clear).
         XCTAssertGreaterThanOrEqual(side.frame.minX, lead + 134 - 0.5, "clear of L's column")
         XCTAssertLessThanOrEqual(side.frame.maxX, trail - 134 + 0.5, "clear of R's column and the rail under it")
         snap(app, "toast-sideways")
@@ -483,8 +485,8 @@ final class NativeTouchesUITests: XCTestCase {
             let again = launch(["-theme", theme, "-sheet", "settings:general"])
             let reset = again.buttons["Reset all settings"].firstMatch
             XCTAssertTrue(reset.waitForExistence(timeout: 5), "\(theme): Settings › General")
-            again.swipeUp()
-            again.swipeUp()
+            for _ in 0..<5 where !reset.isHittable { again.swipeUp() }
+            XCTAssertTrue(reset.isHittable, "\(theme): scrolled to Reset all settings")
             reset.tap()
             XCTAssertTrue(armed(again, "Reset all settings?").waitForExistence(timeout: 2),
                           "\(theme): Reset all settings armed")
@@ -604,7 +606,7 @@ final class NativeTouchesUITests: XCTestCase {
         let armed = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@",
                                                      "Delete this game?")).firstMatch
         XCTAssertTrue(armed.waitForExistence(timeout: 2), "one tap arms Delete")
-        XCTAssertTrue(armed.label.contains("Closes it; the ROM and its save data go"),
+        XCTAssertTrue(armed.label.contains("Closes the game; the ROM and its save data go"),
                       "the line under it says what goes: \(armed.label)")
         snap(app, "game-menu-armed")
         XCTAssertTrue(delete.waitForExistence(timeout: 5), "and it disarms")

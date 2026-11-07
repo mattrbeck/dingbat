@@ -208,7 +208,7 @@ struct AddPicturesView: View {
                         .buttonStyle(SheetButtonStyle(small: false))
                 }
             } else {
-                Text("dingbat can open each game, pick up where you left off, take a picture of the screen for its library card, and close it again. It takes a few seconds a game. Your games and saves are not changed.")
+                Text("dingbat can open each game, pick up where you left off, take a picture of the screen for its library card, and close it again. It takes a moment per game. Your games and saves are not changed.")
                     .font(.system(size: 13.5))
                     .foregroundColor(palette.text)
                     .fixedSize(horizontal: false, vertical: true)

@@ -162,6 +162,38 @@ extension View {
     }
 }
 
+/// A quiet text button that arms (Sign out everywhere): the first tap asks
+/// `question` in the armed look, with the warning haptic; a second within
+/// 3.5 s runs `action`, as every other armed control (SheetConfirmButton).
+struct ArmedLinkButton: View {
+    let label: String
+    let question: String
+    let action: () -> Void
+    @State private var armed = false
+    @State private var armGen = 0
+
+    var body: some View {
+        Button(armed ? question : label, action: tap)
+            .armedLink(armed)
+            .padFocus("armlink:" + label, press: tap)
+    }
+
+    private func tap() {
+        if !armed {
+            armed = true
+            Haptic.warning()
+            armGen += 1
+            let gen = armGen
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3.5) {
+                if armGen == gen { armed = false }
+            }
+            return
+        }
+        armed = false
+        action()
+    }
+}
+
 private struct ArmedLink: ViewModifier {
     let on: Bool
     @Environment(\.palette) private var palette
@@ -200,8 +232,14 @@ struct SheetButtonStyle: ButtonStyle {
             .padding(.horizontal, small ? 12 : 16)
             .padding(.vertical, small ? 7 : 9)
             .frame(maxWidth: fill ? .infinity : nil, minHeight: 32)
-            .background(RoundedRectangle(cornerRadius: 8).fill(background(pressed)))
-            .overlay(RoundedRectangle(cornerRadius: 8).stroke(border, lineWidth: 1))
+            .background(Group {
+                if kind == .armed && enabled {
+                    ArmedFill(shape: RoundedRectangle(cornerRadius: 8))
+                } else {
+                    RoundedRectangle(cornerRadius: 8).fill(background(pressed))
+                        .overlay(RoundedRectangle(cornerRadius: 8).stroke(border, lineWidth: 1))
+                }
+            })
             .opacity(enabled ? 1 : 0.45)
             .offset(y: pressed ? 1 : 0)
             .touchTarget(width: 44, height: 32)
@@ -228,10 +266,8 @@ struct SheetButtonStyle: ButtonStyle {
             return pressed ? grad(palette.surfaceHover, palette.surface3) : grad(palette.surface3, palette.surface2)
         case .primary:
             return pressed ? grad(palette.accentHi, palette.accent2) : grad(palette.accent2, palette.accent)
-        case .ghost:
+        case .ghost, .armed:  // armed: ArmedFill draws it
             return grad(.clear, .clear)
-        case .armed:
-            return grad(palette.dangerFillHi, palette.dangerFill)
         }
     }
 
@@ -242,7 +278,7 @@ struct SheetButtonStyle: ButtonStyle {
         case .primary: return palette.accent.opacity(0.6)
         case .ghost: return palette.border
         case .danger: return palette.danger.opacity(0.4)
-        case .armed: return palette.dangerFill
+        case .armed: return .clear
         }
     }
 }

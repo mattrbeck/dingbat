@@ -204,7 +204,9 @@ whenever play reaches that frame, until it closes.
 
 Not gated in CI. The app's side of most of it runs in the simulator:
 `node ios/e2e/native-touches.mjs <derivedData>` (ios/e2e/uitest/
-NativeTouchesUITests.swift; 13 tests, all passing 2026-11-05). It covers:
+NativeTouchesUITests.swift; 24 tests, 20 passing and 4 skipped (the three
+iPhone Duo ones and AddPicturesSkipsBlank, which needs its knobs)
+2026-11-07). It covers:
 - an audio interruption (began, ended with and without shouldResume, the
   player's own pause winning);
 - the background and back;
@@ -225,7 +227,23 @@ NativeTouchesUITests.swift; 13 tests, all passing 2026-11-05). It covers:
   Report a Bug;
 - the home screen held sideways with a game paused: the picture on the
   left, its name and buttons beside it (as the web at 760 px, the whole
-  screen's width).
+  screen's width);
+- the game's one menu (OneMenuPerGame: the paused hero's Play group, the
+  armed Delete and its line, a Play row's sheet, closed without Play, the
+  ×) and held sideways (GameMenuCloseHeldSideways: scrolled to Delete,
+  the head's × still there and closing it);
+- the armed look in Night, Light, Indigo and Famicom (ArmedLookPerTheme),
+  and Sign out everywhere armed in place, one line, in Settings and the
+  account popover (SignOutEverywhereArmed, a fake account at a closed
+  port);
+- the in-game bar in fast-forward (TopBarFits: no overlap, the readout
+  says fps; knobs DB_BAR_ARGS, DB_MUTE, DB_TIGHT, DB_GAME + DB_ROMS for
+  the sync icon, the mute pill, the tightest row and a tilt cart);
+- a game's toasts under the bar, under the open menu, and held sideways
+  between the shoulder columns (ToastsInPlay);
+- the library head's Add pictures, 44 pt to touch (AddPicturesButton), and
+  the run keeping no blank screen (AddPicturesSkipsBlank, on its own:
+  DB_ROMS=tests/roms/gbedge.gb DB_PICTURES="1 picture added").
 
 The interruptions and route change are the notifications AVAudioSession
 posts, sent by the `-debug-events` hook, so iOS's own delivery of them, the

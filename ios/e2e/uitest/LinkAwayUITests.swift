@@ -1,4 +1,5 @@
 import XCTest
+import notify
 
 /// Linked to a browser that goes away (driven from node): the away card's
 /// Disconnect takes two taps, then the session ends and the card goes.
@@ -8,8 +9,31 @@ final class LinkAwayUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["-audio.muted", "YES", "-autoplay", env["DB_GAME"]!,
                                "-signal", env["DB_SIGNAL"]!, "-link", env["DB_CODE"]!,
-                               "-link-busy-cable", "1000000000"]
+                               "-link-busy-cable", "1000000000", "-debug-events"]
         app.launch()
+
+        // DB_PAD: the menu's Disconnect by a controller alone, armed and
+        // then confirmed by two presses of A (the focus stays on the row
+        // when its label turns to "Disconnect?"). The session ends here.
+        if env["DB_PAD"] == "1" {
+            let pill = app.buttons["Disconnect link cable"].firstMatch
+            XCTAssertTrue(pill.waitForExistence(timeout: 120), "linked")
+            let menu = app.buttons["Menu"].firstMatch
+            if !menu.isHittable { app.otherElements["Game screen"].firstMatch.tap(); sleep(1) }
+            menu.tap()
+            XCTAssertTrue(app.buttons["Disconnect"].firstMatch.waitForExistence(timeout: 3), "the menu's Disconnect")
+            func nav(_ k: String) { notify_post("com.mattrb.dingbat.debug.nav-" + k); usleep(400_000) }
+            nav("down")  // the ring shows, on Library
+            nav("down")  // Disconnect
+            nav("a")
+            XCTAssertTrue(app.buttons["Disconnect?"].firstMatch.waitForExistence(timeout: 2), "A arms it")
+            snap(app, "pad-armed")
+            nav("a")
+            XCTAssertTrue(app.staticTexts["Disconnected"].waitForExistence(timeout: 5), "a second A disconnects")
+            XCTAssertFalse(pill.exists, "the link has ended")
+            sleep(4)
+            return
+        }
 
         // DB_BAR (node holds the browser here a while): the bar's Disconnect
         // and the menu's, each armed by one tap, pictured, left to disarm.

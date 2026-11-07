@@ -103,7 +103,6 @@ struct AccountMenu: View {
     @Environment(\.palette) var palette
     @Environment(\.dismiss) var dismiss
     @ObservedObject private var drive = DriveSync.shared
-    @State private var everywhereArmed = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -163,16 +162,10 @@ struct AccountMenu: View {
                         drive.signOut()
                     }
                     Spacer()
-                    Button(everywhereArmed ? "Sign out everywhere?" : "Sign out everywhere") {
-                        if !everywhereArmed {
-                            everywhereArmed = true
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 4) { everywhereArmed = false }
-                            return
-                        }
+                    ArmedLinkButton(label: "Sign out everywhere", question: "Sign out everywhere?") {
                         dismiss()
                         Task { @MainActor in await drive.signOutEverywhere() }
                     }
-                    .armedLink(everywhereArmed)
                 }
                 .font(.system(size: 13))
                 .foregroundColor(palette.textDim)
@@ -309,7 +302,6 @@ struct HomeDriveRow: View {
 struct DriveSettingsBlock: View {
     @Environment(\.palette) var palette
     @ObservedObject private var drive = DriveSync.shared
-    @State private var everywhereArmed = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -333,16 +325,10 @@ struct DriveSettingsBlock: View {
                 }
                 .font(.system(size: 14, weight: .semibold))
                 .foregroundColor(palette.text)
-                Button(everywhereArmed ? "Sign out everywhere?" : "Sign out everywhere") {
-                    if !everywhereArmed {
-                        everywhereArmed = true
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 4) { everywhereArmed = false }
-                        return
-                    }
+                ArmedLinkButton(label: "Sign out everywhere", question: "Sign out everywhere?") {
                     Task { @MainActor in await drive.signOutEverywhere() }
                 }
                 .font(.system(size: 13))
-                .armedLink(everywhereArmed)
             }
         }
     }

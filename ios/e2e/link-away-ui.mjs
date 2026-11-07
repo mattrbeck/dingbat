@@ -15,6 +15,8 @@
 //   node ios/e2e/link-away-ui.mjs <dd> [simulator udid]
 //
 // The test's screenshots (card, armed, after) are in $SHOTS/link-away-ui.xcresult;
+// PAD=1 instead disconnects from the in-game menu by controller presses
+// alone (arm, then confirm), and checks the browser hears it.
 // BAR=1 holds the browser 25 s once linked so the test first pictures the
 // bar's and the menu's Disconnect armed (bar-armed, menu-armed).
 
@@ -29,6 +31,9 @@ const UDID = process.argv[3] || process.env.SIMDEV || "20B3E400-B140-4C0D-A981-A
 const ROOT = new URL("../..", import.meta.url).pathname;
 const SHOTS = process.env.SHOTS || "/tmp";
 const BAR = process.env.BAR === "1";
+// PAD=1: the menu's Disconnect by a controller (two presses of A) instead of
+// the away card; the browser must hear the session end.
+const PAD = process.env.PAD === "1";
 if (!DD) { console.error("usage: node ios/e2e/link-away-ui.mjs <derivedData> [udid]"); process.exit(2); }
 if (!builtWeb()) { console.error("web/em.wasm not built"); process.exit(2); }
 const playwright = createRequire(join(WEB, "package.json"))("playwright");
@@ -84,7 +89,8 @@ try {
       "-scheme", "DingbatUITest", "-destination", "id=" + UDID, "-derivedDataPath", DD, "-resultBundlePath", result,
       "-only-testing:DingbatUITests/LinkAwayUITests"],
       { env: { ...process.env, TEST_RUNNER_DB_GAME: "linktest.gba", TEST_RUNNER_DB_SIGNAL: "ws://127.0.0.1:" + PORT,
-               TEST_RUNNER_DB_CODE: code, TEST_RUNNER_DB_BAR: BAR ? "1" : "0" }, stdio: ["ignore", "pipe", "pipe"] });
+               TEST_RUNNER_DB_CODE: code, TEST_RUNNER_DB_BAR: BAR ? "1" : "0",
+               TEST_RUNNER_DB_PAD: PAD ? "1" : "0" }, stdio: ["ignore", "pipe", "pipe"] });
     let out = "";
     p.stdout.on("data", (d) => { out += d; });
     p.stderr.on("data", (d) => { out += d; });
@@ -99,34 +105,45 @@ try {
   await until(() => page.evaluate(() => rbLinkWasActive), "cable in use", 10000);
   // BAR=1: the test pictures the bar's and the menu's armed Disconnect first.
   if (BAR) await sleep(25000);
+  if (PAD) {
+    await until(async () => !(await page.evaluate(() => !!net?.started)), "the app's pad Disconnect", 90000);
+    await sleep(1000);
+    const toasts = await page.evaluate(() => window.__toasts);
+    console.log("browser toasts: " + toasts.join(" | "));
+    if (!toasts.some((t) => t.startsWith("Your friend disconnected"))) { ok = false; console.log("MISSING the friend's toast"); }
+    const r = await xc;
+    console.log(r.out.split("\n").filter((l) => /Test Case|error:|TEST (SUCCEEDED|FAILED)|XCTAssert/.test(l)).join("\n"));
+    if (r.code !== 0) ok = false;
+  } else {
 
-  // The browser goes away; the UI test finds the card and disconnects.
-  await page.evaluate(() => {
-    window.__raf = window.requestAnimationFrame; window.__rafHeld = [];
-    window.requestAnimationFrame = (cb) => { window.__rafHeld.push(cb); return 0; };
-    Object.defineProperty(document, "hidden", { configurable: true, get: () => true });
-    document.dispatchEvent(new Event("visibilitychange"));
-  });
-  const t0 = Date.now();
-  await until(async () => !(await page.evaluate(() => !!net?.started)), "the app's disconnect to end the session", 90000);
-  console.log(`browser session ended ${((Date.now() - t0) / 1000).toFixed(1)} s after going away`);
-  await page.evaluate(() => {
-    window.requestAnimationFrame = window.__raf;
-    for (const cb of window.__rafHeld) window.__raf(cb);
-    Object.defineProperty(document, "hidden", { configurable: true, get: () => false });
-    document.dispatchEvent(new Event("visibilitychange"));
-  });
-  await sleep(1000);
-  const toasts = await page.evaluate(() => window.__toasts);
-  const log = await page.evaluate(() => [...document.querySelectorAll("#log-entries p")].map((e) => e.textContent).filter((t) => t.includes("netplay")));
-  console.log("browser log: " + log.slice(-3).join(" | "));
-  console.log("browser toasts: " + toasts.join(" | "));
-  if (!toasts.some((t) => t.startsWith("Your friend disconnected while you were away"))) { ok = false; console.log("MISSING the away toast"); }
-  if (await page.evaluate(() => rollbackMode || paused)) { ok = false; console.log("browser not back to solo play"); }
-  const r = await xc;
-  const summary = r.out.split("\n").filter((l) => /Test Case|error:|TEST (SUCCEEDED|FAILED)|XCTAssert/.test(l));
-  console.log(summary.join("\n"));
-  if (r.code !== 0) ok = false;
+    // The browser goes away; the UI test finds the card and disconnects.
+    await page.evaluate(() => {
+      window.__raf = window.requestAnimationFrame; window.__rafHeld = [];
+      window.requestAnimationFrame = (cb) => { window.__rafHeld.push(cb); return 0; };
+      Object.defineProperty(document, "hidden", { configurable: true, get: () => true });
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    const t0 = Date.now();
+    await until(async () => !(await page.evaluate(() => !!net?.started)), "the app's disconnect to end the session", 90000);
+    console.log(`browser session ended ${((Date.now() - t0) / 1000).toFixed(1)} s after going away`);
+    await page.evaluate(() => {
+      window.requestAnimationFrame = window.__raf;
+      for (const cb of window.__rafHeld) window.__raf(cb);
+      Object.defineProperty(document, "hidden", { configurable: true, get: () => false });
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    await sleep(1000);
+    const toasts = await page.evaluate(() => window.__toasts);
+    const log = await page.evaluate(() => [...document.querySelectorAll("#log-entries p")].map((e) => e.textContent).filter((t) => t.includes("netplay")));
+    console.log("browser log: " + log.slice(-3).join(" | "));
+    console.log("browser toasts: " + toasts.join(" | "));
+    if (!toasts.some((t) => t.startsWith("Your friend disconnected while you were away"))) { ok = false; console.log("MISSING the away toast"); }
+    if (await page.evaluate(() => rollbackMode || paused)) { ok = false; console.log("browser not back to solo play"); }
+    const r = await xc;
+    const summary = r.out.split("\n").filter((l) => /Test Case|error:|TEST (SUCCEEDED|FAILED)|XCTAssert/.test(l));
+    console.log(summary.join("\n"));
+    if (r.code !== 0) ok = false;
+  }
 } catch (e) {
   ok = false;
   console.log("ERROR " + e.message);

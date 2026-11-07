@@ -599,7 +599,7 @@ struct LinkDisconnectPill: View {
             .background(Group { if !armed { Capsule().fill(palette.accentGlow.opacity(0.4)) } })
             .armedFill(armed, Capsule())
         }
-        .accessibilityLabel("Disconnect link cable")
+        .accessibilityLabel(armed ? "Disconnect?" : "Disconnect link cable")
     }
 }
 
@@ -1044,7 +1044,7 @@ struct GameMenu: View {
     @ViewBuilder private var linkItem: some View {
         if link.linked {
             item("cable.connector", disconnectArmed ? "Disconnect?" : "Disconnect",
-                 armed: disconnectArmed) {
+                 armed: disconnectArmed, focusID: "menu:disconnect") {
                 if disconnectArmed {
                     disconnectArmed = false
                     model.closeMenu()
@@ -1133,8 +1133,11 @@ struct GameMenu: View {
     /// `tint`: the glyph and label's colour (Stop Recording's red). `armed`:
     /// waiting for its second tap, in the one armed look (its glyph takes
     /// the ink with the label).
+    /// `focusID`: the row's controller key where its label changes (the
+    /// armed Disconnect asks "Disconnect?"), so the focus stays on it and a
+    /// second press confirms.
     private func item(_ icon: String, _ label: String, trailing: String? = nil, sub: Bool = false,
-                      dot: Bool = false, tint: Color? = nil, armed: Bool = false,
+                      dot: Bool = false, tint: Color? = nil, armed: Bool = false, focusID: String? = nil,
                       action: @escaping () -> Void) -> some View {
         let tint = armed ? palette.dangerInk : tint
         return Button(action: action) {
@@ -1160,7 +1163,7 @@ struct GameMenu: View {
             .armedFill(armed, RoundedRectangle(cornerRadius: 8))
             .contentShape(Rectangle())
         }
-        .padFocus("menu:" + label, armed: armed, press: action)
+        .padFocus(focusID ?? "menu:" + label, armed: armed, press: action)
     }
 }
 

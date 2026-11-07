@@ -15,6 +15,8 @@ import notify
 ///   com.mattrb.dingbat.debug.headphones-out     route change, old device unavailable
 ///   com.mattrb.dingbat.debug.pad-connect        a GCVirtualController connects
 ///   com.mattrb.dingbat.debug.pad-disconnect     ... and disconnects
+///   com.mattrb.dingbat.debug.nav-up|down|a|b    a pad press as the UI gets it
+///                                               (Controllers.debugPress)
 ///
 /// The interruption and route notifications are the ones AVAudioSession
 /// posts, with the userInfo it gives them, so what runs is the app's own
@@ -52,6 +54,10 @@ enum DebugEvents {
             }),
             ("pad-disconnect", { pad?.disconnect(); pad = nil }),
             ("toast", { AppModel.shared.toast("Debug toast") }),
+            ("nav-up", { Controllers.shared.debugPress("up") }),
+            ("nav-down", { Controllers.shared.debugPress("down") }),
+            ("nav-a", { Controllers.shared.debugPress("a") }),
+            ("nav-b", { Controllers.shared.debugPress("b") }),
             ("home", { AppModel.shared.showMainMenu() }),
         ]
         for (name, run) in handlers {
