@@ -19291,7 +19291,7 @@ var Module = {
     setInterval(() => {
       if (sleepVisible) {
         frameCount = 0;
-        return;  // fps display is showing SLEEPING
+        return;  // fps display is showing Sleeping
       }
       const mode = paused ? "paused" : rewindHeld ? "rewind"
         : fastForward ? "ffw" : speed2x ? "2x" : slowMotion ? "slow" : "normal";
@@ -19304,8 +19304,9 @@ var Module = {
       if (usual || mode !== lastFpsMode) {
         fpsDiv.textContent = "";
       } else {
-        // The unit rides in its own span so phones can drop it.
-        fpsDiv.innerHTML = frameCount + '<span class="fps-unit"> fps</span>';
+        // The unit always shows (a bare number is not a reading), in its own
+        // span so a narrow phone's bar can set it smaller.
+        fpsDiv.innerHTML = frameCount + '<span class="fps-unit">fps</span>';
       }
       lastFpsMode = mode;
       frameCount = 0;
@@ -19394,14 +19395,14 @@ var Module = {
       if (e.persisted && (currentRomName || linkMode)) resumeAudio();
     });
 
-    // "SLEEPING" in place of the FPS counter while the GBA is in Stop mode.
+    // "Sleeping" in place of the FPS counter while the GBA is in Stop mode.
     let sleepVisible = false;
     const updateSleepOverlay = () => {
       // The GB/GBA core's Stop mode; a DS game is not on it.
       const sleeping = !ndsGameLoaded() && !!(Module._isStopped && Module._isStopped());
       if (sleeping !== sleepVisible) {
         sleepVisible = sleeping;
-        fpsDiv.textContent = sleeping ? "SLEEPING" : "";
+        fpsDiv.textContent = sleeping ? "Sleeping" : "";
         document.body.classList.toggle("sleeping", sleeping);
       }
     };

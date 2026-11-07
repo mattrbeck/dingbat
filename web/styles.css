@@ -1357,6 +1357,38 @@ body.net-mode .menu-quickrow {
   min-width: 0;
 }
 
+/* "48 fps" on one line, even in a phone's crowded bar. */
+#fps {
+  white-space: nowrap;
+}
+
+.fps-unit {
+  margin-left: 0.4em;
+}
+
+/* A phone's bar beside a tilt cart's button: a smaller unit, so "120 fps"
+   still fits at 390pt. Narrower (the SE's 375pt leaves the readout 27px),
+   the unit goes under the number. */
+@media (max-width: 400px) {
+  .fps-unit {
+    margin-left: 2px;
+    font-size: 10px;
+  }
+}
+@media (max-width: 380px) {
+  #fps:not(:empty) {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: center;
+    line-height: 1;
+  }
+  .fps-unit {
+    margin-left: 0;
+    font-size: 9px;
+    color: var(--text-faint);
+  }
+}
+
 #fps:empty {
   display: none;
 }
@@ -3284,13 +3316,13 @@ body.runtime-ready #boot-progress {
   border-radius: 999px;
 }
 
-/* The count beside the label: "LIBRARY 12 games", or "3 of 12" filtered. */
+/* The count beside the label: "LIBRARY 12 games", or "3 of 12" filtered.
+   The UI's font: monospace is for numbers that change while you watch. */
 .lib-count {
   margin-left: 6px;
   font-weight: 500;
   letter-spacing: 0;
   text-transform: none;
-  font-family: var(--font-mono);
 }
 
 /* --- Library bar: search, chips, sort --------------------------------------
@@ -5349,7 +5381,6 @@ body.debug-2p .home-tile-link {
    Two copies, one per layout (rail foot on desktop, fixed footer below the
    sheet's scroller); exactly one is ever displayed. */
 .settings-version {
-  font-family: var(--font-mono);
   font-size: 12px;
   color: var(--text-faint);
   cursor: pointer;
@@ -8333,11 +8364,10 @@ body.net-mode #saves-modal .modal-toggle-row:has(#reset-save-slot) {
 body.running.sync-shown #status {
   display: inline-flex;
 }
-/* Phones: icon only (tap toasts the description). The fps unit goes too:
-   with both indicators up, "48 fps" overflows the bar at 375pt. */
+/* Phones: icon only (tap toasts the description). The fps unit stays: a
+   bare "48" is not a reading. */
 @media (max-width: 560px) {
-  #sync-indicator .sync-label,
-  .fps-unit {
+  #sync-indicator .sync-label {
     display: none;
   }
 }
