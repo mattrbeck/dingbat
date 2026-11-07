@@ -307,7 +307,7 @@ const cases = {
     await s.page.click("#net-away-disconnect");
     await until(() => s.netlink().some((l) => l === "redial: the friend left"),
       () => "the app told: " + s.netlink().slice(-4).join(" | "), 10000);
-    await until(() => s.toastsApp().some((t) => t.startsWith("Peer disconnected")),
+    await until(() => s.toastsApp().some((t) => t.startsWith("Your friend disconnected")),
       () => "the app's toast: " + s.toastsApp().slice(-3).join(" | "), 5000);
     console.log(`  told in ${((Date.now() - t0) / 1000).toFixed(1)} s; app: ` + s.netlink().slice(-3).join(" | "));
     assert.ok(!s.netlink().some((l) => l.startsWith("goodbye note")), "the app left no note of its own");
@@ -495,7 +495,7 @@ const cases = {
     await until(() => s.toastsApp().some((t) => t.startsWith("Couldn't reconnect")),
       () => "the app's toast: " + s.toastsApp().slice(-3).join(" | "), 10000);
     console.log("  app: " + s.netlink().slice(-3).join(" | ") + "; toasts: " + s.toastsApp().slice(-2).join(" | "));
-    assert.ok(!s.toastsApp().some((t) => t.startsWith("Peer disconnected")), s.toastsApp().join(" | "));
+    assert.ok(!s.toastsApp().some((t) => t.startsWith("Your friend disconnected")), s.toastsApp().join(" | "));
     assert.ok(!s.netlink().some((l) => l === "redial: the friend gave up"), "by the BYE, not the note");
     await s.end();
   },

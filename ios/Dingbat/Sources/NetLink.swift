@@ -485,8 +485,8 @@ final class NetLink: ObservableObject {
             guard let self, self.session === s, s.peer === peer else { return }
             if s.started && self.canResume { self.watchDisconnected(peer, st, s) }
             if st == "failed" {
-                if s.started { self.dropped("connection failed", "Peer connection lost") }
-                else if s.rtcConnected { self.fail("Peer connection lost") }
+                if s.started { self.dropped("connection failed", "Lost the connection to your friend") }
+                else if s.rtcConnected { self.fail("Lost the connection to your friend") }
                 else if s.manual { self.manualFailed() }
                 else { self.rtcGaveUp(s, "ICE failed") }
             } else if st == "disconnected" && s.started && self.canResume {
@@ -499,7 +499,7 @@ final class NetLink: ObservableObject {
             } else if st == "connected" && s.started && self.peerIsAway {
                 NSLog("netlink: connection back while the friend is away")
             } else if (st == "disconnected" || st == "closed") && s.started {
-                self.dropped("connection " + st, "Peer connection lost")
+                self.dropped("connection " + st, "Lost the connection to your friend")
             }
         }
         peer.onOpen = { [weak self] in
@@ -514,7 +514,7 @@ final class NetLink: ObservableObject {
         }
         peer.onClosed = { [weak self] in
             guard let self, self.session === s, s.peer === peer else { return }
-            if s.started { self.dropped("channel closed", "Peer disconnected") }
+            if s.started { self.dropped("channel closed", "Your friend disconnected") }
             else if s.rb != nil && s.rb?.inited == false { self.fail("Connection lost during setup") }
         }
         peer.onMessage = { [weak self] data in
@@ -534,7 +534,7 @@ final class NetLink: ObservableObject {
         if s.sdpIn {
             s.strikes += 1
             if s.strikes >= 2 {
-                fail("Could not connect peer-to-peer (a strict NAT on one side may be blocking it)")
+                fail("Couldn't connect directly to your friend (a strict NAT on one side may be blocking it)")
                 return
             }
         }
@@ -855,7 +855,7 @@ final class NetLink: ObservableObject {
             // (web rbMessage; formal/WebState/LinkResume.lean bye_reason_heard).
             rb.byeIn = true
             let gaveUp = data.count >= 2 && data[data.startIndex + 1] == 1
-            if s.started { peerGone(gaveUp ? "Couldn't reconnect" : "Peer disconnected") }
+            if s.started { peerGone(gaveUp ? "Couldn't reconnect" : "Your friend disconnected") }
             return
         case Self.ready:
             rb.remoteReady = true
@@ -1247,7 +1247,7 @@ final class NetLink: ObservableObject {
     /// The connection is gone: redial if both sides can, else end as before.
     private func dropped(_ why: String, _ endMsg: String) {
         if canResume { beginResume(why) }
-        else { peerGone(session?.rb?.byeIn == true ? "Peer disconnected" : endMsg) }
+        else { peerGone(session?.rb?.byeIn == true ? "Your friend disconnected" : endMsg) }
     }
 
     /// "disconnected" may recover; past the grace it redials (an engine that
@@ -1259,7 +1259,7 @@ final class NetLink: ObservableObject {
         guard st == "disconnected" else { return }
         rb.discTimer = schedule(Self.disconnectedGrace) { [weak self, weak s, weak peer] in
             guard let self, let s, let peer, self.session === s, s.peer === peer else { return }
-            self.dropped("disconnected for \(Int(Self.disconnectedGrace)) s", "Peer connection lost")
+            self.dropped("disconnected for \(Int(Self.disconnectedGrace)) s", "Lost the connection to your friend")
         }
     }
 
@@ -1273,7 +1273,7 @@ final class NetLink: ObservableObject {
         // Back from a suspension longer than the friend waits: it has given up.
         if let last = rb.lastMsgAt, Date().timeIntervalSince(last) > Self.resumeGiveUp {
             NSLog("netlink: %@ after %.0f s of silence — the friend has given up", why, Date().timeIntervalSince(last))
-            peerGone("Peer connection lost")
+            peerGone("Lost the connection to your friend")
             return
         }
         rb.reconnecting = true
@@ -1412,7 +1412,7 @@ final class NetLink: ObservableObject {
                 rb.byeIn = true
                 let gaveUp = (msg["why"] as? String) == "gave-up"
                 NSLog("netlink: redial: the friend %@", gaveUp ? "gave up" : "left")
-                self.peerGone(gaveUp ? "Couldn't reconnect" : "Peer disconnected")
+                self.peerGone(gaveUp ? "Couldn't reconnect" : "Your friend disconnected")
             case "error":
                 self.rsAgain(rb, s, "server: " + ((msg["msg"] as? String) ?? "error"))
             default:
@@ -1470,12 +1470,12 @@ final class NetLink: ObservableObject {
         peer.onState = { [weak self, weak s, weak peer] st in
             guard let self, let s, let peer, self.session === s, s.peer === peer else { return }
             self.watchDisconnected(peer, st, s)
-            if st == "failed" || st == "closed" { self.dropped("connection " + st, "Peer connection lost") }
+            if st == "failed" || st == "closed" { self.dropped("connection " + st, "Lost the connection to your friend") }
             else if st == "disconnected" { NSLog("netlink: connection disconnected — waiting") }
         }
         peer.onClosed = { [weak self, weak s, weak peer] in
             guard let self, let s, let peer, self.session === s, s.peer === peer, s.started else { return }
-            self.dropped("channel closed", "Peer disconnected")
+            self.dropped("channel closed", "Your friend disconnected")
         }
         rb.rsTimer = schedule(Self.resumeAnswerDeadline) { [weak self, weak s, weak rb, weak peer] in
             guard let self, let s, let rb, let peer, s.peer === peer, rb.reconnecting else { return }
@@ -1564,8 +1564,8 @@ final class NetLink: ObservableObject {
     /// The session is ending here and the friend may be redialing (or about
     /// to find the link down and redial): leave a goodbye on the retry code.
     /// The server tells a friend waiting on it at once and turns its next
-    /// rendezvous away with it for 10 minutes, so it ends with "Peer
-    /// disconnected" ("Couldn't reconnect" for "gave-up") instead of
+    /// rendezvous away with it for 10 minutes, so it ends with "Your
+    /// friend disconnected" ("Couldn't reconnect" for "gave-up") instead of
     /// "Reconnecting…" until its own give-up (web rbLeaveNote; server.js
     /// leaveNote; formal/WebState/LinkRedial.lean). false: nothing posted.
     @discardableResult
