@@ -315,8 +315,8 @@ final class AppModel: ObservableObject {
         session.setPaused(false)
     }
 
-    /// Main Menu: pause, store the picture and the session, flush the save,
-    /// go home (web showMainMenu).
+    /// The menu's Library: pause, store the picture and the session, flush
+    /// the save, go home (web showMainMenu).
     func showMainMenu() {
         menuOpen = false
         topbarOpen = false

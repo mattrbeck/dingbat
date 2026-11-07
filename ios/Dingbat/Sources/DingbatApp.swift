@@ -35,7 +35,7 @@ struct DingbatApp: App {
     /// More hooks for screenshots, applied in order after it:
     ///   -landscape            rotate to landscape
     ///   -theme <name>         app theme (saved, as a pick in Settings is)
-    ///   -home                 Main Menu (the paused hero)
+    ///   -home                 the menu's Library (the paused hero)
     ///   -menu                 open the in-game menu
     ///   -sheet <id>           open a sheet: settings[:section], states,
     ///                         saves, rewind, cheats, prints, report,
@@ -72,7 +72,7 @@ struct DingbatApp: App {
                         model.resumeMoment(e, Checkpoints.moments(e)[n])
                     } else if args.contains("-tap") { model.tapGame(e, resume: args.contains("-resume")) }
                     else { model.launch(e, resume: args.contains("-resume")) }
-                    // `-home-after N`: Main Menu N seconds into the game
+                    // `-home-after N`: Library N seconds into the game
                     // (its session is taken), counted from the game opening
                     // (a Drive-only game downloads first).
                     if let h = value("-home-after").flatMap(Double.init) {

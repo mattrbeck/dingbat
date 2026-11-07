@@ -155,7 +155,7 @@ browsing - against one fake Drive, with a test ROM that writes its battery
 save while A is held. Not gated: a live account, Safari on a real iPhone, a
 phone's tab really being suspended.
 
-- [ ] **Pause, sync, pick up.** Play on the phone, save in game, Main Menu:
+- [ ] **Pause, sync, pick up.** Play on the phone, save in game, Menu > Library:
       the kicker goes *Paused · Syncing…* then *Paused · Synced*. On the
       Mac, Sync now: the hero (or the first tile) shows the phone's screen,
       *On your iPhone · …*, and Resume lands exactly there with the save.

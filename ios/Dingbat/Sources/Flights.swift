@@ -145,8 +145,8 @@ final class Flights: ObservableObject {
         GameSession.shared.holdForFlight(true)
     }
 
-    /// Main Menu: the screen shrinks into the hero's frame while the page
-    /// rises in under it. Measured while the screen is still up.
+    /// The menu's Library: the screen shrinks into the hero's frame while
+    /// the page rises in under it. Measured while the screen is still up.
     func goingHome() {
         cancel()
         source = nil

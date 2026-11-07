@@ -258,7 +258,7 @@ final class NativeTouchesUITests: XCTestCase {
         until("the menu opens") { menuOpen }
         let screenH = app.windows.firstMatch.frame.height
         XCTAssertLessThan(screenH, app.windows.firstMatch.frame.width, "held sideways")
-        let first = app.buttons["Main Menu"].firstMatch
+        let first = app.buttons["Library"].firstMatch
         let last = app.buttons["Report a Bug"].firstMatch
         XCTAssertTrue(last.waitForExistence(timeout: 3), "Report a Bug is in the menu")
         snap(app, "menu-landscape")
@@ -282,7 +282,7 @@ final class NativeTouchesUITests: XCTestCase {
         let menu = app.buttons["Menu"].firstMatch
         if !menu.isHittable { app.otherElements["Game screen"].firstMatch.tap() }
         menu.tap()
-        app.buttons["Main Menu"].firstMatch.tap()
+        app.buttons["Library"].firstMatch.tap()
         let picture = app.buttons["Resume game"].firstMatch
         let resume = app.buttons["Resume"].firstMatch
         XCTAssertTrue(picture.waitForExistence(timeout: 5) && resume.waitForExistence(timeout: 5), "the paused hero")

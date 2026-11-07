@@ -482,8 +482,9 @@ struct TopBar: View {
     var body: some View {
         HStack(spacing: 6) {
             if wide {
+                // The way home, named as the menu's Library item is.
                 Button { model.showMainMenu() } label: { BarBrand() }
-                    .accessibilityLabel("Main Menu")
+                    .accessibilityLabel("Library")
             }
             BarIconButton(system: "line.3.horizontal", label: "Menu", active: model.menuOpen,
                           dot: model.newPrints) {
@@ -933,7 +934,7 @@ struct GameMenu: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 2) {
                     if !(link.linked || session.twoPlayer) { quickRow }
-                    item("house", "Main Menu") { model.showMainMenu() }
+                    item("house", "Library") { model.showMainMenu() }
                     sep
                     if !(link.linked || session.twoPlayer) { soloItems }
                     if hSize != .regular {
