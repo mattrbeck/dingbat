@@ -364,6 +364,34 @@ final class NativeTouchesUITests: XCTestCase {
         snap(app, "topbar")
     }
 
+    /// The library head's Add pictures (web .lib-thumbs): drawn 28 pt tall,
+    /// smaller than Add a game (34), its touch area 44 pt (what VoiceOver
+    /// and this test see as its frame), so a tap 5 pt under the drawn
+    /// capsule still lands.
+    func testAddPicturesButton() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-audio.muted", "YES"]
+        app.launch()
+        // The first-run offer, once the boot pull is done.
+        let notNow = app.buttons["Not now"]
+        if notNow.waitForExistence(timeout: 8) { notNow.tap(); sleep(1) }
+        let thumbs = app.buttons["Add pictures"].firstMatch
+        let add = app.buttons["Add a game"].firstMatch
+        XCTAssertTrue(thumbs.waitForExistence(timeout: 5) && add.exists, "the library head's two buttons")
+        print("NATIVE: Add pictures \(thumbs.frame), Add a game \(add.frame)")
+        snap(app, "library-head")
+        XCTAssertEqual(thumbs.frame.height, 44, accuracy: 0.5, "a 44 pt touch area")
+        XCTAssertEqual(thumbs.frame.midY, add.frame.midY, accuracy: 1, "on Add a game's line")
+        XCTAssertLessThanOrEqual(thumbs.frame.maxX, add.frame.minX, "beside it, before it")
+        // The drawn capsule is the middle 28 pt: 19 pt under the middle is
+        // 5 pt below it.
+        let under = app.coordinate(withNormalizedOffset: .zero)
+            .withOffset(CGVector(dx: thumbs.frame.midX, dy: thumbs.frame.midY + 19))
+        under.tap()
+        XCTAssertTrue(app.staticTexts["Add pictures to your library?"].waitForExistence(timeout: 3),
+                      "a tap 5 pt under the capsule opens the offer")
+    }
+
     /// Add pictures over a library whose games are on DB_ROMS (copied in by
     /// the runner): a game whose screen stays one colour (linktest.gba's
     /// white) gets no picture and keeps its cartridge; one with a real
