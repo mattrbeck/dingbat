@@ -8567,6 +8567,18 @@ const showToast = (msg) => pushToast(msg, 2200, null);
 const showActionToast = (msg, label, fn, ms = 8000, { game = false } = {}) =>
   pushToast(msg, ms, { label, fn, game });
 
+// The control strip's height, for the toasts that sit above it on a touch
+// layout (styles.css #toast). It changes with the cart, the layout and the
+// orientation; display:none (no game, a desktop) reads 0.
+{
+  const strip = document.getElementById("controls");
+  if (strip && typeof ResizeObserver !== "undefined") {
+    new ResizeObserver(() => {
+      document.documentElement.style.setProperty("--controls-h", strip.offsetHeight + "px");
+    }).observe(strip);
+  }
+}
+
 // Leaving the game for the home screen: its offers go with it.
 const dismissGameToasts = () => {
   for (const rec of toastItems.slice()) if (rec.game) dismissToast(rec);
