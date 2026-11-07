@@ -2394,7 +2394,7 @@ proc service_netlink() =
     return
   if app.netlink.peer_done:
     echo "NETLINK: peer disconnected — continuing single-player"
-    teardown_netlink("the other player disconnected")
+    teardown_netlink("your friend disconnected")
 
 proc link_mid_frame(): bool =
   ## The linked core stopped inside a frame, parked on the peer: states wait.
@@ -2438,9 +2438,9 @@ proc render_link_window() =
       igText("Paired successfully")
       igText("%s", cstring(app.link.status))
       if app.netlink.peer_paused:
-        igText("The other player has paused.")
+        igText("Your friend has paused.")
       elif app.netlink.stalled:
-        igText("Waiting for the other player...")
+        igText("Waiting for your friend...")
       igText("Rewind, turbo and save-state load are paused while linked.")
       if igButton("Disconnect", ImVec2(x: 0, y: 0)):
         teardown_netlink()
@@ -2463,7 +2463,7 @@ proc render_link_window() =
                cstring(app.link.join_host()), cint(app.link.port))
         if igButton("Cancel", ImVec2(x: 0, y: 0)): link_cancel_setup()
       elif app.link.setup == lsHandshake:
-        igText("Connected. Waiting for the other game to answer")
+        igText("Connected. Waiting for your friend's game to answer")
         igText("(up to %d s)...", cint(app.link.hello_timeout_ms div 1000))
         if igButton("Cancel", ImVec2(x: 0, y: 0)): link_cancel_setup()
       else:

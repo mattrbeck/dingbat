@@ -73,7 +73,7 @@ old code had the bug:
 | 4 | ROM folder read-only, game writes its save at boot | "Save file" notice, app keeps running | IOError, app dies |
 | 22 | 1000 key taps with the menu hidden, then click File | menu opens in 2 frames | not open after 10 frames |
 | 10 | two windows linked: menus | Frame Advance, 2x, Fast Forward, Quick Load greyed | — |
-| 11 | pause one linked window 37 s | other window draws and answers, "The other player has paused.", link kept, both resume | — |
+| 11 | pause one linked window 37 s | other window draws and answers, "Your friend has paused.", link kept, both resume | — |
 | 20 | Disconnect; Cmd+Q while linked | peer shows "Link ended" at once | — |
 | 7, 9 | drop another ROM into a linked window | both sides end the link | — |
 | low | close and reopen Link Cable right after a link | re-paired in ~3 s | — |

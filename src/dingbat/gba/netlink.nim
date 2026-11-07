@@ -74,7 +74,9 @@ proc try_drain(nl: NetLink) =
       when not defined(windows):
         if err.int32 == EINTR.int32: continue
       if err.is_transient(): break  # kernel buffer full; retry on next flush
-      raise newException(NetLinkError, "peer connection lost: " & osErrorMsg(err))
+      # The OS's words ("Connection reset by peer") go to the log only.
+      echo "NETLINK: send failed: ", osErrorMsg(err)
+      raise newException(NetLinkError, "lost the connection to your friend")
   if nl.wire_pos >= nl.wire_out.len:
     nl.wire_out.setLen(0)
     nl.wire_pos = 0
@@ -110,18 +112,19 @@ proc poll_socket(nl: NetLink; timeout_ms: int): bool =
   var buf: array[4096, char]
   let n = nl.sock.recv(addr buf[0], buf.len)
   if n < 0:
-    if osLastError().is_transient(): return false  # select/recv race
-    raise newException(NetLinkError,
-      "peer connection lost: " & osErrorMsg(osLastError()))
+    let err = osLastError()
+    if err.is_transient(): return false  # select/recv race
+    echo "NETLINK: recv failed: ", osErrorMsg(err)  # the OS's words: log only
+    raise newException(NetLinkError, "lost the connection to your friend")
   if n == 0:
     if nl.core.peer_done: return false  # orderly close after BYE
-    raise newException(NetLinkError, "peer disconnected")
+    raise newException(NetLinkError, "your friend disconnected")
   try:
     nl.core.feed(buf.toOpenArray(0, n - 1))
   except LinkProtoError as e:
     # A malformed stream is a broken link, not a crash: callers handle
     # NetLinkError (the peer is untrusted input).
-    raise newException(NetLinkError, "bad data from peer: " & e.msg)
+    raise newException(NetLinkError, "bad data from your friend's game: " & e.msg)
   true
 
 proc pump(nl: NetLink; timeout_ms = 0) =
@@ -163,7 +166,7 @@ proc advance(nl: NetLink; budget_ms: int): bool =
         nl.stall_deadline = now + initDuration(milliseconds = nl.stall_timeout_ms)
       if now > nl.stall_deadline:
         raise newException(NetLinkError,
-          "stalled waiting for peer for " & $nl.stall_timeout_ms & " ms")
+          "stalled waiting for your friend for " & $nl.stall_timeout_ms & " ms")
       if budget_ms >= 0 and now >= give_up:
         return false
     of naHello:
@@ -234,7 +237,7 @@ proc poll_hello*(nl: NetLink; wait_ms = 0): bool =
     raise newException(NetLinkError, nl.core.hello_error)
   of hsWait:
     if getMonoTime() > nl.hello_deadline:
-      raise newException(NetLinkError, "timed out waiting for peer HELLO")
+      raise newException(NetLinkError, "timed out waiting for your friend's game to answer")
     false
 
 proc abandon*(nl: NetLink) =

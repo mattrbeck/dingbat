@@ -632,16 +632,18 @@ proc reject_hello(nc: NetCore; why: string) =
 
 proc handle_hello(nc: NetCore; m: LinkMsg) =
   if m.version != LINKPROTO_VERSION:
-    nc.reject_hello("protocol version mismatch (ours " & $LINKPROTO_VERSION &
-                    ", peer " & $m.version & ")")
+    nc.reject_hello("protocol version mismatch (yours " & $LINKPROTO_VERSION &
+                    ", your friend's " & $m.version & ")")
   elif m.system != LINK_SYSTEM_GBA:
-    nc.reject_hello("emulated-system mismatch (peer system " & $m.system & ")")
+    nc.reject_hello("emulated-system mismatch (your friend's system " &
+                    $m.system & ")")
   elif int(m.unit) == nc.id:
     nc.reject_hello("both sides claim unit " & $nc.id &
                     " (one must host, the other join)")
   elif m.rom_crc != nc.rom_crc and nc.strict_crc:
-    nc.reject_hello("ROM mismatch (our CRC32 " & $nc.rom_crc & ", peer " &
-                    $m.rom_crc & ") — both sides must run the same ROM")
+    nc.reject_hello("ROM mismatch (your CRC32 " & $nc.rom_crc &
+                    ", your friend's " & $m.rom_crc &
+                    ") — both sides must run the same ROM")
   else:
     nc.crc_mismatch = m.rom_crc != nc.rom_crc
     nc.hello = hsDone
@@ -666,7 +668,8 @@ proc handle_msg(nc: NetCore; m: LinkMsg) =
       nc.handle_hello(m)
     of lmBye:
       nc.hello = hsFailed
-      nc.hello_error = "peer refused the link (BYE reason " & $m.flags & ")"
+      nc.hello_error = "your friend's game refused the link (BYE reason " &
+                       $m.flags & ")"
       nc.peer_done = true
     else:
       nc.reject_hello("expected HELLO, got " & $m.kind)

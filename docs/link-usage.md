@@ -35,8 +35,8 @@ pause and reset act on both cores.
 
 GBA tiles also carry **HOST** and **JOIN**. Host picks the game and gets a short code
 (e.g. `KJ4-Q7N`); Join enters it. Each side runs only its own core with its own save. A
-**waiting for peer** badge shows while the emulated clock is stalled on the remote side.
-Rewind, speed, save states, load-save and reset are hidden; pause is local. If the peer
+**Waiting for your friend…** badge shows while the emulated clock is stalled on the remote side.
+Rewind, speed, save states, load-save and reset are hidden; pause is local. If your friend
 leaves, your game keeps running and sees a yanked cable. Different ROM checksums (e.g.
 Ruby↔Sapphire) are a warn-and-confirm, not a block.
 

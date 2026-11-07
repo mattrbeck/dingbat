@@ -67,8 +67,8 @@ explicit cycles: the initiator sends TRANSFER(S, D, data), schedules its own
 completion at S+D, and stalls there if the REPLY has not arrived. The
 responder answers at exactly S when behind it, or immediately when (boundedly)
 past it, running the busy window D from its own clock. Latency slows
-emulation; it cannot desync it. `NetLink.stalled` is the "waiting for peer"
-flag for frontends.
+emulation; it cannot desync it. `NetLink.stalled` is the flag behind the
+"Waiting for your friend" line.
 
 The native stall clock (`NetLink.stall_timeout_ms`, 30 s) ends a link whose
 peer went silent. A paused side keeps reading its socket and sets CLOCK's
