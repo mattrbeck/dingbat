@@ -7772,6 +7772,7 @@ const openTileMenu = async (name, anchor, tile, at = null) => {
 };
 
 tileMenuScrim.addEventListener("click", closeTileMenu);
+document.getElementById("tile-menu-close").addEventListener("click", closeTileMenu);
 // A right-click elsewhere while open: no browser menu over ours.
 tileMenuScrim.addEventListener("contextmenu", (e) => { e.preventDefault(); closeTileMenu(); });
 tileMenu.addEventListener("keydown", (e) => {

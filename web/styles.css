@@ -8685,6 +8685,10 @@ body.running.sync-shown #status {
 #tile-menu-scrim[hidden] {
   display: none;
 }
+/* The popover closes from anywhere outside it; only the sheet shows this. */
+.tile-menu-close {
+  display: none;
+}
 /* A group's heading (Play, Game): the small caps of the library's own. */
 .tile-menu-group {
   padding: 8px 10px 3px;
@@ -8850,10 +8854,27 @@ body.running.sync-shown #status {
     border-bottom: 0;
     border-radius: var(--radius) var(--radius) 0 0;
     animation: tile-sheet-in 0.18s ease-out;
+    /* However tall the menu, a band of scrim stays above it to tap away,
+       and the × below stays at its top (a short in-app browser left the
+       sheet the whole screen, and nothing to close it with). */
+    max-height: calc(100dvh - 72px - var(--safe-t));
+  }
+  /* Held at the sheet's top while its rows scroll under it, taking no
+     room of its own (the head's right padding leaves it the corner). */
+  .tile-menu-close {
+    display: flex;
+    position: sticky;
+    top: 0;
+    right: auto; /* .modal-close's offset would shift a sticky box sideways */
+    z-index: 1;
+    width: 44px;
+    height: 44px;
+    margin: -4px -6px -44px auto;
+    background: var(--surface-1);
   }
   .tile-menu-head {
     margin-bottom: 6px;
-    padding: 4px 6px 12px;
+    padding: 4px 44px 12px 6px;
   }
   .tile-menu-pic {
     display: flex;
