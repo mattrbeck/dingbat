@@ -359,6 +359,47 @@ final class NativeTouchesUITests: XCTestCase {
         snap(app, "topbar")
     }
 
+    /// A game's toasts (web 720bc7e3): under the bar, never over its buttons;
+    /// the open game menu draws over them; held sideways, between the
+    /// shoulder columns (clear of L, R and a DS's Select and Start under R).
+    func testToastsInPlay() {
+        let long = "Play by tilting your device? Your game reads the tilt sensor instead of the buttons while this is on"
+        var app = launch(["-toast", long])
+        let toast = app.staticTexts[long].firstMatch
+        XCTAssertTrue(toast.waitForExistence(timeout: 8), "the toast")
+        let menu = app.buttons["Menu"].firstMatch
+        print("NATIVE: toast \(toast.frame), bar's Menu \(menu.frame)")
+        XCTAssertGreaterThanOrEqual(toast.frame.minY, menu.frame.maxY, "under the bar's buttons")
+        menu.tap()
+        XCTAssertTrue(app.buttons["Library"].firstMatch.waitForExistence(timeout: 3), "the menu opens")
+        sleep(1)
+        snap(app, "toast-under-menu")
+        // The menu's quick row lies where the toast is: on top, it takes the tap.
+        let quickSave = app.buttons["Quick Save"].firstMatch
+        XCTAssertTrue(quickSave.frame.intersects(toast.frame), "the quick row under the toast's place")
+        XCTAssertTrue(quickSave.isHittable, "the open menu draws over the toast")
+        app.terminate()
+
+        app = launch(["-landscape", "-toast", long])
+        let side = app.staticTexts[long].firstMatch
+        XCTAssertTrue(side.waitForExistence(timeout: 8), "the toast, held sideways")
+        sleep(1)
+        let w = app.windows.firstMatch.frame
+        print("NATIVE: sideways window \(w.size), toast \(side.frame)")
+        XCTAssertLessThan(w.height, w.width, "held sideways")
+        // The safe region's edges, from the bar slid in: its ends sit 10 pt
+        // inside them.
+        app.otherElements["Game screen"].firstMatch.tap()
+        let barMenu = app.buttons["Menu"].firstMatch, mute = app.buttons["Unmute"].firstMatch
+        XCTAssertTrue(barMenu.waitForExistence(timeout: 3) && mute.exists, "the bar")
+        sleep(1)
+        let lead = barMenu.frame.minX - 10, trail = mute.frame.maxX + 10
+        print("NATIVE: sideways safe region \(lead)…\(trail), toast \(side.frame)")
+        XCTAssertGreaterThanOrEqual(side.frame.minX, lead + 134 - 0.5, "clear of L's column")
+        XCTAssertLessThanOrEqual(side.frame.maxX, trail - 134 + 0.5, "clear of R's column and the rail under it")
+        snap(app, "toast-sideways")
+    }
+
     /// One armed look in every theme (web :root .armed): the game menu's
     /// Delete and Settings' Reset all settings, armed, pictured per theme.
     /// The fill and its ink are the same in each (Theme.swift dangerFill).

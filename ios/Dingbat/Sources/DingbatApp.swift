@@ -186,6 +186,11 @@ struct DingbatApp: App {
                                          atomically: true, encoding: .utf8)
             }
         }
+        // `-toast TEXT`: that toast 3 s in, held a minute (where a long one
+        // lands over a game: ios/e2e/uitest NativeTouchesUITests).
+        if let t = value("-toast") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3) { model.toast(t, duration: 60) }
+        }
         if let keys = value("-keys") {
             for (i, name) in keys.split(separator: " ").enumerated() {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 3 + Double(i) * 0.6) {
@@ -369,24 +374,44 @@ struct SheetHost: View {
 struct ToastStack: View {
     @EnvironmentObject var model: AppModel
     @Environment(\.palette) var palette
+    @Environment(\.verticalSizeClass) private var vSize
     /// The copy a sheet draws over itself (sheetToasts).
     var inSheet = false
+    /// The copy the play screen draws under its menu (PlayView): the open
+    /// game menu covers the stack, as the web's (body.game-menu-open
+    /// #toast). The root's draws nothing while it is there.
+    var inPlay = false
+
+    /// L and R's column at each side of a phone held sideways (PlayLayout
+    /// phoneLandscape: 6 pt in, up to 120 wide), and a gap: the toasts stay
+    /// between them, clear of a DS's Select and Start in the rail under R.
+    static let sidewaysClear: CGFloat = 6 + 120 + 8
 
     var body: some View {
-        let covered = !inSheet && model.sheetToastHosts > 0
-        ZStack {
-            Color.clear
-            if !covered { stack }
+        let playing = model.screen == .play && model.session.game != nil
+        // One copy at a time: the play screen's while a game is up (its
+        // own fade out included, so a toast is never in the tree twice),
+        // the root's otherwise, a sheet's over both.
+        let covered = (!inSheet && model.sheetToastHosts > 0) || (inPlay ? !playing : (!inSheet && playing))
+        GeometryReader { geo in
+            ZStack {
+                Color.clear
+                if !covered { stack(geo.size) }
+            }
         }
         .allowsHitTesting(!covered && !model.toasts.isEmpty)
             .onAppear { if inSheet { model.sheetToastHosts += 1 } }
             .onDisappear { if inSheet { model.sheetToastHosts -= 1 } }
     }
 
-    private var stack: some View {
+    private func stack(_ size: CGSize) -> some View {
         // In a game the stack sits under the top bar, clear of the touch
         // controls; on the home screen it is bottom-centre as on the web.
+        // A phone held sideways (web max-height 500; PlayLayout
+        // .phoneLandscape) keeps it between the shoulder columns.
         let top = model.screen == .play
+        // PlayLayout's own test for its phone-landscape layout.
+        let sideways = top && vSize == .compact && size.width > size.height
         return VStack(spacing: 8) {
             if !top { Spacer() }
             ForEach(model.toasts) { t in
@@ -427,6 +452,8 @@ struct ToastStack: View {
             }
             if top { Spacer() }
         }
+        .frame(maxWidth: sideways ? max(200, size.width - 2 * Self.sidewaysClear) : .infinity)
+        .frame(maxWidth: .infinity)
         .padding(.horizontal, 16)
         .padding(.bottom, top ? 0 : 24)
         .padding(.top, top ? 60 : 0)
