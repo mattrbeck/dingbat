@@ -442,6 +442,21 @@ export const loadApp = async ({ localStorageSeed = {}, confirmResult = true,
     setInterval: (fn, ms) => { const t = setInterval(fn, ms); t.unref?.(); return t; },
     clearInterval,
     queueMicrotask,
+    // A message task (the picture batch's yield between slices), delivered
+    // on a one-shot that stays ref'd, as the short timers above: a test can
+    // wait on it, and nothing is left holding the loop open after.
+    MessageChannel: class {
+      constructor() {
+        const port = () => ({
+          onmessage: null, other: null,
+          postMessage(data) { const o = this.other; setImmediate(() => o.onmessage?.({ data })); },
+        });
+        this.port1 = port();
+        this.port2 = port();
+        this.port1.other = this.port2;
+        this.port2.other = this.port1;
+      }
+    },
     document,
     localStorage,
     indexedDB: makeFakeIndexedDB(idb, state),

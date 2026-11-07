@@ -15730,17 +15730,20 @@ document.getElementById("hero-close").addEventListener("click", async () => {
 // so no save, session, cheat or frame path can fire for it): its last
 // session is restored where one exists and it is stepped one full render;
 // with no session it runs through its boot toward a title screen, bounded
-// in frames and in wall clock. The screen is then stored as the library
-// frame. The core is left holding the last game, as after a close; the
-// next loadRom re-inits over it. Signed in, Drive-only games can be
+// in frames. It runs uncapped and unheard: as fast as the core goes, with
+// the page given a turn between slices, the frame loop kept off the core
+// and the core not mixing sound. The screen is then stored as the library
+// frame. The core is left holding the last game, frozen, as after a close;
+// the next loadRom re-inits over it. Signed in, Drive-only games can be
 // included: ROM and battery save are fetched into memory, pictured, and
 // never written to this device, so the library's order and local footprint
 // are exactly what they were. The picture itself uploads like any other.
 const THUMBS_OFFER_KEY = "thumbs_offered";
 const THUMBS_RESUME_FRAMES = 2;   // after a state restore: one full render
 const THUMBS_BOOT_FRAMES = 600;   // no session: through the logo to a title (10 s)
-const THUMBS_BOOT_MS = 2500;      // ...or this much wall clock, whichever first
-const THUMBS_CHUNK = 30;          // frames per task, so the page stays responsive
+const THUMBS_SAFETY_MS = 10000;   // a net for a core that hangs: frames end a run
+const THUMBS_CHUNK = 30;          // frames between looks for a blank screen
+const THUMBS_SLICE_MS = 12;       // core time per task, so the page stays responsive
 
 const thumbsModal = document.getElementById("thumbs-modal");
 const thumbsOffer = document.getElementById("thumbs-offer");
@@ -15833,19 +15836,38 @@ const thumbsSetProgress = (i, total, name) => {
   thumbsBarFill.style.width = Math.round((i / Math.max(1, total)) * 100) + "%";
 };
 
-// Run the pictures core on: up to `frames` frames or until `deadline`
-// (performance.now), whichever comes first, in chunks so the page stays
-// responsive, stopping early once `until()` holds. False when the run was
-// stopped or a launch took the core meanwhile.
+// The page's turn between slices: a message task, which a nested
+// setTimeout(0) is not (that one is clamped to 4 ms, longer than a slice).
+const thumbsYieldChannel = new MessageChannel();
+const thumbsYield = () => new Promise((r) => {
+  thumbsYieldChannel.port1.onmessage = () => r();
+  thumbsYieldChannel.port2.postMessage(0);
+});
+
+// Run the pictures core on for `frames` frames (`deadline`, performance.now,
+// is only a safety net), stopping early once `until()` holds, looked at
+// every THUMBS_CHUNK frames so the frame a game ends on is the same however
+// fast the core runs. Each is a _benchFrames(1): the core's frame without
+// presenting it and without loop_tick's session work (no rewind or clip
+// history), which the picture (wasm_fb_ptr) never used. Frames run back to
+// back for THUMBS_SLICE_MS, then the page gets a turn (Stop, the progress
+// bar). False when the run was stopped or a launch took the core meanwhile.
 const thumbsAdvance = async (run, frames, deadline, until = () => false) => {
-  for (let done = 0; done < frames && performance.now() < deadline;) {
-    if (run.cancelled || currentRomName) return false; // a launch took the core
-    let n = Math.min(THUMBS_CHUNK, frames - done);
-    for (let i = 0; i < n; i++) Module._loop_tick();
-    done += n;
-    if (Module._clearAudioBuffer) Module._clearAudioBuffer(); // nobody plays it
-    await new Promise((r) => setTimeout(r, 0));
-    if (until()) break;
+  if (run.cancelled || currentRomName) return false;
+  let slice = performance.now();
+  for (let done = 0; done < frames;) {
+    Module._benchFrames(1);
+    done++;
+    if (done % THUMBS_CHUNK === 0 && until()) break;
+    let now = performance.now();
+    if (now >= deadline) break;
+    if (now - slice >= THUMBS_SLICE_MS) {
+      // Nothing plays it; bounded should a volume change unsilence the core.
+      if (Module._clearAudioBuffer) Module._clearAudioBuffer();
+      await thumbsYield();
+      if (run.cancelled || currentRomName) return false; // a launch took the core
+      slice = performance.now();
+    }
   }
   return !(run.cancelled || currentRomName);
 };
@@ -15875,8 +15897,9 @@ const thumbsPictureOne = async (cand, run, remote) => {
   if (save && save.length) writeToFS("thumb.sav", save);
   Module.ccall("initFromEmscripten", null, ["string"], [romFile]);
   let frames = THUMBS_BOOT_FRAMES;
-  let deadline = performance.now() + THUMBS_BOOT_MS;
+  let deadline = performance.now() + THUMBS_SAFETY_MS;
   let auto = cand.local ? await dbGet(autoStateKey(name)) : null;
+  if (run.cancelled || currentRomName) return false; // a launch took the core
   if (auto?.bytes && applyStateBytes(auto.bytes)) {
     frames = THUMBS_RESUME_FRAMES;
     deadline = Infinity;
@@ -15893,7 +15916,7 @@ const thumbsPictureOne = async (cand, run, remote) => {
   // is the same however fast the core runs); still blank, no picture, and
   // the tile keeps its cartridge.
   if (heap && framebufferBlank(heap, w, h)) {
-    if (!(await thumbsAdvance(run, THUMBS_BOOT_FRAMES, performance.now() + THUMBS_BOOT_MS,
+    if (!(await thumbsAdvance(run, THUMBS_BOOT_FRAMES, performance.now() + THUMBS_SAFETY_MS,
                               () => !(heap = grab()) || !framebufferBlank(heap, w, h)))) return false;
   }
   if (!heap || framebufferBlank(heap, w, h)) {
@@ -15911,8 +15934,9 @@ const thumbsPictureOne = async (cand, run, remote) => {
 };
 
 const runThumbnailBatch = async ({ includeDrive = false } = {}) => {
+  const coreTaken = () => currentRomName || loadingName || linkMode || rollbackMode || netActive();
   if (thumbsRun) return 0;
-  if (currentRomName || linkMode || rollbackMode || netActive()) {
+  if (coreTaken()) {
     showToast("Close the running game first");
     return 0;
   }
@@ -15926,11 +15950,27 @@ const runThumbnailBatch = async ({ includeDrive = false } = {}) => {
     }
   }
   let cands = await thumbsCandidates(includeDrive);
+  // Those awaits (a Drive sign-in among them) leave time for a launch, or a
+  // second run, to have taken the core.
+  if (thumbsRun) return 0;
+  if (coreTaken()) {
+    showToast("Close the running game first");
+    return 0;
+  }
   let run = { cancelled: false, done: 0 };
   thumbsRun = run;
   thumbsOffer.hidden = true;
   thumbsProgress.hidden = false;
   thumbsModal.classList.add("open");
+  // The frame loop keeps off the core the run steps. It can be running here
+  // with no game loaded: on a page that has not had a game yet (nothing was
+  // ever paused) and after a 2P link session (its exit does not pause). It
+  // would play each game at its own pace, sound and all, between the run's
+  // slices, and the last one on after the run. Frozen from here on, as after
+  // a close; a launch unpauses its own game. And the core mixes no sound for
+  // the run.
+  paused = true;
+  if (Module._wasm_set_audio_silent) Module._wasm_set_audio_silent(1);
   try {
     for (let i = 0; i < cands.length && !run.cancelled; i++) {
       thumbsSetProgress(i, cands.length, cands[i].name);
@@ -15946,6 +15986,8 @@ const runThumbnailBatch = async ({ includeDrive = false } = {}) => {
     thumbsSetProgress(cands.length, cands.length, null);
   } finally {
     thumbsRun = null;
+    applyAudioSilent(); // the player's own mute and volume, for the next game
+    if (Module._clearAudioBuffer) Module._clearAudioBuffer(); // a last slice's, if any
     thumbsModal.classList.remove("open");
     releaseFocus(thumbsModal);
     refreshHomeRecent();

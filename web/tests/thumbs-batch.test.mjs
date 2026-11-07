@@ -10,14 +10,20 @@ import { loadApp, u8, eq, settle, jsonRes, bytesRes } from "./helpers.mjs";
 
 const FILES_URL = "https://www.googleapis.com/drive/v3/files";
 
-// A wasm stand-in: counts ticks and state loads; a 240x160 framebuffer at
-// offset 16 of `memory`, with something on it (a blank one is not kept);
-// a canvas whose toBlob yields a JPEG.
+// A wasm stand-in: counts ticks and state loads, logs the silent switch; a
+// 240x160 framebuffer at offset 16 of `memory`, with something on it (a
+// blank one is not kept); a canvas whose toBlob yields a JPEG. The page's
+// clock is a core that takes __clockStep ms a frame: the run reads it once
+// a frame, so it moves by that much each read.
 const stubModule = (app) => app.runIn(`
   globalThis.__ticks = 0; globalThis.__inits = []; globalThis.__loads = 0;
+  globalThis.__silent = [];
+  globalThis.__clock = 0; globalThis.__clockStep = 1;
+  globalThis.performance = { now: () => (__clock += __clockStep) };
   globalThis.Module = {
     ccall: (fn, ret, types, args) => { __inits.push(args[0]); },
-    _loop_tick: () => { __ticks++; },
+    _benchFrames: (n) => { __ticks += n; },
+    _wasm_set_audio_silent: (on) => { __silent.push(on); },
     _clearAudioBuffer: () => {},
     _wasm_fb_ptr: () => 16,
     _wasm_load_state: () => { __loads++; return 1; },
@@ -268,7 +274,7 @@ test("a blank screen is not a picture: the run waits for one that isn't, or keep
   // White through the boot and 60 frames past it, then something on screen.
   app.runIn(`
     new Uint8Array(Module.memory.buffer).fill(255);
-    Module._loop_tick = () => {
+    Module._benchFrames = () => {
       if (++__ticks === THUMBS_BOOT_FRAMES + 60) {
         const m = new Uint8Array(Module.memory.buffer);
         for (let i = 0; i < m.length; i++) m[i] = i * 7;
@@ -280,7 +286,7 @@ test("a blank screen is not a picture: the run waits for one that isn't, or keep
 
   // White for good: no picture, and the tile keeps its cartridge.
   app.idb.delete("frame:A.gba");
-  app.runIn("new Uint8Array(Module.memory.buffer).fill(255); Module._loop_tick = () => { __ticks++; };");
+  app.runIn("new Uint8Array(Module.memory.buffer).fill(255); Module._benchFrames = () => { __ticks++; };");
   assert.equal(await app.api.runThumbnailBatch(), 0);
   assert.equal(app.idb.get("frame:A.gba"), undefined);
   assert.ok(!app.sandbox.FS.files.has("thumb.sav"), "the scratch battery save is gone");
@@ -335,6 +341,82 @@ test("Stop ends the run after the game in hand", async () => {
   eq(framesOf(app), []);
   assert.ok(app.toasts.some((t) => /No pictures added/.test(t)));
   assert.ok(!modalOpen(app));
+});
+
+test("the run is unheard: the core is silenced, the frame loop kept off it, the player's sound back after", async () => {
+  const app = await loadApp();
+  stubModule(app);
+  seedLibrary(app, ["A.gba", "B.gb"]);
+  // A page that has not had a game yet: nothing was ever paused, so the frame
+  // loop would step (and play) the pictures core between the run's slices.
+  app.runIn(`paused = false; globalThis.__heard = 0;
+    Module._benchFrames = () => { __ticks++; if (!paused || __silent.at(-1) !== 1) __heard++; };`);
+  assert.equal(await app.api.runThumbnailBatch(), 2);
+  assert.equal(app.runIn("__ticks"), 2 * app.api.THUMBS_BOOT_FRAMES);
+  assert.equal(app.runIn("__heard"), 0, "every frame paused for the frame loop, and silent");
+  eq(app.runIn("[...__silent]"), [1, 0], "silenced for the run, then the player's volume");
+  assert.equal(app.runIn("paused"), true, "the last game is left frozen, as after a close");
+
+  // A player who had it muted gets it muted back.
+  app.idb.delete("frame:A.gba");
+  app.runIn("muted = true; __silent.length = 0;");
+  assert.equal(await app.api.runThumbnailBatch(), 1);
+  eq(app.runIn("[...__silent]"), [1, 1]);
+});
+
+test("the player's sound comes back however the run ends: Stop, a launch, a core fault", async () => {
+  const app = await loadApp();
+  stubModule(app);
+  seedLibrary(app, ["A.gba", "B.gba"]);
+  const run = async (tick) => {
+    for (const n of ["A.gba", "B.gba"]) app.idb.delete("frame:" + n);
+    app.runIn(`__ticks = 0; __silent.length = 0; Module._benchFrames = ${tick};`);
+    const n = await app.api.runThumbnailBatch();
+    return { n, silent: app.runIn("[...__silent]"), ticks: app.runIn("__ticks") };
+  };
+
+  // Stop, from inside the first game's frames.
+  let r = await run(`() => { if (++__ticks === 50) document.getElementById("thumbs-stop").click(); }`);
+  assert.equal(r.n, 0);
+  assert.ok(r.ticks < app.api.THUMBS_BOOT_FRAMES, "ended at the next slice, not the game's end");
+  eq(r.silent, [1, 0], "stopped");
+
+  // A launch takes the core.
+  r = await run(`() => { if (++__ticks === 50) currentRomName = "rom.gba"; }`);
+  assert.equal(r.n, 0);
+  eq(r.silent, [1, 0], "a launch");
+  assert.equal(app.api.currentRomName, "rom.gba", "the launched game keeps the core");
+  app.api.currentRomName = null;
+
+  // The core faults on every frame: no pictures, and still the player's sound.
+  r = await run(`() => { throw new Error("unreachable"); }`);
+  assert.equal(r.n, 0);
+  eq(r.silent, [1, 0], "a fault");
+  assert.ok(!modalOpen(app));
+});
+
+test("a launch that lands while the run is getting ready keeps the core", async () => {
+  const app = await loadApp();
+  stubModule(app);
+  seedLibrary(app, ["A.gba"]);
+  app.runIn("paused = false;");
+  const p = app.api.runThumbnailBatch(); // waits on the runtime and the library
+  app.runIn(`loadingName = "A.gba";`);  // ...meanwhile a tile tap starts a load
+  assert.equal(await p, 0);
+  assert.equal(app.runIn("__inits.length"), 0, "the core was not re-initialised");
+  eq(app.runIn("[...__silent]"), [], "nor silenced");
+  assert.equal(app.runIn("paused"), false, "nor paused under the game coming in");
+  app.runIn("loadingName = null;");
+});
+
+test("frames, not the wall clock, end a game's run: a slow core still gets its whole boot", async () => {
+  const app = await loadApp();
+  stubModule(app);
+  seedLibrary(app, ["A.gba"]);
+  app.runIn("__clockStep = 10;"); // 100 frames a second: 600 frames take 6 s
+  assert.equal(await app.api.runThumbnailBatch(), 1);
+  assert.equal(app.runIn("__ticks"), app.api.THUMBS_BOOT_FRAMES);
+  assert.ok(app.idb.get("frame:A.gba") instanceof Blob);
 });
 
 test("a batch refuses to run over a loaded game", async () => {
