@@ -5742,12 +5742,6 @@ body.game-menu-open #toast {
     border-radius: 0;
   }
 
-  /* Expanded, no backdrop is left to tap, so the close button returns; the
-     grab handle stays (it is how you get back down). */
-  .modal-settings.sheet-expanded .settings-head .modal-close {
-    display: flex;
-  }
-
   .settings-grab {
     display: flex;
   }
@@ -5888,8 +5882,9 @@ body.game-menu-open #toast {
     display: none;
   }
 
-  /* Detail header: back, title, stepper. No close (swipe-down and the
-     backdrop still dismiss). */
+  /* Detail header: back, title, stepper, and a close like the root list's
+     (#settings-close-list), so a section has a way out besides swipe-down
+     and the backdrop - which an expanded or landscape sheet has none of. */
   .settings-head {
     padding: 8px 14px 14px;
   }
@@ -5898,8 +5893,13 @@ body.game-menu-open #toast {
     display: flex;
   }
 
+  /* The close costs the title 42px. Everything around the title is a
+     fixed 204px, and the longest name, "Game Boy Advance", is 9.15 ems
+     wide: so 20px down to 390px, then just small enough to stay one line
+     (18.4px at 375, 16.8px at 360); at 320 the 16px floor wraps it, as 20px
+     did before the close. */
   .settings-head-title {
-    font-size: 20px;
+    font-size: clamp(16px, calc((100vw - 204px) / 9.3), 20px);
     font-weight: 700;
   }
 
@@ -5907,8 +5907,13 @@ body.game-menu-open #toast {
     display: flex;
   }
 
+  /* 44px, its box 8px in from the edge like the root list's close, 4px off
+     the stepper. */
   .settings-head .modal-close {
-    display: none;
+    display: flex;
+    width: 44px;
+    height: 44px;
+    margin: 0 -6px 0 -4px;
   }
 
   .settings-scroll {
@@ -5942,7 +5947,7 @@ body.game-menu-open #toast {
 }
 
 /* A phone in landscape: a partial sheet leaves nothing usable, so it takes
-   the whole viewport, loses the handle, and gets the close button back. */
+   the whole viewport and loses the handle. */
 @media (max-width: 759px) and (max-height: 479px) {
   .modal-settings {
     height: 100dvh;
@@ -5951,10 +5956,6 @@ body.game-menu-open #toast {
 
   .settings-grab {
     display: none;
-  }
-
-  .settings-head .modal-close {
-    display: flex;
   }
 }
 
