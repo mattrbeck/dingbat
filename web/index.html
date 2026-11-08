@@ -1336,6 +1336,7 @@
               </div>
 
               <div class="settings-pane" id="settings-pane-ds" role="tabpanel" aria-labelledby="settings-tab-ds" hidden>
+                <div class="modal-subhead no-rule">Screen layout</div>
                 <div class="modal-toggle-row row-flow">
                   <span class="modal-row-label">Screens</span>
                   <!-- Five choices: a select here (Settings uses chips for four or
@@ -1348,6 +1349,16 @@
                     <option value="single">One screen</option>
                   </select>
                   <span class="modal-toggle-sub" data-tap>Automatic shows both screens whichever way they come out bigger. Focus shows one large and the other small; tap the top screen to swap them. The screens button in the top bar has these too (V on a keyboard).</span>
+                </div>
+                <div class="modal-toggle-row">
+                  <div>
+                    <span class="modal-row-label">Bottom screen first</span>
+                    <span class="modal-toggle-sub">Swap the screens: the touch screen on top, or the large one in Focus (B on a keyboard)</span>
+                  </div>
+                  <label class="switch">
+                    <input type="checkbox" data-nds-toggle="swap" />
+                    <span class="switch-track"></span>
+                  </label>
                 </div>
                 <div class="modal-toggle-row row-flow">
                   <span class="modal-row-label">Gap</span>
@@ -1367,6 +1378,17 @@
                   </div>
                   <span class="modal-toggle-sub">For games played with the console held sideways like a book. Book, left puts the touch screen on the right (O on a keyboard).</span>
                 </div>
+                <div class="modal-toggle-row nds-phone-only">
+                  <div>
+                    <span class="modal-row-label">Hide the top bar while playing</span>
+                    <span class="modal-toggle-sub">On a phone held upright, the screens take the bar's room. The handle at the top brings the bar back.</span>
+                  </div>
+                  <label class="switch">
+                    <input type="checkbox" data-nds-toggle="barHide" />
+                    <span class="switch-track"></span>
+                  </label>
+                </div>
+                <div class="modal-subhead">3D graphics</div>
                 <div class="modal-toggle-row row-flow">
                   <span class="modal-row-label">3D resolution</span>
                   <div class="chip-row row-flow-ctl" data-nds-chips="hd" role="radiogroup" aria-label="DS 3D resolution">
@@ -1386,26 +1408,6 @@
                   </div>
                   <span class="modal-toggle-sub">The same picture either way. The graphics card takes the 3D off the processor, so games run lighter and higher resolutions cost the processor almost nothing. Automatic uses it when this browser has a hardware one that can, and not with run-ahead.</span>
                   <span id="nds-gpu-status" class="modal-toggle-sub nds-gpu-status" role="status" hidden></span>
-                </div>
-                <div class="modal-toggle-row">
-                  <div>
-                    <span class="modal-row-label">Bottom screen first</span>
-                    <span class="modal-toggle-sub">Swap the screens: the touch screen on top, or the large one in Focus (B on a keyboard)</span>
-                  </div>
-                  <label class="switch">
-                    <input type="checkbox" data-nds-toggle="swap" />
-                    <span class="switch-track"></span>
-                  </label>
-                </div>
-                <div class="modal-toggle-row nds-phone-only">
-                  <div>
-                    <span class="modal-row-label">Hide the top bar while playing</span>
-                    <span class="modal-toggle-sub">On a phone held upright, the screens take the bar's room. The handle at the top brings the bar back.</span>
-                  </div>
-                  <label class="switch">
-                    <input type="checkbox" data-nds-toggle="barHide" />
-                    <span class="switch-track"></span>
-                  </label>
                 </div>
                 <div class="modal-subhead">BIOS and firmware</div>
                 <div class="modal-row">
