@@ -5135,13 +5135,14 @@ body.game-menu-open #toast {
 }
 
 /* The touch rows style on-screen pads, which only (pointer: coarse) draws.
-   Whichever input section a device shows opens the pane, without a rule. */
+   Touch opens the pane where it shows; without it, Response and feedback
+   does. Either way the first label has no rule. */
 @media not all and (pointer: coarse) {
   #touch-section {
     display: none;
   }
 
-  #kb-section > .modal-subhead:first-child {
+  #response-section > .modal-subhead:first-child {
     border-top: none;
     padding-top: 0;
   }
@@ -5978,8 +5979,11 @@ body.game-menu-open #toast {
   }
 }
 
-/* The first section label in a pane needs no separator — the header is one */
-.settings-pane .modal-subhead:first-child,
+/* The first section label in a pane needs no separator — the header is one.
+   Only the pane's own first child: a label opening a wrapper further down
+   (#pad-section's Controller) keeps its rule. The wrappers that can open
+   the pane (#touch-section, #response-section) drop theirs above. */
+.settings-pane > .modal-subhead:first-child,
 .modal-subhead.no-rule {
   border-top: none;
   padding-top: 0;

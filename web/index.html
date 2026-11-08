@@ -1105,8 +1105,9 @@
 
               <div class="settings-pane" id="settings-pane-controls" role="tabpanel" aria-labelledby="settings-tab-controls">
                 <!-- Touch rows style the on-screen pads, which only touch devices
-                     draw (pointer: coarse); #kb-section is the reverse. Each
-                     device sees its own input first. -->
+                     draw (pointer: coarse); #kb-section is the reverse. The
+                     few settings come first (Touch, then Response and
+                     feedback), the long key and button lists after them. -->
                 <div id="touch-section">
                 <div class="modal-subhead">Touch</div>
                 <div class="modal-toggle-row">
@@ -1118,15 +1119,6 @@
                     <input type="checkbox" id="large-controls-toggle" />
                     <span class="switch-track"></span>
                   </label>
-                </div>
-                <div class="modal-toggle-row row-flow" id="landscape-buttons-row">
-                  <span class="modal-row-label">Buttons in landscape</span>
-                  <div id="landscape-buttons-picker" class="chip-row row-flow-ctl" role="radiogroup" aria-label="Buttons in landscape">
-                    <button type="button" class="choice-chip" data-value="outline" role="radio" aria-checked="false">Outline</button>
-                    <button type="button" class="choice-chip selected" data-value="bold" role="radio" aria-checked="true">Bold</button>
-                    <button type="button" class="choice-chip" data-value="solid" role="radio" aria-checked="false">Solid</button>
-                  </div>
-                  <span class="modal-toggle-sub">Bold shows up on any picture</span>
                 </div>
                 <!-- row-flow (styles.css): the control floats into the text flow.
                      The float must be a sibling of the text, not of a wrapper. -->
@@ -1146,6 +1138,15 @@
                   </div>
                   <span class="modal-toggle-sub">Fixed stays put; floating follows your thumb</span>
                 </div>
+                <div class="modal-toggle-row row-flow" id="landscape-buttons-row">
+                  <span class="modal-row-label">Buttons in landscape</span>
+                  <div id="landscape-buttons-picker" class="chip-row row-flow-ctl" role="radiogroup" aria-label="Buttons in landscape">
+                    <button type="button" class="choice-chip" data-value="outline" role="radio" aria-checked="false">Outline</button>
+                    <button type="button" class="choice-chip selected" data-value="bold" role="radio" aria-checked="true">Bold</button>
+                    <button type="button" class="choice-chip" data-value="solid" role="radio" aria-checked="false">Solid</button>
+                  </div>
+                  <span class="modal-toggle-sub">Bold shows up on any picture</span>
+                </div>
                 <div class="modal-toggle-row">
                   <div>
                     <span class="modal-row-label">Hide touch controls with a controller</span>
@@ -1153,6 +1154,39 @@
                   </div>
                   <label class="switch">
                     <input type="checkbox" id="hide-touch-on-gamepad-toggle" checked />
+                    <span class="switch-track"></span>
+                  </label>
+                </div>
+                </div>
+                <div id="response-section">
+                <div class="modal-subhead">Response and feedback</div>
+                <div class="modal-toggle-row row-flow">
+                  <span class="modal-row-label">Run-ahead</span>
+                  <div id="runahead-picker" class="chip-row row-flow-ctl" role="radiogroup" aria-label="Run-ahead frames">
+                    <button type="button" class="choice-chip selected" data-value="0" role="radio" aria-checked="true">Off</button>
+                    <button type="button" class="choice-chip" data-value="1" role="radio" aria-checked="false" aria-label="1 frame">1</button>
+                    <button type="button" class="choice-chip" data-value="2" role="radio" aria-checked="false" aria-label="2 frames">2</button>
+                    <button type="button" class="choice-chip" data-value="3" role="radio" aria-checked="false" aria-label="3 frames">3</button>
+                  </div>
+                  <span class="modal-toggle-sub">Cuts the delay between pressing a button and seeing it happen, by guessing that many frames ahead. Costs extra CPU; ignored at 2&times; speed and in multiplayer.</span>
+                </div>
+                <div class="modal-toggle-row">
+                  <div>
+                    <span class="modal-row-label">Rumble</span>
+                    <span class="modal-toggle-sub">Buzz and shake when a game uses its rumble motor</span>
+                  </div>
+                  <label class="switch">
+                    <input type="checkbox" id="gb-rumble-toggle" checked />
+                    <span class="switch-track"></span>
+                  </label>
+                </div>
+                <div class="modal-toggle-row">
+                  <div>
+                    <span class="modal-row-label">Show inputs on screen</span>
+                    <span class="modal-toggle-sub">Light up a small controller over the game as you press buttons &mdash; for streams, or for watching your own inputs. Recorded clips never include it.</span>
+                  </div>
+                  <label class="switch">
+                    <input type="checkbox" id="input-display-toggle" />
                     <span class="switch-track"></span>
                   </label>
                 </div>
@@ -1207,37 +1241,6 @@
                     <div class="kb-shortcut"><span>Library: resume the game</span><kbd>Start</kbd></div>
                     <div class="kb-shortcut"><span>Library: filter / sort</span><kbd>LB RB / LT RT</kbd></div>
                   </div>
-                </div>
-                <div class="modal-subhead">Response and feedback</div>
-                <div class="modal-toggle-row row-flow">
-                  <span class="modal-row-label">Run-ahead</span>
-                  <div id="runahead-picker" class="chip-row row-flow-ctl" role="radiogroup" aria-label="Run-ahead frames">
-                    <button type="button" class="choice-chip selected" data-value="0" role="radio" aria-checked="true">Off</button>
-                    <button type="button" class="choice-chip" data-value="1" role="radio" aria-checked="false" aria-label="1 frame">1</button>
-                    <button type="button" class="choice-chip" data-value="2" role="radio" aria-checked="false" aria-label="2 frames">2</button>
-                    <button type="button" class="choice-chip" data-value="3" role="radio" aria-checked="false" aria-label="3 frames">3</button>
-                  </div>
-                  <span class="modal-toggle-sub">Cuts the delay between pressing a button and seeing it happen, by guessing that many frames ahead. Costs extra CPU; ignored at 2&times; speed and in multiplayer.</span>
-                </div>
-                <div class="modal-toggle-row">
-                  <div>
-                    <span class="modal-row-label">Rumble</span>
-                    <span class="modal-toggle-sub">Buzz and shake when a game uses its rumble motor</span>
-                  </div>
-                  <label class="switch">
-                    <input type="checkbox" id="gb-rumble-toggle" checked />
-                    <span class="switch-track"></span>
-                  </label>
-                </div>
-                <div class="modal-toggle-row">
-                  <div>
-                    <span class="modal-row-label">Show inputs on screen</span>
-                    <span class="modal-toggle-sub">Light up a small controller over the game as you press buttons &mdash; for streams, or for watching your own inputs. Recorded clips never include it.</span>
-                  </div>
-                  <label class="switch">
-                    <input type="checkbox" id="input-display-toggle" />
-                    <span class="switch-track"></span>
-                  </label>
                 </div>
               </div>
 
