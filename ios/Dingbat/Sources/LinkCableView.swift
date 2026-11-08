@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// "Connect link cable" (web #net-modal): both players type the same code,
+/// "Connect Link Cable" (web #net-modal): both players type the same code,
 /// or, with no server (or by choice), trade codes by hand. The game stays
 /// frozen while it is up; the sheet closes itself when the session starts.
 struct LinkCableView: View {
@@ -10,7 +10,7 @@ struct LinkCableView: View {
     @FocusState private var focused: Bool
 
     var body: some View {
-        SheetChrome(title: "Connect link cable", fit: true) {
+        SheetChrome(title: "Connect Link Cable", fit: true) {
             if link.transferring { LinkTransferScene() } else if link.manualView { manual } else { shared }
             if !link.status.isEmpty {
                 Text(link.status)

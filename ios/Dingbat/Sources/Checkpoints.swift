@@ -4,7 +4,7 @@ import UIKit
 /// Earlier moments of play (web checkpoints): every minute of play the
 /// session is taken again, and kept here too as a checkpoint, a few spread
 /// over play time, for when the newest moment is the thing that crashes the
-/// game ("Resume from earlier"). This device only, never on Drive.
+/// game ("Resume from Earlier"). This device only, never on Drive.
 ///
 /// Files in the game's folder: ckpts.json is the index ({ play, list:
 /// [{ slot, ts, play, saveSig }] }, `play` the game's play clock as of the

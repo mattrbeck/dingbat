@@ -208,7 +208,7 @@ final class NativeTouchesUITests: XCTestCase {
     /// would show above the sheet's top edge.
     func testToastOverAShortSheetShowsOnce() {
         let app = launch(["-sheet", "link"])
-        XCTAssertTrue(app.staticTexts["Connect link cable"].waitForExistence(timeout: 10), "the link sheet")
+        XCTAssertTrue(app.staticTexts["Connect Link Cable"].waitForExistence(timeout: 10), "the link sheet")
         post("toast")
         let toast = app.staticTexts.matching(NSPredicate(format: "label == %@", "Debug toast"))
         XCTAssertTrue(toast.firstMatch.waitForExistence(timeout: 3), "the toast shows")
@@ -623,7 +623,7 @@ final class NativeTouchesUITests: XCTestCase {
         let more = app.buttons["More for this game"].firstMatch
         XCTAssertTrue(more.waitForExistence(timeout: 5), "the paused hero's ⋯")
         more.tap()
-        let states = app.buttons["Save states"].firstMatch
+        let states = app.buttons["Save States"].firstMatch
         XCTAssertTrue(states.waitForExistence(timeout: 3), "the menu, Play group and all")
         sleep(1)
         // Down to Delete: the rows scroll under the head, the × stays.
@@ -655,9 +655,11 @@ final class NativeTouchesUITests: XCTestCase {
         let more = app.buttons["More for this game"].firstMatch
         XCTAssertTrue(more.waitForExistence(timeout: 5), "the paused hero's ⋯")
         more.tap()
-        let states = app.buttons["Save states"].firstMatch
-        XCTAssertTrue(states.waitForExistence(timeout: 3), "Play: Save states")
-        for label in ["Manage saves", "Link cable", "Cheats", "Report a bug", "Rename", "Export…", "Delete"] {
+        // Title Case, as the game's own menu words them.
+        let states = app.buttons["Save States"].firstMatch
+        XCTAssertTrue(states.waitForExistence(timeout: 3), "Play: Save States")
+        for label in ["Manage Saves", "Link Cable", "Cheats", "Report a Bug", "Rename", "Export…",
+                      "Reset Save Data", "Delete"] {
             XCTAssertTrue(app.buttons[label].firstMatch.exists, "\(label) is in the menu")
         }
         XCTAssertTrue(app.staticTexts["PLAY"].exists && app.staticTexts["GAME"].exists, "the two groups' headings")
@@ -674,7 +676,9 @@ final class NativeTouchesUITests: XCTestCase {
         XCTAssertTrue(delete.waitForExistence(timeout: 5), "and it disarms")
         XCTAssertFalse(armed.exists, "its question gone")
         states.tap()
-        XCTAssertTrue(app.staticTexts["Save States"].firstMatch.waitForExistence(timeout: 3), "Save states opens its sheet")
+        // The menu's row has the sheet's title now: the row goes first.
+        XCTAssertTrue(states.waitForNonExistence(timeout: 3), "the menu gives way")
+        XCTAssertTrue(app.staticTexts["Save States"].firstMatch.waitForExistence(timeout: 3), "Save States opens its sheet")
         sleep(1)
         // The sheet's Close, not the hero's under it.
         app.buttons.matching(NSPredicate(format: "label == 'Close'")).allElementsBoundByIndex
@@ -687,7 +691,7 @@ final class NativeTouchesUITests: XCTestCase {
         sleep(1)
         more.tap()
         XCTAssertTrue(app.buttons["Rename"].firstMatch.waitForExistence(timeout: 3), "closed: the game's menu")
-        XCTAssertFalse(app.buttons["Save states"].exists, "closed: no Play group")
+        XCTAssertFalse(app.buttons["Save States"].exists, "closed: no Play group")
         XCTAssertFalse(app.staticTexts["PLAY"].exists, "nor its heading")
         snap(app, "game-menu-closed")
         // Its own × closes it (held sideways it has no grabber or scrim).

@@ -605,7 +605,7 @@ final class RomLibrary: ObservableObject {
         return skipped
     }
 
-    /// Reset save data: the battery save, every state and the session go
+    /// Reset Save Data: the battery save, every state and the session go
     /// (web resetGameSaves / deleteSaveData); Drive is told first.
     func resetSaveData(_ e: RomEntry) {
         DriveSync.shared.queueSaveDataDeletes(e.fileName)

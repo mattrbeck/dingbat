@@ -91,18 +91,18 @@ struct TileMenuView: View {
     /// game that stopped). A DS game has no link cable or cheats, as in the
     /// game's own menu. Link Cable goes through NetLink's own sheet opener.
     @ViewBuilder private var playRows: some View {
-        item("states", "Save states", icon: "square.grid.2x2") { model.openSheet(.states) }
-        item("saves", "Manage saves", icon: "folder") { model.openSheet(.saves) }
+        item("states", "Save States", icon: "square.grid.2x2") { model.openSheet(.states) }
+        item("saves", "Manage Saves", icon: "folder") { model.openSheet(.saves) }
         if !PrintStore.all().isEmpty {
-            item("prints", "Printed photos", icon: "printer", dot: model.newPrints) {
+            item("prints", "Printed Photos", icon: "printer", dot: model.newPrints) {
                 model.openSheet(.prints)
             }
         }
         if !GameSession.shared.isNDS {
-            item("link", "Link cable", icon: "cable.connector") { NetLink.shared.openSheet() }
+            item("link", "Link Cable", icon: "cable.connector") { NetLink.shared.openSheet() }
             item("cheats", "Cheats", icon: "star") { model.openSheet(.cheats) }
         }
-        item("report", "Report a bug", icon: "ladybug") { model.openSheet(.report) }
+        item("report", "Report a Bug", icon: "ladybug") { model.openSheet(.report) }
     }
 
     /// The file items (web tileMenuEntries). Order: get it, name it, wipe
@@ -112,14 +112,14 @@ struct TileMenuView: View {
         let local = entry.isLocal
         let onDrive = drive.driveHasRom(entry.fileName)
         if !local && !onDrive {
-            item("find", "Find the file…", icon: "magnifyingglass") {
+            item("find", "Find the File…", icon: "magnifyingglass") {
                 model.sheet = nil
                 model.relinkLaunch = false
                 model.relinking = entry
             }
         }
         if !local && onDrive {
-            item("download", "Download to this device", icon: "arrow.down",
+            item("download", "Download to This Device", icon: "arrow.down",
                  disabled: drive.downloading[entry.fileName] != nil ? "Downloading…" : nil) {
                 model.sheet = nil
                 model.downloadOnly(entry)
@@ -128,7 +128,7 @@ struct TileMenuView: View {
         // Earlier moments of play, kept on this device: the way back when
         // where the game stopped is what keeps stopping it.
         if local && Checkpoints.hasAny(entry) {
-            item("moments", "Resume from earlier", icon: "clock.arrow.circlepath", disabled: busy) {
+            item("moments", "Resume from Earlier", icon: "clock.arrow.circlepath", disabled: busy) {
                 model.sheet = .moments(entry, crash: false)
             }
         }
@@ -137,7 +137,7 @@ struct TileMenuView: View {
         }
         // It only reads, so an online session does not hold it up.
         if !local && onDrive {
-            item("export", "Download and export…", icon: "arrow.up.forward.square",
+            item("export", "Download and Export…", icon: "arrow.up.forward.square",
                  disabled: drive.downloading[entry.fileName] != nil ? "Downloading…" : nil) {
                 model.sheet = nil
                 model.downloadThenExport(entry)
@@ -146,14 +146,14 @@ struct TileMenuView: View {
             item("export", "Export…", icon: "arrow.up.forward.square") { model.sheet = .export(entry) }
         }
         let hasSaves = library.hasSaveData(entry)
-        item("reset", "Reset save data", icon: "eraser",
+        item("reset", "Reset Save Data", icon: "eraser",
              disabled: busy ?? (hasSaves ? nil : "No save data yet"),
              confirm: "Reset save data?", confirmSub: "Every save for this game is deleted") {
             model.sheet = nil
             HomeActions.resetSaveData(entry)
         }
         if let kept = drive.keptSave(entry.fileName) {
-            item("restore", "Restore old save", icon: "arrow.uturn.backward", disabled: busy,
+            item("restore", "Restore Old Save", icon: "arrow.uturn.backward", disabled: busy,
                  sub: kept.why == "replaced" ? "The save you replaced"
                     : "From before you deleted it" + (kept.at > 0 ? " · saved " + Self.fmtTime(kept.at) : ""),
                  confirm: "Restore old save?", confirmSub: "It replaces the current save") {
@@ -162,7 +162,7 @@ struct TileMenuView: View {
             }
         }
         if local && drive.linked {
-            item("remove", "Remove from this device", icon: Self.removeGlyph,
+            item("remove", "Remove from This Device", icon: Self.removeGlyph,
                  disabled: busy ?? (onDrive ? nil : "Not backed up to Drive yet — this is your only copy"),
                  confirm: "Remove from this device?",
                  confirmSub: (loaded ? "Closes the game; " : "") + "Drive keeps a copy") {
@@ -364,7 +364,7 @@ private extension View {
 /// What the game's menu's items do (web resetGameAction, deleteGameAction,
 /// renameGame), the game in memory included.
 enum HomeActions {
-    /// Reset save data (web resetGameAction). The game in memory is let go
+    /// Reset Save Data (web resetGameAction). The game in memory is let go
     /// unflushed, so its battery RAM cannot write back over the reset, and
     /// boots again fresh, still where the player is.
     static func resetSaveData(_ e: RomEntry) {
@@ -449,7 +449,7 @@ struct RenameView: View {
                 .padding(20)
             }
             .background(palette.surface1.ignoresSafeArea())
-            .navigationTitle("Rename game")
+            .navigationTitle("Rename Game")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {

@@ -645,7 +645,7 @@ final class DriveSync: ObservableObject {
     }
 
     /// A save about to be replaced by an earlier moment's battery, kept aside
-    /// (web resumeMoment): Restore old save switches back.
+    /// (web resumeMoment): Restore Old Save switches back.
     func keepReplacedSave(_ game: String, _ data: Data) {
         let now = Self.now()
         keepOldSave(game, KeptSave(data: data, at: now, del: now, kept: now, why: "replaced"))
@@ -1425,7 +1425,7 @@ final class DriveSync: ObservableObject {
     }
 
     /// Add pictures: a Drive-only game's ROM, and its save (kept here by
-    /// Remove from this device, or Drive's), into memory; nothing written.
+    /// Remove from This Device, or Drive's), into memory; nothing written.
     @MainActor
     func fetchForPicture(_ game: String) async -> (rom: Data, save: Data?)? {
         guard linked, await ensureSignedIn() else { return nil }

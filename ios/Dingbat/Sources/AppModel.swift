@@ -16,7 +16,7 @@ final class AppModel: ObservableObject {
         /// The core stopped on a bug of its own (FaultView).
         case fault
         case tileMenu(RomEntry), rename(RomEntry), export(RomEntry)
-        /// Resume from earlier; `crash`: the "stopped unexpectedly" form.
+        /// Resume from Earlier; `crash`: the "stopped unexpectedly" form.
         case moments(RomEntry, crash: Bool)
         case addPictures
         var id: String {
@@ -70,7 +70,7 @@ final class AppModel: ObservableObject {
         didSet { UserDefaults.standard.set(newPrints, forKey: "prints-new") }
     }
     /// A game with no ROM here whose file the person is picking again
-    /// ("Find the file…").
+    /// ("Find the File…").
     @Published var relinking: RomEntry?
     /// A picked file of a different size than the game had: asked first.
     @Published var relinkConfirm: (entry: RomEntry, bytes: Data)?
@@ -162,7 +162,7 @@ final class AppModel: ObservableObject {
 
     /// Open a game and go to the play screen. `resume`: put its session back
     /// in during the boot (the hero's Resume, a tile in Resume mode).
-    /// `moment`: an earlier moment chosen from Resume from earlier, which
+    /// `moment`: an earlier moment chosen from Resume from Earlier, which
     /// goes in with its battery; `fresh`: from the in-game save, no offer.
     func launch(_ entry: RomEntry, resume: Bool, moment: Data? = nil, fresh: Bool = false) {
         tapGen &+= 1 // a tap held for the boot's pull gives way to this
@@ -468,7 +468,7 @@ final class AppModel: ObservableObject {
         }
     }
 
-    /// The tile's ↓ and the menu's Download to this device.
+    /// The tile's ↓ and the menu's Download to This Device.
     func downloadOnly(_ e: RomEntry) {
         let name = e.fileName
         tileFailed.remove(name)
@@ -482,7 +482,7 @@ final class AppModel: ObservableObject {
         }
     }
 
-    /// "Download and export…" (web): the game comes down, then Export… opens.
+    /// "Download and Export…" (web): the game comes down, then Export… opens.
     func downloadThenExport(_ e: RomEntry) {
         let name = e.fileName
         tileFailed.remove(name)
@@ -501,7 +501,7 @@ final class AppModel: ObservableObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in self?.tileDone.remove(name) }
     }
 
-    /// Find the file: the picked bytes go under the game's own name, so its
+    /// Find the File: the picked bytes go under the game's own name, so its
     /// save pairs with it again (web relinkGameAction).
     func relink(_ e: RomEntry, to url: URL) {
         let scoped = url.startAccessingSecurityScopedResource()
@@ -542,7 +542,7 @@ final class AppModel: ObservableObject {
         if open { launch(e, resume: false) }
     }
 
-    /// The pending Find the file came from a tap on the game, so it opens
+    /// The pending Find the File came from a tap on the game, so it opens
     /// once found; from the tile menu it does not.
     var relinkLaunch = false
 

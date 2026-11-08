@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Resume from earlier (web #moments-modal): the game's session and its
+/// Resume from Earlier (web #moments-modal): the game's session and its
 /// checkpoints, newest first, each with its picture, how much play earlier
 /// it is and when. Two ways in: the game's menu, and - after the game has
 /// stopped unexpectedly twice in a row - a tap on the game, which opens the
@@ -16,7 +16,7 @@ struct MomentsView: View {
     @State private var saveSig: String?
 
     var body: some View {
-        SheetChrome(title: crash ? entry.name + " stopped unexpectedly" : "Resume from earlier") {
+        SheetChrome(title: crash ? entry.name + " stopped unexpectedly" : "Resume from Earlier") {
             SheetHint(hint)
             LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 3), spacing: 10) {
                 ForEach(Array(moments.enumerated()), id: \.element.id) { i, m in
@@ -26,7 +26,7 @@ struct MomentsView: View {
             .padding(.bottom, 12)
             if let m = selected, before(m) {
                 SheetHint("This is from before your last in-game save, which goes back with it. Your newer save " +
-                          "is kept: Restore old save, on the game's menu, brings it back.")
+                          "is kept: Restore Old Save, on the game's menu, brings it back.")
             }
             HStack(spacing: 10) {
                 if crash {
