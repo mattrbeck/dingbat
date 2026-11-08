@@ -368,7 +368,9 @@ final class NativeTouchesUITests: XCTestCase {
     /// smaller than Add a game (34), its touch area 44 pt (what VoiceOver
     /// and this test see as its frame), so a tap 5 pt under the drawn
     /// capsule still lands. It relies on linktest.gba never getting a
-    /// picture (its screen is blank white), so the button is always up.
+    /// picture (its screen is blank white), so the button is up until a run
+    /// marks it blank (testBlankGameLeavesAddPictures, which plays it again
+    /// after); this one runs first after the fresh install.
     func testAddPicturesButton() {
         let app = XCUIApplication()
         app.launchArguments = ["-audio.muted", "YES"]
@@ -420,6 +422,49 @@ final class NativeTouchesUITests: XCTestCase {
         XCTAssertEqual(done.label, want, "only the real screens are pictured")
         sleep(1)
         snap(app, "pictures-added")
+    }
+
+    /// A game whose screen stays blank (linktest.gba's white, the suite's
+    /// one game) is remembered: after a run Add pictures leaves the library
+    /// head, as nothing is left a run would open, stays gone on a relaunch,
+    /// and comes back once the game is played (which leaves the mark gone
+    /// for the tests after this one).
+    func testBlankGameLeavesAddPictures() {
+        var app = XCUIApplication()
+        app.launchArguments = ["-audio.muted", "YES", "-sheet", "addPictures"]
+        app.launch()
+        XCTAssertTrue(app.staticTexts["Add pictures to your library?"].waitForExistence(timeout: 10), "the offer")
+        sleep(1)
+        let go = app.buttons.matching(NSPredicate(format: "label == 'Add pictures'")).allElementsBoundByIndex
+            .last { $0.isHittable }
+        XCTAssertNotNil(go, "the offer's Add pictures")
+        go?.tap()
+        let toast = app.staticTexts.matching(
+            NSPredicate(format: "label CONTAINS 'added' OR label CONTAINS 'blank' OR label == 'Stopped'")).firstMatch
+        XCTAssertTrue(toast.waitForExistence(timeout: 60), "the run ends")
+        print("NATIVE: blank run \(toast.label)")
+        sleep(1)
+        XCTAssertFalse(app.buttons["Add pictures"].exists, "nothing left that a run would open")
+        snap(app, "pictures-blank-remembered")
+        app.terminate()
+
+        app = XCUIApplication()
+        app.launchArguments = ["-audio.muted", "YES"]
+        app.launch()
+        XCTAssertTrue(app.buttons["Add a game"].firstMatch.waitForExistence(timeout: 10), "home")
+        sleep(3)
+        XCTAssertFalse(app.buttons["Add pictures"].exists, "still gone after a relaunch, and no offer")
+        app.terminate()
+
+        // Played: the mark goes.
+        app = launch()
+        app.terminate()
+        app = XCUIApplication()
+        app.launchArguments = ["-audio.muted", "YES"]
+        app.launch()
+        let notNow = app.buttons["Not now"]
+        if notNow.waitForExistence(timeout: 8) { notNow.tap(); sleep(1) }
+        XCTAssertTrue(app.buttons["Add pictures"].firstMatch.waitForExistence(timeout: 5), "back once played")
     }
 
     /// A game's toasts (web 720bc7e3): under the bar, never over its buttons;

@@ -190,6 +190,7 @@ final class GameSession: NSObject, ObservableObject {
         lastSaveSig = RomLibrary.currentSaveSig(entry)
         lastFrameSig = nil
         RomLibrary.shared.touch(entry)
+        AddPictures.clearBlank([entry.fileName])  // played: the next run may picture it
         RomLibrary.shared.noteRomSize(entry.fileName, entry.bytes)
         CheatStore.restore(for: entry)
         tiltKind = Int(dingbat_cart_has_tilt())
@@ -1464,6 +1465,7 @@ final class GameSession: NSObject, ObservableObject {
         lastFrameSig = sig
         try? RomLibrary.ensureDir(g.dir)
         try? jpg.write(to: g.shotURL, options: .atomic)
+        AddPictures.clearBlank([g.fileName])
         RomLibrary.shared.pictureGen += 1
         DriveSync.shared.markUpload("frame:" + g.fileName)
     }

@@ -8,7 +8,8 @@ import SwiftUI
 /// session are never touched: the ROM and battery go to scratch files.
 /// Signed in, Drive-only games can come too: fetched into memory, pictured,
 /// and not kept here. Offered once per device; the library head's Add
-/// pictures any time there is something to picture.
+/// pictures any time there is something a run would open. A game that came
+/// up blank is left out until it is played (`blankKey`).
 final class AddPictures: ObservableObject {
     static let shared = AddPictures()
 
@@ -22,19 +23,37 @@ final class AddPictures: ObservableObject {
     /// Frames between looks (for a blank screen, a launch, Stop).
     static let chunk = 30
     static let offeredKey = "thumbs_offered"
+    /// The sheet's "Include games kept only on Drive", as last left: off
+    /// until turned on. It decides whether Drive-only games keep Add
+    /// pictures up (web THUMBS_DRIVE_KEY). Reset all settings forgets it.
+    static let driveKey = "thumbs-drive"
+    static var driveWanted: Bool {
+        get { UserDefaults.standard.bool(forKey: driveKey) }
+        set {
+            UserDefaults.standard.set(newValue, forKey: driveKey)
+            RomLibrary.shared.pictureGen += 1  // Drive-only games count toward Add pictures, or stop
+        }
+    }
 
     /// Running: "Picturing 2 of 9 — name", and how far.
     @Published private(set) var running = false
     @Published private(set) var status = ""
     @Published private(set) var progress = 0.0
     private var cancelled = false
+    /// This run's games that came up blank.
+    private var blankCount = 0
 
     struct Candidate { let entry: RomEntry; let local: Bool }
 
+    /// Library games without a picture, less those a run came up blank on
+    /// (`blankKey`). Drive-only ones only when asked, and only with a ROM on
+    /// Drive to fetch.
     func candidates(includeDrive: Bool) -> [Candidate] {
         let fm = FileManager.default
+        let blank = Self.blank
         return RomLibrary.shared.entries.compactMap { e in
             if fm.fileExists(atPath: e.shotURL.path) { return nil }
+            if blank[e.fileName] != nil { return nil }
             // The batch boots games on the GB/GBA core: a DS game gets its
             // picture by being played (web).
             if e.isNDS { return nil }
@@ -43,14 +62,55 @@ final class AddPictures: ObservableObject {
         }
     }
 
-    /// Something to picture (the library head's link shows).
-    var anyToPicture: Bool { !candidates(includeDrive: DriveSync.shared.linked).isEmpty }
+    /// Something a run would open (the library head's Add pictures shows):
+    /// Drive-only games count only with the sheet's Drive switch left on,
+    /// since only then does the run fetch them.
+    var anyToPicture: Bool {
+        !candidates(includeDrive: DriveSync.shared.linked && Self.driveWanted).isEmpty
+    }
 
-    /// Once per device, with something to picture and nothing loaded.
+    /// Something the sheet would offer: Drive-only games too, behind its
+    /// switch, whenever signed in.
+    private var anyToOffer: Bool { !candidates(includeDrive: DriveSync.shared.linked).isEmpty }
+
+    // MARK: games that came up blank (web THUMBS_BLANK_KEY)
+
+    /// Games a run came up blank on (still one colour after the boot and as
+    /// long again), by file name. A run, and Add pictures, leave them out
+    /// until the game is played: opening it, a new file for it, or a
+    /// picture stored from play clears the mark, so one press does not run
+    /// them again and again for nothing. This device's only.
+    static let blankKey = "thumbsblank"
+    static var blank: [String: Double] {
+        UserDefaults.standard.dictionary(forKey: blankKey) as? [String: Double] ?? [:]
+    }
+
+    static func markBlank(_ name: String) {
+        var b = blank
+        b[name] = Date().timeIntervalSince1970 * 1000
+        UserDefaults.standard.set(b, forKey: blankKey)
+    }
+
+    static func clearBlank(_ names: [String]) {
+        var b = blank
+        var hit = false
+        for n in names where b.removeValue(forKey: n) != nil { hit = true }
+        if hit { UserDefaults.standard.set(b, forKey: blankKey) }
+    }
+
+    /// The marks of games that left the library or have a picture now
+    /// (one from Drive, say) go (RomLibrary.publish).
+    static func pruneBlank(_ names: Set<String>, pictured: (String) -> Bool) {
+        let spent = blank.keys.filter { !names.contains($0) || pictured($0) }
+        if !spent.isEmpty { clearBlank(Array(spent)) }
+    }
+
+    /// Once per device, with something to picture and nothing loaded. The
+    /// sheet offers Drive-only games behind its switch whenever it opens.
     func maybeOffer() {
         let d = UserDefaults.standard
         guard !d.bool(forKey: Self.offeredKey), GameSession.shared.game == nil,
-              AppModel.shared.sheet == nil, anyToPicture else { return }
+              AppModel.shared.sheet == nil, anyToOffer else { return }
         d.set(true, forKey: Self.offeredKey)  // one offer, whatever the answer
         AppModel.shared.openSheet(.addPictures)
     }
@@ -61,7 +121,7 @@ final class AddPictures: ObservableObject {
             AppModel.shared.toast("Close the running game first")
             return
         }
-        guard anyToPicture else {
+        guard anyToOffer else {
             AppModel.shared.toast("Every game already has a picture")
             return
         }
@@ -80,6 +140,7 @@ final class AddPictures: ObservableObject {
         let cands = candidates(includeDrive: includeDrive)
         running = true
         cancelled = false
+        blankCount = 0
         var done = 0
         // Nobody hears it, and nothing may wait on the audio.
         let audioMode = dingbat_audio_get_mode()
@@ -103,6 +164,8 @@ final class AddPictures: ObservableObject {
         running = false
         status = ""
         progress = 0
+        // The games that came up blank leave Add pictures' count.
+        if blankCount > 0 { RomLibrary.shared.pictureGen += 1 }
         if case .addPictures = AppModel.shared.sheet { AppModel.shared.sheet = nil }
         AppModel.shared.toast(done == 0 ? "No pictures added"
             : "\(done) \(done == 1 ? "picture" : "pictures") added" + (cancelled ? " before stopping" : ""))
@@ -148,7 +211,11 @@ final class AddPictures: ObservableObject {
         if Self.coreBlank() {
             guard await advance(Self.bootFrames, CACurrentMediaTime() + Self.safetySeconds,
                                 until: { !Self.coreBlank() }) else { return false }
-            if Self.coreBlank() { return false }
+            if Self.coreBlank() {
+                Self.markBlank(e.fileName)  // left out until it is played
+                blankCount += 1
+                return false
+            }
         }
         guard let jpg = GameSession.coreImage()?.jpegData(compressionQuality: 0.75) else { return false }
         try? RomLibrary.ensureDir(e.dir)
@@ -190,7 +257,14 @@ struct AddPicturesView: View {
     @ObservedObject private var job = AddPictures.shared
     @ObservedObject private var drive = DriveSync.shared
     @Environment(\.palette) private var palette
-    @State private var includeDrive = false
+    /// As last left (AddPictures.driveWanted).
+    @State private var includeDrive = AddPictures.driveWanted
+
+    /// The Drive row means something only signed in, with a Drive-only game
+    /// still unpictured.
+    private var driveRow: Bool {
+        drive.linked && job.candidates(includeDrive: true).contains(where: { !$0.local })
+    }
 
     var body: some View {
         SheetChrome(title: "Add pictures to your library?", fit: true, onClose: close) {
@@ -214,17 +288,21 @@ struct AddPicturesView: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.bottom, 10)
                 SheetHint("You can do this later from Add pictures, above your library.")
-                if drive.linked && job.candidates(includeDrive: true).contains(where: { !$0.local }) {
+                if driveRow {
                     SheetToggleRow(label: "Include games kept only on Drive",
                                    sub: "Each one is fetched, pictured, and not kept on this device",
-                                   isOn: $includeDrive)
+                                   isOn: Binding(get: { includeDrive }, set: { on in
+                                       includeDrive = on
+                                       AddPictures.driveWanted = on
+                                   }))
                 }
                 HStack(spacing: 10) {
                     Spacer()
                     PadButton("Not now") { SheetNav.close() }
                         .buttonStyle(SheetButtonStyle(small: false))
                     PadButton("Add pictures") {
-                        Task { @MainActor in await job.run(includeDrive: includeDrive) }
+                        let drive = driveRow && includeDrive
+                        Task { @MainActor in await job.run(includeDrive: drive) }
                     }
                     .buttonStyle(SheetButtonStyle(kind: .primary, small: false))
                 }

@@ -223,9 +223,10 @@ final class Settings: ObservableObject {
                   "video.integerScale", "video.uprightPicture", "video.lcdResponse", "video.ambientGlow",
                   "audio.fifoInterp", "audio.mp2kHle", "audio.pitchCorrectFF", "audio.audioLowpass",
                   "audio.playInSilent", "audio.volume", "audio.muted", "dingbat_theme",
-                  "rewindOn", "runahead", "save-hook"] {
+                  "rewindOn", "runahead", "save-hook", AddPictures.driveKey] {
             d.removeObject(forKey: k)
         }
+        RomLibrary.shared.pictureGen += 1  // Add pictures follows its Drive switch, now off again
         let fresh = Settings()
         Keyboard.shared.setPreset(.default)  // the key bindings too (web resetAllSettings)
         NdsState.shared.resetDisplay()       // and the DS screens (nds-layout, nds-display)

@@ -225,8 +225,11 @@ final class RomLibrary: ObservableObject {
     private func publish() {
         // DS games only with DS Beta on; off, they wait in the index.
         let ds = Settings.dsBetaOn
-        entries = recents.compactMap { $0.string("name") }.map { RomEntry(fileName: $0) }
-            .filter { ds || !$0.isNDS }
+        let names = recents.compactMap { $0.string("name") }
+        entries = names.map { RomEntry(fileName: $0) }.filter { ds || !$0.isNDS }
+        AddPictures.pruneBlank(Set(names)) {
+            FileManager.default.fileExists(atPath: RomEntry(fileName: $0).shotURL.path)
+        }
     }
 
     private func saveRecents() {
@@ -418,6 +421,7 @@ final class RomLibrary: ObservableObject {
             throw ImportError.unreadable("Couldn't keep that file: \(error.localizedDescription)")
         }
         noteRomSize(fileName, romData.count)
+        AddPictures.clearBlank([fileName])  // a new file: the next run may picture it
         await bump(fileName, fresh: true)
         DriveSync.shared.markGameUpload(fileName)
         return e

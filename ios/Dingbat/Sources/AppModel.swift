@@ -534,6 +534,7 @@ final class AppModel: ObservableObject {
             return
         }
         library.noteRomSize(e.fileName, data.count)
+        AddPictures.clearBlank([e.fileName])  // a new file: the next run may picture it
         DriveSync.shared.markGameUpload(e.fileName)
         library.pictureGen += 1
         library.refresh()
