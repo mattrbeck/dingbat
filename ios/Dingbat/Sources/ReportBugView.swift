@@ -175,8 +175,8 @@ struct ReportBugView: View {
                     .accessibilityValue(whenText)
             } else {
                 Text(settings.rewind
-                     ? "Slide left to go further back in time. Enable Rewind in Settings to capture a longer timeline."
-                     : "Rewind is off, so only this moment can be attached. Turn Rewind on in Settings to pick an earlier one.")
+                     ? "Slide left to go further back in time. Enable Rewind in Settings › Play to capture a longer timeline."
+                     : "Rewind is off, so only this moment can be attached. Turn Rewind on in Settings › Play to pick an earlier one.")
                     .font(.system(size: 12))
                     .foregroundColor(palette.textFaint)
                     .fixedSize(horizontal: false, vertical: true)

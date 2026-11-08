@@ -14,33 +14,34 @@ import UniformTypeIdentifiers
 
 /// Settings › sections, in the web's order (web #settings-tabs).
 enum SettingsSection: String, CaseIterable, Identifiable {
-    case controls, gb, gba, ds, video, audio, general
+    case controls, video, audio, play, gb, gba, ds, general
 
     var id: String { rawValue }
 
     var name: String {
         switch self {
         case .controls: return "Controls"
-        case .gb: return "Game Boy"
-        case .gba: return "GBA"
-        case .ds: return "Nintendo DS"
         case .video: return "Video"
         case .audio: return "Audio"
+        case .play: return "Play"
+        case .gb: return "Game Boy"
+        case .gba: return "Game Boy Advance"
+        case .ds: return "Nintendo DS"
         case .general: return "General"
         }
     }
 
-    /// The row's second line (web .settings-tab-desc, minus what this app
-    /// has no row for: key bindings, Google Drive, updates).
+    /// The row's second line (web .settings-tab-desc).
     var desc: String {
         switch self {
-        case .controls: return "Touch buttons, joystick, controller"
+        case .controls: return "Touch, run-ahead, rumble, controller"
+        case .video: return "Color, filters, LCD response, glow"
+        case .audio: return "Quality, filtering, fast-forward"
+        case .play: return "Resuming a game, rewind"
         case .gb: return "Palette, Super Game Boy, boot ROM"
         case .gba: return "BIOS file, BIOS calls, intro"
-        case .ds: return "Screen layout, BIOS and firmware"
-        case .video: return "Color, filters, LCD grid, glow"
-        case .audio: return "Quality, filtering, fast-forward"
-        case .general: return "Theme, rewind, run-ahead"
+        case .ds: return "Screen layout, 3D, BIOS and firmware"
+        case .general: return "Theme, Google Drive, save webhook, reset"
         }
     }
 
@@ -263,11 +264,12 @@ struct SettingsView: View {
         VStack(alignment: .leading, spacing: 0) {
             switch s {
             case .controls: ControlsPane()
+            case .video: VideoPane()
+            case .audio: AudioPane()
+            case .play: PlayPane()
             case .gb: GameBoyPane()
             case .gba: GbaPane()
             case .ds: NdsSettingsPane()
-            case .video: VideoPane()
-            case .audio: AudioPane()
             case .general: GeneralPane()
             }
         }
@@ -284,18 +286,12 @@ private struct ControlsPane: View {
     @ObservedObject private var s = Settings.shared
     @ObservedObject private var kb = Keyboard.shared
 
+    /// The web's order: Touch, Response and feedback, then the keyboard
+    /// (while one is connected) and the controller.
     var body: some View {
+        SheetSubhead(text: "Touch", rule: false)
         SheetToggleRow(label: "Large on-screen controls",
                        sub: "A bigger d-pad for touch — best for large fingers", isOn: $s.largeControls)
-        if UIDevice.current.userInterfaceIdiom == .phone {
-            SheetFlowRow(label: "Buttons in landscape", sub: "Bold shows up on any picture") {
-                SheetChipPicker(selection: $s.landscapeButtons,
-                                options: [(.outline, "Outline"), (.bold, "Bold"), (.solid, "Solid")])
-            }
-        }
-        SheetToggleRow(label: "Rumble", sub: "Buzz and shake when a game uses its rumble motor", isOn: $s.rumble)
-        SheetToggleRow(label: "Haptic feedback",
-                       sub: "A light tap under your thumb for each on-screen button press", isOn: $s.haptics)
         SheetFlowRow(label: "Touch direction input", sub: "D-pad buttons or an analog-style joystick") {
             SheetChipPicker(selection: $s.controlStyle, options: [(.dpad, "D-pad"), (.joystick, "Joystick")])
         }
@@ -304,16 +300,28 @@ private struct ControlsPane: View {
                 SheetChipPicker(selection: $s.joystickMode, options: [(.fixed, "Fixed"), (.floating, "Floating")])
             }
         }
+        if UIDevice.current.userInterfaceIdiom == .phone {
+            SheetFlowRow(label: "Buttons in landscape", sub: "Bold shows up on any picture") {
+                SheetChipPicker(selection: $s.landscapeButtons,
+                                options: [(.outline, "Outline"), (.bold, "Bold"), (.solid, "Solid")])
+            }
+        }
         SheetToggleRow(label: "Hide touch controls with a controller",
                        sub: "Hide the on-screen buttons while a game controller is connected",
                        isOn: $s.hideTouchOnGamepad)
-        SheetToggleRow(label: "Show inputs on screen",
-                       sub: "Light up a small controller over the game as you press buttons — for streams, or for watching your own inputs",
-                       isOn: $s.inputDisplay)
-        SheetFlowRow(label: "Opening a game from the library",
-                     sub: "Resume goes back to the moment you left. From save starts from the game’s own save, and offers the moment after.") {
-            SheetChipPicker(selection: $s.libraryOpen, options: [(.resume, "Resume"), (.save, "From save")])
+        SheetSubhead(text: "Response and feedback")
+        SheetFlowRow(label: "Run-ahead",
+                     sub: "Cuts the delay between pressing a button and seeing it happen, by guessing that many frames ahead. Costs extra CPU; ignored at 2× speed and in multiplayer.") {
+            SheetSelect(selection: $s.runahead,
+                        options: [(0, "Off"), (1, "1 frame"), (2, "2 frames"), (3, "3 frames")],
+                        accessibilityLabel: "Run-ahead frames")
         }
+        SheetToggleRow(label: "Rumble", sub: "Buzz and shake when a game uses its rumble motor", isOn: $s.rumble)
+        SheetToggleRow(label: "Haptic feedback",
+                       sub: "A light tap under your thumb for each on-screen button press", isOn: $s.haptics)
+        SheetToggleRow(label: "Show inputs on screen",
+                       sub: "Light up a small controller over the game as you press buttons — for streams, or for watching your own inputs. Recorded clips never include it.",
+                       isOn: $s.inputDisplay)
         // web #kb-section, which touch devices hide: here, while a
         // keyboard is connected.
         if kb.connected { KeyboardBlock() }
@@ -687,28 +695,30 @@ private struct AudioPane: View {
     @Environment(\.palette) private var palette
     @State private var channelsOpen = Settings.shared.channelMutes != 0
 
+    /// The web's order: fast-forward and Silent Mode first, interpolation
+    /// beside the filter that pairs with it, the experimental synthesis last.
     var body: some View {
-        SheetToggleRow(label: "Audio interpolation",
-                       sub: "Smooths GBA music between hardware samples for cleaner treble. Turn off for the exact sound of a real GBA's headphone jack, grit included.",
-                       isOn: $s.fifoInterp)
-        SheetToggleRow(label: "Enhanced music synthesis",
-                       sub: "Experimental. Re-creates supported games' music engines at higher quality than the hardware could mix. Changes the sound's character; engages itself only where it works.",
-                       isOn: $s.mp2kHle)
         SheetToggleRow(label: "Pitch-correct fast-forward",
                        sub: "Keep the pitch normal at 2× speed instead of everything sounding like chipmunks. Uses a little extra CPU, only while fast-forwarding.",
                        isOn: $s.pitchCorrectFF)
-        SheetToggleRow(label: "Analog filter",
-                       sub: "Soften the treble the way the GBA's own output filter and speaker did. Pair with interpolation off for the closest real-hardware sound. GBA games only.",
-                       isOn: Binding(get: { s.analogFilter }, set: { on in
-                           s.analogFilter = on
-                           AudioOutput.shared.setAnalogFilter(on && GameSession.shared.game?.isGBA == true)
-                       }))
         SheetToggleRow(label: "Play in Silent Mode",
                        sub: "Pauses audio from other apps while a game is playing",
                        isOn: Binding(get: { s.playInSilent }, set: { on in
                            s.playInSilent = on
                            AudioOutput.shared.refreshSession()
                        }))
+        SheetToggleRow(label: "Audio interpolation",
+                       sub: "Smooths GBA music between hardware samples for cleaner treble. Turn off for the exact sound of a real GBA's headphone jack, grit included.",
+                       isOn: $s.fifoInterp)
+        SheetToggleRow(label: "Analog filter",
+                       sub: "Soften the treble the way the GBA's own output filter and speaker did. Pair with interpolation off for the closest real-hardware sound. GBA games only.",
+                       isOn: Binding(get: { s.analogFilter }, set: { on in
+                           s.analogFilter = on
+                           AudioOutput.shared.setAnalogFilter(on && GameSession.shared.game?.isGBA == true)
+                       }))
+        SheetToggleRow(label: "Enhanced music synthesis",
+                       sub: "Experimental. Re-creates supported games' music engines at higher quality than the hardware could mix. Changes the sound's character; engages itself only where it works.",
+                       isOn: $s.mp2kHle)
         SheetDisclosure(title: "Channels", open: $channelsOpen)
         if channelsOpen { channels }
     }
@@ -781,6 +791,23 @@ private struct AudioPane: View {
     }
 }
 
+// MARK: - Play
+
+/// web #settings-pane-play: how a game opens, and rewind.
+private struct PlayPane: View {
+    @ObservedObject private var s = Settings.shared
+
+    var body: some View {
+        SheetFlowRow(label: "Opening a game from the library",
+                     sub: "Resume goes back to the moment you left. From save starts from the game’s own save, and offers the moment after.") {
+            SheetChipPicker(selection: $s.libraryOpen, options: [(.resume, "Resume"), (.save, "From save")])
+        }
+        SheetToggleRow(label: "Rewind",
+                       sub: "Hold the rewind button to jump back, or double-tap it for a timeline you can scrub. Costs a few percent of speed; turning it off hides the rewind button.",
+                       isOn: $s.rewind)
+    }
+}
+
 // MARK: - General
 
 private struct GeneralPane: View {
@@ -809,16 +836,6 @@ private struct GeneralPane: View {
         SheetSubhead(text: "Google Drive")
         DriveSettingsBlock()
             .padding(.bottom, 18)
-        SheetSubhead(text: "Emulation")
-        SheetToggleRow(label: "Rewind",
-                       sub: "Hold the rewind button to jump back, or double-tap it for a timeline you can scrub. Costs a few percent of speed; turning it off hides the rewind button.",
-                       isOn: $s.rewind)
-        SheetFlowRow(label: "Run-ahead",
-                     sub: "Cuts the delay between pressing a button and seeing it happen, by guessing the next frame. Costs extra CPU; ignored at 2× speed.") {
-            SheetSelect(selection: $s.runahead,
-                        options: [(0, "Off"), (1, "1 frame"), (2, "2 frames"), (3, "3 frames")],
-                        accessibilityLabel: "Run-ahead frames")
-        }
         SheetDisclosure(title: "Advanced", open: $advancedOpen)
         if advancedOpen {
             VStack(alignment: .leading, spacing: 6) {

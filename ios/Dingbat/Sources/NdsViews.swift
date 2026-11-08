@@ -257,12 +257,13 @@ struct ChipFlow: Layout {
 
 // MARK: - Settings › Nintendo DS
 
-/// web #settings-pane-ds: the screen choices (the same as the Screens
-/// panel), then the optional BIOS and firmware dumps.
+/// web #settings-pane-ds: the screen layout (the same choices as the
+/// Screens panel), the 3D, then the optional BIOS and firmware dumps.
 struct NdsSettingsPane: View {
     @ObservedObject private var nds = NdsState.shared
 
     var body: some View {
+        SheetSubhead(text: "Screen layout", rule: false)
         SheetFlowRow(label: "Screens",
                      sub: "Automatic shows both screens whichever way they come out bigger. Focus shows one large and the other small; tap the top screen to swap them. The screens button in the top bar has these too (V on a keyboard).") {
             ChipFlow(spacing: 6) {
@@ -271,6 +272,9 @@ struct NdsSettingsPane: View {
                 }
             }
         }
+        SheetToggleRow(label: "Bottom screen first",
+                       sub: "Swap the screens: the touch screen on top, or the large one in Focus (B on a keyboard)",
+                       isOn: $nds.swap)
         SheetFlowRow(label: "Gap",
                      sub: "How far apart two screens shown together sit. Like the console is about the real distance, in pixels.") {
             SheetChipPicker(selection: $nds.gap, options: NdsUtil.Gap.allCases.map { ($0, $0.label) })
@@ -279,6 +283,12 @@ struct NdsSettingsPane: View {
                      sub: "For games played with the console held sideways like a book. Book, left puts the touch screen on the right (O on a keyboard).") {
             SheetChipPicker(selection: $nds.rot, options: NdsUtil.rotations.map { ($0, NdsUtil.rotLabel($0)) })
         }
+        if UIDevice.current.userInterfaceIdiom == .phone {
+            SheetToggleRow(label: "Hide the top bar while playing",
+                           sub: "On a phone held upright, the screens take the bar's room. A tap on the picture away from the touch screen brings the bar back.",
+                           isOn: $nds.barHide)
+        }
+        SheetSubhead(text: "3D graphics")
         SheetFlowRow(label: "3D resolution",
                      sub: "Draws the 3D scenes at a higher resolution: sharper edges and models, the same textures. 2D stays as it is. When the processor draws the 3D, each step costs a lot more work a frame, so a slower device may not keep full speed.") {
             SheetChipPicker(selection: $nds.hd, options: NdsState.hdScales.map { ($0, $0 == 1 ? "Native" : "\($0)x") })
@@ -288,14 +298,6 @@ struct NdsSettingsPane: View {
             SheetChipPicker(selection: $nds.gpu, options: NdsState.GpuChoice.allCases.map { ($0, $0.label) })
         }
         if !nds.gpuStatus.isEmpty { SheetHint(nds.gpuStatus) }
-        SheetToggleRow(label: "Bottom screen first",
-                       sub: "Swap the screens: the touch screen on top, or the large one in Focus (B on a keyboard)",
-                       isOn: $nds.swap)
-        if UIDevice.current.userInterfaceIdiom == .phone {
-            SheetToggleRow(label: "Hide the top bar while playing",
-                           sub: "On a phone held upright, the screens take the bar's room. A tap on the picture away from the touch screen brings the bar back.",
-                           isOn: $nds.barHide)
-        }
         SheetSubhead(text: "BIOS and firmware")
         ForEach(NdsUtil.BiosKind.allCases, id: \.self) { k in
             NdsBiosRow(kind: k)

@@ -22,7 +22,7 @@ struct RewindScrubberView: View {
             SheetHint(thumbs.count > 1
                       ? "Drag the strip, or the bar for longer jumps. Everything right of the line is discarded."
                       : settings.rewind ? "No rewind history yet — it builds up as you play."
-                                        : "Rewind is off. Turn it on in Settings › General to keep a timeline you can go back through.")
+                                        : "Rewind is off. Turn it on in Settings › Play to keep a timeline you can go back through.")
             scrubBox
             if stage > 0 && sel > 0 {
                 SheetWarning(text: stage == 1
