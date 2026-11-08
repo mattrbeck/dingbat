@@ -4488,6 +4488,13 @@ body.game-menu-open #toast {
 }
 
 /* ---- Library pictures (thumbs-modal) ---- */
+/* One line however long the game's name, so the box keeps its height from
+   one game to the next; the count leads, the name is what gives way. */
+#thumbs-status {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .thumbs-bar {
   height: 4px;
   margin: 4px 0 18px;
@@ -9151,8 +9158,10 @@ body.running.sync-shown #status {
     animation-duration: 3s;
   }
 
-  /* A tile's download bar steps with the bytes instead of gliding. */
-  .home-tile-load-bar > span {
+  /* A tile's download bar steps with the bytes instead of gliding, and the
+     pictures run's bar with the run. */
+  .home-tile-load-bar > span,
+  .thumbs-bar span {
     transition: none;
   }
 

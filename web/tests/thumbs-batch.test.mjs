@@ -339,7 +339,7 @@ test("Stop ends the run after the game in hand", async () => {
   const n = await p;
   assert.equal(n, 0);
   eq(framesOf(app), []);
-  assert.ok(app.toasts.some((t) => /No pictures added/.test(t)));
+  eq(app.toasts.at(-1), "Stopped", "a Stop before the first picture says so");
   assert.ok(!modalOpen(app));
 });
 
@@ -560,4 +560,55 @@ test("while it runs the box says what it is doing, and asks again next time", as
   app.idb.delete("frame:A.gba");
   assert.equal(await app.api.openThumbsRun(), true);
   assert.equal(title.textContent, "Add pictures to your library?", "the next offer asks again");
+});
+
+// ── Progress and the closing toast ──────────────────────────────────────────
+
+test("the bar shows the run's real progress: it moves during a game, and fills as games finish", async () => {
+  const app = await loadApp();
+  stubModule(app);
+  seedLibrary(app, ["A.gba", "B.gba"]);
+  // Every frame notes the bar as drawn then (the page's clock moves 1 ms a
+  // read, so a game's 600 frames span many slices and so many page turns).
+  app.runIn(`globalThis.__bar = [];
+    Module._benchFrames = (n) => { __ticks += n; __bar.push(parseFloat(document.getElementById("thumbs-bar-fill").style.width)); };`);
+  assert.equal(await app.api.runThumbnailBatch(), 2);
+  const bar = app.runIn("__bar.slice()");
+  for (let i = 1; i < bar.length; i++) assert.ok(bar[i] >= bar[i - 1], `never goes back (${bar[i - 1]} then ${bar[i]})`);
+  const first = bar.slice(0, app.api.THUMBS_BOOT_FRAMES);
+  const second = bar.slice(app.api.THUMBS_BOOT_FRAMES);
+  assert.equal(first[0], 0, "it starts empty");
+  assert.ok(first.some((w) => w > 0 && w < 50), "and moves during the first game: " + [...new Set(first)].join(" "));
+  assert.ok(second[0] >= 50, "the second game starts where the first left it");
+  assert.ok(second.some((w) => w > 50 && w < 100), "and moves on during it");
+  assert.equal(app.document.getElementById("thumbs-bar-fill").style.width, "100%", "full at the end");
+
+  // The next offer starts it from nothing.
+  app.idb.delete("frame:A.gba");
+  assert.equal(await app.api.openThumbsRun(), true);
+  assert.equal(app.document.getElementById("thumbs-bar-fill").style.width, "0%");
+});
+
+test("the closing toast says what the run did, and names the games that stayed blank", async () => {
+  const app = await loadApp();
+  const toast = (r) => app.runIn(`thumbsRunToast(${JSON.stringify(r)})`);
+  eq(toast({ done: 2, blank: 0, cancelled: false }), "2 pictures added");
+  eq(toast({ done: 1, blank: 0, cancelled: true }), "1 picture added before stopping");
+  eq(toast({ done: 0, blank: 0, cancelled: true }), "Stopped");
+  eq(toast({ done: 0, blank: 0, cancelled: false }), "No pictures added");
+  eq(toast({ done: 2, blank: 1, cancelled: false }), "2 pictures added — 1 blank, skipped until played");
+  eq(toast({ done: 0, blank: 2, cancelled: false }), "2 games stayed blank, skipped until played");
+  eq(toast({ done: 0, blank: 1, cancelled: false }), "1 game stayed blank, skipped until played");
+  eq(toast({ done: 0, blank: 1, cancelled: true }), "Stopped — 1 blank, skipped until played");
+
+  // And from a real run: one game pictured, one white for good.
+  stubModule(app);
+  seedLibrary(app, ["A.gba", "B.gba"]);
+  app.runIn(`Module._benchFrames = (n) => {
+    __ticks += n;
+    // A's boot is a real screen; from B's boot on, the screen is white.
+    if (__inits.length === 2) new Uint8Array(Module.memory.buffer).fill(255);
+  };`);
+  assert.equal(await app.api.runThumbnailBatch(), 1);
+  eq(app.toasts.at(-1), "1 picture added — 1 blank, skipped until played");
 });

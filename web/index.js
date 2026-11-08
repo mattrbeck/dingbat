@@ -15813,7 +15813,7 @@ const thumbsStatus = document.getElementById("thumbs-status");
 const thumbsBarFill = document.getElementById("thumbs-bar-fill");
 const thumbsDriveRow = document.getElementById("thumbs-drive-row");
 const thumbsDriveToggle = /** @type {HTMLInputElement} */ (document.getElementById("thumbs-drive-toggle"));
-let thumbsRun = null; // { cancelled, done } while a batch runs
+let thumbsRun = null; // { cancelled, done, blank, step } while a batch runs
 
 // Library entries without a picture, less those a run came up blank on
 // (THUMBS_BLANK_KEY). Drive-only ones only when asked, and only with a ROM
@@ -15849,6 +15849,7 @@ const THUMBS_RUN_TITLE = "Adding pictures";
 const openThumbsOffer = async (cands, { fromButton = false } = {}) => {
   thumbsTitle.textContent = THUMBS_OFFER_TITLE;
   thumbsLaterHint.hidden = fromButton;
+  thumbsSetBar(0);
   thumbsDriveRow.hidden = !driveLinked() || !cands.some((c) => !c.local);
   thumbsDriveToggle.checked = await thumbsDriveWanted();
   thumbsOffer.hidden = false;
@@ -15900,11 +15901,18 @@ const openThumbsRun = async () => {
   return true;
 };
 
+// The bar is the run's own progress: the games done, plus how far the one
+// in hand is through its frames (run.step, from thumbsAdvance), so it moves
+// during a game and not only between them. The status is one line (styles:
+// a long name ends in an ellipsis), so the box keeps its height.
+const thumbsSetBar = (frac) => {
+  thumbsBarFill.style.width = Math.round(Math.min(1, Math.max(0, frac)) * 100) + "%";
+};
 const thumbsSetProgress = (i, total, name) => {
   thumbsStatus.textContent = name
     ? "Picturing " + (i + 1) + " of " + total + " — " + displayName(name)
     : "Done";
-  thumbsBarFill.style.width = Math.round((i / Math.max(1, total)) * 100) + "%";
+  thumbsSetBar(i / Math.max(1, total));
 };
 
 // The page's turn between slices: a message task, which a nested
@@ -15922,8 +15930,9 @@ const thumbsYield = () => new Promise((r) => {
 // presenting it and without loop_tick's session work (no rewind or clip
 // history), which the picture (wasm_fb_ptr) never used. Frames run back to
 // back for THUMBS_SLICE_MS, then the page gets a turn (Stop, the progress
-// bar). False when the run was stopped or a launch took the core meanwhile.
-const thumbsAdvance = async (run, frames, deadline, until = () => false) => {
+// bar: `report` passes the share of `frames` run so far to run.step). False
+// when the run was stopped or a launch took the core meanwhile.
+const thumbsAdvance = async (run, frames, deadline, until = () => false, report = false) => {
   if (run.cancelled || currentRomName) return false;
   let slice = performance.now();
   for (let done = 0; done < frames;) {
@@ -15935,6 +15944,7 @@ const thumbsAdvance = async (run, frames, deadline, until = () => false) => {
     if (now - slice >= THUMBS_SLICE_MS) {
       // Nothing plays it; bounded should a volume change unsilence the core.
       if (Module._clearAudioBuffer) Module._clearAudioBuffer();
+      if (report) run.step?.(done / frames);
       await thumbsYield();
       if (run.cancelled || currentRomName) return false; // a launch took the core
       slice = performance.now();
@@ -15975,7 +15985,7 @@ const thumbsPictureOne = async (cand, run, remote) => {
     frames = THUMBS_RESUME_FRAMES;
     deadline = Infinity;
   }
-  if (!(await thumbsAdvance(run, frames, deadline))) return false;
+  if (!(await thumbsAdvance(run, frames, deadline, undefined, true))) return false;
   let [w, h] = ext === ".gba" ? [240, 160] : [160, 144];
   const grab = () => {
     let ptr = Module._wasm_fb_ptr();
@@ -15993,6 +16003,7 @@ const thumbsPictureOne = async (cand, run, remote) => {
   if (!heap || framebufferBlank(heap, w, h)) {
     try { FS.unlink("thumb.sav"); } catch {}
     await markThumbsBlank(name); // left out until it is played
+    run.blank++;
     return false;
   }
   let sgb = Module._wasm_sgb_active && Module._wasm_sgb_active();
@@ -16029,7 +16040,7 @@ const runThumbnailBatch = async ({ includeDrive = false } = {}) => {
     showToast("Close the running game first");
     return 0;
   }
-  let run = { cancelled: false, done: 0 };
+  let run = { cancelled: false, done: 0, blank: 0, step: null };
   thumbsRun = run;
   thumbsTitle.textContent = THUMBS_RUN_TITLE; // no longer a question
   thumbsOffer.hidden = true;
@@ -16047,6 +16058,7 @@ const runThumbnailBatch = async ({ includeDrive = false } = {}) => {
   try {
     for (let i = 0; i < cands.length && !run.cancelled; i++) {
       thumbsSetProgress(i, cands.length, cands[i].name);
+      run.step = (f) => thumbsSetBar((i + f) / cands.length);
       try {
         if (await thumbsPictureOne(cands[i], run, remote)) {
           run.done++;
@@ -16055,6 +16067,7 @@ const runThumbnailBatch = async ({ includeDrive = false } = {}) => {
       } catch (e) {
         console.warn("thumbnail failed for " + cands[i].name, e);
       }
+      if (!run.cancelled) thumbsSetBar((i + 1) / cands.length);
     }
     thumbsSetProgress(cands.length, cands.length, null);
   } finally {
@@ -16065,10 +16078,21 @@ const runThumbnailBatch = async ({ includeDrive = false } = {}) => {
     releaseFocus(thumbsModal);
     refreshHomeRecent();
   }
-  showToast(run.done === 0 ? "No pictures added"
-    : run.done + (run.done === 1 ? " picture" : " pictures") + " added" +
-      (run.cancelled ? " before stopping" : ""));
+  showToast(thumbsRunToast(run));
   return run.done;
+};
+
+// What a run did, in one short line: the pictures added (or "Stopped", for
+// a Stop before the first), and the games that came up blank, which the
+// next run skips until they are played (THUMBS_BLANK_KEY).
+const thumbsRunToast = ({ done, blank, cancelled }) => {
+  let main = done
+    ? done + (done === 1 ? " picture" : " pictures") + " added" + (cancelled ? " before stopping" : "")
+    : cancelled ? "Stopped" : "";
+  if (!blank) return main || "No pictures added";
+  // One line on a 375 px phone, but for a Stop after some pictures with blanks.
+  return main ? main + " — " + blank + " blank, skipped until played"
+    : blank + (blank === 1 ? " game" : " games") + " stayed blank, skipped until played";
 };
 
 const cancelThumbnailRun = () => { if (thumbsRun) thumbsRun.cancelled = true; };
