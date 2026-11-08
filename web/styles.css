@@ -3375,6 +3375,40 @@ body.runtime-ready #boot-progress {
   text-transform: none;
 }
 
+/* A phone's head holds the label, Add pictures and Add a game on one row
+   only without the word "Library" (measured: 357px of a 375 phone's 343,
+   and "12 games" already wraps at 390). So while Add pictures shows, a
+   narrow head drops the word, as the app's does, and the head stays one
+   row instead of jumping to two and back as the button comes and goes.
+   The word stays for screen readers; the count, the buttons and their
+   44px touch areas are unchanged. */
+@media (max-width: 429px) {
+  .home-recent-head:has(#home-thumbs:not([hidden])) .home-recent-word {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  .home-recent-head:has(#home-thumbs:not([hidden])) .lib-count {
+    margin-left: 0;
+  }
+
+  .home-recent-head:has(#home-thumbs:not([hidden])) .home-recent-meta {
+    column-gap: 8px;
+  }
+}
+
+/* A 320px phone is 7px short even so: Add pictures gives up side padding
+   (not height, nor its touch area). Past "99 games" it still wraps there. */
+@media (max-width: 359px) {
+  .button.lib-thumbs {
+    padding: 0 8px;
+  }
+}
+
 /* --- Library bar: search, chips, sort --------------------------------------
    One row on desktop. On phones it sticks under the top bar while the grid
    scrolls, as two rows: search and sort, then the chips scrolling sideways
