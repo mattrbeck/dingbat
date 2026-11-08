@@ -62,7 +62,7 @@ enum ThemeName: String, CaseIterable, Identifiable {
         }
     }
 
-    /// Settings › Game Boy › Palette › "Match app theme": the four shades,
+    /// Settings › Game Boy › Palette › "App theme": the four shades,
     /// lightest first (web GB_THEME_PALETTES).
     var gbPalette: [UInt32] {
         switch self {

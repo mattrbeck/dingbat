@@ -713,6 +713,21 @@ final class NativeTouchesUITests: XCTestCase {
         snap(app, "settings-controls")
     }
 
+    /// Run-ahead's chips read "1", "2", "3": VoiceOver hears "1 frame",
+    /// "2 frames", "3 frames" (web aria-label), and a tap selects one.
+    func testShortChipsSpeakTheirNames() {
+        // Off at the start whatever an earlier run left.
+        let app = launch(["-runahead", "0", "-sheet", "settings:controls"])
+        let one = app.buttons["1 frame"].firstMatch
+        XCTAssertTrue(one.waitForExistence(timeout: 10), "Run-ahead's 1 chip is \"1 frame\"")
+        XCTAssertTrue(app.buttons["3 frames"].exists, "Run-ahead's 3 chip is \"3 frames\"")
+        XCTAssertFalse(one.isSelected, "run-ahead starts off")
+        one.tap()
+        XCTAssertTrue(one.isSelected, "a tap selects it")
+        app.buttons["Off"].firstMatch.tap()
+        XCTAssertFalse(one.isSelected, "Off again")
+    }
+
     /// Signed in to a fake Drive (`-drive-stub`, DB_DRIVE): a pull down on
     /// the home screen runs a sync. The fake's request log, read by the
     /// runner, has to show requests after the printed pull time.

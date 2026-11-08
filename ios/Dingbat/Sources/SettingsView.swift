@@ -312,9 +312,10 @@ private struct ControlsPane: View {
         SheetSubhead(text: "Response and feedback")
         SheetFlowRow(label: "Run-ahead",
                      sub: "Cuts the delay between pressing a button and seeing it happen, by guessing that many frames ahead. Costs extra CPU; ignored at 2× speed and in multiplayer.") {
-            SheetSelect(selection: $s.runahead,
-                        options: [(0, "Off"), (1, "1 frame"), (2, "2 frames"), (3, "3 frames")],
-                        accessibilityLabel: "Run-ahead frames")
+            SheetChipPicker(selection: $s.runahead,
+                            options: [(0, "Off"), (1, "1"), (2, "2"), (3, "3")],
+                            spoken: [1: "1 frame", 2: "2 frames", 3: "3 frames"],
+                            accessibilityLabel: "Run-ahead frames")
         }
         SheetToggleRow(label: "Rumble", sub: "Buzz and shake when a game uses its rumble motor", isOn: $s.rumble)
         SheetToggleRow(label: "Haptic feedback",
@@ -354,10 +355,10 @@ private struct KeyboardBlock: View {
 
     var body: some View {
         SheetSubhead(text: "Keyboard")
-        SheetRow(label: "Preset") {
-            SheetSelect(selection: Binding(get: { kb.preset }, set: { kb.setPreset($0) }),
-                        options: [(.default, "Default"), (.homerow, "Home-row"), (.custom, "Custom")],
-                        accessibilityLabel: "Keyboard preset")
+        SheetFlowRow(label: "Preset", sub: "Custom is whatever you rebind below") {
+            SheetChipPicker(selection: Binding(get: { kb.preset }, set: { kb.setPreset($0) }),
+                            options: [(.default, "Default"), (.homerow, "Home-row"), (.custom, "Custom")],
+                            accessibilityLabel: "Keyboard preset")
         }
         SheetHint("Tap a key, then press its replacement. Saved automatically.")
         LazyVGrid(columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible())], alignment: .leading, spacing: 8) {
@@ -454,9 +455,9 @@ private struct GameBoyPane: View {
         Group {
             SheetFlowRow(label: "Palette",
                          sub: "The four colors black-and-white games are drawn in. Color games are never affected.") {
-                SheetSelect(selection: $s.gbPaletteMode,
-                            options: [(.default, "Default"), (.theme, "Match app theme"), (.custom, "Custom…")],
-                            accessibilityLabel: "Game Boy palette")
+                SheetChipPicker(selection: $s.gbPaletteMode,
+                                options: [(.default, "Default"), (.theme, "App theme"), (.custom, "Custom")],
+                                accessibilityLabel: "Game Boy palette")
             }
             if sgbActive {
                 SheetHint("Super Game Boy games bring their own colors, so there are no shades to replace. Turn it off below to use a palette.")

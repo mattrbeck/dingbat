@@ -516,6 +516,9 @@ struct SheetChip<Leading: View>: View {
     let selected: Bool
     /// Stretch to the width it is given (a grid cell).
     var fill = false
+    /// What VoiceOver reads when the chip's text is short (web aria-label:
+    /// "1" is read "1 frame").
+    var spoken: String? = nil
     let action: () -> Void
     @ViewBuilder var leading: () -> Leading
     @Environment(\.palette) private var palette
@@ -538,6 +541,7 @@ struct SheetChip<Leading: View>: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .accessibilityLabel(spoken ?? label)
         .accessibilityAddTraits(selected ? .isSelected : [])
         .padFocus("chip:" + padID, press: action)
     }
@@ -546,22 +550,29 @@ struct SheetChip<Leading: View>: View {
 }
 
 extension SheetChip where Leading == EmptyView {
-    init(label: String, selected: Bool, action: @escaping () -> Void) {
-        self.init(label: label, selected: selected, fill: false, action: action, leading: { EmptyView() })
+    init(label: String, selected: Bool, spoken: String? = nil, action: @escaping () -> Void) {
+        self.init(label: label, selected: selected, fill: false, spoken: spoken, action: action,
+                  leading: { EmptyView() })
     }
 }
 
-/// A radiogroup of chips over any value (web .chip-row).
+/// A radiogroup of chips over any value (web .chip-row): `spoken` gives a
+/// chip whose text is too short to read on its own a fuller name (web
+/// aria-label), `accessibilityLabel` names the group (the row's label).
 struct SheetChipPicker<Value: Hashable>: View {
     @Binding var selection: Value
     let options: [(Value, String)]
+    var spoken: [Value: String] = [:]
+    var accessibilityLabel = ""
 
     var body: some View {
-        HStack(spacing: 6) {
+        let row = HStack(spacing: 6) {
             ForEach(options, id: \.0) { opt in
-                SheetChip(label: opt.1, selected: selection == opt.0) { selection = opt.0 }
+                SheetChip(label: opt.1, selected: selection == opt.0, spoken: spoken[opt.0]) { selection = opt.0 }
             }
         }
+        if accessibilityLabel.isEmpty { row }
+        else { row.accessibilityElement(children: .contain).accessibilityLabel(accessibilityLabel) }
     }
 }
 
