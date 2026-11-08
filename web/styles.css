@@ -73,7 +73,13 @@
 
   /* ---- Amber-tinted pressed / active fills ---- */
   --accent-tint-top: #2a2410;    /* shared top of active/pressed amber fills */
-  --btn-active-bottom: #211c0c;  /* icon-btn.active / segmented-bar active */
+  /* An on top-bar button (.icon-btn.active): lit like .button-primary. The
+     shell-coloured themes, whose idle buttons are light, keep a dark one. */
+  --btn-on-fill: linear-gradient(180deg, var(--accent-2), var(--accent));
+  --btn-on-fill-hover: linear-gradient(180deg, var(--accent-hi), var(--accent-2));
+  --btn-on-ink: var(--accent-ink);
+  --btn-on-border: rgba(var(--accent-rgb), 0.6);
+  --btn-on-shadow: inset 0 1px 0 rgba(var(--hi-rgb), 0.35), 0 0 14px -3px var(--accent-glow);
   --pad-pressed-bottom: #1d1809; /* on-screen pad pressed */
 
   /* ---- Dark translucent scrims (feature-specific) ---- */
@@ -216,7 +222,6 @@
   --control-strip-top: #100b1a;
 
   --accent-tint-top: #221a36;
-  --btn-active-bottom: #1a142b;
   --pad-pressed-bottom: #161126;
 
   --drop-overlay-bg: rgba(10, 7, 18, 0.82);
@@ -263,7 +268,6 @@
   --cart-gba-label-lo: #8f73e0;
 
   --accent-tint-top: #1c1726;
-  --btn-active-bottom: #15111f;
   --pad-pressed-bottom: #110d1a;
 
   --drop-overlay-bg: rgba(0, 0, 0, 0.85);
@@ -334,7 +338,6 @@
   /* Pressed/active fills invert to light amber tints; the accent
      (#9c5400) stays the icon/label color on top of them. */
   --accent-tint-top: #ffe7c4;
-  --btn-active-bottom: #ffdca6;
   --pad-pressed-bottom: #f8d193;
 
   --drop-overlay-bg: rgba(233, 236, 243, 0.85);
@@ -395,7 +398,6 @@
   --control-strip-top: #0e0b18;
 
   --accent-tint-top: #1c1738;
-  --btn-active-bottom: #15112a;
   --pad-pressed-bottom: #110e22;
 
   --drop-overlay-bg: rgba(11, 9, 19, 0.82);
@@ -464,7 +466,7 @@
   --control-strip-top: #190b10;
 
   --accent-tint-top: #381724;
-  --btn-active-bottom: #2a111b;
+  --btn-on-foot: #2a111b;  /* the dark on-state's foot */
   --pad-pressed-bottom: #220e16;
 
   --drop-overlay-bg: rgba(19, 9, 13, 0.82);
@@ -532,7 +534,7 @@
   --control-strip-top: #0c0f18;
 
   --accent-tint-top: #182137;
-  --btn-active-bottom: #121929;
+  --btn-on-foot: #121929;  /* the dark on-state's foot */
   --pad-pressed-bottom: #0f1422;
 
   --drop-overlay-bg: rgba(10, 12, 18, 0.82);
@@ -600,7 +602,7 @@
   --control-strip-top: #0d180b;
 
   --accent-tint-top: #1b3916;
-  --btn-active-bottom: #142a10;
+  --btn-on-foot: #142a10;  /* the dark on-state's foot */
   --pad-pressed-bottom: #10230e;
 
   --drop-overlay-bg: rgba(11, 19, 9, 0.82);
@@ -668,7 +670,7 @@
   --control-strip-top: #131311;
 
   --accent-tint-top: #2b331c;
-  --btn-active-bottom: #202615;
+  --btn-on-foot: #202615;  /* the dark on-state's foot */
   --pad-pressed-bottom: #1b1f11;
 
   --drop-overlay-bg: rgba(15, 14, 13, 0.82);
@@ -745,7 +747,6 @@
   --control-strip-top: #140c18;
 
   --accent-tint-top: #2d1738;
-  --btn-active-bottom: #21112a;
   --pad-pressed-bottom: #1c0e22;
 
   --drop-overlay-bg: rgba(15, 10, 18, 0.82);
@@ -812,7 +813,7 @@
   --control-strip-top: #18100c;
 
   --accent-tint-top: #3b2214;
-  --btn-active-bottom: #2c190f;
+  --btn-on-foot: #2c190f;  /* the dark on-state's foot */
   --pad-pressed-bottom: #24150c;
 
   --drop-overlay-bg: rgba(18, 13, 10, 0.82);
@@ -880,7 +881,7 @@
   --control-strip-top: #141210;
 
   --accent-tint-top: #3c1613;
-  --btn-active-bottom: #2d100e;
+  --btn-on-foot: #2d100e;  /* the dark on-state's foot */
   --pad-pressed-bottom: #250d0c;
 
   --drop-overlay-bg: rgba(15, 14, 13, 0.82);
@@ -923,6 +924,23 @@
   --dpad-border-w: 3px;
   --dpad-bar-line: transparent;
   --panel-stripe: rgba(24, 18, 10, 0.62);
+}
+
+/* Shell-coloured themes: the idle bar buttons are light, so an on one is a
+   dark accent-tinted well, which already stands out; the lit fill would sit
+   at the idle buttons' lightness. */
+:root[data-theme="glacier"],
+:root[data-theme="fuchsia"],
+:root[data-theme="kiwi"],
+:root[data-theme="dmg"],
+:root[data-theme="famicom"],
+:root[data-theme="daiei"] {
+  --btn-on-fill: linear-gradient(180deg, var(--accent-tint-top), var(--btn-on-foot));
+  --btn-on-fill-hover: var(--btn-on-fill);
+  --btn-on-ink: var(--accent);
+  --btn-on-border: rgba(var(--accent-rgb), 0.5);
+  --btn-on-shadow: inset 0 1px 0 rgba(var(--accent-hi-rgb), 0.15),
+    0 0 0 1px rgba(var(--accent-rgb), 0.12), 0 0 12px -2px var(--accent-glow);
 }
 
 *,
@@ -1065,12 +1083,40 @@ button {
   display: none;
 }
 
+/* On (fast forward, 2x, paused, rewinding), from the --btn-on-* tokens:
+   lit like .button-primary, a solid accent fill with the accent's ink for
+   the glyph (stroked or filled alike, both draw in currentColor), or in the
+   shell-coloured themes a dark accent well - so it reads at a glance
+   against an idle button in every theme. */
 .icon-btn.active {
-  color: var(--accent);
-  border-color: rgba(var(--accent-rgb), 0.5);
-  background: linear-gradient(180deg, var(--accent-tint-top), var(--btn-active-bottom));
-  box-shadow: inset 0 1px 0 rgba(var(--accent-hi-rgb), 0.15),
-    0 0 0 1px rgba(var(--accent-rgb), 0.12), 0 0 12px -2px var(--accent-glow);
+  color: var(--btn-on-ink);
+  border-color: var(--btn-on-border);
+  background: var(--btn-on-fill);
+  box-shadow: var(--btn-on-shadow);
+}
+
+@media (hover: hover) {
+  .icon-btn.active:hover {
+    color: var(--btn-on-ink);
+    background: var(--btn-on-fill-hover);
+    border-color: var(--btn-on-border);
+  }
+}
+
+.icon-btn.active:active {
+  box-shadow: inset 0 2px 5px var(--inset-lo);
+}
+
+/* Forced colors drops the fill, which would leave on and off alike. (The
+   body step outranks the phone's segmented-bar rule.) */
+@media (forced-colors: active) {
+  .icon-btn.active,
+  body #playback-controls .icon-btn.active {
+    forced-color-adjust: none;
+    color: HighlightText;
+    background: Highlight;
+    border-color: Highlight;
+  }
 }
 
 /* --- Menu --- */
@@ -7699,8 +7745,10 @@ body.rewind-off #report-slider {
     width: 17px;
     height: 17px;
   }
+  /* Lit as a lone button is. */
   #playback-controls .icon-btn.active {
-    background: linear-gradient(180deg, var(--accent-tint-top), var(--btn-active-bottom));
+    background: var(--btn-on-fill);
+    box-shadow: var(--btn-on-shadow);
   }
   #playback-controls .icon-btn:active {
     transform: none;

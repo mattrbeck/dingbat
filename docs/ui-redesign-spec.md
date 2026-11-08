@@ -97,7 +97,9 @@ the solid it mirrors — the file's own rule.
 
   /* ---- Amber-tinted → accent-tinted fills ---- */
   --accent-tint-top: #242a12;
-  --btn-active-bottom: #181c0a;
+  /* An on top-bar button: --btn-on-fill, --btn-on-ink, --btn-on-border and
+     --btn-on-shadow, lit from the accent by default (styles.css :root);
+     a light-chrome theme sets --btn-on-foot and the dark well instead. */
   --pad-pressed-bottom: #141806;
 
   /* ---- System badges: cool hues, clear of a yellow-green accent ---- */
