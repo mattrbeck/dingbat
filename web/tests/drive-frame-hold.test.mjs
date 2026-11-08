@@ -97,7 +97,9 @@ test("so does one when Drive's picture is the one this device last saw", async (
 // picture of it never synced here once waited for the game to close, and
 // then lost to Drive's older one. Now the pull marks Drive's seen while the
 // game keeps its picture up to date, and the flush sends this device's.
-const openHere = (app) => app.runIn(`currentRomName = "A.gba"; currentOriginalName = "A.gba";`);
+// `pictured`: the game has stored a picture of its own since it loaded.
+const openHere = (app, { pictured = true } = {}) => app.runIn(
+  `currentRomName = "A.gba"; currentOriginalName = "A.gba"; lastFrameSig = ${pictured ? '"its own"' : "null"};`);
 
 test("the open game's own picture goes up: the pull marks Drive's seen", async () => {
   const drive = driveWithPicture();
@@ -125,4 +127,27 @@ test("not while the open game's session is held back (its picture is not kept th
   await settle();
   assert.equal(text(drive.get(NAME)), "THEIRS", "Drive's picture is not written over");
   assert.ok(app.api.syncState.queueUp.includes(NAME), "still queued, for a later pull");
+});
+
+test("not before the open game has stored a picture of its own (the queued one may be older)", async () => {
+  const drive = driveWithPicture();
+  const app = await device(drive);
+  openHere(app, { pictured: false });
+  await app.api.pullSync({ silent: true });
+  await app.api.flushSync();
+  await settle();
+  assert.equal(text(drive.get(NAME)), "THEIRS", "the boot screen does not go up");
+  assert.ok(app.api.syncState.queueUp.includes(NAME));
+});
+
+test("not while a Switch to another device's newer moment of the game is on offer", async () => {
+  const drive = driveWithPicture();
+  const app = await device(drive);
+  openHere(app);
+  app.runIn(`handoffStash = { game: "A.gba", news: [] };`);
+  await app.api.pullSync({ silent: true });
+  await app.api.flushSync();
+  await settle();
+  assert.equal(text(drive.get(NAME)), "THEIRS", "Drive keeps the other device's picture");
+  assert.ok(app.api.syncState.queueUp.includes(NAME));
 });

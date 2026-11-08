@@ -4687,10 +4687,14 @@ const pullSyncInner = async ({ silent = true } = {}) => {
         // The picture of the game being played is never brought down, so a
         // picture of it never synced here (the flush holds one back until
         // this pull lands Drive's) would wait for the game to close and then
-        // lose to Drive's older one. Queued while the game keeps its picture
-        // up to date, it is this session's, or about to be: Drive's is marked
-        // seen, and the flush sends this device's over it.
-        if (p.kind === "frame" && framePictured(p.game) && syncState.queueUp.includes(name) &&
+        // lose to Drive's older one. Queued once the game has stored a picture
+        // of its own this session (lastFrameSig, cleared at load; until then
+        // the queued one may be an older boot screen), it is this session's:
+        // Drive's is marked seen, and the flush sends this device's over it.
+        // Not while a Switch to another device's newer moment is on offer:
+        // taken, the game leaves, and Drive's picture is that moment's.
+        if (p.kind === "frame" && framePictured(p.game) && lastFrameSig !== null &&
+            handoffStash?.game !== p.game && syncState.queueUp.includes(name) &&
             syncState.rmt[name] !== f.modifiedTime) {
           syncState.rmt[name] = f.modifiedTime;
           queuedMissing = true;

@@ -1122,11 +1122,16 @@ final class DriveSync: ObservableObject {
                     // down, so a picture of it never synced here (uploadOne
                     // holds one back until this pull lands Drive's) would wait
                     // for the game to close and then lose to Drive's older
-                    // one. Queued while the game keeps its picture up to date
-                    // (storeLastFrame; not a switched-off DS), it is this
-                    // session's, or about to be: Drive's is marked seen, and
-                    // the flush sends this device's over it (web the same).
-                    let pictured = !(GameSession.shared.isNDS && NdsState.shared.poweredOff)
+                    // one. Queued once the game has stored a picture of its
+                    // own this session (storeLastFrame; until then the queued
+                    // one may be an older boot screen) and keeps it up to date
+                    // (not a switched-off DS), it is this session's: Drive's
+                    // is marked seen, and the flush sends this device's over
+                    // it (web the same). Not while a Switch to another
+                    // device's newer moment is on offer: taken, the game
+                    // leaves, and Drive's picture is that moment's.
+                    let s = GameSession.shared
+                    let pictured = s.pictureTaken && !(s.isNDS && NdsState.shared.poweredOff) && handoffStash?.game != p.game
                     if p.kind == "frame", pictured, state.queueUp.contains(name), state.rmt[name] != f.modifiedTime {
                         state.rmt[name] = f.modifiedTime
                         queuedMissing = true

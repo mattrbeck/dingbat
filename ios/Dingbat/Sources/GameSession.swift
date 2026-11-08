@@ -1450,6 +1450,9 @@ final class GameSession: NSObject, ObservableObject {
     /// Signature of the last picture stored, so an unchanged screen (a title
     /// screen left running) is neither rewritten nor sent again.
     private var lastFrameSig: String?
+    /// Whether this game has stored a picture of its own since it loaded:
+    /// until then a queued picture of it may be an older one (DriveSync's pull).
+    var pictureTaken: Bool { lastFrameSig != nil }
 
     /// The library picture: the last screen, a JPEG at 2x native as the
     /// web's (frame:<name>), mirrored on Drive.
