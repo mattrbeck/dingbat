@@ -142,6 +142,18 @@ struct Palette {
     var btnActiveBottom = Color(hex: 0x211C0C)
     var padPressedBottom = Color(hex: 0x1D1809)
 
+    /// A top-bar button that is on (fast forward, 2x, paused, muted, the
+    /// menu open): its face top to bottom, icon, border, glow and the light
+    /// along its top edge (web .icon-btn.active). make() sets them per theme:
+    /// lit like the primary button where the tinted face was faint, the
+    /// tinted face kept where the bar is shell-coloured.
+    var barOnTop = Color(hex: 0xFFC880)
+    var barOnBottom = Color(hex: 0xFFB04D)
+    var barOnInk = Color(hex: 0x2A1800)
+    var barOnBorder = Color(hex: 0xFFB04D, alpha: 0.6)
+    var barOnGlow = Color(hex: 0xFFB04D, alpha: 0.32)
+    var barOnHighlight = Color.white.opacity(0.35)
+
     // Touch pads.
     var padTop = Color(hex: 0x262E44)
     var padBottom = Color(hex: 0x141826)
@@ -389,6 +401,20 @@ struct Palette {
         case .fuchsia: p.peer = Color(hex: 0x6FD3C7)
         case .kiwi, .dmg: p.peer = Color(hex: 0xC79CFF)
         case .amber, .daiei: break
+        }
+        // A top-bar button that is on. Where the tinted face barely stood off
+        // the chrome (the dark themes, Light), it is lit like the primary
+        // button: accent 2 down to accent, the accent ink, the accent's glow.
+        // On the shell-coloured bars the dark tinted face already stands
+        // out, where a lit accent face would melt into the bar's own colour.
+        switch t {
+        case .night, .amber, .black, .light, .indigo, .atomicPurple:
+            p.barOnTop = p.accent2; p.barOnBottom = p.accent; p.barOnInk = p.accentInk
+            p.barOnBorder = p.accent.opacity(0.6); p.barOnGlow = p.accentGlow
+            p.barOnHighlight = Color.white.opacity(0.35)
+        case .glacier, .fuchsia, .kiwi, .dmg, .famicom, .daiei:
+            p.barOnTop = p.accentTintTop; p.barOnBottom = p.btnActiveBottom; p.barOnInk = p.accent
+            p.barOnBorder = p.accent.opacity(0.5); p.barOnGlow = .clear; p.barOnHighlight = .clear
         }
         return p
     }

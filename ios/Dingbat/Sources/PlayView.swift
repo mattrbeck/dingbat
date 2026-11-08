@@ -638,26 +638,50 @@ struct BarIconButton: View {
         Button(action: action) {
             Image(systemName: system)
                 .font(.system(size: 15, weight: .semibold))
-                .foregroundColor(active ? palette.accent : palette.chromeInk)
+                .foregroundColor(active ? palette.barOnInk : palette.chromeInk)
                 .frame(width: width, height: 34)
-                .background(
-                    RoundedRectangle(cornerRadius: 9)
-                        .fill(active
-                              ? AnyShapeStyle(LinearGradient(colors: [palette.accentTintTop, palette.btnActiveBottom],
-                                                             startPoint: .top, endPoint: .bottom))
-                              : AnyShapeStyle(LinearGradient(colors: [palette.chromeBtnTop, palette.chromeBtnBottom],
-                                                             startPoint: .top, endPoint: .bottom)))
-                )
-                .overlay(RoundedRectangle(cornerRadius: 9)
-                    .stroke(active ? palette.accent.opacity(0.5) : palette.chromeBtnBorder, lineWidth: 1))
+                .barFace(active: active)
                 .overlay(alignment: .topTrailing) {
                     if dot {
-                        Circle().fill(palette.accent).frame(width: 7, height: 7).offset(x: -4, y: 4)
+                        // On the lit fill the accent would vanish: the ink.
+                        Circle().fill(active ? palette.barOnInk : palette.accent)
+                            .frame(width: 7, height: 7).offset(x: -4, y: 4)
                     }
                 }
         }
         .accessibilityLabel(label)
     }
+}
+
+/// A top-bar button's face (web .icon-btn): the chrome button, or, on, lit
+/// like the primary button (Palette.barOn*). The size is the caller's; the
+/// glow is a shadow, so it takes no room.
+private struct BarFace: ViewModifier {
+    @Environment(\.palette) var palette
+    let active: Bool
+
+    func body(content: Content) -> some View {
+        let shape = RoundedRectangle(cornerRadius: 9)
+        return content
+            .background(
+                shape.fill(LinearGradient(colors: active ? [palette.barOnTop, palette.barOnBottom]
+                                                         : [palette.chromeBtnTop, palette.chromeBtnBottom],
+                                          startPoint: .top, endPoint: .bottom))
+                    .shadow(color: active ? palette.barOnGlow : .clear, radius: 5)
+            )
+            .overlay(alignment: .top) {
+                // The lit face's top edge catches the light.
+                if active {
+                    Rectangle().fill(palette.barOnHighlight).frame(height: 1)
+                        .padding(.horizontal, 7).padding(.top, 1)
+                }
+            }
+            .overlay(shape.stroke(active ? palette.barOnBorder : palette.chromeBtnBorder, lineWidth: 1))
+    }
+}
+
+extension View {
+    func barFace(active: Bool) -> some View { modifier(BarFace(active: active)) }
 }
 
 /// Reset · Rewind · Pause · (paused: Step | running: 2x · Fast forward).
@@ -777,10 +801,7 @@ struct BarIconButtonLabel: View {
             .font(.system(size: 15, weight: .semibold))
             .foregroundColor(palette.chromeInk)
             .frame(width: width, height: 34)
-            .background(RoundedRectangle(cornerRadius: 9)
-                .fill(LinearGradient(colors: [palette.chromeBtnTop, palette.chromeBtnBottom],
-                                     startPoint: .top, endPoint: .bottom)))
-            .overlay(RoundedRectangle(cornerRadius: 9).stroke(palette.chromeBtnBorder, lineWidth: 1))
+            .barFace(active: false)
     }
 }
 
@@ -794,20 +815,11 @@ struct SpeedGlyph: View {
 
     var body: some View {
         Triangles(count: count)
-            .fill(active ? palette.accent : palette.chromeInk)
+            .fill(active ? palette.barOnInk : palette.chromeInk)
             .frame(width: count == 3 ? 18 : 15, height: 11)
             .rotationEffect(backward ? .degrees(180) : .zero)
             .frame(width: width, height: 34)
-            .background(
-                RoundedRectangle(cornerRadius: 9)
-                    .fill(active
-                          ? AnyShapeStyle(LinearGradient(colors: [palette.accentTintTop, palette.btnActiveBottom],
-                                                         startPoint: .top, endPoint: .bottom))
-                          : AnyShapeStyle(LinearGradient(colors: [palette.chromeBtnTop, palette.chromeBtnBottom],
-                                                         startPoint: .top, endPoint: .bottom)))
-            )
-            .overlay(RoundedRectangle(cornerRadius: 9)
-                .stroke(active ? palette.accent.opacity(0.5) : palette.chromeBtnBorder, lineWidth: 1))
+            .barFace(active: active)
             .contentShape(Rectangle())
     }
 
