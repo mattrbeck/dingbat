@@ -328,7 +328,7 @@ test("Drive-only games are fetched, pictured, and never written to the device", 
   eq(app.idb.get("recent").map((r) => r.name), ["A.gba", "D.gba"], "order untouched");
 });
 
-test("Stop ends the run after the game in hand", async () => {
+test("Stop ends the run at once, mid-game", async () => {
   const app = await loadApp();
   stubModule(app);
   seedLibrary(app, ["A.gba", "B.gba", "C.gba"]);
@@ -611,4 +611,75 @@ test("the closing toast says what the run did, and names the games that stayed b
   };`);
   assert.equal(await app.api.runThumbnailBatch(), 1);
   eq(app.toasts.at(-1), "1 picture added — 1 blank, skipped until played");
+});
+
+// ── Focus and the backdrop ──────────────────────────────────────────────────
+
+// The fake DOM's focus() does nothing: note which of the box's buttons gets it.
+const noteFocus = (app) => {
+  const seen = [];
+  for (const id of ["thumbs-close", "thumbs-go", "thumbs-not-now", "thumbs-stop"]) {
+    app.document.getElementById(id).focus = () => seen.push(id);
+  }
+  return seen;
+};
+
+test("the offer's first focus is its primary Add pictures, and a run moves it to Stop", async () => {
+  const app = await loadApp();
+  stubModule(app);
+  seedLibrary(app, ["A.gba"]);
+  const seen = noteFocus(app);
+  assert.equal(await app.api.openThumbsRun(), true);
+  eq(seen.at(-1), "thumbs-go", "A on a controller answers yes, not the x");
+
+  const p = app.api.runThumbnailBatch();
+  await settle();
+  eq(seen.at(-1), "thumbs-stop", "the focused button hid: focus goes to Stop, inside the box");
+  await p;
+});
+
+test("Add pictures hiding while it has focus hands focus to the library's Add a game", async () => {
+  const app = await loadApp();
+  stubModule(app);
+  seedLibrary(app, ["A.gba", "B.gba"]);
+  const seen = [];
+  app.document.getElementById("lib-add").focus = () => seen.push("lib-add");
+  assert.equal(await thumbsBtnShown(app), true);
+  // The run it started pictures the last game; the box has handed focus
+  // back to it, and the library render is about to hide it.
+  assert.equal(await app.api.runThumbnailBatch(), 2);
+  app.runIn(`document.activeElement = document.getElementById("home-thumbs")`);
+  assert.equal(await thumbsBtnShown(app), false);
+  eq(seen, ["lib-add"], "not dropped on the page");
+
+  // Hidden while something else has focus: focus is left alone.
+  seen.length = 0;
+  app.idb.delete("frame:A.gba");
+  assert.equal(await thumbsBtnShown(app), true);
+  app.idb.set("frame:A.gba", new Blob([u8(1)]));
+  app.runIn(`document.activeElement = document.body`);
+  assert.equal(await thumbsBtnShown(app), false);
+  eq(seen, []);
+});
+
+test("a backdrop tap during a run stops it, as Escape does; on the offer it closes, as every box's does", async () => {
+  const app = await loadApp();
+  stubModule(app);
+  seedLibrary(app, ["A.gba", "B.gba", "C.gba"]);
+  const modal = app.document.getElementById("thumbs-modal");
+
+  const p = app.api.runThumbnailBatch();
+  await settle();
+  await modal.dispatch("click", { target: modal });
+  assert.equal(await p, 0);
+  eq(framesOf(app), [], "stopped at once, inside the first game, before any picture");
+  eq(app.toasts.at(-1), "Stopped");
+  assert.ok(!modalOpen(app));
+
+  // The offer: a tap outside the box closes it; one inside does not.
+  assert.equal(await app.api.openThumbsRun(), true);
+  await modal.dispatch("click", { target: app.document.getElementById("thumbs-offer") });
+  assert.ok(modalOpen(app), "a tap inside the box is not the backdrop");
+  await modal.dispatch("click", { target: modal });
+  assert.ok(!modalOpen(app));
 });

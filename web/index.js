@@ -502,6 +502,13 @@ const modalFocusables = (overlay) =>
       && !n.closest?.("[inert]")
   );
 
+// An element focus can go to: in the document and laid out.
+const focusShown = (el) => !!el && el.isConnected !== false && el.offsetParent !== null;
+// The home screen's own way in, whichever is on screen: the library head's
+// Add a game, a library of one's, or the empty state's.
+const homeFocusFallback = () =>
+  ["lib-add", "home-solo-add", "home-load"].map((id) => document.getElementById(id)).find(focusShown);
+
 const trapFocus = (overlay) => {
   modalTrapOverlay = overlay;
   modalReturnFocus = document.activeElement;
@@ -531,14 +538,15 @@ const releaseFocus = (overlay) => {
   if (modalTrapHandler) overlay.removeEventListener("keydown", modalTrapHandler);
   modalTrapHandler = null;
   try {
-    // The return target may be display:none by now (a hidden menu item);
-    // fall back to the menu button so focus stays in the chrome.
+    // The return target may be display:none by now (a hidden menu item; the
+    // library head's Add pictures once nothing is left to picture): fall back
+    // to the first of these still on screen - the menu button, so focus stays
+    // in the chrome, or on the home screen (where that is hidden) the
+    // library's own way in - never to a hidden one, which leaves focus on
+    // the page itself.
     if (modalReturnFocus && modalReturnFocus.focus) {
-      if (modalReturnFocus.isConnected && modalReturnFocus.offsetParent !== null) {
-        modalReturnFocus.focus();
-      } else {
-        menuBtn.focus();
-      }
+      const to = [modalReturnFocus, menuBtn].find(focusShown) || homeFocusFallback();
+      if (to) to.focus();
     }
   } catch {}
   modalReturnFocus = null;
@@ -8327,7 +8335,13 @@ const refreshHomeRecent = async () => {
   // Drive switch left on, since only then can the run fetch them.
   thumbsDriveWanted()
     .then((drive) => thumbsCandidates(driveLinked() && drive, keys))
-    .then((cands) => { if (gen === homeRenderGen) homeThumbsBtn.hidden = !cands.length; })
+    .then((cands) => {
+      if (gen !== homeRenderGen) return;
+      // Hiding while focused (the run it started pictured the last game)
+      // hands focus on first, rather than dropping it on the page.
+      if (!cands.length && document.activeElement === homeThumbsBtn) homeFocusFallback()?.focus();
+      homeThumbsBtn.hidden = !cands.length;
+    })
     .catch(() => {});
   // Filtered before the commit: a fresh render is already filtered.
   for (let t of tiles) t.hidden = !libTileMatches(t);
@@ -15813,6 +15827,8 @@ const thumbsStatus = document.getElementById("thumbs-status");
 const thumbsBarFill = document.getElementById("thumbs-bar-fill");
 const thumbsDriveRow = document.getElementById("thumbs-drive-row");
 const thumbsDriveToggle = /** @type {HTMLInputElement} */ (document.getElementById("thumbs-drive-toggle"));
+const thumbsGoBtn = document.getElementById("thumbs-go");
+const thumbsStopBtn = document.getElementById("thumbs-stop");
 let thumbsRun = null; // { cancelled, done, blank, step } while a batch runs
 
 // Library entries without a picture, less those a run came up blank on
@@ -15856,6 +15872,9 @@ const openThumbsOffer = async (cands, { fromButton = false } = {}) => {
   thumbsProgress.hidden = true;
   thumbsModal.classList.add("open");
   trapFocus(thumbsModal);
+  // The primary, not the x the trap lands on: A on a controller, or Enter,
+  // answers the question instead of dismissing it.
+  thumbsGoBtn.focus();
 };
 
 // Shown once per device, when there is something to picture and nothing is
@@ -16046,6 +16065,10 @@ const runThumbnailBatch = async ({ includeDrive = false } = {}) => {
   thumbsOffer.hidden = true;
   thumbsProgress.hidden = false;
   thumbsModal.classList.add("open");
+  // The focused Add pictures has just hidden: focus goes to Stop, inside the
+  // box, and the box keeps the trap (a run started without the offer gets one).
+  if (modalTrapOverlay !== thumbsModal) trapFocus(thumbsModal);
+  thumbsStopBtn.focus();
   // The frame loop keeps off the core the run steps. It can be running here
   // with no game loaded: on a page that has not had a game yet (nothing was
   // ever paused) and after a 2P link session (its exit does not pause). It
@@ -16097,7 +16120,7 @@ const thumbsRunToast = ({ done, blank, cancelled }) => {
 
 const cancelThumbnailRun = () => { if (thumbsRun) thumbsRun.cancelled = true; };
 
-document.getElementById("thumbs-go").addEventListener("click", () => {
+thumbsGoBtn.addEventListener("click", () => {
   runThumbnailBatch({ includeDrive: !thumbsDriveRow.hidden && thumbsDriveToggle.checked });
 });
 document.getElementById("thumbs-not-now").addEventListener("click", closeThumbsModal);
@@ -16107,9 +16130,12 @@ thumbsDriveToggle.addEventListener("change", async () => {
 });
 document.getElementById("home-thumbs").addEventListener("click", () => { openThumbsRun(); });
 document.getElementById("thumbs-close").addEventListener("click", closeThumbsModal);
-document.getElementById("thumbs-stop").addEventListener("click", cancelThumbnailRun);
+thumbsStopBtn.addEventListener("click", cancelThumbnailRun);
+// The backdrop does what Escape does, as for every other box: closes the
+// offer, and during a run stops it at once (closeThumbsModal); the pictures
+// already added are kept.
 thumbsModal.addEventListener("click", (e) => {
-  if (e.target === thumbsModal && !thumbsRun) closeThumbsModal();
+  if (e.target === thumbsModal) closeThumbsModal();
 });
 
 // --- Screenshot ---

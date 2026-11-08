@@ -55,3 +55,31 @@ test("releaseFocus ignores overlays that don't own the trap", async () => {
   assert.equal(app.runIn("modalTrapOverlay"), null);
   assert.equal(settings.classList.contains("open"), false);
 });
+
+// The return target can be gone by the time a box closes (Add pictures hides
+// once nothing is left to picture). Focus must land on something on screen,
+// never on a hidden fallback, which leaves it on the page itself.
+test("releaseFocus falls back to a visible element: the menu button, else the library's Add a game", async () => {
+  const app = await loadApp();
+  const seen = [];
+  for (const id of ["home-thumbs", "menu-btn", "lib-add", "home-solo-add"]) {
+    app.document.getElementById(id).focus = () => seen.push(id);
+  }
+  // Open the box from Add pictures, hide `hidden` meanwhile, close it: where does focus go?
+  // (The fake DOM reads offsetParent null as "not on screen".)
+  const closeWith = (hidden) => {
+    seen.length = 0;
+    app.runIn(`document.activeElement = document.getElementById("home-thumbs");
+      trapFocus(document.getElementById("thumbs-modal"))`);
+    for (const id of hidden) app.document.getElementById(id).offsetParent = null;
+    app.runIn(`releaseFocus(document.getElementById("thumbs-modal"))`);
+    for (const id of hidden) delete app.document.getElementById(id).offsetParent;
+    return seen.at(-1);
+  };
+  assert.equal(closeWith([]), "home-thumbs", "the opener, while it is still there");
+  assert.equal(closeWith(["home-thumbs"]), "menu-btn", "in a game: the menu button");
+  assert.equal(closeWith(["home-thumbs", "menu-btn"]), "lib-add",
+    "on the home screen, where the menu button is hidden: the library's Add a game");
+  assert.equal(closeWith(["home-thumbs", "menu-btn", "lib-add"]), "home-solo-add",
+    "a library of one game shows its own Add a game");
+});
