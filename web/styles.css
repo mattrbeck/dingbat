@@ -4466,7 +4466,7 @@ body.game-menu-open #toast {
   cursor: default;
 }
 
-/* A radio group with no answer yet (GBA call modes with no BIOS). Not on
+/* A radio group whose choice can't apply (GBA call modes with no BIOS). Not on
    the subhead: fading a heading takes its divider with it. */
 .radio-group.row-disabled {
   opacity: var(--disabled-opacity);
@@ -6276,7 +6276,7 @@ body.game-menu-open #toast {
   font-size: 13.5px;
 }
 
-.radio-row:hover {
+.radio-row:has(input:enabled):hover {
   background: var(--surface-2);
 }
 
@@ -6285,10 +6285,47 @@ body.game-menu-open #toast {
   background: rgba(var(--accent-rgb), 0.05);
 }
 
+/* Drawn, not native: a disabled native radio drops accent-color and its
+   checked dot all but vanishes, and with no GBA BIOS the disabled group
+   still has to show the mode in use. */
 .radio-row input {
-  margin: 3px 0 0;
-  accent-color: var(--accent);
+  appearance: none;
+  display: grid;
+  place-content: center;
+  width: 16px;
+  height: 16px;
+  margin: 2px 0 0;
+  border: 1.5px solid var(--text-faint);
+  border-radius: 50%;
+  background: none;
   flex: 0 0 auto;
+}
+
+.radio-row input:checked {
+  border-color: var(--accent);
+}
+
+.radio-row input:checked::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+/* Forced colors drops author backgrounds, which would erase the drawn dot. */
+@media (forced-colors: active) {
+  .radio-row input:checked::before {
+    background: CanvasText;
+  }
+
+  .radio-row input:disabled:checked::before {
+    background: GrayText;
+  }
+}
+
+.radio-row:has(input:disabled) {
+  cursor: default;
 }
 
 .radio-sub {

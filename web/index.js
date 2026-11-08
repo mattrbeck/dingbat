@@ -915,19 +915,17 @@ const gbaBiosModeGroup = document.getElementById("gba-bios-mode-group");
 const gbaBiosModeRadios = /** @type {NodeListOf<HTMLInputElement>} */ (
   document.querySelectorAll('input[name="gba-bios-mode"]'));
 const gbcBootromStatus = document.getElementById("gbc-bootrom-status");
+// Whether a GBA BIOS file is stored; updateBiosStatusText keeps it current
+// on every Settings open.
+let gbaHasBios = false;
 
 const updateBiosStatusText = async () => {
   let gba = await dbGet("bios:gba");
   gbaBiosStatus.textContent = gba ? gba.name || "Set" : "Not set";
   let gbc = await dbGet("bios:gbc");
   gbcBootromStatus.textContent = gbc ? gbc.name || "Set" : "Not set";
-  // With no BIOS file the intro and call-mode rows are inert but keep their
-  // stored values.
-  const noBios = !gba;
-  gbaRunBiosToggle.disabled = noBios;
-  gbaRunBiosRow.classList.toggle("row-disabled", noBios);
-  gbaBiosModeGroup.classList.toggle("row-disabled", noBios);
-  for (const r of gbaBiosModeRadios) r.disabled = noBios;
+  gbaHasBios = !!gba;
+  syncGbaBiosUI();
 };
 
 // iOS/iPadOS (iPad reports as "MacIntel" with touch points since iPadOS 13).
@@ -6597,11 +6595,23 @@ const applySystemSettings = () => {
   ndsApplyRewind();
 };
 
-const syncSystemSettingsUI = () => {
-  for (let r of /** @type {NodeListOf<HTMLInputElement>} */ (document.querySelectorAll('input[name="gba-bios-mode"]'))) {
-    r.checked = Number(r.value) === gbaBiosMode;
+// With no BIOS file the core boots HLE with no intro whatever is stored
+// (make_gba): the rows show that, disabled, and the stored choices come back
+// when a BIOS is chosen.
+const syncGbaBiosUI = () => {
+  const mode = gbaHasBios ? gbaBiosMode : 0;
+  for (const r of gbaBiosModeRadios) {
+    r.checked = Number(r.value) === mode;
+    r.disabled = !gbaHasBios;
   }
-  gbaRunBiosToggle.checked = gbaRunBios;
+  gbaRunBiosToggle.checked = gbaHasBios && gbaRunBios;
+  gbaRunBiosToggle.disabled = !gbaHasBios;
+  gbaRunBiosRow.classList.toggle("row-disabled", !gbaHasBios);
+  gbaBiosModeGroup.classList.toggle("row-disabled", !gbaHasBios);
+};
+
+const syncSystemSettingsUI = () => {
+  syncGbaBiosUI();
   gbRumbleToggle.checked = gbRumble;
   if (sgbToggle) sgbToggle.checked = sgbEnable;
   if (sgbBorderToggle) {
@@ -6620,7 +6630,7 @@ const saveSystemSettings = () => {
     { gbaBiosMode, gbaRunBios, gbRumble, rewindOn, sgbEnable, sgbBorder });
 };
 
-for (let r of /** @type {NodeListOf<HTMLInputElement>} */ (document.querySelectorAll('input[name="gba-bios-mode"]'))) {
+for (const r of gbaBiosModeRadios) {
   r.addEventListener("change", () => {
     if (r.checked) {
       gbaBiosMode = Number(r.value);
