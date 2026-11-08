@@ -927,11 +927,25 @@ const gbcBootromStatus = document.getElementById("gbc-bootrom-status");
 // on every Settings open.
 let gbaHasBios = false;
 
+// A BIOS / boot ROM / firmware row's Remove: only while a file is set, so
+// Tab and the controller pass over it otherwise. When the Remove just used
+// goes, focus steps back to the row's Choose rather than out of Settings.
+const setRemovable = (kind, set) => {
+  const btn = /** @type {HTMLButtonElement | null} */ (document.getElementById("remove-" + kind));
+  if (!btn) return;
+  if (!set && document.activeElement === btn) {
+    document.getElementById("pick-" + kind)?.focus({ preventScroll: true });
+  }
+  btn.disabled = !set;
+};
+
 const updateBiosStatusText = async () => {
   let gba = await dbGet("bios:gba");
   gbaBiosStatus.textContent = gba ? gba.name || "Set" : "Not set";
+  setRemovable("gba-bios", !!gba);
   let gbc = await dbGet("bios:gbc");
   gbcBootromStatus.textContent = gbc ? gbc.name || "Set" : "Not set";
+  setRemovable("gbc-bootrom", !!gbc);
   gbaHasBios = !!gba;
   syncGbaBiosUI();
 };
@@ -12808,6 +12822,9 @@ const resetAllSettings = async () => {
 
   // Add pictures follows the pictures box's Drive switch, now off again.
   refreshHomeRecent();
+  // The BIOS files are not settings and stay; their rows are redrawn as
+  // they stand (Remove only where a file is set).
+  await updateBiosStatusText();
 };
 
 const resetSettingsSlot = document.getElementById("reset-settings-slot");
@@ -19002,6 +19019,7 @@ const updateNdsBiosStatus = async () => {
     if (!el) continue;
     const rec = await dbGet(NDS_BIOS_KEYS[kind]).catch(() => null);
     el.textContent = rec ? rec.name || "Set" : kind === "firmware" ? "Built-in" : "HLE";
+    setRemovable("nds-" + kind, !!rec);
   }
   updateNdsFwSettings(false); // a dump chosen or removed changes the settings shown
 };

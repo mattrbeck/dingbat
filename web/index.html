@@ -1294,7 +1294,7 @@
                   <span class="modal-row-label">GBC Boot ROM</span>
                   <span id="gbc-bootrom-status" class="modal-row-status">Not set</span>
                   <button type="button" class="button button-sm" id="pick-gbc-bootrom">Choose</button>
-                  <button type="button" class="button button-sm button-ghost" id="remove-gbc-bootrom">Remove</button>
+                  <button type="button" class="button button-sm button-ghost" id="remove-gbc-bootrom" disabled>Remove</button>
                 </div>
                 <p class="modal-hint">With a boot ROM set, Game Boy games play the startup animation first.</p>
               </div>
@@ -1305,7 +1305,7 @@
                   <span class="modal-row-label">GBA BIOS</span>
                   <span id="gba-bios-status" class="modal-row-status">Not set</span>
                   <button type="button" class="button button-sm" id="pick-gba-bios">Choose</button>
-                  <button type="button" class="button button-sm button-ghost" id="remove-gba-bios">Remove</button>
+                  <button type="button" class="button button-sm button-ghost" id="remove-gba-bios" disabled>Remove</button>
                 </div>
                 <div class="modal-toggle-row" id="gba-run-bios-row">
                   <div>
@@ -1414,19 +1414,19 @@
                   <span class="modal-row-label">ARM9 BIOS</span>
                   <span id="nds-bios9-status" class="modal-row-status">HLE</span>
                   <button type="button" class="button button-sm" id="pick-nds-bios9">Choose</button>
-                  <button type="button" class="button button-sm button-ghost" id="remove-nds-bios9">Remove</button>
+                  <button type="button" class="button button-sm button-ghost" id="remove-nds-bios9" disabled>Remove</button>
                 </div>
                 <div class="modal-row">
                   <span class="modal-row-label">ARM7 BIOS</span>
                   <span id="nds-bios7-status" class="modal-row-status">HLE</span>
                   <button type="button" class="button button-sm" id="pick-nds-bios7">Choose</button>
-                  <button type="button" class="button button-sm button-ghost" id="remove-nds-bios7">Remove</button>
+                  <button type="button" class="button button-sm button-ghost" id="remove-nds-bios7" disabled>Remove</button>
                 </div>
                 <div class="modal-row">
                   <span class="modal-row-label">Firmware</span>
                   <span id="nds-firmware-status" class="modal-row-status">Built-in</span>
                   <button type="button" class="button button-sm" id="pick-nds-firmware">Choose</button>
-                  <button type="button" class="button button-sm button-ghost" id="remove-nds-firmware">Remove</button>
+                  <button type="button" class="button button-sm button-ghost" id="remove-nds-firmware" disabled>Remove</button>
                 </div>
                 <p class="modal-hint">None of these are needed: without them DS games run on dingbat's own BIOS and a built-in firmware. Dumps from your console (bios9.bin, bios7.bin, firmware.bin) apply the next time a DS game starts.</p>
                 <!-- The firmware's user settings (index.js "Console settings"):
