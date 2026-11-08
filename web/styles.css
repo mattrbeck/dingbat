@@ -5351,8 +5351,14 @@ body.game-menu-open #toast {
   display: none;
 }
 
+/* In the header's row, not pinned to a corner. Relative, not static, with
+   the corner offsets cleared: a touch screen's close grows its target with
+   an absolute ::after, which an unpositioned button would hand to the
+   nearest positioned ancestor - the whole header, Back and the stepper
+   included, would then close Settings. */
 .settings-head .modal-close {
-  position: static;
+  position: relative;
+  inset: auto;
   flex: 0 0 auto;
 }
 
@@ -5645,6 +5651,12 @@ body.game-menu-open #toast {
     height: 44px;
   }
 
+  /* Already 44px: the touch ::after would only reach over the stepper. */
+  .settings-head .modal-close::after,
+  #settings-close-list::after {
+    content: none;
+  }
+
   .settings-stepper button {
     height: 44px;
   }
@@ -5787,7 +5799,8 @@ body.game-menu-open #toast {
 
   #settings-close-list {
     display: flex;
-    position: static;
+    position: relative; /* in the row; see .settings-head .modal-close */
+    inset: auto;
     flex: 0 0 auto;
     width: 44px;
     height: 44px;
