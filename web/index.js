@@ -15805,6 +15805,8 @@ const THUMBS_CHUNK = 30;          // frames between looks for a blank screen
 const THUMBS_SLICE_MS = 12;       // core time per task, so the page stays responsive
 
 const thumbsModal = document.getElementById("thumbs-modal");
+const thumbsTitle = document.getElementById("thumbs-title");
+const thumbsLaterHint = document.getElementById("thumbs-later-hint");
 const thumbsOffer = document.getElementById("thumbs-offer");
 const thumbsProgress = document.getElementById("thumbs-progress");
 const thumbsStatus = document.getElementById("thumbs-status");
@@ -15839,8 +15841,14 @@ const closeThumbsModal = () => {
 };
 
 // The box in its offer state. The Drive row shows only when it can mean
-// something: signed in, with a Drive-only game still unpictured.
-const openThumbsOffer = async (cands) => {
+// something: signed in, with a Drive-only game still unpictured. The
+// pointer to Add pictures is for the one-time offer: opened from that
+// button, it would point at itself.
+const THUMBS_OFFER_TITLE = "Add pictures to your library?";
+const THUMBS_RUN_TITLE = "Adding pictures";
+const openThumbsOffer = async (cands, { fromButton = false } = {}) => {
+  thumbsTitle.textContent = THUMBS_OFFER_TITLE;
+  thumbsLaterHint.hidden = fromButton;
   thumbsDriveRow.hidden = !driveLinked() || !cands.some((c) => !c.local);
   thumbsDriveToggle.checked = await thumbsDriveWanted();
   thumbsOffer.hidden = false;
@@ -15888,7 +15896,7 @@ const openThumbsRun = async () => {
     showToast("Every game already has a picture");
     return false;
   }
-  await openThumbsOffer(cands);
+  await openThumbsOffer(cands, { fromButton: true });
   return true;
 };
 
@@ -16023,6 +16031,7 @@ const runThumbnailBatch = async ({ includeDrive = false } = {}) => {
   }
   let run = { cancelled: false, done: 0 };
   thumbsRun = run;
+  thumbsTitle.textContent = THUMBS_RUN_TITLE; // no longer a question
   thumbsOffer.hidden = true;
   thumbsProgress.hidden = false;
   thumbsModal.classList.add("open");

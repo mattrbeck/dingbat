@@ -530,3 +530,34 @@ test("Reset all settings turns the Drive switch off, and the button follows", as
   assert.equal(app.idb.get("thumbs-drive"), undefined);
   assert.equal(app.document.getElementById("home-thumbs").hidden, true);
 });
+
+// ── The box's words ─────────────────────────────────────────────────────────
+
+test("the pointer to Add pictures shows on the one-time offer, not when that button opened the box", async () => {
+  const app = await loadApp();
+  seedLibrary(app, ["A.gba"]);
+  const hint = app.document.getElementById("thumbs-later-hint");
+  assert.equal(await app.api.maybeOfferThumbnails(), true);
+  assert.equal(hint.hidden, false, "the one-time offer says where to find it later");
+
+  app.document.getElementById("thumbs-not-now").click();
+  assert.equal(await app.api.openThumbsRun(), true);
+  assert.equal(hint.hidden, true, "opened from Add pictures, it would point at itself");
+});
+
+test("while it runs the box says what it is doing, and asks again next time", async () => {
+  const app = await loadApp();
+  stubModule(app);
+  seedLibrary(app, ["A.gba"]);
+  const title = app.document.getElementById("thumbs-title");
+  assert.equal(await app.api.openThumbsRun(), true);
+  assert.equal(title.textContent, "Add pictures to your library?");
+
+  app.runIn(`Module._benchFrames = (n) => { __ticks += n; globalThis.__title = document.getElementById("thumbs-title").textContent; };`);
+  assert.equal(await app.api.runThumbnailBatch(), 1);
+  assert.equal(app.runIn("__title"), "Adding pictures", "a run is no longer a question");
+
+  app.idb.delete("frame:A.gba");
+  assert.equal(await app.api.openThumbsRun(), true);
+  assert.equal(title.textContent, "Add pictures to your library?", "the next offer asks again");
+});
