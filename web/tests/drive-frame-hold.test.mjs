@@ -57,6 +57,7 @@ test("the pull then brings Drive's picture down, and the queued one drops", asyn
   await app.api.pullSync({ silent: true });
   await settle();
   assert.equal(await blobText(app.idb.get(NAME)), "THEIRS", "the tile shows Drive's picture");
+  assert.ok(app.runIn("!!syncTimer"), "the pull schedules the flush that drops it");
   await app.api.flushSync();
   await settle();
   assert.ok(!app.api.syncState.queueUp.includes(NAME), "nothing left to send");

@@ -3,8 +3,8 @@
 // small buttons' targets with an absolute ::after (styles.css, pointer:
 // coarse); on a close button left unpositioned in a header row, that ::after
 // once took the whole header as its box - on a phone Back, Previous and Next
-// all closed Settings, and on a tablet a tap on a row of the list did
-// nothing. Each tap lands on the middle of the button, as a finger does, and
+// all closed Settings, and on a tablet so did a tap on a row of the list.
+// Each tap lands on the middle of the button, as a finger does, and
 // the page decides what was hit - nothing is clicked by name.
 //
 // Phones: an iPhone (WebKit, Safari's engine) and an Android phone
