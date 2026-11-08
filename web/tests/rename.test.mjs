@@ -292,7 +292,7 @@ test("files this device does not hold still get their remote rename", async () =
 
 test("a Drive-only game renames without its bytes ever being here", async () => {
   const app = await loadApp();
-  // The "Remove from this device" shape: saves here, ROM only on Drive.
+  // The "Remove from This Device" shape: saves here, ROM only on Drive.
   app.idb.set("recent", [{ name: OLD, ts: 100 }]);
   app.idb.set("save:" + OLD, u8(9, 9));
   signIn(app, { sigs: { ["rom:" + OLD]: "s" } });

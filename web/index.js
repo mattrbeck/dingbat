@@ -2241,7 +2241,7 @@ const downloadGameAction = async (name) => {
   updateStorageInfo();
   return ok;
 };
-// Find the file = the same inverse, from the user's own disk. The bytes are
+// Find the File = the same inverse, from the user's own disk. The bytes are
 // stored under the entry's name, never the picked file's: the game keeps its
 // save, its picture and its place, which is the whole point of asking. Two
 // guards first, because pairing the wrong ROM with a save is how a save gets
@@ -4630,7 +4630,7 @@ const pullSyncInner = async ({ silent = true } = {}) => {
         // Never downloaded here: a ROM is immutable, and either already on
         // this device or fetched on demand (downloadGame). The listing is
         // then the only place this device can learn that Drive holds it -
-        // which is what "Remove from this device" needs to know before it
+        // which is what "Remove from This Device" needs to know before it
         // frees the local bytes. Recorded, not fetched - and the listing
         // gives the size for free, for a game that has never been here.
         syncState.rmt[name] = f.modifiedTime;
@@ -4873,7 +4873,7 @@ const downloadGame = async (game, { onProgress = null } = {}) => {
   return ok;
 };
 
-// --- "Remove from this device" (the inverse of downloadGame) --------------
+// --- "Remove from This Device" (the inverse of downloadGame) --------------
 // Frees the ROM bytes, box art and auto-resume snapshot. No tombstone, no
 // Drive delete; the game re-renders as a Drive-only tile. Save data is kept
 // (it may be irreplaceable) and queued for upload on the way out.
@@ -5198,7 +5198,7 @@ const openRenameModal = async (oldName) => {
     renameModalOpen = false;
     m.dismiss();
   };
-  m = buildSyncModal({ title: "Rename game", hint: null, onDismiss: close });
+  m = buildSyncModal({ title: "Rename Game", hint: null, onDismiss: close });
 
   const pane = () => { m.body.innerHTML = ""; return m.body; };
   const para = (parent, cls, text) => {
@@ -6926,7 +6926,7 @@ const clearThumbsBlank = async (games) => {
 // Drop the ROM record. The pictures and the save data stay, and so does the
 // library entry (bumpRecentIndex), so what is left is the game itself minus
 // its file: a tile that keeps its face and its save, and says where the file
-// has to come from. Remove from this device keeps the frame for the same
+// has to come from. Remove from This Device keeps the frame for the same
 // reason; here both pictures stay, there being no Drive copy to re-pull them
 // from. The size is noted on the way out, so the menu can still say what
 // getting the file back is worth.
@@ -7457,7 +7457,7 @@ const MENU_ICONS = {
   bug: '<path d="M8 8a4 4 0 0 1 8 0v2a4 4 0 0 1-8 0zM12 12v7M6 10H3M6 14H3M18 10h3M18 14h3M8 7 6 5M16 7l2-2"/>',
   prints: '<path d="M6 9V4h12v5M6 15h12v5H6zM6 9h12a2 2 0 0 1 2 2v4H4v-4a2 2 0 0 1 2-2z"/>',
   // The file items' own, in the same stroke. Download is the tile's corner
-  // glyph (DL_PATH); Reset save data's is Quick Save's disk, struck out.
+  // glyph (DL_PATH); Reset Save Data's is Quick Save's disk, struck out.
   find: '<circle cx="11" cy="11" r="6"/><path d="M20 20l-4.6-4.6"/>',
   download: DL_PATH,
   moments: '<path d="M4 12a8 8 0 1 0 2.3-5.6M4 4v3.5h3.5M12 8v4l2.8 1.8"/>',
@@ -7474,6 +7474,8 @@ const MENU_ICONS = {
 // the second (the pattern of every destructive button here), disarming
 // after a moment or when a sibling arms. Armed, the label asks the action
 // back (confirmLabel) and the sub-line says what goes (confirmSub).
+// Labels are in Title Case, as the bar's menu has them ("Save States",
+// "Report a Bug"); the question and the sub-lines are sentences.
 const tileMenuItem = ({ label, sub = "", icon = "", danger = false, disabled = "", confirmLabel = "", confirmSub = "", run }) => {
   let b = document.createElement("button");
   b.type = "button";
@@ -7548,19 +7550,19 @@ const sessionMenuEntries = () => {
   const ds = ndsGameLoaded();
   let items = [
     ...(ds && !ndsHasStates() ? [] : [
-      tileMenuItem({ label: "Save states", icon: MENU_ICONS.states,
+      tileMenuItem({ label: "Save States", icon: MENU_ICONS.states,
                      run: () => openStatesModal() })]),
-    tileMenuItem({ label: "Manage saves", icon: MENU_ICONS.saves,
+    tileMenuItem({ label: "Manage Saves", icon: MENU_ICONS.saves,
                    run: () => openSavesModal() }),
   ];
   if (printerPhotos.length) {
-    items.push(tileMenuItem({ label: "Printed photos", icon: MENU_ICONS.prints,
+    items.push(tileMenuItem({ label: "Printed Photos", icon: MENU_ICONS.prints,
                               run: () => printsItem.click() }));
   }
   if (!ds) {
     items.push(
       tileMenuItem({
-        label: "Link cable",
+        label: "Link Cable",
         icon: MENU_ICONS.link,
         run: () => document.getElementById("net-connect").click(),
       }),
@@ -7571,7 +7573,7 @@ const sessionMenuEntries = () => {
                               run: () => openCheatsModal() }));
   }
   items.push(
-    tileMenuItem({ label: "Report a bug", icon: MENU_ICONS.bug,
+    tileMenuItem({ label: "Report a Bug", icon: MENU_ICONS.bug,
                    run: () => openReportModal() }),
   );
   return items;
@@ -7606,13 +7608,13 @@ const tileMenuEntries = (name, f) => {
   let busy = f.busy ? "Exit the online session first" : "";
   if (f.missing) {
     items.push(tileMenuItem({
-      label: "Find the file…",
+      label: "Find the File…",
       icon: MENU_ICONS.find,
       run: () => relinkGameAction(name),
     }));
   } else if (f.driveOnly) {
     items.push(tileMenuItem({
-      label: "Download to this device",
+      label: "Download to This Device",
       icon: MENU_ICONS.download,
       disabled: f.downloading ? "Downloading…" : "",
       run: () => downloadGameAction(name),
@@ -7622,7 +7624,7 @@ const tileMenuEntries = (name, f) => {
   // when where the game stopped is what keeps stopping it.
   if (f.moments && !f.driveOnly && !f.missing) {
     items.push(tileMenuItem({
-      label: "Resume from earlier",
+      label: "Resume from Earlier",
       icon: MENU_ICONS.moments,
       disabled: busy,
       run: () => openMomentsModal(name),
@@ -7639,7 +7641,7 @@ const tileMenuEntries = (name, f) => {
   // comes down first, as Download does, and is exported from here.
   if (f.driveOnly && !f.missing) {
     items.push(tileMenuItem({
-      label: "Download and export…",
+      label: "Download and Export…",
       icon: MENU_ICONS.export,
       disabled: f.downloading ? "Downloading…" : "",
       run: async () => { if (await downloadGameAction(name)) await openExportModal(name); },
@@ -7652,7 +7654,7 @@ const tileMenuEntries = (name, f) => {
     }));
   }
   items.push(tileMenuItem({
-    label: "Reset save data",
+    label: "Reset Save Data",
     icon: MENU_ICONS.reset,
     disabled: busy || (f.hasSaves ? "" : "No save data yet"),
     confirmLabel: "Reset save data?",
@@ -7664,7 +7666,7 @@ const tileMenuEntries = (name, f) => {
   // because nothing else on screen can.
   if (f.kept) {
     items.push(tileMenuItem({
-      label: "Restore old save",
+      label: "Restore Old Save",
       icon: MENU_ICONS.restore,
       sub: (f.kept.why === "replaced" ? "The save you replaced" : "From before you deleted it") +
            (f.kept.at ? " · saved " + fmtStateTime(f.kept.at) : ""),
@@ -7676,7 +7678,7 @@ const tileMenuEntries = (name, f) => {
   }
   if (!f.driveOnly && f.linked) {
     items.push(tileMenuItem({
-      label: "Remove from this device",
+      label: "Remove from This Device",
       icon: MENU_ICONS.remove,
       // A paused game is closed on the way, the way Delete already does it.
       disabled: busy ||
@@ -9221,7 +9223,7 @@ const persistAutoState = () => {
 // an hour back, or (saved in game since) none. So while a game runs, every
 // CHECKPOINT_PLAY_MS of play takes the session again, and keeps it as a
 // checkpoint: a few earlier moments, kept on this device only, for when the
-// newest one is the thing that crashes (Resume from earlier).
+// newest one is the thing that crashes (Resume from Earlier).
 //
 // The frame's thread only copies: the plain state image, the screen and the
 // battery file (wasm_state_plain_size, ~1 ms; ~4 ms on a phone-speed CPU).
@@ -10002,17 +10004,17 @@ statesDeleteBtn.addEventListener("click", async () => {
   await renderStatesGrid();
 });
 
-// --- Resume from earlier ---------------------------------------------------
+// --- Resume from Earlier ---------------------------------------------------
 // The moments a game can go back into: its session (where it stopped) and
 // its checkpoints, newest first, each with its picture, how much play
 // earlier it is and when. Two ways in, and nothing anywhere else: the
-// game's menu (Resume from earlier), and - after the game has stopped
+// game's menu (Resume from Earlier), and - after the game has stopped
 // unexpectedly CRASH_ASK_STREAK times in a row - a tap on the game itself,
 // which opens this instead of resuming the moment that may be the cause.
 //
 // A moment from before the game's last in-game save takes its battery back
 // with it (a state carries the cart's RAM). The newer save is kept aside
-// first, as a restored save keeps the one it replaces: Restore old save, on
+// first, as a restored save keeps the one it replaces: Restore Old Save, on
 // the game's menu, switches back.
 const momentsModal = document.getElementById("moments-modal");
 const momentsGrid = document.getElementById("moments-grid");
@@ -10080,7 +10082,7 @@ const selectMoment = (i) => {
   momentsNote.hidden = !before;
   momentsNote.textContent = before
     ? "This is from before your last in-game save, which goes back with it. Your newer save " +
-      "is kept: Restore old save, on the game's menu, brings it back." : "";
+      "is kept: Restore Old Save, on the game's menu, brings it back." : "";
 };
 
 const renderMoments = async (name) => {
@@ -10134,7 +10136,7 @@ const openMomentsModal = (name, { crash = false } = {}) => {
   momentsFor = name;
   const n = crashStreak(name);
   momentsTitle.textContent = crash
-    ? displayName(name) + " stopped unexpectedly" : "Resume from earlier";
+    ? displayName(name) + " stopped unexpectedly" : "Resume from Earlier";
   momentsHint.textContent = crash
     ? "It closed without warning the last " + (n === 2 ? "two" : n) + " times. If the " +
       "moment it resumes from is what's stopping it, pick an earlier one."

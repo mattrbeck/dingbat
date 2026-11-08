@@ -137,7 +137,7 @@ test("a device that missed the delete does not hand its old save to the game loa
   assert.equal(d0.idb.get("save:G.gba"), undefined, "without being applied");
   assert.ok(d0.toasts.some((t) => t.includes("from before you deleted it")),
     "and says so there too: " + JSON.stringify(d0.toasts));
-  assert.ok((await tileMenuLabels(d0, "G.gba")).includes("Restore old save"),
+  assert.ok((await tileMenuLabels(d0, "G.gba")).includes("Restore Old Save"),
     "the game's menu offers it");
 
   // Restored, it is the game's save everywhere, and nothing is offered in
@@ -145,7 +145,7 @@ test("a device that missed the delete does not hand its old save to the game loa
   await d0.runIn(`restoreKeptSave("G.gba")`);
   eq(d0.idb.get("save:G.gba"), u8(12));
   assert.equal(kept(d0, "G.gba")?.data, null, "there was no save to keep in its place");
-  assert.ok(!(await tileMenuLabels(d0, "G.gba")).includes("Restore old save"));
+  assert.ok(!(await tileMenuLabels(d0, "G.gba")).includes("Restore Old Save"));
   await flush(d0);
   eq(drive.get("save:G.gba")?.bytes, u8(12));
   // Device 1 still holds the copy it kept: the restore outranks it there
@@ -235,7 +235,7 @@ test("a kept save lasts 30 days from the delete, then leaves every device and Dr
   await flush(d0);
   assert.equal(kept(d0, "G.gba"), undefined, "gone after 31");
   assert.equal(drive.get("oldsave:G.gba"), null, "from Drive too");
-  assert.ok(!(await tileMenuLabels(d0, "G.gba")).includes("Restore old save"));
+  assert.ok(!(await tileMenuLabels(d0, "G.gba")).includes("Restore Old Save"));
   await pull(d1);
   await flush(d1);
   assert.equal(kept(d1, "G.gba"), undefined, "and from the other device");
@@ -260,7 +260,7 @@ test("restoring a kept save keeps the save it replaced, so a second restore undo
   await d0.runIn(`restoreKeptSave("G.gba")`);
   eq(d0.idb.get("save:G.gba"), u8(12), "the kept save is the game's save now");
   eq(kept(d0, "G.gba")?.data, u8(20), "and the one it replaced is kept in its place");
-  assert.ok((await tileMenuLabels(d0, "G.gba")).includes("Restore old save"));
+  assert.ok((await tileMenuLabels(d0, "G.gba")).includes("Restore Old Save"));
 
   await d0.runIn(`restoreKeptSave("G.gba")`);
   eq(d0.idb.get("save:G.gba"), u8(20), "the second restore undoes the first");

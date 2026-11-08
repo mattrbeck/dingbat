@@ -425,7 +425,7 @@ test("going back past an in-game save keeps the newer save aside", async () => {
   await app.runIn(`resumeMoment('A.gba', { kind: "checkpoint", slot: 4 })`);
   await settle();
   const kept = app.idb.get("oldsave:A.gba");
-  assert.deepEqual([...kept.data], [1, 1], "Restore old save brings it back");
+  assert.deepEqual([...kept.data], [1, 1], "Restore Old Save brings it back");
   assert.equal(kept.why, "replaced");
   assert.equal(app.api.currentOriginalName, "A.gba", "the game boots");
   assert.equal(app.runIn("globalThis.__loads || 0"), 1,
@@ -443,13 +443,13 @@ test("going back within the same save keeps nothing aside", async () => {
   assert.equal(app.runIn("globalThis.__loads || 0"), 1);
 });
 
-test("the game's menu offers Resume from earlier only when there are earlier moments", async () => {
+test("the game's menu offers Resume from Earlier only when there are earlier moments", async () => {
   const app = await loadApp();
   const labels = (moments) => app.runIn(`tileMenuEntries('A.gba', { moments: ${moments} })`)
     .filter((b) => b.classList.contains("tile-menu-item")) // not the rule above Delete
     .map((b) => b.children.find((c) => c.classList.contains("tile-menu-label")).textContent);
-  assert.ok(!labels(false).includes("Resume from earlier"));
-  assert.ok(labels(true).includes("Resume from earlier"));
+  assert.ok(!labels(false).includes("Resume from Earlier"));
+  assert.ok(labels(true).includes("Resume from Earlier"));
 });
 
 test("a game's checkpoints go with its reset and its delete", async () => {

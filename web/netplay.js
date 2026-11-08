@@ -209,7 +209,7 @@ const openNetConnect = async (attach) => {
   if (linkMode) await exitLinkMode();
   netAttach = attach;
   net = makeSession(attach);
-  netTitle.textContent = "Connect link cable";
+  netTitle.textContent = "Connect Link Cable";
   netCodeInput.value = "";
   netJoinGo.disabled = false;
   netSetStatus("");
