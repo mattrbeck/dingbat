@@ -86,8 +86,8 @@ needs a second real device.
       read the allowance from the console (`navigator.storage.estimate()`)
       and halve it, then load GBA games past it. The oldest
       tile is still there, still showing its picture, dashed like a
-      Drive-only tile, and its menu offers Find the file rather than
-      Download. Twenty small GB games evict nothing at all.
+      Drive-only tile, and its menu offers Find the File… rather than
+      Download to This Device. Twenty small GB games evict nothing at all.
 - [ ] **The allowance is not the same everywhere.** Check
       `navigator.storage.estimate()` on the phone, on the desktop and in a
       private window: the three differ, and the budget moves with them. A
@@ -310,9 +310,9 @@ Android Chrome crash, Safari's own Cmd-Q, a phone's frame pacing.
       the third tap opens *“Game” stopped unexpectedly*. Pick an earlier
       moment: it resumes there. Kill it again and the earlier moments are
       still listed.
-- [ ] **Resume from earlier, past a save.** Save in game, play a minute, then
-      the game's menu → Resume from earlier → a moment marked *Before your
-      last save*: it resumes there, and the menu offers Restore old save
+- [ ] **Resume from Earlier, past a save.** Save in game, play a minute, then
+      the game's menu → Resume from Earlier → a moment marked *Before your
+      last save*: it resumes there, and the menu offers Restore Old Save
       (*The save you replaced*), which brings the newer save back.
 
 ## State-machine fix round (formal/FINDINGS.md)

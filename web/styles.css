@@ -4645,7 +4645,7 @@ body.game-menu-open #toast {
   flex-shrink: 0;
 }
 
-/* ---- Resume from earlier (the Save States grid, read-only) ---- */
+/* ---- Resume from Earlier (the Save States grid, read-only) ---- */
 /* The note under the grid says what going back to the chosen moment does
    to the in-game save; it is the only text that changes with the choice,
    so it reads in the body colour, apart from the hint above. */

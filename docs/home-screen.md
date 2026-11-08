@@ -77,7 +77,7 @@ Checkpoints are kept on this device only (`ckpts:<game>` index,
 index carries (`play`), so a week away does not lump them into one bucket:
 the newest, and the oldest within each of 3 min, 10 min, 30 min, 2 h, 8 h
 and beyond behind it (`keepCheckpoints`). Older than 30 days, one goes.
-They go with a reset, a delete and Remove from this device; a rename moves
+They go with a reset, a delete and Remove from This Device; a rename moves
 them. Other games' checkpoints are freed before any ROM when storage runs
 out (`dbPutRoomy`).
 
@@ -127,13 +127,13 @@ the cause, pick an earlier one. The sheet is the Save States grid: *Latest*
 (the session) then each kept checkpoint, labelled by play time back (*4 min
 earlier*, *2 h earlier*) and the clock time, *Latest* chosen; **Resume**,
 and **Start from in-game save**. The same sheet, without the crash wording
-or the save button, is **Resume from earlier** on the game's menu whenever
+or the save button, is **Resume from Earlier** on the game's menu whenever
 it has checkpoints.
 
 A moment from before the last in-game save carries that older battery: the
 cell says *Before your last save*, the note under the grid says what
 happens, and choosing it keeps the newer save aside first (`keepOldSave`,
-*The save you replaced*) so **Restore old save** switches back
+*The save you replaced*) so **Restore Old Save** switches back
 (`resumeMoment`; loadRom's `resume.force` applies it despite the save).
 
 The kicker over the name says where the game stands:

@@ -75,3 +75,14 @@ test("Reset all settings keeps the files, and each Remove as it stands", async (
   assert.equal(remove(app, "gba-bios").disabled, false, "the BIOS is still set");
   assert.equal(remove(app, "gbc-bootrom").disabled, true, "the boot ROM still is not");
 });
+
+test("turning DS Beta on redraws the DS rows, so a dump stored meanwhile can be removed", async () => {
+  const app = await loadApp();
+  await refresh(app);
+  assert.equal(remove(app, "nds-firmware").disabled, true);
+  await app.api.dbPut(app.runIn("NDS_BIOS_KEYS.firmware"), file("firmware.bin"));
+  app.runIn("setDsBeta(true)");
+  await settle();
+  assert.equal(remove(app, "nds-firmware").disabled, false, "the dump's Remove is on");
+  assert.equal(remove(app, "nds-bios9").disabled, true, "the rows without one stay off");
+});

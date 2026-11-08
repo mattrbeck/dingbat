@@ -12823,8 +12823,9 @@ const resetAllSettings = async () => {
   // Add pictures follows the pictures box's Drive switch, now off again.
   refreshHomeRecent();
   // The BIOS files are not settings and stay; their rows are redrawn as
-  // they stand (Remove only where a file is set).
-  await updateBiosStatusText();
+  // they stand (Remove only where a file is set). Not awaited: a failed
+  // read must not fail the Reset.
+  updateBiosStatusText().catch(() => {});
 };
 
 const resetSettingsSlot = document.getElementById("reset-settings-slot");
@@ -13442,6 +13443,9 @@ const setDsBeta = (on) => {
   // A DS game running when it goes off goes too (its save is flushed).
   if (!on && ndsGameLoaded()) unloadGame();
   if (on) loadNdsLayoutFromStorage();
+  // The DS rows were last drawn, if ever, while hidden: a dump stored then
+  // gets its Remove (setRemovable) now, not at the next Settings open.
+  if (on) updateNdsBiosStatus().catch(() => {});
   renderKbBindings();
   refreshHomeRecent();
 };
