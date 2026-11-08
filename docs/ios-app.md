@@ -29,7 +29,9 @@ to Drive's own pictures: with the boot's pull held back no offer comes, a
 run waits ("Waiting for Drive…") and its Stop ends it at once, and Drive's
 picture comes down with nothing sent; with Drive down at boot, a run's
 boot screen does not go up over Drive's picture when the app comes back to
-the front. `ios/e2e/trade.mjs` plays a whole Pokémon trade, FireRed
+the front; and with Drive down while a game is open, the game's own picture
+does go up over Drive's once Drive is back, the game still open.
+`ios/e2e/trade.mjs` plays a whole Pokémon trade, FireRed
 in Chromium against LeafGreen in the app from save states at the Cable Club
 counter, over a relay that delays, jitters and drops the WebRTC packets
 (`ios/e2e/netem.mjs`, no root needed); it needs the real games, so it is

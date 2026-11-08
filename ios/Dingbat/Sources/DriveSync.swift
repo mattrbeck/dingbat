@@ -1117,7 +1117,22 @@ final class DriveSync: ObservableObject {
                 } else if !romsHere.contains(p.game) && !(p.kind == "oldsave" && local[name] != nil) {
                     continue
                 }
-                if GameSession.shared.game?.fileName == p.game { continue }
+                if GameSession.shared.game?.fileName == p.game {
+                    // The picture of the game being played is never brought
+                    // down, so a picture of it never synced here (uploadOne
+                    // holds one back until this pull lands Drive's) would wait
+                    // for the game to close and then lose to Drive's older
+                    // one. Queued while the game keeps its picture up to date
+                    // (storeLastFrame; not a switched-off DS), it is this
+                    // session's, or about to be: Drive's is marked seen, and
+                    // the flush sends this device's over it (web the same).
+                    let pictured = !(GameSession.shared.isNDS && NdsState.shared.poweredOff)
+                    if p.kind == "frame", pictured, state.queueUp.contains(name), state.rmt[name] != f.modifiedTime {
+                        state.rmt[name] = f.modifiedTime
+                        queuedMissing = true
+                    }
+                    continue
+                }
                 if state.rmt[name] == f.modifiedTime { continue }
                 if genBound(p.kind) && f.gen < lib.gen(p.game) {
                     if p.kind == "save" {

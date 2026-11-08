@@ -11,6 +11,10 @@
 //    screen; Drive back and the app back in front, which sends what is
 //    queued before it pulls: the boot screen does not go up over Drive's
 //    picture, and Drive's comes down instead (DriveSync.uploadOne).
+// 3. Drive down while a game is open: the game's own picture is queued and
+//    held; Drive back and the app back in front with the game still open:
+//    the pull marks Drive's picture seen (it never brings the open game's
+//    down), and the game's own picture goes up over it.
 //
 // The app's tmp/addpictures.txt (with -debug-events) says what Add pictures
 // did; its debug notifications pictures-run and pictures-stop are the head's
@@ -96,10 +100,10 @@ seed("frame:" + GAME, picture);
 seed("frame:" + GAME2, picture);
 const stub = await serveDrive(drive);
 
-const launch = () =>
-  simctl("launch", UDID, BUNDLE, "-audio.muted", "YES", "-debug-events", "-drive-stub", stub.base);
+const launch = (extra = []) =>
+  simctl("launch", UDID, BUNDLE, "-audio.muted", "YES", "-debug-events", "-drive-stub", stub.base, ...extra);
 // A fresh install holding `game`, with no picture of it, launched.
-const freshLaunch = (game) => {
+const freshLaunch = (game, extra = []) => {
   trySimctl("boot", UDID);
   simctl("bootstatus", UDID);
   trySimctl("terminate", UDID, BUNDLE);
@@ -109,7 +113,7 @@ const freshLaunch = (game) => {
   mkdirSync(join(data, "Documents/roms"), { recursive: true });
   copyFileSync(join(ROOT, "tests/roms", game), join(data, "Documents/roms", game));
   const logFile = join(data, "tmp/addpictures.txt");
-  launch();
+  launch(extra);
   return {
     frame: join(data, "Library/Application Support/dingbat/games", game, "frame.jpg"),
     log: () => (existsSync(logFile) ? readFileSync(logFile, "utf8").trim().split("\n") : [])
@@ -185,6 +189,24 @@ try {
   assert.equal(uploads(GAME2, from).length, 0, "the boot screen did not go up over Drive's picture");
   assert.ok(drive.get("frame:" + GAME2).bytes.equals(picture), "Drive keeps its picture");
   console.log("PASS: Drive down at boot");
+
+  // Case 3: Drive down while the game is open.
+  down = true;
+  const from3 = drive.log.length;
+  const three = freshLaunch(GAME2, ["-autoplay", GAME2]);
+  await sleep(8000);  // the game runs; going away pauses it and stores its picture
+  simctl("launch", UDID, "com.apple.Preferences");
+  await until("the game's own picture", () => existsSync(three.frame), 15000);
+  assert.ok(!readFileSync(three.frame).equals(picture), "the game's own screen, not Drive's picture");
+  await sleep(2000);
+  down = false;
+  launch();  // back in front, the game still open: sends what is queued, then pulls
+  await until("the game's own picture on Drive", () => uploads(GAME2, from3).length > 0, 30000);
+  await sleep(2000);
+  console.log("iPhone's Drive calls, the game open:", calls(from3));
+  assert.ok(!drive.get("frame:" + GAME2).bytes.equals(picture), "Drive's older picture is written over");
+  assert.ok(!readFileSync(three.frame).equals(picture), "and was never brought down");
+  console.log("PASS: the game open");
 } catch (e) {
   failed = true;
   console.error(e);
