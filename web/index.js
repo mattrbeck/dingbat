@@ -4683,7 +4683,20 @@ const pullSyncInner = async ({ silent = true } = {}) => {
       }
       // Don't fight the autosave: not for the game being played, nor for the
       // one being loaded (loadingName), which will run on the save it read.
-      if (isRomLoaded(p.game) || loadingName === p.game) continue;
+      if (isRomLoaded(p.game) || loadingName === p.game) {
+        // The picture of the game being played is never brought down, so a
+        // picture of it never synced here (the flush holds one back until
+        // this pull lands Drive's) would wait for the game to close and then
+        // lose to Drive's older one. Queued while the game keeps its picture
+        // up to date, it is this session's, or about to be: Drive's is marked
+        // seen, and the flush sends this device's over it.
+        if (p.kind === "frame" && framePictured(p.game) && syncState.queueUp.includes(name) &&
+            syncState.rmt[name] !== f.modifiedTime) {
+          syncState.rmt[name] = f.modifiedTime;
+          queuedMissing = true;
+        }
+        continue;
+      }
       if (syncState.rmt[name] === f.modifiedTime) continue; // unchanged remotely
       // Written for an older generation of the game: a device that had not
       // pulled the delete sent it. Never applied. A save is kept aside; then
@@ -7187,11 +7200,14 @@ const copyFramebuffer = () => {
   shadeFramebuffer(heap, w, h, pictureShades());
   return { heap, w, h };
 };
+// Whether the open game's picture is being kept up to date (storeLastFrame
+// takes one): not in the frame-synced modes, nor for a DS switched off (the
+// picture stays the last one played) or a session held back (a boot screen).
+const framePictured = (name) =>
+  !!currentRomName && !!currentOriginalName && currentOriginalName === name &&
+  !linkMode && !rollbackMode && !netActive() && !ndsOffFor() && sessionHeldFor !== name;
 const storeLastFrame = ({ force = false } = {}) => {
-  if (!currentRomName || !currentOriginalName) return Promise.resolve();
-  if (linkMode || rollbackMode || netActive()) return Promise.resolve();
-  if (ndsOffFor()) return Promise.resolve(); // the picture stays the last one played
-  if (sessionHeldFor === currentOriginalName) return Promise.resolve(); // a boot screen
+  if (!framePictured(currentOriginalName)) return Promise.resolve();
 
   const fb = copyFramebuffer();
   if (!fb) return Promise.resolve();

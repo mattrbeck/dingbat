@@ -92,3 +92,37 @@ test("so does one when Drive's picture is the one this device last saw", async (
   assert.equal(text(drive.get(NAME)), "BOOT");
   assert.ok(!app.api.syncState.queueUp.includes(NAME));
 });
+
+// The game being played: the pull never brings its picture down, so a
+// picture of it never synced here once waited for the game to close, and
+// then lost to Drive's older one. Now the pull marks Drive's seen while the
+// game keeps its picture up to date, and the flush sends this device's.
+const openHere = (app) => app.runIn(`currentRomName = "A.gba"; currentOriginalName = "A.gba";`);
+
+test("the open game's own picture goes up: the pull marks Drive's seen", async () => {
+  const drive = driveWithPicture();
+  const app = await device(drive);
+  openHere(app);
+  await app.api.flushSync();
+  await app.api.pullSync({ silent: true });
+  await settle();
+  assert.equal(await blobText(app.idb.get(NAME)), "BOOT", "the open game's picture is not replaced");
+  assert.equal(app.api.syncState.rmt[NAME], drive.get(NAME).modifiedTime, "Drive's is seen");
+  assert.ok(app.runIn("!!syncTimer"), "the pull schedules the flush that sends it");
+  await app.api.flushSync();
+  await settle();
+  assert.equal(text(drive.get(NAME)), "BOOT", "this device's picture is on Drive");
+  assert.ok(!app.api.syncState.queueUp.includes(NAME));
+});
+
+test("not while the open game's session is held back (its picture is not kept then)", async () => {
+  const drive = driveWithPicture();
+  const app = await device(drive);
+  openHere(app);
+  app.runIn(`sessionHeldFor = "A.gba";`);
+  await app.api.pullSync({ silent: true });
+  await app.api.flushSync();
+  await settle();
+  assert.equal(text(drive.get(NAME)), "THEIRS", "Drive's picture is not written over");
+  assert.ok(app.api.syncState.queueUp.includes(NAME), "still queued, for a later pull");
+});
