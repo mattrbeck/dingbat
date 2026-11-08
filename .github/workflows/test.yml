@@ -576,8 +576,8 @@ jobs:
           - { shard: "handoff mac+mac", files: e2e/handoff.e2e.mjs, pairs: "mac+mac" }
           # The controller walk (~45 s), the clip speed check (~15 s), the
           # GB pictures check (~6 s), the boot sync check (~50 s, both
-          # pairs) and the touch Settings taps (~20 s) ride along: a runner
-          # of their own costs more than they take.
+          # pairs) and the touch Settings taps (~20 s, phones and an iPad)
+          # ride along: a runner of their own costs more than they take.
           - { shard: "crash recovery + gamepad", files: "e2e/crash-recovery.e2e.mjs e2e/gamepad.e2e.mjs e2e/clip-speed.e2e.mjs e2e/gb-pictures.e2e.mjs e2e/boot-sync.e2e.mjs e2e/settings-touch.e2e.mjs", pairs: "" }
     name: web-e2e (${{ matrix.shard }})
     steps:
@@ -651,7 +651,7 @@ jobs:
           - { shard: "fourteen-steps iphone+mac", files: e2e/fourteen-steps.e2e.mjs, pairs: "iphone+mac" }
           - { shard: "fourteen-steps mac+iphone", files: e2e/fourteen-steps.e2e.mjs, pairs: "mac+iphone" }
           - { shard: "handoff", files: e2e/handoff.e2e.mjs, pairs: "iphone+mac,mac+mac" }
-          # The touch Settings taps again, in Apple's WebKit (an iPhone's).
+          # The touch Settings taps again, in Apple's WebKit (an iPhone's, an iPad's).
           - { shard: "crash recovery", files: "e2e/crash-recovery.e2e.mjs e2e/boot-sync.e2e.mjs e2e/settings-touch.e2e.mjs", pairs: "" }
     name: web-e2e-macos (${{ matrix.shard }})
     steps:

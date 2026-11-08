@@ -5651,7 +5651,7 @@ body.game-menu-open #toast {
     height: 44px;
   }
 
-  /* Already 44px: the touch ::after would only reach over the stepper. */
+  /* Already 44px: the touch ::after would only reach over its neighbours. */
   .settings-head .modal-close::after,
   #settings-close-list::after {
     content: none;

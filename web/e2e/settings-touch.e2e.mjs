@@ -1,12 +1,17 @@
-// Settings on a touch phone, tapped with a finger: every button in the
-// sheet's headers does its own job. A touch screen grows small buttons'
-// targets with an absolute ::after (styles.css, pointer: coarse); on a
-// close button left unpositioned in a header row, that ::after once took the
-// whole header as its box, so Back, Previous and Next all closed Settings.
-// Each tap lands on the middle of the button, as a finger does, and the
-// page decides what was hit - nothing is clicked by name.
+// Settings on a touch screen, tapped with a finger: every button in its
+// headers, and a row of its list, does its own job. A touch screen grows
+// small buttons' targets with an absolute ::after (styles.css, pointer:
+// coarse); on a close button left unpositioned in a header row, that ::after
+// once took the whole header as its box - on a phone Back, Previous and Next
+// all closed Settings, and on a tablet a tap on a row of the list did
+// nothing. Each tap lands on the middle of the button, as a finger does, and
+// the page decides what was hit - nothing is clicked by name.
 //
-// An iPhone (WebKit, Safari's engine) and an Android phone (Chromium).
+// Phones: an iPhone (WebKit, Safari's engine) and an Android phone
+// (Chromium), where Settings is a sheet - a list, and a section pushed over
+// it with Back and Previous/Next. A tablet: an iPad, upright and on its
+// side, where Settings is the list beside the section, with no Back and no
+// arrows. What a layout does not show is not tapped.
 //
 //   node --test e2e/settings-touch.e2e.mjs    # from web/, after the wasm build
 
@@ -20,8 +25,12 @@ const playwright = createRequire(join(WEB, "package.json"))("playwright");
 const skip = !builtWeb() ? "web/em.wasm not built (nim c -d:emscripten src/dingbat_wasm.nim)" : false;
 
 let web = null;
-const browsers = [];
-after(async () => { for (const b of browsers) await b.close(); web?.close(); });
+const browsers = new Map();
+const browser = async (engine) => {
+  if (!browsers.has(engine)) browsers.set(engine, await playwright[engine].launch({ headless: true }));
+  return browsers.get(engine);
+};
+after(async () => { for (const b of browsers.values()) await b.close(); web?.close(); });
 
 // Where Settings is: open or not, on the list or in a section, and which.
 const where = (page) => page.evaluate(() => ({
@@ -29,6 +38,8 @@ const where = (page) => page.evaluate(() => ({
   detail: document.getElementById("settings-frame").classList.contains("on-detail"),
   title: document.getElementById("settings-section-title").textContent.trim(),
 }));
+
+const shown = (page, selector) => page.locator(selector).first().isVisible();
 
 // A finger on the middle of what `selector` names, once it has stopped
 // moving (the sheet slides in, and a section slides over the list).
@@ -64,18 +75,19 @@ const settle = async (page, want, what) => {
   }
 };
 
-const PHONES = [
-  { engine: "webkit", descriptor: "iPhone 13 Mini" },
-  { engine: "chromium", descriptor: "Pixel 7" },
+const DEVICES = [
+  { engine: "webkit", descriptor: "iPhone 13 Mini", sheet: true },
+  { engine: "chromium", descriptor: "Pixel 7", sheet: true },
+  { engine: "webkit", descriptor: "iPad Pro 11", sheet: false },
+  { engine: "webkit", descriptor: "iPad Pro 11 landscape", sheet: false },
 ];
 
-for (const { engine, descriptor } of PHONES) {
-  test(`Settings on a touch phone (${descriptor}): Back, the arrows, a row and both ×s each do their own job`,
+for (const { engine, descriptor, sheet } of DEVICES) {
+  test(`Settings on a touch screen (${descriptor}): each button and row does its own job`,
        { skip, timeout: 120000 }, async () => {
     web ??= await serveWeb();
-    const browser = await playwright[engine].launch({ headless: true });
-    browsers.push(browser);
-    const ctx = await browser.newContext({ ...playwright.devices[descriptor], serviceWorkers: "block" });
+    const ctx = await (await browser(engine)).newContext(
+      { ...playwright.devices[descriptor], serviceWorkers: "block" });
     const page = await ctx.newPage();
     const errors = [];
     page.on("pageerror", (e) => errors.push(e.message));
@@ -88,39 +100,55 @@ for (const { engine, descriptor } of PHONES) {
       typeof db !== "undefined" && !!db, null, { timeout: 60000 });
     await sleep(500);
 
-    // The touch styles are the ones under test, and the sheet layout.
+    // The touch styles are the ones under test, in the layout this device gets.
     const media = await page.evaluate(() => ({
       coarse: matchMedia("(pointer: coarse)").matches,
       sheet: matchMedia("(max-width: 759px)").matches,
     }));
-    assert.ok(media.coarse, "the phone has a coarse pointer");
-    assert.ok(media.sheet, "Settings is a sheet at this width");
+    assert.ok(media.coarse, "the screen is a coarse pointer");
+    assert.equal(media.sheet, sheet, sheet ? "Settings is a sheet" : "Settings is list and section side by side");
+    // In the sheet, a row opens its section over the list; side by side,
+    // the section is always there.
+    const inSection = sheet ? { detail: true } : {};
 
-    // Opened from the library's gear, on the list. The list's × closes it.
+    // Opened from the library's gear, on the list. The list's ×, where
+    // there is one, closes it.
     await tap(page, "#settings-btn");
     await settle(page, { open: true, detail: false }, "the gear opens Settings on the list");
-    await tap(page, "#settings-close-list");
-    await settle(page, { open: false }, "the list's × closes Settings");
+    if (await shown(page, "#settings-close-list")) {
+      await tap(page, "#settings-close-list");
+      await settle(page, { open: false }, "the list's × closes Settings");
+      await tap(page, "#settings-btn");
+      await settle(page, { open: true, detail: false }, "the gear opens Settings again");
+    } else {
+      assert.ok(!sheet, "the sheet's list has a ×");
+    }
 
     // A row opens its section.
-    await tap(page, "#settings-btn");
-    await settle(page, { open: true, detail: false }, "the gear opens Settings again");
     await tap(page, "#settings-tab-audio");
-    await settle(page, { open: true, detail: true, title: "Audio" }, "the Audio row opens Audio");
+    await settle(page, { open: true, ...inSection, title: "Audio" }, "the Audio row opens Audio");
 
     // Next and Previous step through the sections, Settings staying open.
-    await tap(page, "#settings-next");
-    await settle(page, { open: true, detail: true, title: "Play" }, "Next moves on to Play");
-    await tap(page, "#settings-prev");
-    await settle(page, { open: true, detail: true, title: "Audio" }, "Previous moves back to Audio");
+    if (await shown(page, "#settings-next")) {
+      await tap(page, "#settings-next");
+      await settle(page, { open: true, ...inSection, title: "Play" }, "Next moves on to Play");
+      await tap(page, "#settings-prev");
+      await settle(page, { open: true, ...inSection, title: "Audio" }, "Previous moves back to Audio");
+    } else {
+      assert.ok(!sheet, "the sheet's section has Previous and Next");
+    }
 
     // Back goes to the list, Settings staying open.
-    await tap(page, "#settings-back");
-    await settle(page, { open: true, detail: false }, "Back returns to the list");
+    if (await shown(page, "#settings-back")) {
+      await tap(page, "#settings-back");
+      await settle(page, { open: true, detail: false }, "Back returns to the list");
+    } else {
+      assert.ok(!sheet, "the sheet's section has Back");
+    }
 
     // Another row, then the section's ×, which closes Settings.
     await tap(page, "#settings-tab-video");
-    await settle(page, { open: true, detail: true, title: "Video" }, "the Video row opens Video");
+    await settle(page, { open: true, ...inSection, title: "Video" }, "the Video row opens Video");
     await tap(page, "#settings-close");
     await settle(page, { open: false }, "the section's × closes Settings");
 
