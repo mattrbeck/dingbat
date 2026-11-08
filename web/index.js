@@ -2256,6 +2256,7 @@ const relinkGameAction = (name, { launch = false } = {}) => {
         !(await confirmSuspectRom(fileName, want))) return;
     await dbPut(romKey(name), { name, data: bytes });
     await noteRomSize(name, bytes.length);
+    await clearThumbsBlank([name]); // a new file: the next run may picture it
     markGameUpload(name); // the account's only copy may be this one again
     showToast("“" + displayName(name) + "” is back on this device");
     refreshHomeRecent();
@@ -6888,6 +6889,32 @@ const noteRomSize = async (game, bytes) => {
   await dbPut(ROM_SIZES_KEY, romSizes);
 };
 
+// Games a pictures run came up blank on (still a blank screen after the boot
+// and as long again), by name. A run, and the library head's Add pictures,
+// leave them out until the game is played: opening it, or a picture stored
+// from play, clears the mark, so one press does not run them again and
+// again for nothing. Local only, like romsizes (the key does not parse as a
+// Drive file name), and the library render drops the marks of games that
+// have left it or have a picture now.
+const THUMBS_BLANK_KEY = "thumbsblank";
+/** @type {Record<string, number> | null} */
+let thumbsBlank = null;
+const loadThumbsBlank = async () => {
+  if (!thumbsBlank) thumbsBlank = (await dbGet(THUMBS_BLANK_KEY)) || {};
+  return thumbsBlank;
+};
+const markThumbsBlank = async (game) => {
+  await loadThumbsBlank();
+  thumbsBlank[game] = Date.now();
+  await dbPut(THUMBS_BLANK_KEY, thumbsBlank);
+};
+const clearThumbsBlank = async (games) => {
+  await loadThumbsBlank();
+  let hit = false;
+  for (const g of games) if (g in thumbsBlank) { delete thumbsBlank[g]; hit = true; }
+  if (hit) await dbPut(THUMBS_BLANK_KEY, thumbsBlank);
+};
+
 // Drop the ROM record. The pictures and the save data stay, and so does the
 // library entry (bumpRecentIndex), so what is left is the game itself minus
 // its file: a tile that keeps its face and its save, and says where the file
@@ -7144,6 +7171,7 @@ const storeLastFrame = ({ force = false } = {}) => {
       if (blob) {
         await dbPut(frameKey(name), blob);
         markUpload(frameKey(name)); // signed in: the other devices' tiles too
+        await clearThumbsBlank([name]);
       }
     } catch {}
   });
@@ -7250,6 +7278,7 @@ const addRecentRom = async (name, bytes, art) => {
   }
   await noteRomSize(name, bytes.byteLength ?? bytes.length);
   if (art) await dbPut(artKey(name), art); // Blob (box art from a zip)
+  await clearThumbsBlank([name]); // a new file: the next run may picture it
   await bumpRecentIndex(name, { fresh: true });
   refreshHomeRecent();
   requestPersistentStorage();
@@ -7258,6 +7287,7 @@ const addRecentRom = async (name, bytes, art) => {
 
 // Recency bump without rewriting the rom: record.
 const touchRecent = async (name) => {
+  await clearThumbsBlank([name]); // played: the next run may picture it
   await bumpRecentIndex(name);
   refreshHomeRecent();
 };
@@ -8156,6 +8186,10 @@ const refreshHomeRecent = async () => {
     for (let n of stale) delete romSizes[n];
     dbPut(ROM_SIZES_KEY, romSizes);
   }
+  await loadThumbsBlank();
+  if (gen !== homeRenderGen) return;
+  let spent = Object.keys(thumbsBlank).filter((n) => !live.has(n) || keys.includes(frameKey(n)));
+  if (spent.length) clearThumbsBlank(spent);
   roms = sortRoms(roms);
   let tiles = [];
   let pictures = []; // each tile's picture, decoded (The first picture)
@@ -8288,9 +8322,11 @@ const refreshHomeRecent = async () => {
     paintTileLoad(tile);
     tiles.push(tile);
   }
-  // The pictures offer is worth showing only while something lacks one.
-  // Drive-only games count when signed in, since the run can fetch them.
-  thumbsCandidates(driveLinked(), keys)
+  // The pictures offer is worth showing only while something lacks one that
+  // a run would open: Drive-only games count when signed in with the box's
+  // Drive switch left on, since only then can the run fetch them.
+  thumbsDriveWanted()
+    .then((drive) => thumbsCandidates(driveLinked() && drive, keys))
     .then((cands) => { if (gen === homeRenderGen) homeThumbsBtn.hidden = !cands.length; })
     .catch(() => {});
   // Filtered before the commit: a fresh render is already filtered.
@@ -12674,6 +12710,7 @@ const SETTINGS_KEYS = [
   "keybindings", "large-controls", "opaque-controls", "landscape-buttons",
   "control-style", "joystick-mode", "hide-touch-on-gamepad",
   "runahead", "gb-palette", "input-display", "library-open", "nds-layout", "nds-display",
+  "thumbs-drive",
 ];
 
 const resetAllSettings = async () => {
@@ -12752,6 +12789,9 @@ const resetAllSettings = async () => {
 
   try { localStorage.removeItem(THEME_KEY); } catch (e) {}
   applyTheme(DEFAULT_THEME);
+
+  // Add pictures follows the pictures box's Drive switch, now off again.
+  refreshHomeRecent();
 };
 
 const resetSettingsSlot = document.getElementById("reset-settings-slot");
@@ -15754,6 +15794,10 @@ document.getElementById("hero-close").addEventListener("click", async () => {
 // never written to this device, so the library's order and local footprint
 // are exactly what they were. The picture itself uploads like any other.
 const THUMBS_OFFER_KEY = "thumbs_offered";
+// The box's "Include games kept only on Drive", as last left: off until
+// turned on. It decides whether Drive-only games keep Add pictures up.
+const THUMBS_DRIVE_KEY = "thumbs-drive";
+const thumbsDriveWanted = async () => (await dbGet(THUMBS_DRIVE_KEY)) === true;
 const THUMBS_RESUME_FRAMES = 2;   // after a state restore: one full render
 const THUMBS_BOOT_FRAMES = 600;   // no session: through the logo to a title (10 s)
 const THUMBS_SAFETY_MS = 10000;   // a net for a core that hangs: frames end a run
@@ -15769,17 +15813,21 @@ const thumbsDriveRow = document.getElementById("thumbs-drive-row");
 const thumbsDriveToggle = /** @type {HTMLInputElement} */ (document.getElementById("thumbs-drive-toggle"));
 let thumbsRun = null; // { cancelled, done } while a batch runs
 
-// Library entries without a picture. Drive-only ones only when asked.
-// `known` is the caller's key list, where it already has one (the grid
-// reads the same keys to decide which games are local).
+// Library entries without a picture, less those a run came up blank on
+// (THUMBS_BLANK_KEY). Drive-only ones only when asked, and only with a ROM
+// on Drive to fetch: a game on neither (a missing tile) is one no run can
+// open. `known` is the caller's key list, where it already has one (the
+// grid reads the same keys to decide which games are local).
 const thumbsCandidates = async (includeDrive, known) => {
   let keys = new Set((known || await dbKeys()).filter((k) => typeof k === "string"));
+  let blank = await loadThumbsBlank();
   let out = [];
   for (let { name } of await getRecentMeta()) {
     if (keys.has(frameKey(name))) continue;
+    if (blank[name]) continue;
     if (isNdsRomName(name)) continue; // the batch runs the GB/GBA core only
     let local = keys.has(romKey(name));
-    if (local || includeDrive) out.push({ name, local });
+    if (local || (includeDrive && driveHasRom(name))) out.push({ name, local });
   }
   return out;
 };
@@ -15792,9 +15840,9 @@ const closeThumbsModal = () => {
 
 // The box in its offer state. The Drive row shows only when it can mean
 // something: signed in, with a Drive-only game still unpictured.
-const openThumbsOffer = (cands) => {
+const openThumbsOffer = async (cands) => {
   thumbsDriveRow.hidden = !driveLinked() || !cands.some((c) => !c.local);
-  thumbsDriveToggle.checked = false;
+  thumbsDriveToggle.checked = await thumbsDriveWanted();
   thumbsOffer.hidden = false;
   thumbsProgress.hidden = true;
   thumbsModal.classList.add("open");
@@ -15810,7 +15858,7 @@ const maybeOfferThumbnails = async () => {
   let cands = await thumbsCandidates(driveLinked());
   if (!cands.length) return false;
   await dbPut(THUMBS_OFFER_KEY, Date.now()); // one offer, whatever the answer
-  openThumbsOffer(cands);
+  await openThumbsOffer(cands);
   return true;
 };
 
@@ -15840,7 +15888,7 @@ const openThumbsRun = async () => {
     showToast("Every game already has a picture");
     return false;
   }
-  openThumbsOffer(cands);
+  await openThumbsOffer(cands);
   return true;
 };
 
@@ -15936,6 +15984,7 @@ const thumbsPictureOne = async (cand, run, remote) => {
   }
   if (!heap || framebufferBlank(heap, w, h)) {
     try { FS.unlink("thumb.sav"); } catch {}
+    await markThumbsBlank(name); // left out until it is played
     return false;
   }
   let sgb = Module._wasm_sgb_active && Module._wasm_sgb_active();
@@ -16019,6 +16068,10 @@ document.getElementById("thumbs-go").addEventListener("click", () => {
   runThumbnailBatch({ includeDrive: !thumbsDriveRow.hidden && thumbsDriveToggle.checked });
 });
 document.getElementById("thumbs-not-now").addEventListener("click", closeThumbsModal);
+thumbsDriveToggle.addEventListener("change", async () => {
+  await dbPut(THUMBS_DRIVE_KEY, thumbsDriveToggle.checked);
+  refreshHomeRecent(); // Drive-only games now count toward Add pictures, or stop
+});
 document.getElementById("home-thumbs").addEventListener("click", () => { openThumbsRun(); });
 document.getElementById("thumbs-close").addEventListener("click", closeThumbsModal);
 document.getElementById("thumbs-stop").addEventListener("click", cancelThumbnailRun);

@@ -15,6 +15,7 @@ const GLOBAL_KEYS = [
   "system", "audio", "colorCorrect", "video", "keybindings", "large-controls",
   "opaque-controls", "landscape-buttons", "control-style", "joystick-mode", "hide-touch-on-gamepad",
   "runahead", "gb-palette", "thumbs_offered", "playing", "crashes", "lastgasp",
+  "romsizes", "thumbsblank", "thumbs-drive",
 ];
 
 // Every IndexedDB key web/index.js writes for one game. Spelled out, not

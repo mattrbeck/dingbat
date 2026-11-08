@@ -88,7 +88,7 @@ test("the Drive row shows only when signed in with a Drive-only game", async () 
   app2.idb.set("recent", [{ name: "A.gba", ts: 2 }, { name: "D.gba", ts: 1 }]);
   app2.api.gdriveToken = "t";
   app2.api.syncState = { queueUp: [], queueDel: [], queueRen: [], tomb: [], ren: [],
-                         sigs: {}, rmt: {}, connected: true };
+                         sigs: { "rom:D.gba": "x" }, rmt: {}, connected: true }; // D's ROM is on Drive
   await app2.api.maybeOfferThumbnails();
   assert.equal(app2.document.getElementById("thumbs-drive-row").hidden, false);
   assert.equal(app2.document.getElementById("thumbs-drive-toggle").checked, false, "off by default");
@@ -301,7 +301,7 @@ test("Drive-only games are fetched, pictured, and never written to the device", 
   app.api.gdriveToken = "t";
   app.api.gdriveTokenExp = Date.now() + 3600e3;
   app.api.syncState = { queueUp: [], queueDel: [], queueRen: [], tomb: [], ren: [],
-                        sigs: {}, rmt: {}, connected: true };
+                        sigs: { "rom:D.gba": "x" }, rmt: {}, connected: true }; // from the last pull
   const downloads = [];
   app.setFetch(async (url, opts = {}) => {
     url = String(url);
@@ -428,4 +428,105 @@ test("a batch refuses to run over a loaded game", async () => {
   assert.equal(await app.api.runThumbnailBatch(), 0);
   eq(framesOf(app), []);
   assert.equal(app.runIn("__inits.length"), 0, "the core was not re-initialised");
+});
+
+// ── Games that come up blank, and games the run can't open ─────────────────
+
+const signedIn = (app) => {
+  app.api.gdriveToken = "t";
+  app.api.gdriveTokenExp = Date.now() + 3600e3;
+  app.api.syncState = { queueUp: [], queueDel: [], queueRen: [], tomb: [], ren: [],
+                        sigs: {}, rmt: {}, connected: true };
+};
+const thumbsBtnShown = async (app) => {
+  await app.api.refreshHomeRecent();
+  await settle();
+  return !app.document.getElementById("home-thumbs").hidden;
+};
+
+test("a game that comes up blank is left out until it is played, and the button goes away", async () => {
+  const app = await loadApp();
+  stubModule(app);
+  seedLibrary(app, ["A.gba", "B.gba"]);
+  app.idb.set("frame:B.gba", new Blob([u8(1)]));
+  app.runIn("new Uint8Array(Module.memory.buffer).fill(255);"); // white for good
+  assert.equal(await thumbsBtnShown(app), true, "A has no picture yet");
+
+  assert.equal(await app.api.runThumbnailBatch(), 0);
+  assert.ok(app.idb.get("thumbsblank")?.["A.gba"], "the blank game is remembered on this device");
+  assert.equal(await thumbsBtnShown(app), false, "nothing left a run would picture");
+
+  // A second run (the offer, say) does not boot it again.
+  const inits = app.runIn("__inits.length");
+  assert.equal(await app.api.runThumbnailBatch(), 0);
+  assert.equal(app.runIn("__inits.length"), inits, "A was not opened again");
+
+  // Opening it clears the mark: the next run may try again.
+  await app.runIn(`touchRecent("A.gba")`);
+  assert.equal(app.idb.get("thumbsblank")?.["A.gba"], undefined);
+  assert.equal(await thumbsBtnShown(app), true);
+});
+
+test("a picture from play, or a game leaving the library, drops its blank mark", async () => {
+  const app = await loadApp();
+  seedLibrary(app, ["A.gba", "B.gba"]);
+  app.idb.set("thumbsblank", { "A.gba": 1, "B.gba": 1, "Gone.gba": 1 });
+  app.idb.set("frame:A.gba", new Blob([u8(1)])); // played on another device, pulled down
+  await app.api.refreshHomeRecent();
+  await settle();
+  eq(Object.keys(app.idb.get("thumbsblank")), ["B.gba"], "only the one still blank and unplayed");
+});
+
+test("Drive-only games keep Add pictures up only while the box's Drive switch is on", async () => {
+  const app = await loadApp();
+  seedLibrary(app, ["A.gba"]);
+  app.idb.set("frame:A.gba", new Blob([u8(1)]));
+  app.idb.set("recent", [{ name: "A.gba", ts: 2 }, { name: "D.gba", ts: 1 }]);
+  signedIn(app);
+  app.api.syncState.sigs = { "rom:D.gba": "x" }; // D's ROM is on Drive
+  assert.equal(await thumbsBtnShown(app), false,
+    "with the switch off a run cannot open D, so it does not count");
+
+  // The box still offers D behind the switch (the one-time offer finds it).
+  assert.equal(await app.api.maybeOfferThumbnails(), true);
+  const toggle = app.document.getElementById("thumbs-drive-toggle");
+  assert.equal(app.document.getElementById("thumbs-drive-row").hidden, false);
+  assert.equal(toggle.checked, false);
+  toggle.checked = true;
+  await toggle.dispatch("change");
+  await settle();
+  assert.equal(app.idb.get("thumbs-drive"), true, "the switch is remembered");
+  assert.equal(await thumbsBtnShown(app), true, "now a run would fetch D");
+
+  app.document.getElementById("thumbs-not-now").click();
+  assert.equal(await app.api.openThumbsRun(), true);
+  assert.equal(toggle.checked, true, "the box opens with the switch as it was left");
+});
+
+test("a game on neither this device nor Drive never counts, even with the Drive switch on", async () => {
+  const app = await loadApp();
+  seedLibrary(app, ["A.gba"]);
+  app.idb.set("frame:A.gba", new Blob([u8(1)]));
+  // M was removed from this device with no Drive copy: a missing tile.
+  app.idb.set("recent", [{ name: "A.gba", ts: 2 }, { name: "M.gba", ts: 1 }]);
+  signedIn(app);
+  app.idb.set("thumbs-drive", true);
+  assert.equal(app.runIn(`driveHasRom("M.gba")`), false);
+  assert.equal(await thumbsBtnShown(app), false, "no run can open it, so no button");
+  assert.equal(await app.api.openThumbsRun(), false, "and the box has nothing to offer");
+});
+
+test("Reset all settings turns the Drive switch off, and the button follows", async () => {
+  const app = await loadApp();
+  seedLibrary(app, ["A.gba"]);
+  app.idb.set("frame:A.gba", new Blob([u8(1)]));
+  app.idb.set("recent", [{ name: "A.gba", ts: 2 }, { name: "D.gba", ts: 1 }]);
+  signedIn(app);
+  app.api.syncState.sigs = { "rom:D.gba": "x" };
+  app.idb.set("thumbs-drive", true);
+  assert.equal(await thumbsBtnShown(app), true);
+  await app.runIn("resetAllSettings()");
+  await settle();
+  assert.equal(app.idb.get("thumbs-drive"), undefined);
+  assert.equal(app.document.getElementById("home-thumbs").hidden, true);
 });
