@@ -97,11 +97,12 @@ struct HomeView: View {
         }
         .environment(\.padScope, "home")
         .onAppear {
-            // The one-time offer, once a first Drive pull has had a moment
-            // to bring pictures down (not in scripted test launches).
+            // The one-time offer, once the boot's Drive pull has brought its
+            // pictures down, or at once without Drive (not in scripted test
+            // launches).
             let args = ProcessInfo.processInfo.arguments
             guard !args.contains("-autoplay"), !args.contains("-sheet") else { return }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 4) { AddPictures.shared.maybeOffer() }
+            Task { @MainActor in await AddPictures.shared.offerAfterBoot() }
         }
         .fileImporter(isPresented: $importing,
                       allowedContentTypes: [.gbaRom, .gbRom, .gbcRom] + (Settings.dsBetaOn ? [.ndsRom] : []) + [.zip, .data],

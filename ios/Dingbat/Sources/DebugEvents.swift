@@ -17,6 +17,9 @@ import notify
 ///   com.mattrb.dingbat.debug.pad-disconnect     ... and disconnects
 ///   com.mattrb.dingbat.debug.nav-up|down|a|b    a pad press as the UI gets it
 ///                                               (Controllers.debugPress)
+///   com.mattrb.dingbat.debug.pictures-run       Add pictures from the library
+///                                               head, and its run started
+///   com.mattrb.dingbat.debug.pictures-stop      the run's Stop
 ///
 /// The interruption and route notifications are the ones AVAudioSession
 /// posts, with the userInfo it gives them, so what runs is the app's own
@@ -59,6 +62,13 @@ enum DebugEvents {
             ("nav-a", { Controllers.shared.debugPress("a") }),
             ("nav-b", { Controllers.shared.debugPress("b") }),
             ("home", { AppModel.shared.showMainMenu() }),
+            // The library head's Add pictures, then the sheet's Add pictures;
+            // and its Stop (ios/e2e/pictures-hold.mjs).
+            ("pictures-run", {
+                AddPictures.shared.open()
+                Task { @MainActor in await AddPictures.shared.run(includeDrive: false) }
+            }),
+            ("pictures-stop", { AddPictures.debugLog("stop"); AddPictures.shared.cancel() }),
         ]
         for (name, run) in handlers {
             var token: Int32 = 0

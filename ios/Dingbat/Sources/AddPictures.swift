@@ -112,6 +112,49 @@ final class AddPictures: ObservableObject {
         if !spent.isEmpty { clearBlank(Array(spent)) }
     }
 
+    /// The boot's first Drive pull, waited for until this long after launch,
+    /// before the offer or a run picks its games (web THUMBS_PULL_WAIT_MS).
+    static let pullWait = 15.0
+    /// The home screen's settle before the offer (its launch intro, ~2 s).
+    static let offerSettle = 2.0
+    /// offerAfterBoot has started this launch (the home screen appears
+    /// again after every game).
+    private var bootOfferStarted = false
+
+    /// The one-time offer at launch: once the home screen has settled and
+    /// the boot's Drive pull is done (or Drive isn't in use), not on a
+    /// fixed delay that could beat Drive's pictures down.
+    @MainActor
+    func offerAfterBoot() async {
+        guard !bootOfferStarted else { return }
+        bootOfferStarted = true
+        let start = CACurrentMediaTime()
+        await DriveSync.shared.waitForFirstPull(maxWait: Self.pullWait)
+        let left = Self.offerSettle - (CACurrentMediaTime() - start)
+        if left > 0 { try? await Task.sleep(nanoseconds: UInt64(left * 1e9)) }
+        maybeOffer()
+    }
+
+    #if DEBUG
+    /// `-debug-events`: what Add pictures did, a line each, in tmp/addpictures.txt
+    /// (ms of system uptime, since the device booted, then offer / run /
+    /// wait / stop / end <toast>) for ios/e2e/pictures-hold.mjs.
+    static func debugLog(_ line: String) {
+        guard ProcessInfo.processInfo.arguments.contains("-debug-events") else { return }
+        let url = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("addpictures.txt")
+        let text = String(format: "%.0f ", ProcessInfo.processInfo.systemUptime * 1000) + line + "\n"
+        if let h = try? FileHandle(forWritingTo: url) {
+            h.seekToEndOfFile()
+            h.write(Data(text.utf8))
+            try? h.close()
+        } else {
+            try? text.write(to: url, atomically: true, encoding: .utf8)
+        }
+    }
+    #else
+    static func debugLog(_ line: String) {}
+    #endif
+
     /// Once per device, with something to picture and nothing loaded. The
     /// sheet offers Drive-only games behind its switch whenever it opens.
     func maybeOffer() {
@@ -120,6 +163,7 @@ final class AddPictures: ObservableObject {
               AppModel.shared.sheet == nil, anyToOffer else { return }
         d.set(true, forKey: Self.offeredKey)  // one offer, whatever the answer
         fromButton = false
+        Self.debugLog("offer")
         AppModel.shared.openSheet(.addPictures)
     }
 
@@ -146,10 +190,20 @@ final class AddPictures: ObservableObject {
             AppModel.shared.toast("Close the running game first")
             return
         }
-        let cands = candidates(includeDrive: includeDrive)
         running = true
         cancelled = false
         blankCount = 0
+        Self.debugLog("run")
+        // The boot's Drive pull may still be bringing pictures down: the
+        // games are picked once it has (a Stop, the x or a swipe meanwhile
+        // ends the run at once, before the first, as "Stopped").
+        if DriveSync.shared.firstPullPending(maxWait: Self.pullWait) {
+            status = "Waiting for Drive…"
+            progress = 0
+            Self.debugLog("wait")
+            await DriveSync.shared.waitForFirstPull(maxWait: Self.pullWait) { [weak self] in self?.cancelled ?? true }
+        }
+        let cands = cancelled ? [] : candidates(includeDrive: includeDrive)
         var done = 0
         // Nobody hears it, and nothing may wait on the audio.
         let audioMode = dingbat_audio_get_mode()
@@ -181,7 +235,11 @@ final class AddPictures: ObservableObject {
         // The games that came up blank leave Add pictures' count.
         if blankCount > 0 { RomLibrary.shared.pictureGen += 1 }
         if case .addPictures = AppModel.shared.sheet { AppModel.shared.sheet = nil }
-        AppModel.shared.toast(Self.runToast(done: done, blank: blankCount, cancelled: stopped))
+        // Drive's pull may have brought every picture down meanwhile.
+        let toast = cands.isEmpty && !stopped ? "Every game already has a picture"
+            : Self.runToast(done: done, blank: blankCount, cancelled: stopped)
+        Self.debugLog("end " + toast)
+        AppModel.shared.toast(toast)
     }
 
     /// What a run did, in one short line (web thumbsRunToast): the pictures
@@ -201,6 +259,9 @@ final class AddPictures: ObservableObject {
     private func pictureOne(_ c: Candidate) async -> Bool {
         let e = c.entry
         let fm = FileManager.default
+        // A picture that came down from Drive since the run began is a
+        // better one than a boot screen: keep it.
+        if fm.fileExists(atPath: e.shotURL.path) { return false }
         let dir = fm.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent("thumb")
         try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
         let rom = dir.appendingPathComponent("thumb." + e.ext)
@@ -244,6 +305,7 @@ final class AddPictures: ObservableObject {
             }
         }
         guard let jpg = GameSession.coreImage()?.jpegData(compressionQuality: 0.75) else { return false }
+        if fm.fileExists(atPath: e.shotURL.path) { return false }  // one came down while it ran
         try? RomLibrary.ensureDir(e.dir)
         guard (try? jpg.write(to: e.shotURL, options: .atomic)) != nil else { return false }
         DriveSync.shared.markUpload("frame:" + e.fileName)

@@ -378,9 +378,13 @@ final class NativeTouchesUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["-audio.muted", "YES"]
         app.launch()
-        // The first-run offer, once the boot pull is done.
+        // The first-run offer: with no Drive in use there is no pull to wait
+        // for, so it comes once the home screen settles (2 s).
+        let t0 = Date()
         let notNow = app.buttons["Not now"]
-        if notNow.waitForExistence(timeout: 8) { notNow.tap(); sleep(1) }
+        XCTAssertTrue(notNow.waitForExistence(timeout: 8), "the first-run offer, no Drive to wait for")
+        print("NATIVE: offer after \(String(format: "%.1f", Date().timeIntervalSince(t0))) s")
+        if notNow.exists { notNow.tap(); sleep(1) }
         let thumbs = app.buttons["Add pictures"].firstMatch
         let add = app.buttons["Add a game"].firstMatch
         XCTAssertTrue(thumbs.waitForExistence(timeout: 5) && add.exists, "the library head's two buttons")

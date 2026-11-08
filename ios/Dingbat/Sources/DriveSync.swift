@@ -805,6 +805,31 @@ final class DriveSync: ObservableObject {
     /// The boot's pull is still out, and said so (the ring).
     var bootPullOut: Bool { !firstPullDone && status == .syncing && linked }
 
+    /// Signed in, the boot's first pull may still be bringing pictures down
+    /// (they are Drive files): Add pictures waits for it, so a game is only
+    /// unpictured once it has had that chance, and a boot screen is never
+    /// pictured and uploaded over a better picture from Drive (web
+    /// offerThumbnailsAfterBoot). At once when not signed in, or once
+    /// `stopped()` holds; never past `maxWait` seconds from launch, so the
+    /// wait is bounded per launch however often it is asked (a linked device
+    /// with no live token never pulls: offline, or a sign-in waiting on a
+    /// tap).
+    @MainActor
+    func waitForFirstPull(maxWait: Double, unless stopped: () -> Bool = { false }) async {
+        while !stopped() && firstPullPending(maxWait: maxWait) {
+            guard (try? await Task.sleep(nanoseconds: 100_000_000)) != nil else { return }
+        }
+    }
+
+    /// Signed in, the boot's first pull not done, and still within `maxWait`
+    /// seconds of launch.
+    func firstPullPending(maxWait: Double) -> Bool {
+        linked && !firstPullDone && Self.now() < bootAt + maxWait * 1000
+    }
+
+    /// When this launch began (the first-pull waits are counted from it).
+    private let bootAt = DriveSync.now()
+
     /// Drive may hold a newer save or session of the game than this device
     /// last saw. Opened now, it would boot on the older copy here, and the
     /// pull's hand-off would then offer a Switch over the game being played.
