@@ -35,11 +35,18 @@ final class AddPictures: ObservableObject {
         }
     }
 
-    /// Running: "Picturing 2 of 9 — name", and how far.
+    /// Running: "Picturing 2 of 9 — name", and how far: the games done plus
+    /// how far the one in hand is through its frames, so the bar moves
+    /// during a game and not only between them.
     @Published private(set) var running = false
     @Published private(set) var status = ""
     @Published private(set) var progress = 0.0
+    /// The sheet was opened from the library head's Add pictures: its
+    /// pointer to that button would point at itself.
+    @Published private(set) var fromButton = false
     private var cancelled = false
+    /// The game in hand's share of its frames, onto the bar (run()).
+    private var step: ((Double) -> Void)?
     /// This run's games that came up blank.
     private var blankCount = 0
 
@@ -112,6 +119,7 @@ final class AddPictures: ObservableObject {
         guard !d.bool(forKey: Self.offeredKey), GameSession.shared.game == nil,
               AppModel.shared.sheet == nil, anyToOffer else { return }
         d.set(true, forKey: Self.offeredKey)  // one offer, whatever the answer
+        fromButton = false
         AppModel.shared.openSheet(.addPictures)
     }
 
@@ -125,6 +133,7 @@ final class AddPictures: ObservableObject {
             AppModel.shared.toast("Every game already has a picture")
             return
         }
+        fromButton = true
         AppModel.shared.openSheet(.addPictures)
     }
 
@@ -146,14 +155,19 @@ final class AddPictures: ObservableObject {
         let audioMode = dingbat_audio_get_mode()
         dingbat_audio_set_mode(2)
         dingbat_set_fast_forward(1)
+        let total = Double(max(1, cands.count))
         for (i, c) in cands.enumerated() where !cancelled && GameSession.shared.game == nil {
             status = "Picturing \(i + 1) of \(cands.count) — \(c.entry.name)"
-            progress = Double(i) / Double(max(1, cands.count))
+            progress = Double(i) / total
+            step = { [weak self] f in self?.progress = (Double(i) + f) / total }
             if await pictureOne(c) {
                 done += 1
                 RomLibrary.shared.pictureGen += 1  // the grid fills in as it goes
             }
+            if !cancelled { progress = Double(i + 1) / total }
         }
+        step = nil
+        let stopped = cancelled
         // The core is left empty unless a launch took it meanwhile.
         if GameSession.shared.game == nil {
             dingbat_unload(0)
@@ -167,8 +181,20 @@ final class AddPictures: ObservableObject {
         // The games that came up blank leave Add pictures' count.
         if blankCount > 0 { RomLibrary.shared.pictureGen += 1 }
         if case .addPictures = AppModel.shared.sheet { AppModel.shared.sheet = nil }
-        AppModel.shared.toast(done == 0 ? "No pictures added"
-            : "\(done) \(done == 1 ? "picture" : "pictures") added" + (cancelled ? " before stopping" : ""))
+        AppModel.shared.toast(Self.runToast(done: done, blank: blankCount, cancelled: stopped))
+    }
+
+    /// What a run did, in one short line (web thumbsRunToast): the pictures
+    /// added (or "Stopped", for a Stop before the first), and the games
+    /// that came up blank, which the next run skips until they are played.
+    static func runToast(done: Int, blank: Int, cancelled: Bool) -> String {
+        let main = done > 0
+            ? "\(done) \(done == 1 ? "picture" : "pictures") added" + (cancelled ? " before stopping" : "")
+            : cancelled ? "Stopped" : ""
+        guard blank > 0 else { return main.isEmpty ? "No pictures added" : main }
+        return main.isEmpty
+            ? "\(blank) \(blank == 1 ? "game" : "games") stayed blank, skipped until played"
+            : main + " — \(blank) blank, skipped until played"
     }
 
     @MainActor
@@ -204,7 +230,7 @@ final class AddPictures: ObservableObject {
             frames = Self.resumeFrames
             deadline = .infinity
         }
-        guard await advance(frames, deadline) else { return false }
+        guard await advance(frames, deadline, report: step) else { return false }
         // A blank screen (still on a boot's white, or in a fade): run on to
         // the next one that isn't, for up to as long again, in frames;
         // still blank, no picture, and the tile keeps its cartridge.
@@ -226,10 +252,12 @@ final class AddPictures: ObservableObject {
 
     /// Run the pictures core on: up to `frames` frames or until `deadline`,
     /// whichever comes first, in chunks so the app stays responsive,
-    /// stopping early once `until()` holds (web thumbsAdvance). False when
-    /// the run was stopped or a launch took the core meanwhile.
+    /// stopping early once `until()` holds (web thumbsAdvance), and passing
+    /// `report` the share of `frames` run so far. False when the run was
+    /// stopped or a launch took the core meanwhile.
     @MainActor
-    private func advance(_ frames: Int, _ deadline: CFTimeInterval, until: () -> Bool = { false }) async -> Bool {
+    private func advance(_ frames: Int, _ deadline: CFTimeInterval, until: () -> Bool = { false },
+                         report: ((Double) -> Void)? = nil) async -> Bool {
         var ran = 0
         while ran < frames && CACurrentMediaTime() < deadline {
             // A launch takes the core: this one gives way.
@@ -237,6 +265,7 @@ final class AddPictures: ObservableObject {
             let n = min(Self.chunk, frames - ran)
             for _ in 0..<n { dingbat_run_frame() }
             ran += n
+            report?(Double(ran) / Double(frames))
             dingbat_audio_clear()
             await Task.yield()
             try? await Task.sleep(nanoseconds: 1_000_000)
@@ -259,6 +288,7 @@ struct AddPicturesView: View {
     @Environment(\.palette) private var palette
     /// As last left (AddPictures.driveWanted).
     @State private var includeDrive = AddPictures.driveWanted
+    @AccessibilityFocusState private var stopFocused: Bool
 
     /// The Drive row means something only signed in, with a Drive-only game
     /// still unpictured.
@@ -267,27 +297,48 @@ struct AddPicturesView: View {
     }
 
     var body: some View {
-        SheetChrome(title: "Add pictures to your library?", fit: true, onClose: close) {
+        // No longer a question once it runs.
+        SheetChrome(title: job.running ? "Adding pictures" : "Add pictures to your library?", fit: true, onClose: close) {
             if job.running {
+                // One line, a long name ending in an ellipsis: the sheet
+                // keeps its height from game to game.
                 Text(job.status)
                     .font(.system(size: 13.5))
                     .foregroundColor(palette.textDim)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
                     .padding(.bottom, 10)
+                    .accessibilityHidden(true)  // the bar under it reads it
                 ProgressView(value: job.progress)
                     .tint(palette.accent)
                     .padding(.bottom, 16)
+                    .accessibilityLabel(job.status)
                 HStack {
                     Spacer()
                     PadButton("Stop") { job.cancel() }
                         .buttonStyle(SheetButtonStyle(small: false))
+                        .accessibilityFocused($stopFocused)
+                }
+                .onAppear {
+                    // The focused Add pictures has just gone: the pad's ring,
+                    // and VoiceOver, go to Stop, inside the sheet (web: focus
+                    // moves to Stop).
+                    if PadNav.shared.showing { PadNav.shared.focus(PadNav.key(Self.scope, "button:Stop")) }
+                    // Set at once it is often lost in the sheet's own change
+                    // of content: a moment later it holds.
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { stopFocused = true }
                 }
             } else {
-                Text("dingbat can open each game, pick up where you left off, take a picture of the screen for its library card, and close it again. It takes a moment per game. Your games and saves are not changed.")
+                Text("dingbat opens each game for a moment to take a picture of its screen for the library, then closes it. Your games and saves are not changed.")
                     .font(.system(size: 13.5))
                     .foregroundColor(palette.text)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.bottom, 10)
-                SheetHint("You can do this later from Add pictures, above your library.")
+                // For the one-time offer: opened from that button, it would
+                // point at itself.
+                if !job.fromButton {
+                    SheetHint("You can do this later from Add pictures, above your library.")
+                }
                 if driveRow {
                     SheetToggleRow(label: "Include games kept only on Drive",
                                    sub: "Each one is fetched, pictured, and not kept on this device",
@@ -308,8 +359,15 @@ struct AddPicturesView: View {
                 }
             }
         }
-        .interactiveDismissDisabled(job.running)
+        // The primary, not Not now beside it: A on a controller answers the
+        // question instead of dismissing it.
+        .onAppear { PadNav.shared.preferred[Self.scope] = "button:Add pictures" }
+        // A swipe down (or a tap outside, on iPad) does what the x does:
+        // during a run, it stops it at once; the pictures already added are kept.
+        .onDisappear { job.cancel() }
     }
+
+    private static let scope = AppModel.Sheet.addPictures.id
 
     private func close() {
         job.cancel()

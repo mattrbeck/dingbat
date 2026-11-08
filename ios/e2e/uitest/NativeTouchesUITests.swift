@@ -57,6 +57,9 @@ final class NativeTouchesUITests: XCTestCase {
         return app
     }
 
+    /// The toast an Add pictures run ends on (AddPictures.runToast).
+    private static let runToast = "label CONTAINS ' added' OR label CONTAINS 'skipped until played' OR label == 'Stopped'"
+
     private func snap(_ app: XCUIApplication, _ name: String) {
         let a = XCTAttachment(screenshot: app.screenshot())
         a.name = name
@@ -393,6 +396,9 @@ final class NativeTouchesUITests: XCTestCase {
         under.tap()
         XCTAssertTrue(app.staticTexts["Add pictures to your library?"].waitForExistence(timeout: 3),
                       "a tap 5 pt under the capsule opens the offer")
+        XCTAssertFalse(app.staticTexts["You can do this later from Add pictures, above your library."].exists,
+                       "opened from the button, no pointer to the button")
+        snap(app, "pictures-offer-from-button")
     }
 
     /// Add pictures over a library whose games are on DB_ROMS (copied in by
@@ -400,7 +406,8 @@ final class NativeTouchesUITests: XCTestCase {
     /// white) gets no picture and keeps its cartridge; one with a real
     /// screen gets its picture. Prints the toast (NATIVE: pictures …). Run
     /// on its own (the suite's library is linktest.gba alone), from the repo:
-    ///   DB_ROMS=tests/roms/gbedge.gb DB_PICTURES="1 picture added" \
+    ///   DB_ROMS=tests/roms/gbedge.gb \
+    ///     DB_PICTURES="1 picture added — 1 blank, skipped until played" \
     ///     node ios/e2e/native-touches.mjs <dd>
     func testAddPicturesSkipsBlank() throws {
         guard let want = ProcessInfo.processInfo.environment["DB_PICTURES"] else {
@@ -416,7 +423,10 @@ final class NativeTouchesUITests: XCTestCase {
             .last { $0.isHittable }
         XCTAssertNotNil(go, "the offer's Add pictures")
         go?.tap()
-        let done = app.staticTexts.matching(NSPredicate(format: "label ENDSWITH 'added' OR label ENDSWITH 'stopping'")).firstMatch
+        // No longer a question while it runs (pictured if the run is still
+        // going: no wait, which could outlast the toast after it).
+        if app.staticTexts["Adding pictures"].exists { snap(app, "pictures-running") }
+        let done = app.staticTexts.matching(NSPredicate(format: Self.runToast)).firstMatch
         XCTAssertTrue(done.waitForExistence(timeout: 60), "the run ends")
         print("NATIVE: pictures \(done.label)")
         XCTAssertEqual(done.label, want, "only the real screens are pictured")
@@ -434,15 +444,18 @@ final class NativeTouchesUITests: XCTestCase {
         app.launchArguments = ["-audio.muted", "YES", "-sheet", "addPictures"]
         app.launch()
         XCTAssertTrue(app.staticTexts["Add pictures to your library?"].waitForExistence(timeout: 10), "the offer")
+        XCTAssertTrue(app.staticTexts["You can do this later from Add pictures, above your library."].exists,
+                      "the offer (not from the button) points at the button")
         sleep(1)
+        snap(app, "pictures-offer")
         let go = app.buttons.matching(NSPredicate(format: "label == 'Add pictures'")).allElementsBoundByIndex
             .last { $0.isHittable }
         XCTAssertNotNil(go, "the offer's Add pictures")
         go?.tap()
-        let toast = app.staticTexts.matching(
-            NSPredicate(format: "label CONTAINS 'added' OR label CONTAINS 'blank' OR label == 'Stopped'")).firstMatch
+        let toast = app.staticTexts.matching(NSPredicate(format: Self.runToast)).firstMatch
         XCTAssertTrue(toast.waitForExistence(timeout: 60), "the run ends")
         print("NATIVE: blank run \(toast.label)")
+        XCTAssertEqual(toast.label, "1 game stayed blank, skipped until played", "the toast says so")
         sleep(1)
         XCTAssertFalse(app.buttons["Add pictures"].exists, "nothing left that a run would open")
         snap(app, "pictures-blank-remembered")

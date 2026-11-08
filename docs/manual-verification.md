@@ -243,7 +243,10 @@ iPhone Duo ones and AddPicturesSkipsBlank, which needs its knobs)
   between the shoulder columns (ToastsInPlay);
 - the library head's Add pictures, 44 pt to touch (AddPicturesButton), and
   the run keeping no blank screen (AddPicturesSkipsBlank, on its own:
-  DB_ROMS=tests/roms/gbedge.gb DB_PICTURES="1 picture added").
+  DB_ROMS=tests/roms/gbedge.gb
+  DB_PICTURES="1 picture added — 1 blank, skipped until played"), and a
+  blank game leaving Add pictures until it is played
+  (BlankGameLeavesAddPictures).
 
 The interruptions and route change are the notifications AVAudioSession
 posts, sent by the `-debug-events` hook, so iOS's own delivery of them, the
