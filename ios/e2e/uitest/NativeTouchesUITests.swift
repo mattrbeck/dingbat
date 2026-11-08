@@ -713,6 +713,26 @@ final class NativeTouchesUITests: XCTestCase {
         snap(app, "settings-controls")
     }
 
+    /// Settings › Game Boy Advance with no BIOS file (the suite has none) and
+    /// Real BIOS and the intro stored: the rows show what the core will do,
+    /// HLE and no intro, disabled.
+    func testGbaWithNoBiosShowsHle() {
+        let app = launch(["-gbaBiosMode", "1", "-gbaRunBios", "YES", "-sheet", "settings:gba"])
+        let intro = app.switches["Play BIOS intro"].firstMatch
+        XCTAssertTrue(intro.waitForExistence(timeout: 10), "Settings › Game Boy Advance")
+        XCTAssertTrue(app.staticTexts["Not set"].exists, "the suite has no GBA BIOS file")
+        XCTAssertEqual(intro.value as? String, "0", "no BIOS: the intro shows off")
+        XCTAssertFalse(intro.isEnabled, "and can't be turned on")
+        let radio = { (name: String) in
+            app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", name)).firstMatch }
+        XCTAssertTrue(radio("HLE").isSelected, "no BIOS: HLE shows selected")
+        // A row reads "label, sub": the comma matches "Real BIOS, The most
+        // faithful…" and skips "Real BIOS boot, HLE calls".
+        XCTAssertFalse(radio("Real BIOS,").isSelected, "the stored Real BIOS does not")
+        XCTAssertFalse(radio("HLE").isEnabled, "the calls can't be changed")
+        snap(app, "settings-gba-no-bios")
+    }
+
     /// Run-ahead's chips read "1", "2", "3": VoiceOver hears "1 frame",
     /// "2 frames", "3 frames" (web aria-label), and a tap selects one.
     func testShortChipsSpeakTheirNames() {

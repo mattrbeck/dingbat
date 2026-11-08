@@ -607,9 +607,12 @@ private struct GbaPane: View {
     var body: some View {
         SheetSubhead(text: "BIOS", rule: false)
         BiosFileRow(label: "GBA BIOS", url: RomLibrary.gbaBiosURL) { gen += 1 }
+        // With no BIOS file the core boots HLE with no intro whatever is
+        // stored (dingbat_ios.nim's GBA load): the rows show that, disabled,
+        // and the stored choices come back when a BIOS is chosen.
         SheetToggleRow(label: "Play BIOS intro",
                        sub: "Play the GBA startup animation first. Needs a BIOS file.",
-                       isOn: $s.gbaRunBios)
+                       isOn: hasBios ? $s.gbaRunBios : .constant(false))
             .disabled(!hasBios)
         SheetSubhead(text: "BIOS calls (SWI)")
         VStack(spacing: 2) {
@@ -623,7 +626,7 @@ private struct GbaPane: View {
     }
 
     private func radio(_ v: Int, _ label: String, _ sub: String) -> some View {
-        RadioRow(label: label, sub: sub, selected: s.gbaBiosMode == v) { s.gbaBiosMode = v }
+        RadioRow(label: label, sub: sub, selected: (hasBios ? s.gbaBiosMode : 0) == v) { s.gbaBiosMode = v }
     }
 }
 
