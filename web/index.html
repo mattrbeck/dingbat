@@ -1511,26 +1511,9 @@
               </div>
 
               <div class="settings-pane" id="settings-pane-audio" role="tabpanel" aria-labelledby="settings-tab-audio" hidden>
-                <div class="modal-toggle-row">
-                  <div>
-                    <span class="modal-row-label">Audio interpolation</span>
-                    <span class="modal-toggle-sub">Smooths GBA music between hardware samples for cleaner treble. Turn off for the exact sound of a real GBA's headphone jack, grit included.</span>
-                  </div>
-                  <label class="switch">
-                    <input type="checkbox" id="fifo-interp-toggle" checked />
-                    <span class="switch-track"></span>
-                  </label>
-                </div>
-                <div class="modal-toggle-row">
-                  <div>
-                    <span class="modal-row-label">Enhanced music synthesis</span>
-                    <span class="modal-toggle-sub">Experimental. Re-creates supported games' music engines at higher quality than the hardware could mix. Changes the sound's character; engages itself only where it works.</span>
-                  </div>
-                  <label class="switch">
-                    <input type="checkbox" id="mp2k-hle-toggle" />
-                    <span class="switch-track"></span>
-                  </label>
-                </div>
+                <!-- Every game's rows first; then the two that shape GBA sound,
+                     side by side (the filter's note pairs it with interpolation
+                     off); the experimental one last. -->
                 <div class="modal-toggle-row">
                   <div>
                     <span class="modal-row-label">Pitch-correct fast-forward</span>
@@ -1538,6 +1521,26 @@
                   </div>
                   <label class="switch">
                     <input type="checkbox" id="pitch-correct-ff-toggle" checked />
+                    <span class="switch-track"></span>
+                  </label>
+                </div>
+                <div class="modal-toggle-row" id="play-in-silent-row" hidden>
+                  <div>
+                    <span class="modal-row-label">Play in Silent Mode</span>
+                    <span class="modal-toggle-sub">Pauses audio from other apps while a game is playing</span>
+                  </div>
+                  <label class="switch">
+                    <input type="checkbox" id="play-in-silent-toggle" checked />
+                    <span class="switch-track"></span>
+                  </label>
+                </div>
+                <div class="modal-toggle-row">
+                  <div>
+                    <span class="modal-row-label">Audio interpolation</span>
+                    <span class="modal-toggle-sub">Smooths GBA music between hardware samples for cleaner treble. Turn off for the exact sound of a real GBA's headphone jack, grit included.</span>
+                  </div>
+                  <label class="switch">
+                    <input type="checkbox" id="fifo-interp-toggle" checked />
                     <span class="switch-track"></span>
                   </label>
                 </div>
@@ -1551,13 +1554,13 @@
                     <span class="switch-track"></span>
                   </label>
                 </div>
-                <div class="modal-toggle-row" id="play-in-silent-row" hidden>
+                <div class="modal-toggle-row">
                   <div>
-                    <span class="modal-row-label">Play in Silent Mode</span>
-                    <span class="modal-toggle-sub">Pauses audio from other apps while a game is playing</span>
+                    <span class="modal-row-label">Enhanced music synthesis</span>
+                    <span class="modal-toggle-sub">Experimental. Re-creates supported games' music engines at higher quality than the hardware could mix. Changes the sound's character; engages itself only where it works.</span>
                   </div>
                   <label class="switch">
-                    <input type="checkbox" id="play-in-silent-toggle" checked />
+                    <input type="checkbox" id="mp2k-hle-toggle" />
                     <span class="switch-track"></span>
                   </label>
                 </div>
