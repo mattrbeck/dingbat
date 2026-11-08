@@ -954,6 +954,19 @@ final class DriveSync: ObservableObject {
             state.queueUp.removeAll { $0 == name }
             return
         }
+        // A picture this device has never synced (a pictures run's boot
+        // screen, made while the pull was out or offline) does not go over
+        // one on Drive that this device has not seen yet: it stays queued,
+        // the pull after brings Drive's down, and the entry then drops (its
+        // bytes are the ones synced). A picture of a game whose picture has
+        // synced here before goes up as ever, and so does one over an older
+        // generation's picture (the game deleted and loaded again), which
+        // the pull never brings down: it is written over, as the session's
+        // guard below lets an older generation's session be.
+        if parsed?.kind == "frame", state.sigs[name] == nil, let r0 = remote.map[name], r0.gen >= gen,
+           state.rmt[name] != r0.modifiedTime {
+            return
+        }
         let bytes = readSyncBytes(name)
         // A session another device wrote since this one last saw Drive's
         // copy is not written over unseen: the pull after decides.
