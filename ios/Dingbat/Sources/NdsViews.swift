@@ -308,10 +308,12 @@ struct NdsSettingsPane: View {
 
 /// One DS dump: its status (HLE / Built-in, or the file), Choose and Remove
 /// (web #pick-nds-*, #remove-nds-*). A file of the wrong size is refused
-/// (web biosSizeOk).
+/// (web biosSizeOk). Remove is off while no file is set: greyed, no tap,
+/// passed over by the pad.
 private struct NdsBiosRow: View {
     let kind: NdsUtil.BiosKind
     @Environment(\.palette) private var palette
+    @Environment(\.padScope) private var scope
     @State private var picking = false
     @State private var gen = 0
     @State private var failed: String?
@@ -337,10 +339,14 @@ private struct NdsBiosRow: View {
                 .foregroundColor(palette.textFaint)
                 .lineLimit(1)
                 .frame(maxWidth: .infinity, alignment: .leading)
-            PadButton("Choose") { picking = true }.buttonStyle(SheetButtonStyle())
-            PadButton("Remove") {
+            // Keyed by the dump: the three rows' buttons were one key, so a
+            // pad reached one row's, and a row with no file took that one off.
+            PadButton("Choose", id: "bios:\(kind.rawValue):choose") { picking = true }.buttonStyle(SheetButtonStyle())
+            PadButton("Remove", id: "bios:\(kind.rawValue):remove") {
                 try? FileManager.default.removeItem(at: url)
                 try? FileManager.default.removeItem(at: nameURL)
+                PadNav.shared.handOff(PadNav.key(scope, "bios:\(kind.rawValue):remove"),
+                                      to: PadNav.key(scope, "bios:\(kind.rawValue):choose"))
                 gen += 1
             }
             .buttonStyle(SheetButtonStyle(kind: .ghost))

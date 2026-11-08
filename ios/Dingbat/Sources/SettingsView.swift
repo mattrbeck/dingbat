@@ -529,12 +529,14 @@ private struct GameBoyPane: View {
 }
 
 /// A BIOS / boot ROM file: its status, Choose (copied into the app) and
-/// Remove (web .modal-row with #pick-*, #remove-*).
+/// Remove (web .modal-row with #pick-*, #remove-*). Remove is off while no
+/// file is set: greyed, no tap, passed over by the pad.
 private struct BiosFileRow: View {
     let label: String
     let url: URL
     var onChange: () -> Void = {}
     @Environment(\.palette) private var palette
+    @Environment(\.padScope) private var scope
     @State private var picking = false
     @State private var gen = 0
     @State private var failed: String?
@@ -546,6 +548,9 @@ private struct BiosFileRow: View {
 
     /// The picked file's own name (web bios.name), kept beside it.
     private var nameURL: URL { url.appendingPathExtension("name") }
+    /// The row's pad keys, by its file ("gbc_bootrom"), as the DS rows' by
+    /// their dump.
+    private var padID: String { "bios:" + url.deletingPathExtension().lastPathComponent }
     private var status: String {
         guard let size else { return "Not set" }
         if let n = try? String(contentsOf: nameURL, encoding: .utf8), !n.isEmpty { return n }
@@ -560,10 +565,12 @@ private struct BiosFileRow: View {
                 .foregroundColor(palette.textFaint)
                 .lineLimit(1)
                 .frame(maxWidth: .infinity, alignment: .leading)
-            PadButton("Choose") { picking = true }.buttonStyle(SheetButtonStyle())
-            PadButton("Remove") {
+            // Keyed by the row: a pad reaches each row's own buttons.
+            PadButton("Choose", id: padID + ":choose") { picking = true }.buttonStyle(SheetButtonStyle())
+            PadButton("Remove", id: padID + ":remove") {
                 try? FileManager.default.removeItem(at: url)
                 try? FileManager.default.removeItem(at: nameURL)
+                PadNav.shared.handOff(PadNav.key(scope, padID + ":remove"), to: PadNav.key(scope, padID + ":choose"))
                 gen += 1
                 onChange()
             }

@@ -15,7 +15,8 @@ import notify
 ///   com.mattrb.dingbat.debug.headphones-out     route change, old device unavailable
 ///   com.mattrb.dingbat.debug.pad-connect        a GCVirtualController connects
 ///   com.mattrb.dingbat.debug.pad-disconnect     ... and disconnects
-///   com.mattrb.dingbat.debug.nav-up|down|a|b    a pad press as the UI gets it
+///   com.mattrb.dingbat.debug.nav-up|down|left|right|a|b
+///                                               a pad press as the UI gets it
 ///                                               (Controllers.debugPress)
 ///   com.mattrb.dingbat.debug.pictures-run       Add pictures from the library
 ///                                               head, and its run started
@@ -59,6 +60,8 @@ enum DebugEvents {
             ("toast", { AppModel.shared.toast("Debug toast") }),
             ("nav-up", { Controllers.shared.debugPress("up") }),
             ("nav-down", { Controllers.shared.debugPress("down") }),
+            ("nav-left", { Controllers.shared.debugPress("left") }),
+            ("nav-right", { Controllers.shared.debugPress("right") }),
             ("nav-a", { Controllers.shared.debugPress("a") }),
             ("nav-b", { Controllers.shared.debugPress("b") }),
             ("home", { AppModel.shared.showMainMenu() }),

@@ -45,6 +45,11 @@ final class PadNav: ObservableObject {
     func register(_ key: String, _ item: Item) { items[key] = item }
     func unregister(_ key: String) { items[key] = nil }
 
+    /// The focused item is about to grey out (a BIOS row's Remove once its
+    /// file is gone): the ring steps to `to`, in the same scope, instead of
+    /// the next press starting again from the top.
+    func handOff(_ from: String, to: String) { if focused == from { focused = to } }
+
     /// What the pad drives now; nil in the game itself.
     var scope: String? {
         let m = AppModel.shared
@@ -214,19 +219,28 @@ struct PadFocusable: ViewModifier {
                     .allowsHitTesting(false)
             )
             .background(GeometryReader { g in
+                let at = Placement(frame: g.frame(in: .global), enabled: enabled)
                 Color.clear
-                    .onAppear { put(g.frame(in: .global)) }
-                    .onChange(of: g.frame(in: .global)) { put($0) }
-                    .onChange(of: enabled) { _ in put(g.frame(in: .global)) }
+                    .onAppear { put(at) }
+                    .onChange(of: at) { put($0) }
             })
             .onDisappear { nav.unregister(key) }
             .id(key)
     }
 
-    private func put(_ frame: CGRect) {
+    /// Where the item is and whether it is on, watched as one: put() takes
+    /// both from onChange's new value, never `self.enabled`, which in the
+    /// closure is still the one from before the change (a button greyed out
+    /// on screen, a BIOS row's Remove once its file went, stayed in reach).
+    private struct Placement: Equatable {
+        let frame: CGRect
+        let enabled: Bool
+    }
+
+    private func put(_ at: Placement) {
         guard !scope.isEmpty else { return }
-        guard enabled else { nav.unregister(key); return }
-        nav.register(key, .init(scope: scope, frame: frame, press: press, adjust: adjust, alt: alt))
+        guard at.enabled else { nav.unregister(key); return }
+        nav.register(key, .init(scope: scope, frame: at.frame, press: press, adjust: adjust, alt: alt))
     }
 }
 

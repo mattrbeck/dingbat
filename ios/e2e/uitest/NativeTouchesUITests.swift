@@ -14,6 +14,24 @@ final class NativeTouchesUITests: XCTestCase {
     override func setUp() {
         continueAfterFailure = true
         notify_register_check("com.mattrb.dingbat.debug.state", &token)
+        // A run killed inside testBiosRemoveOffWhileNotSet would leave its
+        // all-zero boot ROM, and every GBC game after it would boot through it.
+        clearDummyBootROM()
+    }
+
+    /// testBiosRemoveOffWhileNotSet's dummy GBC boot ROM, by its name file.
+    private static let dummyName = "dummy_boot.bin"
+    private static func dummyBootROM(in data: URL) -> (rom: URL, name: URL) {
+        let rom = data.appendingPathComponent("Library/Application Support/dingbat/bios/gbc_bootrom.bin")
+        return (rom, rom.appendingPathExtension("name"))
+    }
+    /// Takes the dummy away: only a boot ROM whose name file says it is ours.
+    private func clearDummyBootROM() {
+        guard let data = appContainer() else { return }
+        let (rom, name) = Self.dummyBootROM(in: data)
+        guard (try? String(contentsOf: name, encoding: .utf8)) == Self.dummyName else { return }
+        try? FileManager.default.removeItem(at: rom)
+        try? FileManager.default.removeItem(at: name)
     }
 
     private func state() -> UInt64 {
@@ -59,6 +77,19 @@ final class NativeTouchesUITests: XCTestCase {
 
     /// The toast an Add pictures run ends on (AddPictures.runToast).
     private static let runToast = "label CONTAINS ' added' OR label CONTAINS 'skipped until played' OR label == 'Stopped'"
+
+    /// The app's data container (Documents, Library, tmp), found by its
+    /// bundle id beside the runner's own: the simulator's containers are
+    /// plain folders on the Mac's disk, and the folder moves when the app is
+    /// installed again, so it is looked up once the app runs.
+    private func appContainer() -> URL? {
+        let parent = URL(fileURLWithPath: NSHomeDirectory()).deletingLastPathComponent()
+        let dirs = (try? FileManager.default.contentsOfDirectory(at: parent, includingPropertiesForKeys: nil)) ?? []
+        return dirs.first { d in
+            let meta = d.appendingPathComponent(".com.apple.mobile_container_manager.metadata.plist")
+            return NSDictionary(contentsOf: meta)?["MCMMetadataIdentifier"] as? String == "com.mattrb.dingbat"
+        }
+    }
 
     private func snap(_ app: XCUIApplication, _ name: String) {
         let a = XCTAttachment(screenshot: app.screenshot())
@@ -796,7 +827,61 @@ final class NativeTouchesUITests: XCTestCase {
         // faithful…" and skips "Real BIOS boot, HLE calls".
         XCTAssertFalse(radio("Real BIOS,").isSelected, "the stored Real BIOS does not")
         XCTAssertFalse(radio("HLE").isEnabled, "the calls can't be changed")
+        XCTAssertFalse(app.buttons["Remove"].firstMatch.isEnabled, "nothing set: the BIOS row's Remove is off")
         snap(app, "settings-gba-no-bios")
+    }
+
+    /// A BIOS row's Remove is off while nothing is set: greyed and no tap
+    /// beside "Not set", on once a file is there, and pressed with the pad it
+    /// goes off again with the ring stepping back to the row's Choose, not to
+    /// the top of Settings. The file is a dummy GBC boot ROM this test puts in
+    /// the app's container and takes away again whatever happens.
+    func testBiosRemoveOffWhileNotSet() throws {
+        var app = launch(["-sheet", "settings:gb"])
+        let data = try XCTUnwrap(appContainer(), "the app's data container, beside the runner's")
+        let fm = FileManager.default
+        let (rom, name) = Self.dummyBootROM(in: data)
+        defer { clearDummyBootROM() }
+        XCTAssertTrue(app.buttons["Remove"].firstMatch.waitForExistence(timeout: 10), "Settings › Game Boy's boot ROM row")
+        XCTAssertTrue(app.staticTexts["Not set"].exists, "no boot ROM")
+        XCTAssertFalse(app.buttons["Remove"].firstMatch.isEnabled, "nothing set: Remove is off")
+        snap(app, "bios-remove-off")
+        app.terminate()
+
+        try fm.createDirectory(at: rom.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data(count: 2304).write(to: rom)
+        try Self.dummyName.write(to: name, atomically: true, encoding: .utf8)
+        app = launch(["-sheet", "settings:gb"])
+        let remove = app.buttons["Remove"].firstMatch
+        XCTAssertTrue(app.staticTexts[Self.dummyName].waitForExistence(timeout: 10), "the file shows")
+        XCTAssertTrue(remove.isEnabled, "a file set: Remove is on")
+        snap(app, "bios-remove-on")
+
+        // The pad, down to the row (PadNav's DEBUG dump says where the ring is).
+        let dump = data.appendingPathComponent("tmp/padnav.txt")
+        let row = "settings|bios:gbc_bootrom:"
+        // Its first line is where the ring is, then one line per item the
+        // pad can reach.
+        let lines = { () -> [String] in
+            ((try? String(contentsOf: dump, encoding: .utf8)) ?? "").split(separator: "\n").map(String.init)
+        }
+        let ring = { lines().first.map { String($0.dropFirst("focused ".count)) } ?? "" }
+        try? fm.removeItem(at: dump)
+        for _ in 0..<40 where !ring().hasPrefix(row) { post("nav-down"); usleep(300_000) }
+        if ring() == row + "choose" { post("nav-right"); usleep(300_000) }
+        XCTAssertEqual(ring(), row + "remove", "the pad reaches the row's own Remove")
+        post("nav-a")
+        XCTAssertTrue(app.staticTexts["Not set"].waitForExistence(timeout: 3), "A on Remove takes the file away")
+        XCTAssertFalse(remove.isEnabled, "and Remove goes off")
+        // Down from Choose, the last row, has nowhere to go: the ring stays
+        // put, where a ring left on the gone Remove starts again at the top.
+        post("nav-down")
+        usleep(300_000)
+        XCTAssertEqual(ring(), row + "choose", "the ring stepped back to the row's Choose")
+        XCTAssertFalse(lines().dropFirst().contains { $0.hasPrefix(row + "remove ") },
+                       "the greyed Remove is out of the pad's reach")
+        snap(app, "bios-remove-pad-off")
+        XCTAssertFalse(fm.fileExists(atPath: rom.path), "the file is gone")
     }
 
     /// Run-ahead's chips read "1", "2", "3": VoiceOver hears "1 frame",
