@@ -4141,6 +4141,19 @@ const flushSyncInner = async () => {
         syncState.queueUp = syncState.queueUp.filter((n) => n !== name);
         return;
       }
+      // A picture this device has never synced (Add pictures' boot screen,
+      // taken offline or while the pull was failing) does not go over one
+      // on Drive that this device has not seen yet: it stays queued, the
+      // pull after brings Drive's down (writing its sig), and the entry then
+      // drops, its bytes being the ones synced. A picture of a game whose
+      // picture has synced here before goes up as ever, and so does one
+      // over an older generation's picture (the game deleted and loaded
+      // again), which the pull never brings down: it is written over, as
+      // the session guard below lets an older generation's session be.
+      if (parsed?.kind === "frame" && !syncState.sigs[name] && held0 &&
+          fileGen(held0) >= gen && syncState.rmt[name] !== held0.modifiedTime) {
+        return;
+      }
       let bytes = live(await readSyncBytes(name));
       // A session another device wrote since this one last saw Drive's copy
       // is not written over unseen: it stays queued, and the pull after this
@@ -4718,6 +4731,9 @@ const pullSyncInner = async ({ silent = true } = {}) => {
       }
       syncState.rmt[name] = f.modifiedTime;
       local.delete(name);
+      // A picture the flush held back (never synced here) now is: the
+      // flush that follows drops it from the queue.
+      if (p.kind === "frame" && syncState.queueUp.includes(name)) queuedMissing = true;
     }
 
     ahead.stop();
