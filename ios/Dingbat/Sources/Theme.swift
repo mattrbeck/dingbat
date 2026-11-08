@@ -152,7 +152,9 @@ struct Palette {
     var barOnInk = Color(hex: 0x2A1800)
     var barOnBorder = Color(hex: 0xFFB04D, alpha: 0.6)
     var barOnGlow = Color(hex: 0xFFB04D, alpha: 0.32)
-    var barOnHighlight = Color.white.opacity(0.35)
+    var barOnHighlight = Palette.litTopEdge
+    /// A lit face's top edge (web inset 0 1px 0 rgba(hi, 0.35)).
+    static let litTopEdge = Color.white.opacity(0.35)
 
     // Touch pads.
     var padTop = Color(hex: 0x262E44)
@@ -411,7 +413,7 @@ struct Palette {
         case .night, .amber, .black, .light, .indigo, .atomicPurple:
             p.barOnTop = p.accent2; p.barOnBottom = p.accent; p.barOnInk = p.accentInk
             p.barOnBorder = p.accent.opacity(0.6); p.barOnGlow = p.accentGlow
-            p.barOnHighlight = Color.white.opacity(0.35)
+            p.barOnHighlight = Palette.litTopEdge
         case .glacier, .fuchsia, .kiwi, .dmg, .famicom, .daiei:
             p.barOnTop = p.accentTintTop; p.barOnBottom = p.btnActiveBottom; p.barOnInk = p.accent
             p.barOnBorder = p.accent.opacity(0.5); p.barOnGlow = .clear; p.barOnHighlight = .clear

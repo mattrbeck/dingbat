@@ -250,6 +250,23 @@ final class NativeTouchesUITests: XCTestCase {
 
     // MARK: the in-game menu
 
+    /// Fast forward and 2x keep their labels on and off: VoiceOver hears
+    /// "selected" while one is on, and not once it is off again.
+    func testBarOnSaysSelected() {
+        let app = launch()
+        let ff = app.buttons["Fast Forward"].firstMatch
+        if !ff.isHittable { app.otherElements["Game screen"].firstMatch.tap(); sleep(1) }
+        XCTAssertFalse(ff.isSelected, "off: not selected")
+        ff.tap()
+        XCTAssertTrue(ff.isSelected, "fast forward on: selected")
+        let double = app.buttons["2x Speed"].firstMatch
+        double.tap()
+        XCTAssertTrue(double.isSelected, "2x on: selected")
+        XCTAssertFalse(ff.isSelected, "and fast forward, now off, is not")
+        double.tap()
+        XCTAssertFalse(double.isSelected, "2x off again")
+    }
+
     /// With the menu open the bar still works: Pause pauses and the menu
     /// goes (web: the click hides the dropdown and goes on); the hamburger
     /// still toggles it; a tap on the game only closes it.

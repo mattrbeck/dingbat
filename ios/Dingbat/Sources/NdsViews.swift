@@ -69,7 +69,7 @@ struct NdsBarButtons: View {
     @ObservedObject private var nds = NdsState.shared
 
     var body: some View {
-        BarIconButton(system: "arrow.up.arrow.down", label: "Swap the DS screens", active: nds.swap) {
+        BarIconButton(system: "arrow.up.arrow.down", label: "Swap the DS screens", active: nds.swap, saysOn: true) {
             nds.swapScreens()
         }
         BarIconButton(system: nds.layout.mode == .side ? "rectangle.split.2x1" : "rectangle.split.1x2",

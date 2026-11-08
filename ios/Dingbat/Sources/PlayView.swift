@@ -534,7 +534,7 @@ struct TopBar: View {
             }
             if settings.mp2kHle && session.mp2kAvailable && !(link.linked || session.twoPlayer) {
                 BarIconButton(system: "music.note", label: "Enhanced music",
-                              active: session.hleActive && !session.hleSessionOff) {
+                              active: session.hleActive && !session.hleSessionOff, saysOn: true) {
                     session.hleSessionOff.toggle()
                     session.applyHle()
                     model.toast(session.hleSessionOff ? "Enhanced music off for this game"
@@ -626,6 +626,10 @@ struct BarIconButton: View {
     let system: String
     var label: String
     var active = false
+    /// VoiceOver hears "selected" while it is on: for a button whose label
+    /// stays the same either way (Enhanced music, the DS swap), where Mute's
+    /// says it already ("Unmute").
+    var saysOn = false
     var dot = false
     var width: CGFloat = 34
     let action: () -> Void
@@ -650,6 +654,8 @@ struct BarIconButton: View {
                 }
         }
         .accessibilityLabel(label)
+        // Here, not outside padFocus: its ring would widen the element.
+        .accessibilityAddTraits(saysOn && active ? .isSelected : [])
     }
 }
 
@@ -728,6 +734,8 @@ struct PlaybackCluster: View {
                     SpeedGlyph(count: 2, active: session.speed == .double, width: w)
                 }
                 .accessibilityLabel("2x Speed")
+                // On, VoiceOver hears "selected": the label stays the same.
+                .accessibilityAddTraits(session.speed == .double ? .isSelected : [])
                 .disabled(redialing)
                 .opacity(redialing ? 0.45 : 1)
                 if !(link.linked || session.twoPlayer) {
@@ -735,6 +743,7 @@ struct PlaybackCluster: View {
                         SpeedGlyph(count: 3, active: session.speed == .fastForward, width: w)
                     }
                     .accessibilityLabel("Fast Forward")
+                    .accessibilityAddTraits(session.speed == .fastForward ? .isSelected : [])
                 }
             }
         }
@@ -763,7 +772,7 @@ struct PlaybackCluster: View {
                 }
             }
             .accessibilityLabel("Rewind: hold to rewind, double-tap to pick a moment")
-            .accessibilityAddTraits(.isButton)
+            .accessibilityAddTraits(session.rewinding ? [.isButton, .isSelected] : .isButton)
     }
 
     /// Tap = one frame; hold 400 ms, then a frame every 100 ms.
