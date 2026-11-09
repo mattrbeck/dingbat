@@ -6597,7 +6597,10 @@ const refreshHomeEmptyActions = () => {
   if (linked) {
     homeDriveBtn.textContent = "Sync";
     homeDriveBtn.removeAttribute("aria-label");
-  } else {
+  } else if (!homeDriveBtn.querySelector?.("img.gsi-dark")) {
+    // Only when the pill is not already there (index.html draws it): new
+    // <img>s for the same artwork repaint it after index.js, and that late
+    // paint was the page's Largest Contentful Paint.
     homeDriveBtn.innerHTML = GOOGLE_BUTTON_HTML;
     homeDriveBtn.setAttribute("aria-label", "Sign in with Google");
   }
