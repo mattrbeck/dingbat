@@ -92,15 +92,23 @@ jobs:
         # global scope (createGlRenderer, SDPCodec, window.* hooks, `Module`)
         # and esbuild minifies each file independently. Filenames are kept:
         # the SW ASSETS list and index.html reference them by name.
+        # Each gets a source map beside it (<file>.map, the original text
+        # inside): a browser fetches one only while DevTools is open, so
+        # players download nothing more, and the maps stay out of sw.js's
+        # ASSETS. The source root is a fixed name, not the commit: the
+        # version hash below covers every file here, and a commit in a map
+        # would make every deploy an update.
         run: |
           set -eo pipefail
           .github/scripts/retry.sh 3 npm install --no-save --no-audit --no-fund esbuild@0.28.1
           for f in index.js netplay.js glpresent.js sdputil.js embed.js nds/ndsutil.js nds/ndsaudio.js nds/gpu3d.js; do
             npx esbuild "web/$f" --minify-whitespace --minify-syntax \
+              --sourcemap --source-root=source/ \
               --outfile="web/$f" --allow-overwrite
           done
           for f in styles.css embed.css; do
-            npx esbuild "web/$f" --minify --outfile="web/$f" --allow-overwrite
+            npx esbuild "web/$f" --minify --sourcemap --source-root=source/ \
+              --outfile="web/$f" --allow-overwrite
           done
           # index.html's comments: a fifth of its gzip (26.3 -> 20.6 KB),
           # all of it ahead of the first paint. Its inline scripts hold no

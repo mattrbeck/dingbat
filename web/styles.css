@@ -2495,9 +2495,12 @@ html.home-pending #home-inner {
   min-height: var(--home-pending-h, 0px);
 }
 
+/* A rise, not a fade: the home screen is there from its first frame. Faded
+   in from transparent, it was faint for its first 0.3-0.4 s on a phone, and
+   its content only counted as painted (Largest Contentful Paint) once the
+   fade had a frame to show - which waited for index.js to finish running. */
 @keyframes home-in {
   from {
-    opacity: 0;
     transform: translateY(10px);
   }
 }
