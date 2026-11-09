@@ -347,7 +347,8 @@ export const loadApp = async ({ localStorageSeed = {}, confirmResult = true,
     const containerListeners = {};
     const container = {
       controller: serviceWorker.controlled ? makeSWWorker("activated") : null,
-      register: async () => registration,
+      registerCalls: 0, // index.js registers once the core is in (registerServiceWorker)
+      async register() { this.registerCalls++; return registration; },
       getRegistrations: async () => [registration],
       addEventListener(type, fn) { (containerListeners[type] ??= []).push(fn); },
       removeEventListener(type, fn) {
@@ -706,8 +707,9 @@ export const loadApp = async ({ localStorageSeed = {}, confirmResult = true,
   await api.openDB();
 
   // No wasm runtime initializes in the vm; launch paths await it, so mark
-  // it ready.
-  vm.runInContext("markRuntimeReady()", context);
+  // it ready. Storage too: the database is open (above), and a picked or
+  // dropped file waits on storageReady before it goes into the library.
+  vm.runInContext("markRuntimeReady(); storageReadyResolve()", context);
 
   const dispatchDoc = async (type, ev = {}) => {
     ev.type ??= type;

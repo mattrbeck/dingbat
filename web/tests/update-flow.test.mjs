@@ -8,6 +8,14 @@ import { loadApp } from "./helpers.mjs";
 
 const settle = () => new Promise((r) => setTimeout(r, 0));
 
+// The page as it is once the core is in: index.js registers the worker
+// then (registerServiceWorker), never at load.
+const bootApp = async (opts) => {
+  const app = await loadApp(opts);
+  app.runIn("registerServiceWorker()");
+  return app;
+};
+
 // Returns the waiting worker so the caller can activate it.
 const clickUpdateWithWaiting = async (app) => {
   const waiting = app.sw.makeWorker("installed");
@@ -21,7 +29,7 @@ const clickUpdateWithWaiting = async (app) => {
 };
 
 test("the very first claim still never reloads mid-boot", async () => {
-  const app = await loadApp({ serviceWorker: true }); // uncontrolled boot
+  const app = await bootApp({ serviceWorker: true }); // uncontrolled boot
   await settle();
   app.sw.takeControl(); // fresh install's clients.claim()
   await settle();
@@ -29,7 +37,7 @@ test("the very first claim still never reloads mid-boot", async () => {
 });
 
 test("controlled session: Update click reloads on handover", async () => {
-  const app = await loadApp({ serviceWorker: { controlled: true } });
+  const app = await bootApp({ serviceWorker: { controlled: true } });
   await settle();
   const waiting = await clickUpdateWithWaiting(app);
   app.sw.takeControl(waiting); // skipWaiting → activate → claim
@@ -38,7 +46,7 @@ test("controlled session: Update click reloads on handover", async () => {
 });
 
 test("session that began uncontrolled: Update click after the first claim reloads", async () => {
-  const app = await loadApp({ serviceWorker: true });
+  const app = await bootApp({ serviceWorker: true });
   await settle();
   app.sw.takeControl(); // first install claims the page; no reload
   await settle();
@@ -51,7 +59,7 @@ test("session that began uncontrolled: Update click after the first claim reload
 
 test("shift-reload shape: Update handover is this page's first claim, still reloads", async () => {
   // Uncontrolled page: no claim fires until the Update click's worker activates.
-  const app = await loadApp({ serviceWorker: true });
+  const app = await bootApp({ serviceWorker: true });
   await settle();
   const waiting = await clickUpdateWithWaiting(app);
   app.sw.takeControl(waiting);
@@ -60,7 +68,7 @@ test("shift-reload shape: Update handover is this page's first claim, still relo
 });
 
 test("another tab's update reloads this tab too, even after an initial claim", async () => {
-  const app = await loadApp({ serviceWorker: true });
+  const app = await bootApp({ serviceWorker: true });
   await settle();
   app.sw.takeControl(); // this tab's boot claim
   await settle();
@@ -70,7 +78,7 @@ test("another tab's update reloads this tab too, even after an initial claim", a
 });
 
 test("clicking Update shows the busy state while the install runs", async () => {
-  const app = await loadApp({ serviceWorker: { controlled: true } });
+  const app = await bootApp({ serviceWorker: { controlled: true } });
   await settle();
   await clickUpdateWithWaiting(app);
   const btn = app.elements.get("update-btn");
@@ -80,7 +88,7 @@ test("clicking Update shows the busy state while the install runs", async () => 
 });
 
 test("failed install (redundant worker) falls back to the clean-slate reset", async () => {
-  const app = await loadApp({ serviceWorker: { controlled: true } });
+  const app = await bootApp({ serviceWorker: { controlled: true } });
   await settle();
   const installing = app.sw.makeWorker("installing");
   app.state.swUpdateImpl = async () => { app.sw.registration.installing = installing; };
@@ -97,7 +105,7 @@ test("failed install (redundant worker) falls back to the clean-slate reset", as
 // ServiceWorker.lean's bug_update_in_one_tab_reloads_the_other_midgame: the
 // Update click in one tab activates the new worker, which claims every tab.
 test("another tab's update does not reload this tab mid-game; it offers the reload", async () => {
-  const app = await loadApp({ serviceWorker: { controlled: true } });
+  const app = await bootApp({ serviceWorker: { controlled: true } });
   await settle();
   app.api.currentRomName = "rom.gba";
   app.sw.takeControl(); // the handover another tab's Update click triggered
@@ -116,7 +124,7 @@ test("another tab's update does not reload this tab mid-game; it offers the relo
 });
 
 test("a rollback session counts as a game in progress", async () => {
-  const app = await loadApp({ serviceWorker: { controlled: true } });
+  const app = await bootApp({ serviceWorker: { controlled: true } });
   await settle();
   app.api.rollbackMode = true;
   app.sw.takeControl();
@@ -125,7 +133,7 @@ test("a rollback session counts as a game in progress", async () => {
 });
 
 test("this tab's own Update still reloads it with a game loaded", async () => {
-  const app = await loadApp({ serviceWorker: { controlled: true } });
+  const app = await bootApp({ serviceWorker: { controlled: true } });
   await settle();
   app.api.currentRomName = "rom.gba";
   const waiting = app.sw.makeWorker("installed");
@@ -136,4 +144,26 @@ test("this tab's own Update still reloads it with a game loaded", async () => {
   app.sw.takeControl(waiting);
   await settle();
   assert.equal(app.state.reloads, 1);
+});
+
+test("the worker registers once the core is in, not while the page loads", async () => {
+  // A first visit's install downloads every asset again; registered at load
+  // it shared the link with the page's own first load.
+  const app = await loadApp({ serviceWorker: true });
+  await settle();
+  assert.equal(app.sw.container.registerCalls, 0);
+  app.runIn("storageReadyResolve()");
+  await app.runIn("Module.onRuntimeInitialized()");
+  await settle();
+  assert.equal(app.sw.container.registerCalls, 1);
+  app.runIn("registerServiceWorker()"); // a second call is a no-op
+  assert.equal(app.sw.container.registerCalls, 1);
+});
+
+test("a page already controlled registers at load, ahead of the core", async () => {
+  // A returning visit's registration costs no download, and Update leans on
+  // swRegistration from the start (without it applyUpdate takes the reset).
+  const app = await loadApp({ serviceWorker: { controlled: true } });
+  await settle();
+  assert.equal(app.sw.container.registerCalls, 1);
 });

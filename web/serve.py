@@ -5,10 +5,10 @@ Plain:  python3 web/serve.py                 http://localhost:8765
 LAN:    python3 web/serve.py --dev --https --host 0.0.0.0 --port 8443 \\
             --cert CERT.pem --key KEY.pem    (tools/serve_nds_dev.sh does this)
 
---dev pairs every page with the wasm builds on disk: index.html loads
-em.js?v=<em.wasm mtime>, em.js fetches em.wasm with the same stamp, and
-window.DINGBAT_ASSET_V carries the DS core's (index.js adds it to
-nds/nds.js and nds.wasm). It also serves a sw.js that clears the caches and
+--dev pairs every page with the wasm builds on disk: index.html gets
+window.DINGBAT_ASSET_V = {em: <em.wasm mtime>, nds: <nds.wasm mtime>}, which
+index.js adds to em.js and em.wasm, and to nds/nds.js and nds.wasm; em.js
+itself (as the embed loads it) fetches em.wasm with the same stamp. It also serves a sw.js that clears the caches and
 unregisters itself, so no service worker left on the origin can hand out a
 stale em.js or nds.js. Every response is no-store.
 """
@@ -71,10 +71,9 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         if path in ("/", "/index.html"):
             with open(os.path.join(WEB, "index.html"), "rb") as f:
                 html = f.read()
-            html = html.replace(b'<script src="em.js"></script>',
-                                b'<script src="em.js?v=' + em.encode() + b'"></script>')
-            html = html.replace(b'href="em.wasm"', b'href="em.wasm?v=' + em.encode() + b'"')
-            tag = ('<script>window.DINGBAT_ASSET_V = {em: "%s", nds: "%s"};</script>'
+            # index.js loads em.js and em.wasm itself, stamping both from
+            # DINGBAT_ASSET_V.em (emAssetQuery).
+            tag =('<script>window.DINGBAT_ASSET_V = {em: "%s", nds: "%s"};</script>'
                    % (em, nds)).encode()
             return html.replace(b"<head>", b"<head>\n    " + tag, 1), "text/html"
         if path == "/em.js":

@@ -84,25 +84,40 @@ window.addEventListener("keydown", (e) => {
 
 let swRegistration = null;
 
-if ("serviceWorker" in navigator) {
+// A first visit registers once the core is in (onRuntimeInitialized), not at
+// load: its install fetches every asset again, past the HTTP cache (sw.js,
+// installAssets), and on a phone's link that second copy halved the
+// bandwidth the page's own first load had. A page already controlled (a
+// returning visit) costs nothing to register at once, and must: Update and
+// the update check lean on swRegistration from the start (applyUpdate
+// without it takes the clean-slate fullResetReload).
+let swRegistered = false;
+const registerServiceWorker = () => {
+  if (swRegistered || !("serviceWorker" in navigator)) return;
+  swRegistered = true;
   navigator.serviceWorker.register("sw.js").then((reg) => {
     if (!reg) return; // SW-blocked contexts (test harnesses) resolve undefined
     swRegistration = reg;
     if (reg.waiting) showUpdateButton();
-    // The browser checks sw.js on navigation, so this fires on the first
-    // load after a deploy.
-    reg.addEventListener("updatefound", () => {
-      let sw = reg.installing;
-      sw.addEventListener("statechange", () => {
+    const watch = (sw) => {
+      sw?.addEventListener("statechange", () => {
         if (sw.state === "installed" && navigator.serviceWorker.controller) {
           showUpdateButton();
         }
       });
-    });
+    };
+    // The browser checks sw.js on navigation, so an update can already be
+    // installing by the time this resolves; updatefound has fired for it.
+    watch(reg.installing);
+    reg.addEventListener("updatefound", () => watch(reg.installing));
   });
+};
+if (navigator.serviceWorker?.controller) registerServiceWorker();
+
+if ("serviceWorker" in navigator) {
   // Reload when a new worker takes over from an old one. The first visit's
-  // clients.claim() also fires controllerchange; reloading then would abort
-  // the em.wasm fetch mid-boot. hadController flips after any
+  // clients.claim() also fires controllerchange; reloading then would throw
+  // away the page it just installed under. hadController flips after any
   // controllerchange (not a load-time constant: a session that begins
   // uncontrolled becomes controlled by the first claim and a later Update
   // click must still reload); appUpdating covers the handover being the
@@ -6566,7 +6581,10 @@ const refreshHomeEmptyActions = () => {
   // is set, and the empty state is the right thing to be showing then.
   if (libraryEmpty !== null) document.body.classList.toggle("lib-has-games", !libraryEmpty);
   noteLibraryHint();
-  if (!homeDriveBtn) return;
+  // Before the library is read the markup's drawing stands (index.html
+  // draws the empty state's row whole): hiding it here only to show it a
+  // few frames on was the very jump that drawing is there to stop.
+  if (!homeDriveBtn || libraryEmpty === null) return;
   const shown = libraryEmpty === true && !!GDRIVE_CLIENT_ID;
   homeDriveBtn.hidden = !shown;
   if (homeDriveRow) homeDriveRow.hidden = !shown;
@@ -13428,8 +13446,14 @@ const handleZipFile = async (file) => {
   let innerExt = extOf(innerName);
   if (!looksLikeValidRom(romBytes, innerExt) &&
       !(await confirmSuspectRom(innerName, innerExt))) return;
-  await ensureRuntimeReady(); // a zip dropped before the wasm runtime is up
+  // Into the library first: that is storage only, so a game picked before
+  // the core is in shows up at once and only its boot waits. Storage itself
+  // first, though: this handler is live from the moment index.js runs, and
+  // initStorage (DOMContentLoaded) opens the database and reads the sync
+  // state - the tombstones a re-imported game's generation is judged by.
+  await storageReady;
   await addRecentRom(innerName, romBytes, art);
+  await ensureRuntimeReady(); // a zip dropped before the wasm runtime is up
   // In the library either way; booted only if nothing was opened since.
   if (gen !== loadGen) return;
   loadRom("rom" + innerExt, innerName, { gen, rom: romBytes });
@@ -13450,8 +13474,10 @@ let handleRomFile = (file) => {
     let bytes = new Uint8Array(/** @type {ArrayBuffer} */ (reader.result));
     if (!looksLikeValidRom(bytes, ext) &&
         !(await confirmSuspectRom(file.name, ext))) return;
-    await ensureRuntimeReady(); // a ROM picked/dropped before the runtime is up
+    // Storage, the library, then the core: see handleZipFile.
+    await storageReady;
     await addRecentRom(file.name, bytes);
+    await ensureRuntimeReady(); // a ROM picked/dropped before the runtime is up
     // In the library either way; booted only if nothing was opened since.
     if (gen !== loadGen) return;
     loadRom(romName, file.name, { gen, rom: bytes });
@@ -13547,6 +13573,21 @@ const openRomPicker = () => {
 // under a hero that is the whole library.
 for (let id of ["home-load", "lib-add", "home-solo-add"]) {
   document.getElementById(id)?.addEventListener("click", openRomPicker);
+}
+
+// A file picked or dropped before this script ran (index.html's early
+// handlers, after #home-drive-row), and from here on any their picker
+// still hands over: in once storage is up, as a drop would be. Defining
+// dingbatTakeFile is also what stands those handlers down.
+window.dingbatTakeFile = (file) => {
+  // A tick on: a file held from before is taken while this script is still
+  // running, ahead of storageReady's declaration below.
+  setTimeout(() => storageReady.then(() => handleDroppedFile(file), () => {}));
+};
+if (window.dingbatEarlyFile) {
+  const early = window.dingbatEarlyFile;
+  window.dingbatEarlyFile = null;
+  window.dingbatTakeFile(early);
 }
 
 let dropOverlay = document.getElementById("drop-overlay");
@@ -19229,11 +19270,15 @@ const runtimeReadyPromise = new Promise((resolve) => {
   markRuntimeReady = () => { runtimeReady = true; resolve(); };
 });
 
-// Queue an FS/Module-touching action behind runtime init, with a toast
-// when the wait is real.
+// Queue an FS/Module-touching action behind runtime init. Only a wait that
+// is real says anything: the download's progress (showCoreWait), up until
+// the core is in. A failed download is retried here too, as the person has
+// just asked for it again.
 const ensureRuntimeReady = () => {
   if (runtimeReady) return Promise.resolve();
-  showToast("Starting the emulator…");
+  coreWanted = true;
+  coreLoad.retry?.(); // first: the toast reads the state it leaves
+  showCoreWait();
   return runtimeReadyPromise;
 };
 
@@ -19334,9 +19379,13 @@ var Module = {
     applyMp2kHle();
     applyFifoInterp();
     applyLcdResponse();
-    // Unblock queued launches and retire the boot progress strip.
+    // Unblock queued launches and retire a waiting launch's progress.
     markRuntimeReady();
     document.body.classList.add("runtime-ready");
+    coreArrived();
+    // Its install fetches the whole app again; now nothing is waiting on
+    // the link (registerServiceWorker).
+    registerServiceWorker();
     // The one-time library-pictures offer: after the grid and the Drive
     // session (resumeDriveOnBoot) have had a moment to settle, and the
     // first pull has had its say.
@@ -20081,6 +20130,212 @@ var Module = {
     };
     requestAnimationFrame(tick);
   },
+};
+
+// --- The core's download -------------------------------------------------
+// em.js and em.wasm are not in index.html. The page's own scripts and styles
+// come first and whole, so the home screen is complete and working as soon
+// as it paints, and the core follows in the background while the person
+// finds a game - which on a first visit takes longer than the download. A
+// launch that gets there first waits in ensureRuntimeReady and says how far
+// along the download is (showCoreWait); nothing else ever mentions it.
+//
+// Module.instantiateWasm is em.js's own hook for fetching the wasm: the same
+// streaming compile, with the bytes counted on the way through, and a failed
+// download kept to retry (coreLoad.retry) instead of a dead page.
+
+// em.wasm's decoded size, stamped by deploy-pages.yml: Content-Length is the
+// gzip size, while the body stream counts decoded bytes. Unstamped (a dev
+// server) the bar uses Content-Length when nothing is encoded, and otherwise
+// shows motion without a figure.
+const CORE_BYTES = Number(document.querySelector?.('meta[name="dingbat-core-bytes"]')?.getAttribute("content")) || 0;
+/** @type {{ got: number, total: number, state: string, retry: null | (() => void), seen: Set<() => void> }} */
+const coreLoad = { got: 0, total: 0, state: "idle", retry: null, seen: new Set() };
+const noteCore = () => { for (const fn of coreLoad.seen) fn(); };
+
+// The LAN dev server (web/serve.py --dev) stamps window.DINGBAT_ASSET_V, as
+// for the DS core (ndsAssetQuery); production fetches the bare URLs, which
+// are the service worker's cache keys.
+const emAssetQuery = () => {
+  const v = window.DINGBAT_ASSET_V?.em;
+  return v ? "?v=" + encodeURIComponent(v) : "";
+};
+
+// The wasm's request goes out with em.js's (loadCoreScript), not after it
+// has run: one round trip and em.js's own download fewer before the bytes
+// start. The first attempt takes it; a retry asks again.
+let coreEarly = null;
+const fetchCore = async (imports) => {
+  coreLoad.got = 0;
+  coreLoad.total = CORE_BYTES;
+  coreLoad.state = "downloading";
+  noteCore();
+  const early = coreEarly;
+  coreEarly = null;
+  const res = await (early || fetch("em.wasm" + emAssetQuery(), { credentials: "same-origin" }));
+  if (!res.ok) throw new Error("HTTP " + res.status);
+  if (!coreLoad.total && !res.headers.get("Content-Encoding")) {
+    coreLoad.total = Number(res.headers.get("Content-Length")) || 0;
+  }
+  // Counted off a clone, so the compile is handed the response itself: a
+  // rewrapped one has no URL, and V8 keys its compiled-code cache on the URL
+  // (a returning visit would compile the core from scratch every time).
+  if (res.body) {
+    const reader = res.clone().body.getReader();
+    (async () => {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        coreLoad.got += value.byteLength;
+        noteCore();
+      }
+      // The last byte is in; what is left is the end of the compile.
+      if (coreLoad.state === "downloading") {
+        coreLoad.state = "starting";
+        noteCore();
+      }
+    })().catch(() => {}); // the compile's own read reports a broken stream
+  }
+  // Streaming compile needs application/wasm (em.js's own loader falls back
+  // the same way where it is not).
+  const wasmType = /^application\/wasm\b/.test(res.headers.get("Content-Type") || "");
+  if (wasmType && typeof WebAssembly.instantiateStreaming === "function") {
+    return WebAssembly.instantiateStreaming(res, imports);
+  }
+  return WebAssembly.instantiate(await res.arrayBuffer(), imports);
+};
+
+// Somebody is waiting on the core (ensureRuntimeReady): a failure says so
+// then, whether or not the progress toast is still on screen to hand over
+// (a burst of toasts can push it out, TOAST_MAX).
+let coreWanted = false;
+let coreFailToast = null;
+// Bytes that arrived but will not compile or link are no connection
+// problem, and fetching them again only fetches the same cached copy: an
+// em.wasm from another build. Force update replaces the whole app.
+const coreBroken = (e) => e instanceof WebAssembly.CompileError || e instanceof WebAssembly.LinkError;
+const showCoreFailed = (broken) => {
+  hideCoreWait();
+  if (coreFailToast && !coreFailToast.gone) dismissToast(coreFailToast);
+  coreFailToast = broken
+    ? showActionToast("The emulator's files don't match this version.", "Update", () => {
+        coreFailToast = null;
+        appUpdating = true; // as the Force update row: a reload is committed
+        forceUpdate().catch((err) => {
+          appUpdating = false;
+          alert("Force update failed: " + err.message);
+        });
+      }, 20000)
+    : showActionToast("Couldn't download the emulator. Check the connection.", "Try Again", () => {
+        coreFailToast = null;
+        coreLoad.retry?.(); // first: the toast reads the state it leaves
+        showCoreWait();
+      }, 20000);
+};
+
+const coreFailed = (e, again) => {
+  log("couldn't load the emulator: " + (e?.message || e));
+  coreLoad.state = "failed";
+  coreLoad.retry = () => { coreLoad.retry = null; again(); };
+  noteCore();
+  if (coreWanted && !runtimeReady) showCoreFailed(coreBroken(e));
+};
+
+Module.instantiateWasm = (imports, receive) => {
+  const attempt = () => {
+    fetchCore(imports).then((r) => {
+      coreLoad.state = "starting";
+      noteCore();
+      receive(r.instance, r.module);
+    }, (e) => coreFailed(e, attempt));
+  };
+  attempt();
+  return {}; // the exports arrive through receive
+};
+
+const loadCoreScript = () => {
+  coreLoad.state = "downloading";
+  noteCore();
+  if (!coreEarly) {
+    coreEarly = fetch("em.wasm" + emAssetQuery(), { credentials: "same-origin" });
+    coreEarly.catch(() => {}); // fetchCore reports it, when it takes it
+  }
+  const s = document.createElement("script");
+  s.src = "em.js" + emAssetQuery();
+  s.async = true;
+  s.onerror = () => {
+    s.remove();
+    // The wasm's early request most likely failed with it: the retry asks
+    // for both again rather than handing fetchCore a spent one.
+    coreEarly = null;
+    coreFailed(new Error("em.js"), loadCoreScript);
+  };
+  document.body.append(s);
+};
+
+// Back online: pick up a failed download where nobody has to ask.
+window.addEventListener("online", () => coreLoad.retry?.());
+
+// After DOMContentLoaded: every script in index.html has run (Module is
+// complete) and initStorage, queued ahead of this, has the library on its
+// way. The test harness holds readyState at "loading", so it never fires.
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", loadCoreScript, { once: true });
+} else {
+  loadCoreScript();
+}
+
+// The one thing a waiting launch shows: a toast with the download's
+// progress, gone when the core is in. The percentage is aria-hidden (a live
+// region announcing every chunk is noise); the sentence is what is read.
+let coreWait = null;
+const showCoreWait = () => {
+  // A Try Again tapped after the core came in anyway: nothing to wait for.
+  if (runtimeReady || (coreWait && !coreWait.gone)) return;
+  if (coreFailToast && !coreFailToast.gone) dismissToast(coreFailToast); // retried
+  coreFailToast = null;
+  const rec = pushToast("Downloading the emulator…", 2 ** 31 - 1, null);
+  coreWait = rec;
+  rec.el.classList.add("core-wait");
+  const msg = rec.el.querySelector(".toast-msg");
+  const pct = document.createElement("span");
+  pct.className = "core-wait-pct";
+  pct.setAttribute("aria-hidden", "true");
+  msg.append(" ", pct);
+  const bar = document.createElement("div");
+  bar.className = "core-wait-bar";
+  bar.setAttribute("aria-hidden", "true");
+  const fill = document.createElement("span");
+  bar.append(fill);
+  rec.el.append(bar);
+  let painted = -1;
+  const paint = () => {
+    if (rec.gone) { coreLoad.seen.delete(paint); return; }
+    if (coreLoad.state === "failed") return; // coreFailed says so
+    const known = coreLoad.total > 0 && coreLoad.state === "downloading";
+    rec.el.classList.toggle("core-wait-known", known || coreLoad.state === "starting");
+    const f = coreLoad.state === "starting" ? 1 : known ? Math.min(1, coreLoad.got / coreLoad.total) : 0;
+    const p = Math.floor(f * 100);
+    if (p === painted && coreLoad.state !== "starting") return;
+    painted = p;
+    msg.firstChild.textContent = coreLoad.state === "starting" ? "Starting the emulator…" : "Downloading the emulator…";
+    pct.textContent = known ? p + "%" : "";
+    // No figure: the stylesheet's slide (or, reduced, a still full bar).
+    fill.style.transform = known || coreLoad.state === "starting" ? "scaleX(" + f + ")" : "";
+  };
+  coreLoad.seen.add(paint);
+  paint();
+};
+const hideCoreWait = () => {
+  if (coreWait && !coreWait.gone) dismissToast(coreWait);
+  coreWait = null;
+};
+// The core is in (onRuntimeInitialized): neither the wait nor a failure
+// that the online retry has since overtaken stays up.
+const coreArrived = () => {
+  hideCoreWait();
+  if (coreFailToast && !coreFailToast.gone) dismissToast(coreFailToast);
+  coreFailToast = null;
 };
 
 const getInputs = (element) =>

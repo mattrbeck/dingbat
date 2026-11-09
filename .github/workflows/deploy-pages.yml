@@ -70,6 +70,20 @@ jobs:
         # tools/serve_nds_dev.sh's standalone core page and its probes.
         run: rm -f web/nds.html web/nds/nds-page.js web/nds/audio-probe.mjs web/nds/shot.mjs
 
+      - name: Stamp the core's size
+        # em.wasm's decoded size, for the download progress a launch waiting
+        # on the core shows (index.js, "The core's download"): the response's
+        # Content-Length is the gzip size. Before the version hash, which
+        # covers index.html; the build is reproducible, so the stamp is too.
+        run: |
+          set -eo pipefail
+          bytes=$(stat -c %s web/em.wasm)
+          sed -i "s/<meta name=\"dingbat-core-bytes\" content=\"\"/<meta name=\"dingbat-core-bytes\" content=\"${bytes}\"/" web/index.html
+          grep -q "name=\"dingbat-core-bytes\" content=\"${bytes}\"" web/index.html || {
+            echo "::error::core size stamping failed - the meta in web/index.html did not match"
+            exit 1
+          }
+
       - name: Minify web assets
         # sw.js is never minified: index.js's update checker regex-matches the
         # literal `CACHE_VERSION = "..."` the stamp below writes.
@@ -88,6 +102,14 @@ jobs:
           for f in styles.css embed.css; do
             npx esbuild "web/$f" --minify --outfile="web/$f" --allow-overwrite
           done
+          # index.html's comments: a fifth of its gzip (26.3 -> 20.6 KB),
+          # all of it ahead of the first paint. Its inline scripts hold no
+          # "<!--"; the check after makes sure none was left half-cut.
+          perl -0pi -e 's/<!--.*?-->//gs' web/index.html
+          if grep -q -e '<!--' -e '-->' web/index.html; then
+            echo "::error::a comment survived (or was cut short) in web/index.html"
+            exit 1
+          fi
 
       - name: Find the live site
         id: pages

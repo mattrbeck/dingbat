@@ -46,11 +46,12 @@
          the standalone viewport up by the status-bar height without growing
          it (the bottom "chin gap"). The default lets iOS fill both safe areas
          from the theme-color meta, which index.js keeps in step with the theme. -->
-    <!-- Preload em.wasm (~65% of the payload) in parallel with the scripts.
-         `crossorigin` must match em.js's own fetch (mode "cors" + same-origin
-         credentials) or the browser downloads it twice; same bare URL so the
-         service worker's cache-first match hits. -->
-    <link rel="preload" href="em.wasm" as="fetch" crossorigin />
+    <!-- No em.wasm preload, and no em.js tag: the core is ~60% of a first
+         visit, and fetched alongside the page it held back the scripts that
+         make the home screen work. index.js asks for it after them ("The
+         core's download"). The figure below is em.wasm's decoded size for
+         that download's progress, stamped by deploy-pages.yml. -->
+    <meta name="dingbat-core-bytes" content="" />
     <link rel="icon" type="image/png" href="favicon-96x96.png" sizes="96x96" />
     <link rel="icon" type="image/svg+xml" href="favicon.svg" />
     <link rel="shortcut icon" href="favicon.ico" />
@@ -575,11 +576,64 @@
               <p class="home-drop-hint"><span class="ds-beta-off">.gba, .gb, .gbc or a .zip</span><span class="ds-beta-only">.gba, .gb, .gbc, .nds or a .zip</span></p>
             </div>
             <!-- Signed out: Google's own button, per its branding rules.
-                 Signed in with nothing here yet: a plain Sync. -->
-            <div id="home-drive-row" hidden>
+                 Signed in with nothing here yet: a plain Sync. Drawn here
+                 as a first visit sees it, so the empty state is whole at
+                 first paint rather than when index.js arrives (and the brand
+                 does not jump up to make room for it then); the script after
+                 it redraws a linked account's, as refreshHomeEmptyActions
+                 would. A library's page (body.lib-has-games) never shows it. -->
+            <div id="home-drive-row">
               <span id="home-drive-lead">Already playing on another device?</span>
-              <button type="button" id="home-drive" class="button"></button>
+              <button type="button" id="home-drive" class="gsi-btn" aria-label="Sign in with Google"><img class="gsi-dark" src="google-signin-dark.svg" alt="" width="180" height="40"><img class="gsi-light" src="google-signin-light.svg" alt="" width="180" height="40"></button>
             </div>
+            <script>
+              (function () {
+                try {
+                  var h = JSON.parse(localStorage.getItem("dingbat_drive") || "null");
+                  if (!h || !h.i) return;
+                  var b = document.getElementById("home-drive");
+                  b.className = "button";
+                  b.textContent = "Sync";
+                  b.removeAttribute("aria-label");
+                  document.getElementById("home-drive-lead").hidden = true;
+                } catch (e) {}
+              })();
+            </script>
+            <script>
+              // Before index.js has run, Add a game and a dropped file still
+              // work: the file is handed to index.js (window.dingbatTakeFile)
+              // or held for it (window.dingbatEarlyFile), and a drop never
+              // has the browser open the file in place of the page. Once
+              // dingbatTakeFile exists, index.js's own handlers do it all.
+              (function () {
+                var take = function (f) {
+                  if (!f) return;
+                  if (window.dingbatTakeFile) window.dingbatTakeFile(f);
+                  else window.dingbatEarlyFile = f;
+                };
+                document.getElementById("home-load").addEventListener("click", function () {
+                  if (window.dingbatTakeFile) return;
+                  var input = document.createElement("input");
+                  input.type = "file";
+                  // As openRomPicker: iOS greys the ROMs out under a filter.
+                  var ios = /iP(hone|ad|od)/.test(navigator.platform) ||
+                    (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+                  var ds = false;
+                  try { ds = localStorage.getItem("ds-beta") === "1"; } catch (e) {}
+                  if (!ios) input.accept = ".gba,.gb,.gbc,.cgb,.sgb," + (ds ? ".nds," : "") + ".zip";
+                  input.addEventListener("input", function () { take(input.files && input.files[0]); });
+                  input.click();
+                });
+                document.addEventListener("dragover", function (e) {
+                  if (!window.dingbatTakeFile) e.preventDefault();
+                });
+                document.addEventListener("drop", function (e) {
+                  if (window.dingbatTakeFile) return;
+                  e.preventDefault();
+                  take(e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]);
+                });
+              })();
+            </script>
           </div>
           <!-- The rungs under the hero: Resume for the sessions the hero
                cannot draw (2P link, rollback, online), and Add a game -
@@ -595,10 +649,6 @@
               <span>Add a game</span>
             </button>
           </div>
-
-          <!-- Wasm-boot progress. CSS delays its fade-in so fast loads never
-               flash it; body.runtime-ready hides it. -->
-          <div id="boot-progress" aria-hidden="true"><span></span></div>
 
           <div id="home-recent-wrap" hidden>
             <div class="home-recent-head" id="home-recent-head">
@@ -1817,6 +1867,6 @@
     <script src="index.js"></script>
     <script src="sdputil.js"></script>
     <script src="netplay.js"></script>
-    <script src="em.js"></script>
+    <!-- em.js: loaded by index.js once these have run ("The core's download"). -->
   </body>
 </html>
