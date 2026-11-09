@@ -486,6 +486,56 @@ final class NativeTouchesUITests: XCTestCase {
         snap(app, "pictures-added")
     }
 
+    /// Add pictures with a pad, and a swipe: the ring starts on the offer's
+    /// Add pictures (A answers the question), A starts the run and the ring
+    /// moves to Stop, and a swipe down on the sheet stops the run at once,
+    /// as its x does. The run is held on "Waiting for Drive…" (a Drive that
+    /// never answers: an unroutable address), which the suite's one blank
+    /// game would otherwise end in well under a second.
+    func testAddPicturesPadThenSwipeStops() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["-audio.muted", "YES", "-debug-events", "-sheet", "addPictures",
+                               "-drive-stub", "http://10.255.255.1"]
+        app.launch()
+        let data = try XCTUnwrap(appContainer(), "the app's data container, beside the runner's")
+        XCTAssertTrue(app.staticTexts["Add pictures to your library?"].waitForExistence(timeout: 10), "the offer")
+        sleep(1)
+        let dump = data.appendingPathComponent("tmp/padnav.txt")
+        let ring = { () -> String in
+            let first = ((try? String(contentsOf: dump, encoding: .utf8)) ?? "").split(separator: "\n").first
+            return first.map { String($0.dropFirst("focused ".count)) } ?? ""
+        }
+        try? FileManager.default.removeItem(at: dump)
+        // Right of the primary, the last button, is nothing: the first move
+        // shows the ring where it starts.
+        post("nav-right")
+        usleep(400_000)
+        XCTAssertEqual(ring(), "addPictures|button:Add pictures", "the ring starts on the offer's Add pictures")
+        post("nav-a")
+        XCTAssertTrue(app.staticTexts["Adding pictures"].waitForExistence(timeout: 5), "A starts the run")
+        let toast = app.staticTexts.matching(NSPredicate(format: Self.runToast)).firstMatch
+        usleep(600_000)
+        if toast.exists { throw XCTSkip("the run ended before the pad and the swipe could reach it: \(toast.label)") }
+        // Below Stop, the sheet's last button, is nothing: the ring stays.
+        post("nav-down")
+        usleep(400_000)
+        XCTAssertEqual(ring(), "addPictures|button:Stop", "the ring moved to Stop")
+        snap(app, "pictures-pad-stop")
+        // A drag from the title to the foot of the screen (an element's own
+        // swipe stays inside its bounds, too short to dismiss a sheet).
+        let title = app.staticTexts["Adding pictures"].frame
+        let origin = app.coordinate(withNormalizedOffset: .zero)
+        let from = origin.withOffset(CGVector(dx: title.midX, dy: title.minY - 14))
+        from.press(forDuration: 0.1, thenDragTo: origin.withOffset(CGVector(dx: title.midX, dy: app.frame.height - 10)))
+        // The toast first: it is up 2.2 s.
+        XCTAssertTrue(toast.waitForExistence(timeout: 3), "the swipe ends the run")
+        print("NATIVE: swiped run \(toast.label)")
+        XCTAssertEqual(toast.label, "Stopped", "a swipe before the first picture stops it")
+        XCTAssertFalse(app.staticTexts["Adding pictures"].exists, "the sheet is gone")
+        let log = (try? String(contentsOf: data.appendingPathComponent("tmp/addpictures.txt"), encoding: .utf8)) ?? ""
+        XCTAssertTrue(log.contains("end Stopped"), "the run ended there: \(log)")
+    }
+
     /// A game whose screen stays blank (linktest.gba's white, the suite's
     /// one game) is remembered: after a run Add pictures leaves the library
     /// head, as nothing is left a run would open, stays gone on a relaunch,
