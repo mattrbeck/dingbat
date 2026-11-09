@@ -3403,6 +3403,23 @@ body.runtime-ready #boot-progress {
   min-height: 34px;
 }
 
+/* On touch its hit area reaches 44px tall without drawing any taller, as
+   Add pictures' beside it. Positioned, so the area is its own, not the
+   nearest positioned ancestor's; above the grid's first row it reaches
+   over. */
+@media (pointer: coarse) {
+  .button.lib-add {
+    position: relative;
+    z-index: 1;
+  }
+
+  .lib-add::before {
+    content: "";
+    position: absolute;
+    inset: -6px 0; /* from the padding box: 32 + 12 = 44px */
+  }
+}
+
 .lib-add svg {
   width: 15px;
   height: 15px;
@@ -5204,6 +5221,53 @@ body.game-menu-open #toast {
 
 .switch input:focus-visible + .switch-track {
   box-shadow: 0 0 0 3px var(--accent-glow);
+}
+
+/* Forced colors drops author backgrounds, which would erase the knob and
+   the on fill and leave on and off alike: system colours instead, the on
+   track filled in Highlight. */
+@media (forced-colors: active) {
+  .switch-track,
+  .switch-track::after {
+    forced-color-adjust: none;
+  }
+
+  .switch-track {
+    background: Canvas;
+    border-color: CanvasText;
+  }
+
+  .switch-track::after {
+    background: CanvasText;
+    box-shadow: none;
+  }
+
+  .switch input:checked + .switch-track {
+    background: Highlight;
+    border-color: Highlight;
+  }
+
+  .switch input:checked + .switch-track::after {
+    background: HighlightText;
+  }
+
+  .switch input:disabled + .switch-track {
+    border-color: GrayText;
+  }
+
+  .switch input:disabled + .switch-track::after,
+  .switch input:disabled:checked + .switch-track {
+    background: GrayText;
+  }
+
+  .switch input:disabled:checked + .switch-track::after {
+    background: Canvas;
+  }
+
+  .switch input:focus-visible + .switch-track {
+    outline: 2px solid Highlight;
+    outline-offset: 2px;
+  }
 }
 
 /* The sliders take the switches' glow for keyboard focus instead of the
