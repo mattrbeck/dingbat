@@ -154,6 +154,15 @@ jobs:
           }
           echo -n "${VERSION}" > web/version.txt
 
+      - name: Write the asset manifest
+        # Every precached file's digest (sw.js checks each copy its install
+        # keeps against it, and reuses any it already holds). Last, after
+        # every step that rewrites one of them: the minify, the core-size
+        # stamp, the comment strip and the version stamp above. After "Pick
+        # the version" too, which it does not change: the manifest is a
+        # function of the files that step hashes and the version it picks.
+        run: node .github/scripts/asset-manifest.mjs web
+
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:

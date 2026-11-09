@@ -85,9 +85,10 @@ window.addEventListener("keydown", (e) => {
 let swRegistration = null;
 
 // A first visit registers once the core is in (onRuntimeInitialized), not at
-// load: its install fetches every asset again, past the HTTP cache (sw.js,
-// installAssets), and on a phone's link that second copy halved the
-// bandwidth the page's own first load had. A page already controlled (a
+// load: its install takes every asset the page has loaded from the HTTP cache
+// (sw.js, heldCopy), so registering after em.wasm has arrived means the
+// install downloads only what the page never asked for, instead of a second
+// copy sharing a phone's link with the first. A page already controlled (a
 // returning visit) costs nothing to register at once, and must: Update and
 // the update check lean on swRegistration from the start (applyUpdate
 // without it takes the clean-slate fullResetReload).
@@ -19383,8 +19384,8 @@ var Module = {
     markRuntimeReady();
     document.body.classList.add("runtime-ready");
     coreArrived();
-    // Its install fetches the whole app again; now nothing is waiting on
-    // the link (registerServiceWorker).
+    // Its install takes what this page loaded from the HTTP cache, em.wasm
+    // included now (registerServiceWorker).
     registerServiceWorker();
     // The one-time library-pictures offer: after the grid and the Drive
     // session (resumeDriveOnBoot) have had a moment to settle, and the
