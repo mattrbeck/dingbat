@@ -28,7 +28,7 @@ then `lake env lean AxiomAudit.lean`, which fails if any theorem rests on
 | `LinkPairing` | two players on one code: both clients, the signaling server (server.nim / server.js) and the network between them; suspension, unseen socket deaths, the pairing deadline |
 | `LinkResume` | a dropped link resuming: inputs, the input log and RESUME, pause and 2x across a resume, numbered pause presses agreeing, BYE and the goodbye note, the give-up clock, what each player sees |
 | `LinkRedial` | the redial on the retry code: both clients, the server (and its goodbye notes), sockets, the pairing/answer/re-rendezvous timers, suspension |
-| `ServiceWorker` | update check, web/sw.js install/activate/fetch, reload on controllerchange, the update a too-new save state asks for |
+| `ServiceWorker` | update check, web/sw.js install (both the version-probed design and the manifest one, side by side) / activate / fetch / Force update, reload on controllerchange, the update a too-new save state asks for |
 
 `FINDINGS.md` ranks every counterexample the web models found.
 
