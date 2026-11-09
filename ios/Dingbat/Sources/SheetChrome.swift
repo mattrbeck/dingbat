@@ -519,6 +519,8 @@ struct SheetChip<Leading: View>: View {
     /// What VoiceOver reads when the chip's text is short (web aria-label:
     /// "1" is read "1 frame").
     var spoken: String? = nil
+    /// A pad key to reach this chip by (PadNav.handOff); otherwise its own.
+    var padKey: String? = nil
     let action: () -> Void
     @ViewBuilder var leading: () -> Leading
     @Environment(\.palette) private var palette
@@ -543,15 +545,15 @@ struct SheetChip<Leading: View>: View {
         .buttonStyle(.plain)
         .accessibilityLabel(spoken ?? label)
         .accessibilityAddTraits(selected ? .isSelected : [])
-        .padFocus("chip:" + padID, press: action)
+        .padFocus("chip:" + (padKey ?? padID), press: action)
     }
 
     @State private var padID = UUID().uuidString
 }
 
 extension SheetChip where Leading == EmptyView {
-    init(label: String, selected: Bool, spoken: String? = nil, action: @escaping () -> Void) {
-        self.init(label: label, selected: selected, fill: false, spoken: spoken, action: action,
+    init(label: String, selected: Bool, spoken: String? = nil, padKey: String? = nil, action: @escaping () -> Void) {
+        self.init(label: label, selected: selected, fill: false, spoken: spoken, padKey: padKey, action: action,
                   leading: { EmptyView() })
     }
 }
@@ -564,11 +566,14 @@ struct SheetChipPicker<Value: Hashable>: View {
     let options: [(Value, String)]
     var spoken: [Value: String] = [:]
     var accessibilityLabel = ""
+    /// Pad keys for the chips, "chip:<padKey>:<label>" (PadNav.handOff).
+    var padKey: String? = nil
 
     var body: some View {
         let row = HStack(spacing: 6) {
             ForEach(options, id: \.0) { opt in
-                SheetChip(label: opt.1, selected: selection == opt.0, spoken: spoken[opt.0]) { selection = opt.0 }
+                SheetChip(label: opt.1, selected: selection == opt.0, spoken: spoken[opt.0],
+                          padKey: padKey.map { $0 + ":" + opt.1 }) { selection = opt.0 }
             }
         }
         if accessibilityLabel.isEmpty { row }

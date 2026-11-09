@@ -446,6 +446,7 @@ private struct GameBoyPane: View {
     @ObservedObject private var s = Settings.shared
     @ObservedObject private var session = GameSession.shared
     @Environment(\.palette) private var palette
+    @Environment(\.padScope) private var scope
 
     /// SGB colour in the running game: the shader has no shades to replace.
     private var sgbActive: Bool { session.game != nil && dingbat_sgb_active() != 0 }
@@ -457,7 +458,7 @@ private struct GameBoyPane: View {
                          sub: "The four colors black-and-white games are drawn in. Color games are never affected.") {
                 SheetChipPicker(selection: $s.gbPaletteMode,
                                 options: [(.default, "Default"), (.theme, "App theme"), (.custom, "Custom")],
-                                accessibilityLabel: "Game Boy palette")
+                                accessibilityLabel: "Game Boy palette", padKey: "gbpalette")
             }
             if sgbActive {
                 SheetHint("Super Game Boy games bring their own colors, so there are no shades to replace. Turn it off below to use a palette.")
@@ -473,12 +474,17 @@ private struct GameBoyPane: View {
                 .clipShape(RoundedRectangle(cornerRadius: 6))
                 .overlay(RoundedRectangle(cornerRadius: 6).stroke(palette.border2, lineWidth: 1))
                 .accessibilityHidden(true)
-                PadButton("Reset") {
+                // Off while there is nothing to reset (web the same): the
+                // pad's ring steps to Default as it greys.
+                PadButton("Reset", id: "gbpalette:reset") {
+                    PadNav.shared.handOff(PadNav.key(scope, "gbpalette:reset"),
+                                          to: PadNav.key(scope, "chip:gbpalette:Default"))
                     s.gbPaletteMode = .default
                     s.gbPaletteCustom = Settings.defaultShades
                 }
                 .buttonStyle(SheetButtonStyle())
                 .accessibilityLabel("Reset the Game Boy palette")
+                .disabled(s.gbPaletteMode == .default && s.gbPaletteCustom == Settings.defaultShades)
             }
             .padding(.bottom, 14)
             if s.gbPaletteMode == .custom {

@@ -901,6 +901,39 @@ final class NativeTouchesUITests: XCTestCase {
         XCTAssertFalse(fm.fileExists(atPath: rom.path), "the file is gone")
     }
 
+    /// The Game Boy palette's Reset is off while there is nothing to reset,
+    /// on once a palette is picked, and A on it with the pad resets and steps
+    /// the ring to Default as it greys.
+    func testGbPaletteResetOffAtDefaults() throws {
+        let app = launch(["-gb-palette.mode", "default", "-sheet", "settings:gb"])
+        let data = try XCTUnwrap(appContainer(), "the app's data container, beside the runner's")
+        let reset = app.buttons["Reset the Game Boy palette"].firstMatch
+        XCTAssertTrue(reset.waitForExistence(timeout: 10), "Settings › Game Boy's palette Reset")
+        XCTAssertFalse(reset.isEnabled, "the default palette: Reset is off")
+        app.buttons["App theme"].firstMatch.tap()
+        XCTAssertTrue(reset.isEnabled, "a palette picked: Reset is on")
+        snap(app, "gb-palette-reset-on")
+
+        let dump = data.appendingPathComponent("tmp/padnav.txt")
+        let ring = { () -> String in
+            let first = ((try? String(contentsOf: dump, encoding: .utf8)) ?? "").split(separator: "\n").first
+            return first.map { String($0.dropFirst("focused ".count)) } ?? ""
+        }
+        try? FileManager.default.removeItem(at: dump)
+        for _ in 0..<40 where ring() != "settings|gbpalette:reset" { post("nav-down"); usleep(300_000) }
+        XCTAssertEqual(ring(), "settings|gbpalette:reset", "the pad reaches Reset")
+        post("nav-a")
+        usleep(500_000)
+        XCTAssertFalse(reset.isEnabled, "A on Reset puts the default back, and Reset goes off")
+        XCTAssertTrue(app.buttons["Default"].firstMatch.isSelected, "Default is the palette again")
+        // Left of Default, the first chip, is nothing: the ring stays put,
+        // where a ring left on the greyed Reset starts again at the top.
+        post("nav-left")
+        usleep(300_000)
+        XCTAssertEqual(ring(), "settings|chip:gbpalette:Default", "the ring stepped to Default")
+        snap(app, "gb-palette-reset-off")
+    }
+
     /// Run-ahead's chips read "1", "2", "3": VoiceOver hears "1 frame",
     /// "2 frames", "3 frames" (web aria-label), and a tap selects one.
     func testShortChipsSpeakTheirNames() {
