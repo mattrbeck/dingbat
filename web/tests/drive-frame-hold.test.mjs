@@ -144,10 +144,34 @@ test("not while a Switch to another device's newer moment of the game is on offe
   const drive = driveWithPicture();
   const app = await device(drive);
   openHere(app);
-  app.runIn(`handoffStash = { game: "A.gba", news: [] };`);
+  offered(app, drive, { since: false });
   await app.api.pullSync({ silent: true });
   await app.api.flushSync();
   await settle();
   assert.equal(text(drive.get(NAME)), "THEIRS", "Drive keeps the other device's picture");
   assert.ok(app.api.syncState.queueUp.includes(NAME));
 });
+
+test("but once this device's own session has gone up over the offered one, the picture goes too", async () => {
+  const drive = driveWithPicture();
+  const app = await device(drive);
+  openHere(app);
+  offered(app, drive, { since: true });
+  await app.api.pullSync({ silent: true });
+  await app.api.flushSync();
+  await settle();
+  assert.equal(text(drive.get(NAME)), "BOOT", "this device's picture is on Drive");
+  assert.ok(!app.api.syncState.queueUp.includes(NAME));
+});
+
+// The other device's session of A.gba was offered here ("Switch"), and marked
+// seen as an offer does. `since`: this device's own session has gone up over
+// it since (the player kept playing here), so Drive's session is not the one
+// offered any more.
+function offered(app, drive, { since }) {
+  const f = drive.add("stateauto:A.gba", ascii(since ? "MINE" : "THEIRS"));
+  const at = since ? "2025-01-01T00:00:00.000Z" : f.modifiedTime;
+  app.api.syncState.rmt["stateauto:A.gba"] = f.modifiedTime;
+  app.runIn(`handoffStash = { game: "A.gba",
+    news: [{ key: "stateauto:A.gba", f: { modifiedTime: ${JSON.stringify(at)} } }] };`);
+}

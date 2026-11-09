@@ -4412,6 +4412,11 @@ const takeHandoff = async (game, news) => {
 // offered, the other device's session is marked seen, and this device's
 // own next session would go up over it.
 let handoffStash = null; // { game, news }
+// A Switch to another device's moment of `game` still on offer: Drive (the
+// pull's listing) still holds a file it offered. Once this device's own
+// session goes up over it (the player kept playing here), it is not.
+const handoffLive = (game, remote) => handoffStash?.game === game &&
+  handoffStash.news.some((n) => remote.get(n.key)?.modifiedTime === n.f.modifiedTime);
 const switchToHandoff = async (game) => {
   if (currentOriginalName !== game || handoffStash?.game !== game) return;
   const { news } = handoffStash;
@@ -4691,10 +4696,11 @@ const pullSyncInner = async ({ silent = true } = {}) => {
         // of its own this session (lastFrameSig, cleared at load; until then
         // the queued one may be an older boot screen), it is this session's:
         // Drive's is marked seen, and the flush sends this device's over it.
-        // Not while a Switch to another device's newer moment is on offer:
-        // taken, the game leaves, and Drive's picture is that moment's.
+        // Not while a Switch to another device's newer moment is on offer
+        // (handoffLive): taken, the game leaves, and Drive's picture is that
+        // moment's.
         if (p.kind === "frame" && framePictured(p.game) && lastFrameSig !== null &&
-            handoffStash?.game !== p.game && syncState.queueUp.includes(name) &&
+            !handoffLive(p.game, remote) && syncState.queueUp.includes(name) &&
             syncState.rmt[name] !== f.modifiedTime) {
           syncState.rmt[name] = f.modifiedTime;
           queuedMissing = true;

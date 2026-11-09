@@ -1128,10 +1128,10 @@ final class DriveSync: ObservableObject {
                     // (not a switched-off DS), it is this session's: Drive's
                     // is marked seen, and the flush sends this device's over
                     // it (web the same). Not while a Switch to another
-                    // device's newer moment is on offer: taken, the game
-                    // leaves, and Drive's picture is that moment's.
+                    // device's newer moment is on offer (handoffLive): taken,
+                    // the game leaves, and Drive's picture is that moment's.
                     let s = GameSession.shared
-                    let pictured = s.pictureTaken && !(s.isNDS && NdsState.shared.poweredOff) && handoffStash?.game != p.game
+                    let pictured = s.pictureTaken && !(s.isNDS && NdsState.shared.poweredOff) && !handoffLive(p.game, remote.map)
                     if p.kind == "frame", pictured, state.queueUp.contains(name), state.rmt[name] != f.modifiedTime {
                         state.rmt[name] = f.modifiedTime
                         queuedMissing = true
@@ -1273,6 +1273,13 @@ final class DriveSync: ObservableObject {
     // MARK: hand-off (web "Hand-off: the game in memory, played on another device since")
 
     private func handoffKeys(_ g: String) -> [String] { ["save:" + g, "stateauto:" + g] }
+    /// A Switch to another device's moment of `g` still on offer: Drive (the
+    /// pull's listing) still holds a file it offered. Once this device's own
+    /// session goes up over it (the player kept playing here), it is not.
+    private func handoffLive(_ g: String, _ remote: [String: DriveFile]) -> Bool {
+        guard let stash = handoffStash, stash.game == g else { return false }
+        return stash.news.contains { remote[$0.key]?.modifiedTime == $0.f.modifiedTime }
+    }
 
     @MainActor
     private func handoff(remote: Listing, lib: DriveLibrary, live: () throws -> Void, queuedMissing: inout Bool) async throws {
