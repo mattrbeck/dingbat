@@ -12636,7 +12636,8 @@ const syncGbPaletteUI = () => {
     if (gbPaletteInputs[i]) gbPaletteInputs[i].value = gbPaletteCustom[i];
   }
   // Reset is off while there is nothing to reset (the default palette, the
-  // custom shades untouched), as a BIOS row's Remove with no file. Focus on
+  // custom shades untouched), as a BIOS row's Remove with no file, and with
+  // the chips under SGB colour (its row is greyed: iOS the same). Focus on
   // it as it greys steps to the Default chip.
   if (gbPaletteResetBtn) {
     const atDefault = gbPaletteMode === "default" &&
@@ -12644,7 +12645,7 @@ const syncGbPaletteUI = () => {
     if (atDefault && document.activeElement === gbPaletteResetBtn) {
       gbPaletteChips.find((c) => c.dataset.value === "default" && !c.disabled)?.focus({ preventScroll: true });
     }
-    gbPaletteResetBtn.disabled = atDefault;
+    gbPaletteResetBtn.disabled = atDefault || sgb;
   }
   if (gbPalettePreview) {
     const shades = gbPaletteColors() || GB_DEFAULT_SHADES;

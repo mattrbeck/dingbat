@@ -247,6 +247,16 @@ test("the palette's Reset is off while there is nothing to reset", async () => {
   assert.equal(reset.disabled, true, "reset: off again");
 });
 
+test("the palette's Reset is off under Super Game Boy colour, with the rest of its row", async () => {
+  const h = await loadApp();
+  const reset = h.elements.get("gb-palette-reset");
+  h.api.setGbPaletteMode("theme");
+  assert.equal(reset.disabled, false, "a palette picked: on");
+  h.runIn(`currentRomName = "sgb.gb"; Module._wasm_sgb_active = () => 1;`);
+  h.api.setGbPaletteMode("theme");
+  assert.equal(reset.disabled, true, "SGB colour: no shades to replace, nothing to reset here");
+});
+
 test("Reset all settings also clears the palette", async () => {
   const h = await loadApp();
   h.api.gbPaletteMode = "theme";

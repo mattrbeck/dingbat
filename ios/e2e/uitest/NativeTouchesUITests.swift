@@ -955,7 +955,11 @@ final class NativeTouchesUITests: XCTestCase {
     /// on once a palette is picked, and A on it with the pad resets and steps
     /// the ring to Default as it greys.
     func testGbPaletteResetOffAtDefaults() throws {
-        let app = launch(["-gb-palette.mode", "default", "-sheet", "settings:gb"])
+        // The default custom shades too (Settings.defaultShades), whatever an
+        // earlier session left in the simulator's defaults.
+        let app = launch(["-gb-palette.mode", "default",
+                          "-gb-palette.custom", "(16249855, 13021439, 10645455, 3810403)",
+                          "-sheet", "settings:gb"])
         let data = try XCTUnwrap(appContainer(), "the app's data container, beside the runner's")
         let reset = app.buttons["Reset the Game Boy palette"].firstMatch
         XCTAssertTrue(reset.waitForExistence(timeout: 10), "Settings › Game Boy's palette Reset")
@@ -970,7 +974,12 @@ final class NativeTouchesUITests: XCTestCase {
             return first.map { String($0.dropFirst("focused ".count)) } ?? ""
         }
         try? FileManager.default.removeItem(at: dump)
-        for _ in 0..<40 where ring() != "settings|gbpalette:reset" { post("nav-down"); usleep(300_000) }
+        // Down to the palette's chips, right to Custom (the last), then down to
+        // Reset, under it at the row's right edge.
+        for _ in 0..<40 where !ring().hasPrefix("settings|chip:gbpalette:") { post("nav-down"); usleep(300_000) }
+        for _ in 0..<3 where ring() != "settings|chip:gbpalette:Custom" { post("nav-right"); usleep(300_000) }
+        post("nav-down")
+        usleep(300_000)
         XCTAssertEqual(ring(), "settings|gbpalette:reset", "the pad reaches Reset")
         post("nav-a")
         usleep(500_000)
