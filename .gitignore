@@ -27,6 +27,8 @@ web/node_modules/
 # WASM build artifacts and test ROMs
 web/em.js
 web/em.wasm
+# Written by deploy-pages.yml (.github/scripts/asset-manifest.mjs)
+web/asset-manifest.json
 web/bios.bin
 web/rom.gba
 web/rom.gb
