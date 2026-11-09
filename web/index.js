@@ -12548,7 +12548,7 @@ const gbPaletteChips = Array.from(/** @type {NodeListOf<HTMLButtonElement>} */ (
   document.querySelectorAll("#gb-palette-picker .choice-chip")));
 const gbPaletteCustomRow = document.getElementById("gb-palette-custom-row");
 const gbPalettePreview = document.getElementById("gb-palette-preview");
-const gbPaletteResetBtn = document.getElementById("gb-palette-reset");
+const gbPaletteResetBtn = /** @type {HTMLButtonElement | null} */ (document.getElementById("gb-palette-reset"));
 const gbPaletteInputs = [0, 1, 2, 3].map((i) =>
   /** @type {HTMLInputElement} */ (document.getElementById("gb-palette-shade-" + i)));
 
@@ -12634,6 +12634,17 @@ const syncGbPaletteUI = () => {
     r.classList.toggle("row-disabled", sgb);
   for (let i = 0; i < 4; i++) {
     if (gbPaletteInputs[i]) gbPaletteInputs[i].value = gbPaletteCustom[i];
+  }
+  // Reset is off while there is nothing to reset (the default palette, the
+  // custom shades untouched), as a BIOS row's Remove with no file. Focus on
+  // it as it greys steps to the Default chip.
+  if (gbPaletteResetBtn) {
+    const atDefault = gbPaletteMode === "default" &&
+      gbPaletteCustom.every((c, i) => String(c).toLowerCase() === GB_DEFAULT_SHADES[i]);
+    if (atDefault && document.activeElement === gbPaletteResetBtn) {
+      gbPaletteChips.find((c) => c.dataset.value === "default" && !c.disabled)?.focus({ preventScroll: true });
+    }
+    gbPaletteResetBtn.disabled = atDefault;
   }
   if (gbPalettePreview) {
     const shades = gbPaletteColors() || GB_DEFAULT_SHADES;

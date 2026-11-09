@@ -229,6 +229,24 @@ test("the palette's own Reset undoes the palette and nothing else", async () => 
   assert.equal(h.idb.get("runahead"), 2);
 });
 
+test("the palette's Reset is off while there is nothing to reset", async () => {
+  const h = await loadApp();
+  const reset = h.elements.get("gb-palette-reset");
+  h.api.setGbPaletteMode("default");
+  assert.equal(reset.disabled, true, "the default palette: nothing to reset");
+  h.api.setGbPaletteMode("theme");
+  assert.equal(reset.disabled, false, "a palette picked: on");
+  h.api.setGbPaletteMode("custom");
+  const input = h.elements.get("gb-palette-shade-2");
+  input.value = "#00ff00";
+  await input.dispatch("input");
+  h.api.setGbPaletteMode("default");
+  assert.equal(reset.disabled, false, "back on Default with changed custom shades: still something to reset");
+  await reset.dispatch("click");
+  await settle();
+  assert.equal(reset.disabled, true, "reset: off again");
+});
+
 test("Reset all settings also clears the palette", async () => {
   const h = await loadApp();
   h.api.gbPaletteMode = "theme";
