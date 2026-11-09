@@ -800,3 +800,89 @@ Not modelled: real-device iOS suspension timing, the server's rendezvous
 rate limits, the away card's own clock, and liveness in general (the
 `regress_*` and witness traces show recovery for each case, not for every
 schedule; two sides can keep restarting each other until the give-up).
+
+## One download, not two (2026-11-09, branch sw-dedupe on e3dbc604, `WebState/ServiceWorker`)
+
+sw.js's install no longer downloads every asset again. deploy-pages.yml
+writes asset-manifest.json (each precached file's SHA-256, under the build's
+version); the install fetches it fresh, refuses it unless it is its own
+build's, and takes each asset from the first copy whose bytes hash to its
+digest: any `dingbat-*` cache (an old worker's included, which holds bare
+URLs and no digests), then the HTTP cache (only-if-cached), then the network.
+Force update downloads everything again, checked against the manifest the
+origin serves now. The probes are gone: the digests do their job.
+
+The model now holds both designs side by side (`Env.N`, the first build with
+the manifest; the page protocol is unchanged, so old and new pages and
+workers pair freely), the bytes of each asset per build (`Env.C`, so assets
+may be unchanged across builds), the digest (`Env.H`, assumed injective
+where a theorem needs it), the HTTP cache (anything at all, as far as the
+install is concerned), e3dbc604's registration timing (an uncontrolled page
+registers once its core is in), and a reinstall that fails (ok:false, the
+asking tab's full reset). Proved:
+
+- **Consistency** (`cache_is_its_build`, H injective, no Force update): every
+  cache `dingbat-<v>` holds exactly build v's bytes, for every interleaving
+  of deploys, stale edges (a new install's manifest and downloads may come
+  from any build up to the deployed one), older caches, the HTTP cache and
+  installs of both designs. Hence `no_mixed_boot_without_force`: a page boots
+  exactly the build it boots from. With Force update, `cache_holds_builds`
+  (every cache entry is some build's copy of that asset, and only deployed
+  builds have caches) and `force_stage_one_build` (what a reinstall stages is
+  one build's bytes before it goes live; old design by its probes, new by the
+  digests). `bug_force_update_serves_half_written_cache` stands: the commit
+  is still one put per asset.
+- **No double download**: a lookup takes a held copy whenever one has the
+  digest (`lookup_takes_held`), only a lookup that found none marks an asset
+  for download (`net_only_after_a_miss`), and an asset downloads at most once
+  (`downloaded_once`). Traces: a first visit's install downloads nothing
+  (`first_visit_downloads_nothing_twice`; and it cannot register before the
+  core is in, `first_visit_registers_after_the_core`); an old worker's
+  update to the first new build downloads index.js alone
+  (`old_to_new_update_downloads_only_what_changed`); after an old worker's
+  Force update has put the new build in its cache, the new worker installs
+  with no download at all (`old_worker_force_then_new_worker_reuses`).
+- **The old guarantees, across the pairings**: `no_forced_midgame`,
+  `no_reload_without_a_click`, `shows_at_most_once`, and the old traces
+  (`regress_update_in_one_tab_*`, `newer_state_update_reloads_only_its_tab`,
+  `old_page_force_under_new_worker`). New: `watching_has_install` (an
+  applyUpdate watching an install always has it under way, so it ends in
+  skipWaiting or the full reset).
+- **Deploys mid-install** fail the install in both designs
+  (`regress_install_across_deploy_mixes_cache`, `regress_new_install_across_deploy`,
+  and the retries); a stale sw.js's install is refused before downloading
+  (`stale_worker_refuses_the_manifest`); a Force update straddling a deploy
+  fails in both (`regress_force_update_straddle_not_verified`,
+  `regress_new_force_update_straddle_fails`).
+- **Liveness** (`stable_deploy_installs`, H injective): from any state with a
+  worker active and the deployed build neither active nor waiting, a run with
+  no deploy (sources answering the deployed build) leaves it waiting over a
+  cache of exactly its bytes, in either design.
+
+**Found while modelling (pre-existing, narrowed, not closed).** Another
+worker's activation deletes every `dingbat-*` cache but its own, including
+one an install is still filling. Build 1 waiting, build 2 installing (an
+Update click's own `update()` starts it), the click's skipWaiting activates
+build 1: build 2's cache goes, and on origin/main its later puts land in the
+orphaned Cache object, so build 2 "installs" over nothing and, once active,
+serves every asset off the network (mixed builds possible, nothing offline).
+The new `commit` keeps every response in memory, puts them all at the end and
+then checks the cache under that name holds them, failing the install
+otherwise (`regress_activation_mid_commit_fails_install`). Left: activate's
+`caches.keys()` and its `caches.delete()` are two steps, and a commit and
+check landing between them (a cache that already existed, e.g. a failed
+attempt's, listed before the commit) is not caught; the model's activation
+is atomic, so it does not show this window. Closing it would need activation
+to delete only caches it knows to be older (a build sequence in the manifest).
+
+**Found in the e2e, not modelled:** after Force update, Chromium's reload can
+run the index.js the page before it ran, from its memory cache, when that
+copy is younger than its max-age (Pages sends ten minutes) and the worker is
+the same; the worker's cache does hold the new bytes (a fresh navigation
+shows them). Reproduced with origin/main's sw.js as well. It bites only a
+Force update within ten minutes of that worker's install.
+
+Not modelled: the dev build (no manifest), `collect`'s digest groups ("./"
+and "./index.html" share one copy), the lookups' per-source awaits (one
+event here; a copy appearing or going mid-lookup is downloaded, never kept
+wrong), and the old design's Cache-handle orphaning.
