@@ -1,13 +1,16 @@
 // web/asset-manifest.json: the digest of every file web/sw.js precaches, for
-// its install to check each copy it keeps against (sw.js, collect). Run by
+// its install to check each copy it keeps against (sw.js, collect), and of
+// each file of the DS core it keeps once fetched (sw.js LAZY, under `lazy`:
+// workers from before it check that `files` lists exactly their ASSETS). Run by
 // deploy-pages.yml after the last step that rewrites a precached file (the
 // service worker's version stamp), so the digests are of the bytes Pages
 // serves.
 //
 //   node .github/scripts/asset-manifest.mjs <site dir>
 //
-// The list is sw.js's own ASSETS and the version its CACHE_VERSION, so the
-// two cannot disagree; "./" is the site's index.html, as Pages serves it.
+// The lists are sw.js's own ASSETS and LAZY and the version its
+// CACHE_VERSION, so the two cannot disagree; "./" is the site's index.html,
+// as Pages serves it. A file missing from the site fails it (and the deploy).
 // Nothing in it depends on the time or the machine: the build stays
 // reproducible.
 
@@ -16,11 +19,13 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-export const swAssets = (swSource) => {
-  const m = swSource.match(/const ASSETS = \[([^\]]+)\]/);
-  if (!m) throw new Error("ASSETS list not found in sw.js");
+const swList = (swSource, name) => {
+  const m = swSource.match(new RegExp(`const ${name} = \\[([^\\]]+)\\]`));
+  if (!m) throw new Error(name + " list not found in sw.js");
   return [...m[1].matchAll(/"(\.\/[^"]*)"/g)].map((x) => x[1]);
 };
+export const swAssets = (swSource) => swList(swSource, "ASSETS");
+export const swLazy = (swSource) => swList(swSource, "LAZY");
 
 export const swVersion = (swSource) => {
   const m = swSource.match(/const CACHE_VERSION = "([^"]+)"/);
@@ -34,9 +39,9 @@ export const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex"
 
 export const buildManifest = (dir) => {
   const sw = readFileSync(join(dir, "sw.js"), "utf8");
-  const files = {};
-  for (const u of swAssets(sw)) files[u] = sha256(readFileSync(join(dir, fileFor(u))));
-  return { version: swVersion(sw), files };
+  const digests = (urls) =>
+    Object.fromEntries(urls.map((u) => [u, sha256(readFileSync(join(dir, fileFor(u))))]));
+  return { version: swVersion(sw), files: digests(swAssets(sw)), lazy: digests(swLazy(sw)) };
 };
 
 export const writeManifest = (dir) => {
@@ -58,5 +63,6 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
     process.exit(1);
   }
   const m = writeManifest(dir);
-  console.log(`asset-manifest.json: ${Object.keys(m.files).length} files, version ${m.version}`);
+  console.log(`asset-manifest.json: ${Object.keys(m.files).length} files, ` +
+              `${Object.keys(m.lazy).length} lazy, version ${m.version}`);
 }

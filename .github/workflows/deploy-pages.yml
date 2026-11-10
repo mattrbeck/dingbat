@@ -164,7 +164,9 @@ jobs:
 
       - name: Write the asset manifest
         # Every precached file's digest (sw.js checks each copy its install
-        # keeps against it, and reuses any it already holds). Last, after
+        # keeps against it, and reuses any it already holds), and the DS
+        # core's (nds/nds.{js,wasm} and the minified nds/gpu3d.js: checked
+        # when a DS game fetches them, carried over by an update). Last, after
         # every step that rewrites one of them: the minify, the core-size
         # stamp, the comment strip and the version stamp above. After "Pick
         # the version" too, which it does not change: the manifest is a
