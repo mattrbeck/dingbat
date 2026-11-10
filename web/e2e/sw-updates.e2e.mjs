@@ -21,7 +21,7 @@ import { builtWeb, sleep, WEB } from "./devices.mjs";
 import { synctestRom, SYNCTEST_NAME as GAME } from "./synctest-rom.mjs";
 import { fileFor, sha256, swAssets, writeManifest } from "../../.github/scripts/asset-manifest.mjs";
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
 
 const playwright = createRequire(join(WEB, "package.json"))("playwright");
 // Not on CI unless asked (DINGBAT_E2E_UPDATES=1). On its own shard there
@@ -290,7 +290,9 @@ const NEW_ASSETS = builtWeb() ? swAssets(readFileSync(join(WEB, "sw.js"), "utf8"
 const serveCounted = (dir) => new Promise((resolve) => {
   const log = [];
   const holds = [];
+  let down = false;
   const server = createServer(async (req, res) => {
+    if (down) { req.socket.destroy(); return; }
     const url = new URL(req.url, "http://x");
     for (const h of holds) {
       if (!h.done && h.re.test(url.pathname + url.search)) { h.hit(); await h.gate; }
@@ -314,6 +316,7 @@ const serveCounted = (dir) => new Promise((resolve) => {
   server.listen(0, "127.0.0.1", () => resolve({
     url: `http://127.0.0.1:${server.address().port}/`,
     log,
+    offline: (v) => { down = v; },
     // Holds the first request matching `re` until release(); `seen` once it arrives.
     hold: (re) => {
       let hit, open;
@@ -330,11 +333,16 @@ const serveCounted = (dir) => new Promise((resolve) => {
 
 // `src` (a web/ directory) staged into `dir` as a deploy: sw.js and
 // version.txt stamped with `version`, index.js marked with `letter`, and the
-// manifest unless `manifest` is false (a build from before it).
-const stage = async (src, dir, version, letter, { manifest = true } = {}) => {
+// manifest: this checkout's (`manifest` true), an older build's own script's
+// (a path to it), or none (false: a build from before it). `tamper` rewrites
+// files after the manifest, as a stale edge serving another object would.
+const stage = async (src, dir, version, letter, { manifest = true, tamper = null } = {}) => {
   await cp(src, dir, { recursive: true, force: true, filter: (p) =>
     !/[/\\](node_modules|tests|e2e|bench|types|signaling)([/\\]|$)/.test(p.slice(src.length - 1)) });
-  for (const f of ["em.js", "em.wasm"]) await cp(join(WEB, f), join(dir, f)); // the core is not in git
+  // The cores are not in git.
+  for (const f of ["em.js", "em.wasm", "nds/nds.js", "nds/nds.wasm"]) {
+    if (existsSync(join(WEB, f))) await cp(join(WEB, f), join(dir, f));
+  }
   const sw = (await readFile(join(src, "sw.js"), "utf8"))
     .replace('const CACHE_VERSION = "dev";', `const CACHE_VERSION = "${version}";`);
   await writeFile(join(dir, "sw.js"), sw);
@@ -342,16 +350,25 @@ const stage = async (src, dir, version, letter, { manifest = true } = {}) => {
   await writeFile(join(dir, "index.js"),
     (await readFile(join(src, "index.js"), "utf8")) + `\nvar __build = "${letter}";\n`);
   await rm(join(dir, "asset-manifest.json"), { force: true });
-  if (manifest) writeManifest(dir);
+  if (manifest === true) writeManifest(dir);
+  else if (manifest) execFileSync(process.execPath, [manifest, dir], { stdio: "pipe" });
+  if (tamper) await tamper(dir);
 };
 
-// An older build's web/, out of the repository.
+// An older build's web/ and its manifest script (null when it predates
+// one), out of the repository.
 const oldWeb = async () => {
   const out = await mkdtemp(join(tmpdir(), "dingbat-old-"));
-  const tar = execFileSync("git", ["-C", REPO, "archive", OLD_REF, "web"], { maxBuffer: 1 << 30 });
+  const tar = execFileSync("git", ["-C", REPO, "archive", OLD_REF, "web", ".github/scripts"],
+    { maxBuffer: 1 << 30 });
   execFileSync("tar", ["-x", "-C", out], { input: tar });
-  return join(out, "web");
+  // Its real path: the script runs only when argv[1] is its own URL's path,
+  // and the Mac's temp dir is a symlink (/var -> /private/var).
+  const script = join(realpathSync(out), ".github/scripts/asset-manifest.mjs");
+  return { web: join(out, "web"), script: existsSync(script) ? script : false, root: out };
 };
+const oldStage = (old, dir, version, letter) =>
+  stage(old.web, dir, version, letter, { manifest: old.script });
 
 // Bare path -> how many times the site sent it.
 const tally = (entries) => {
@@ -383,7 +400,29 @@ for (const engine of ENGINES) {
         swRegistration.active?.state === "activated", null, { timeout: 60000 });
     };
     const letter = (page) => page.evaluate(() => typeof __build === "undefined" ? "?" : __build);
-    const cacheKeys = (page) => page.evaluate(() => caches.keys());
+    // The asset caches (sw.js's pointer, dingbat-live, left out; a worker
+    // from before it has none), and the live one as the pointer names it.
+    const cacheKeys = (page) => page.evaluate(async () =>
+      (await caches.keys()).filter((k) => k !== "dingbat-live").sort());
+    const livePointer = (page) => page.evaluate(async () => {
+      const p = await caches.open("dingbat-live");
+      const keys = await p.keys();
+      return Object.fromEntries(await Promise.all(keys.map(async (r) =>
+        [new URL(r.url).pathname.split("/").pop(), await (await p.match(r)).text()])));
+    });
+    // A Force update's cache becomes the only one once its grace is over.
+    const onlyCache = (page, re) => page.waitForFunction(async (src) => {
+      const k = (await caches.keys()).filter((x) => x !== "dingbat-live");
+      return k.length === 1 && new RegExp(src).test(k[0]);
+    }, re.source, { timeout: 30000, polling: 500 });
+    // What the cache `name` holds of the DS core.
+    const ndsHeld = (page, name) => page.evaluate(async (n) => {
+      const c = await caches.open(n);
+      return Promise.all(["nds/nds.js", "nds/nds.wasm"].map(async (u) => !!(await c.match(u))));
+    }, name);
+    // The DS core as a DS game loads it (index.js loadNdsCore): its script,
+    // then the nds.wasm it fetches. Whether it came up.
+    const loadDs = (page) => page.evaluate(() => loadNdsCore().then(() => true, () => false));
     // update() until a worker waits.
     const untilWaiting = (page) => page.waitForFunction(() => {
       const reg = swRegistration;
@@ -409,7 +448,7 @@ for (const engine of ENGINES) {
       await browser?.close();
       site?.close();
       if (dir) await rm(dir, { recursive: true, force: true });
-      if (oldSrc) await rm(join(oldSrc, ".."), { recursive: true, force: true });
+      if (oldSrc) await rm(oldSrc.root, { recursive: true, force: true });
     });
 
     test("a first visit downloads each asset once, the worker's install included; " +
@@ -505,7 +544,7 @@ for (const engine of ENGINES) {
 
     test("an old build's page and worker update to the new build, downloading only what changed",
       async () => {
-        await stage(oldSrc, dir, "o1", "O1", { manifest: false });
+        await oldStage(oldSrc, dir, "o1", "O1");
         const { ctx, page } = await open();
         try {
           await page.goto(site.url);
@@ -535,7 +574,7 @@ for (const engine of ENGINES) {
 
     test("an old page's Force update under its old worker brings the new page in, " +
          "whose own worker then installs from that cache", async () => {
-      await stage(oldSrc, dir, "o2", "O2", { manifest: false });
+      await oldStage(oldSrc, dir, "o2", "O2");
       const { ctx, page } = await open();
       try {
         await page.goto(site.url);
@@ -566,7 +605,7 @@ for (const engine of ENGINES) {
 
     test("an old page left under the new worker by another tab's Update: " +
          "its Force update is answered by the new worker", async () => {
-      await stage(oldSrc, dir, "o3", "O3", { manifest: false });
+      await oldStage(oldSrc, dir, "o3", "O3");
       const { ctx, page } = await open();
       try {
         await page.goto(site.url);
@@ -587,10 +626,209 @@ for (const engine of ENGINES) {
         await page.evaluate(() => { currentRomName = null; });
         await reloadedBy(page, () => { forceUpdate(); });
         assert.equal(await letter(page), "N13");
-        assert.deepEqual(await cacheKeys(page), ["dingbat-n12"]);
+        // Committed to a cache of its own, the pointer moved there, the
+        // install's cache dropped after its grace.
+        await onlyCache(page, /^dingbat-n12-\d+-[a-z0-9]+$/);
+        assert.deepEqual(Object.keys(await livePointer(page)), ["n12"]);
+        assert.match((await livePointer(page)).n12, /^dingbat-n12-/);
       } finally {
         await ctx.close();
       }
     });
+
+    test("a load of the app with a query right after a deploy boots the worker's build, " +
+         "online and offline", async () => {
+      await stage(WEB, dir, "q1", "Q1");
+      const { ctx, page } = await open();
+      try {
+        await page.goto(site.url);
+        await installedFresh(page);
+        await stage(WEB, dir, "q2", "Q2"); // deployed, not installed
+        for (const q of ["?2p", "?gpu3d=1"]) {
+          const from = site.log.length;
+          await page.goto(site.url + q);
+          await booted(page);
+          assert.equal(await letter(page), "Q1", q + ": the worker's build");
+          const shell = site.log.slice(from).filter((e) => (e.path === "/" || e.path === "/index.html") && !e.query.startsWith("?v="));
+          assert.deepEqual(shell, [], q + ": index.html came from the network");
+        }
+        assert.ok(await page.evaluate(() => document.body.classList.contains("debug-2p")) === false);
+        site.offline(true);
+        try {
+          await page.goto(site.url + "?2p");
+          await booted(page);
+          assert.equal(await letter(page), "Q1", "offline");
+          assert.ok(await page.evaluate(() => document.body.classList.contains("debug-2p")),
+                    "the page read its own query");
+        } finally { site.offline(false); }
+      } finally {
+        await ctx.close();
+      }
+    });
+
+    test("a DS core cached under one build survives an update that leaves it alone, " +
+         "downloading none of it; a tampered nds.wasm is refused", async () => {
+      await stage(WEB, dir, "d1", "D1");
+      const { ctx, page } = await open();
+      try {
+        await page.goto(site.url);
+        await installedFresh(page);
+        const l0 = site.log.length;
+        assert.ok(await loadDs(page), "the DS core loads");
+        const got = tally(site.log.slice(l0));
+        assert.equal(got["/nds/nds.js"], 1);
+        assert.equal(got["/nds/nds.wasm"], 1);
+        assert.deepEqual(await ndsHeld(page, "dingbat-d1"), [true, true], "kept once checked");
+
+        // An update changing index.js alone: the new install takes the DS
+        // core along from d1's cache.
+        const u0 = site.log.length;
+        await stage(WEB, dir, "d2", "D2");
+        await untilWaiting(page);
+        const dl = assetGets(site, u0).map((e) => e.path);
+        assert.ok(!dl.some((p) => p.startsWith("/nds/nds.")), "downloaded: " + JSON.stringify(dl));
+        await reloadedBy(page, () => { applyUpdate(); });
+        assert.equal(await letter(page), "D2");
+        assert.deepEqual(await cacheKeys(page), ["dingbat-d2"]);
+        assert.deepEqual(await ndsHeld(page, "dingbat-d2"), [true, true]);
+        const l1 = site.log.length;
+        assert.ok(await loadDs(page), "offline-ready: from the cache");
+        assert.ok(!site.log.slice(l1).some((e) => e.path.startsWith("/nds/")));
+
+        // A build whose served nds.wasm is not the one its manifest names
+        // (an edge still on another object): refused, nothing kept.
+        // d3 changes nds.wasm, but the server still sends d2's (an edge on
+        // the previous object, the browser's HTTP cache too): its install
+        // carries nds.js over and finds no nds.wasm with its digest; the
+        // DS start downloads one, under the bare URL and then a fresh one,
+        // and refuses both.
+        const wasm = join(dir, "nds/nds.wasm");
+        await stage(WEB, dir, "d3", "D3", { manifest: false });
+        const orig = await readFile(wasm);
+        const changed = Buffer.from(orig);
+        changed[changed.length - 1] ^= 1;
+        await writeFile(wasm, changed);
+        writeManifest(dir);
+        await writeFile(wasm, orig);
+        await untilWaiting(page);
+        await reloadedBy(page, () => { applyUpdate(); });
+        assert.equal(await letter(page), "D3");
+        assert.deepEqual(await ndsHeld(page, "dingbat-d3"), [true, false], "only nds.js carried over");
+        const l2 = site.log.length;
+        const ok = await page.evaluate(() => fetch("nds/nds.wasm").then((r) => r.ok, () => false));
+        assert.equal(ok, false, "a nds.wasm that is not this build's is not served");
+        assert.equal(await loadDs(page), false, "nor does the DS core load on it");
+        const tries = site.log.slice(l2).filter((e) => e.path === "/nds/nds.wasm").map((e) => e.query);
+        assert.ok(tries.some((q) => /^\?v=/.test(q)), "retried under a fresh URL: " + JSON.stringify(tries));
+        assert.deepEqual(await ndsHeld(page, "dingbat-d3"), [true, false], "nothing kept");
+        // The edge catches up: the next try gets it.
+        await writeFile(wasm, changed);
+        assert.ok(await page.evaluate(() => fetch("nds/nds.wasm").then((r) => r.ok, () => false)));
+        assert.deepEqual(await ndsHeld(page, "dingbat-d3"), [true, true]);
+        await writeFile(wasm, orig);
+      } finally {
+        await ctx.close();
+      }
+    });
+
+    test("an old build's worker that fetched the DS core: the new install carries it over; " +
+         "a Force update from the old page under the old worker, then the new worker installs", async () => {
+      await oldStage(oldSrc, dir, "o4", "O4");
+      const { ctx, page } = await open();
+      try {
+        await page.goto(site.url);
+        await installedFresh(page);
+        assert.equal(await letter(page), "O4");
+        assert.ok(await loadDs(page), "the old page's DS core");
+        // The old worker keeps whatever the network gave, in its own cache.
+        assert.deepEqual(await ndsHeld(page, "dingbat-o4"), [true, true]);
+
+        const u0 = site.log.length;
+        await stage(WEB, dir, "n20", "N20");
+        await page.evaluate(() => checkForUpdate());
+        await page.waitForFunction(() => updateAvailable, null, { timeout: 30000 });
+        await untilWaiting(page);
+        const dl = assetGets(site, u0).map((e) => e.path);
+        assert.ok(!dl.some((p) => p.startsWith("/nds/nds.")), "downloaded: " + JSON.stringify(dl));
+        await reloadedBy(page, () => { applyUpdate(); });
+        assert.equal(await letter(page), "N20");
+        assert.deepEqual(await cacheKeys(page), ["dingbat-n20"]);
+        assert.deepEqual(await ndsHeld(page, "dingbat-n20"), [true, true], "carried over");
+      } finally {
+        await ctx.close();
+      }
+
+      // A fresh visitor on the old build; the new one deploys and the old
+      // page's Force update runs in the old worker (0b7f1b57's reinstall,
+      // one put per asset into its own cache).
+      await oldStage(oldSrc, dir, "o5", "O5");
+      const t = await open();
+      try {
+        await t.page.goto(site.url);
+        await installedFresh(t.page);
+        assert.ok(await loadDs(t.page));
+        await stage(WEB, dir, "n21", "N21");
+        await reloadedBy(t.page, () => { forceUpdate(); });
+        assert.equal(await letter(t.page), "N21", "the new page, under the old worker");
+        await booted(t.page);
+        const u0 = site.log.length;
+        await untilWaiting(t.page);
+        const dl = assetGets(site, u0).filter((e) => e.query === "?v=n21").map((e) => e.path);
+        if (engine === "chromium") assert.deepEqual(dl, [], "every asset held already");
+        else assert.ok(dl.every((p) => p === "/index.js"), JSON.stringify(dl));
+        await reloadedBy(t.page, () => { applyUpdate(); });
+        assert.equal(await letter(t.page), "N21");
+        assert.deepEqual(await cacheKeys(t.page), ["dingbat-n21"]);
+        assert.deepEqual(await ndsHeld(t.page, "dingbat-n21"), [true, true], "the DS core too");
+      } finally {
+        await t.ctx.close();
+      }
+    });
+
+    // Stopping a worker needs CDP.
+    test("a Force update interrupted mid-commit leaves the old build working", { skip: engine !== "chromium" },
+      async () => {
+        await stage(WEB, dir, "k1", "K1");
+        const { ctx, page } = await open();
+        try {
+          await page.goto(site.url);
+          await installedFresh(page);
+          const cdp = await ctx.newCDPSession(page);
+          await cdp.send("ServiceWorker.enable");
+          // The new files; the worker's download of em.wasm held, and the
+          // worker stopped while it waits.
+          await stage(WEB, dir, "k1", "K2");
+          const held = site.hold(/^\/em\.wasm\?v=\d+$/);
+          await page.evaluate(() => {
+            navigator.serviceWorker.controller.postMessage({ type: "reinstall", nonce: Date.now() });
+          });
+          await held.seen;
+          await cdp.send("ServiceWorker.stopAllWorkers");
+          held.release();
+          // What a commit stopped part-way leaves: a cache of its own with
+          // some of the new build in it, the pointer not moved.
+          await page.evaluate(async () => {
+            const c = await caches.open("dingbat-k1-1-partial");
+            await c.put("index.js", new Response('var __build = "K2-partial";'));
+          });
+          await page.reload();
+          await booted(page);
+          assert.equal(await letter(page), "K1", "the old build, whole");
+          assert.ok(await page.evaluate(async () =>
+            (await (await fetch("em.wasm")).arrayBuffer()).byteLength > 0));
+          const ptr = await livePointer(page);
+          assert.equal(ptr.k1, "dingbat-k1", "the pointer never moved");
+          // A Force update now lands, and clears what that one left.
+          await reloadedBy(page, () => { forceUpdate(); });
+          assert.ok(await page.evaluate(async () =>
+            (await (await fetch("index.js")).text()).includes('var __build = "K2"')));
+          await onlyCache(page, /^dingbat-k1-\d+-[a-z0-9]+$/);
+          await page.goto(site.url);
+          await booted(page);
+          assert.equal(await letter(page), "K2");
+        } finally {
+          await ctx.close();
+        }
+      });
   });
 }

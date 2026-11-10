@@ -181,8 +181,11 @@ const collect = async (m, bust, reuse) => {
 // holds every asset: another worker's activation deletes every dingbat-*
 // cache but its own, and one landing mid-put leaves the puts in a cache no
 // name reaches any more. The DS core's files are optional: one missing is
-// fetched (and checked) when a DS game starts.
+// fetched (and checked) when a DS game starts. The cache starts empty: what a
+// failed attempt left there is in `got` already if it hashed right, and
+// nothing else may stay beside the manifest.
 const commit = async (name, got, m) => {
+  await caches.delete(name);
   const cache = await caches.open(name);
   const puts = [...got].map(([u, res]) => cache.put(new Request(u), res));
   if (m) puts.push(cache.put(new Request(MANIFEST), manifestResponse(m)));
