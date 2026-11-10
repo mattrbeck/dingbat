@@ -1,29 +1,32 @@
 -- What this models, for formal/anchors.mjs (which lists stale models):
 -- @models web/index.js: applyUpdate checkForUpdate fullResetReload maybeCheckForUpdate probeBuilds refuseState registerServiceWorker showUpdateButton updateForNewerState on:visibilitychange
--- @models web/sw.js: hex digest fetchManifest fetchFresh verified heldCopy collect commit collectDev install reinstall on:activate on:fetch on:install on:message
+-- @models web/sw.js: hex sha256 digest fetchManifest fetchFresh verified assetCaches heldCopy manifestResponse collect commit liveName setLive collectDev install dropCaches dropLater reinstall cached lazyFrom on:activate on:fetch on:install on:message
 
 /-
 # Service worker, update check and update flow (web/sw.js, web/index.js)
 
-Brought to the sw-dedupe design (branch sw-dedupe, on e3dbc604): line
-numbers are at that branch's sw.js and index.js. The update flow is the one
-5901c517 fixed (the `regress_*` theorems below), with the update a too-new
-save state asks for (df47a452) and e3dbc604's registration timing.
+Brought to the sw-limits design (branch sw-limits, on 0b7f1b57): sw.js is
+named by function below, index.js's line numbers are at 0b7f1b57 (sw-limits
+leaves it alone). The update flow is the one 5901c517 fixed (the `regress_*`
+theorems below), with the update a too-new save state asks for (df47a452)
+and e3dbc604's registration timing.
 
-## The two install designs, side by side
+## Three designs side by side
 
 A worker's install runs the code of its own build, so a browser holds
-workers of both designs while the change rolls out. `Env.N` is the first
-build with the manifest; builds below it are *old*, the rest *new*. The page
-side (`skipWaiting`, the `reinstall`/`reinstalled` messages, controllerchange,
-checkForUpdate's regex on `CACHE_VERSION = "..."`) is the same in both, so
-an old page under a new worker and a new page under an old worker run the
-same protocol; the model's pages are build-agnostic and every pairing is
-reachable (`old_page_force_under_new_worker`,
-`old_worker_force_then_new_worker_reuses`).
+workers of every design still in the wild while a change rolls out.
+`Env.N` is the first build with the manifest, `Env.M` the first of this
+design (`Env.curGen`: both); builds below N are *old*, the rest *new*, and
+the new ones from M on are *current*. The page side (`skipWaiting`, the
+`reinstall`/`reinstalled` messages, controllerchange, checkForUpdate's regex
+on `CACHE_VERSION = "..."`) is the same in all three, so any page under any
+worker runs the same protocol; the model's pages are build-agnostic and
+every pairing is reachable (`old_page_force_under_new_worker`,
+`old_worker_force_then_new_worker_reuses`, `old_page_force_under_cur_worker`,
+`v1_worker_force_then_cur_worker_reuses`, `old_worker_ds_core_carried_over`).
 
-*Old* (origin/main's sw.js): `installAssets` probes version.txt under a URL
-no edge has seen, fetches every asset under `?v=<CACHE_VERSION>` with
+*Old* (before 0b7f1b57): `installAssets` probes version.txt under a URL no
+edge has seen, fetches every asset under `?v=<CACHE_VERSION>` with
 `cache: "reload"`, then checks the cached version.txt and a second probe;
 unless all three name CACHE_VERSION the install fails. Its correctness rests
 on fresh URLs reaching the origin's current build (`fetchJs`/`fetchWasm`
@@ -31,16 +34,29 @@ read `dep`) and on deploys only moving forward. Force update (`reinstall`)
 is the same bracketed download into a staging cache, then one put per asset
 into the live cache.
 
-*New* (sw.js 34-176): `install` (163) fetches asset-manifest.json fresh
-(`fetchManifest` 52; refused unless its version is CACHE_VERSION), then
-`collect` (110) takes each asset from the first copy whose bytes hash to
-the manifest's digest (`heldCopy` 89: every dingbat-* cache, then the HTTP
-cache through only-if-cached), else downloads it (`fetchFresh` 70, under
-`?v=`) and checks that download too; then `commit` (139) puts them all into
-`dingbat-<v>` and checks the cache under that name still holds every one.
-Force update (`reinstall` 202) downloads every asset under a nonce, checks
-each against the manifest the origin serves now (any build), and puts them
-into the live cache one by one.
+*New* (0b7f1b57): `install` fetches asset-manifest.json fresh
+(`fetchManifest`; refused unless its version is CACHE_VERSION), then
+`collect` takes each asset from the first copy whose bytes hash to the
+manifest's digest (`heldCopy`: every dingbat-* cache, then the HTTP cache
+through only-if-cached), else downloads it (`fetchFresh`, under `?v=`) and
+checks that download too; then `commit` puts them all into `dingbat-<v>` and
+checks the cache under that name still holds every one. Force update
+downloads every asset under a nonce, checks each against the manifest the
+origin serves now (any build), and puts them into the live cache one by one.
+Its fetch handler matches the exact URL (a load with a query string misses)
+and keeps any DS core file the network answers, unchecked.
+
+*Current* (sw-limits): the install as 0b7f1b57's, plus the DS core files
+(LAZY: nds.js, nds.wasm, gpu3d.js) held with the manifest's `lazy` digests,
+never downloaded, into an emptied cache that also keeps the manifest. The
+fetch handler answers every load of the app with "./" whatever its query
+(`shell`), serves a DS core file from the live cache or downloads it and
+keeps it only when it hashes to that cache's manifest (`lazyFrom`). Force
+update downloads into a cache of its own (`dingbat-<v>-<nonce>`), the DS
+core files the live cache holds too, and once that holds everything moves
+the pointer (`setLive`: one put into `dingbat-live`) the fetch handler reads
+the live cache's name from (`liveName`, read again by a worker started
+cold); the old cache goes after a grace (`dropLater`).
 
 The registration (index.js `registerServiceWorker` 96): a controlled page
 registers at load, an uncontrolled one (a first visit) only once its core is
@@ -50,32 +66,39 @@ in (19389), so its HTTP cache holds em.wasm by the time the install looks.
 
 * A build is a version number; `dep` is what the origin serves now, and a
   deploy bumps it. Two assets stand for all of them: index.js (with
-  version.txt) and em.wasm. Their bytes are `Env.C a b`, a parameter: any
-  asset may be unchanged between builds (an index.js-only update keeps
-  em.wasm's bytes). `Env.H` is the SHA-256 digest, a parameter too; the
-  consistency theorems assume it injective (`Injective`), the one
-  assumption the new design adds. The manifest of build m lists
-  `H (C a m)`.
-* Caches hold bytes, per name `dingbat-<v>`, both assets together. The HTTP
+  index.html, the shell, and version.txt) and em.wasm. Their bytes are
+  `Env.C a b`, a parameter: any asset may be unchanged between builds (an
+  index.js-only update keeps em.wasm's bytes). The DS core is two files,
+  nds.js (with gpu3d.js) and nds.wasm, with bytes `Env.L l b`. `Env.H` is the
+  SHA-256 digest, a parameter too; the consistency theorems assume it
+  injective (`Injective`), the one assumption the manifest designs add. The
+  manifest of build m lists `H (C a m)` and, from this design on,
+  `H (L l m)`.
+* `cache v` is the cache serving worker v's fetches: `dingbat-<v>`, or for
+  this design the one v's pointer names. A cache of this design keeps the
+  manifest it was filled under (`cman v`, its build: a Force update's can be
+  another build than v) and holds DS core files (`lazy v`); an older
+  design's holds DS core files as its fetch handler kept them. The HTTP
   cache holds bytes per asset: a page booted off the network puts index.js
-  there and its em.wasm once its core is in (`coreLoaded`); `httpFill`
-  puts any older or current build's bytes there at any time (a stale edge,
+  there and its em.wasm once its core is in (`coreLoaded`); `httpFill` puts
+  any older or current build's bytes there at any time (a stale edge,
   another tab), `httpEvict` drops one: what the install finds there is
   anything at all.
-* The new install's manifest may come from any build up to `dep` (a stale
+* A new install's manifest may come from any build up to `dep` (a stale
   edge cannot make it pass, its version is checked); its downloads may get
-  any build up to `dep` (`nNet a b`): the new design's consistency does not
-  rest on fresh URLs reaching the origin. Its lookup (`nLook`) is one event
-  that reads every cache and the HTTP cache at once; the code reads them one
-  `await` apart, so the theorem is about copies held throughout the lookup
-  (one that appears mid-lookup can be missed, one that goes can be missed,
-  and either way the asset is downloaded, never kept wrong). The code reads
-  the caches named when `collect` starts; the model reads those there at the
-  lookup (a cache created in between belongs to another install or a
-  reinstall).
-* `commit`'s puts are one event (`nCommit`) and its presence check another
-  (`nCheck`). Another worker's activation (atomic here: `activate`) can land
-  between them and delete the cache; then the check fails the install
+  any build up to `dep` (`nNet a b`): the new designs' consistency does not
+  rest on fresh URLs reaching the origin. Its lookup (`nLook`, and for the DS
+  core `nLookLz`) is one event that reads every cache (and, for an asset,
+  the HTTP cache) at once; the code reads them one `await` apart, so the
+  theorems are about copies held throughout the lookup (one that appears
+  mid-lookup can be missed, one that goes can be missed, and either way the
+  asset is downloaded, or the DS core file left to its lazy fetch, never kept
+  wrong). The code reads the caches named when `collect` starts; the model
+  reads those there at the lookup.
+* `commit`'s puts are one event (`nCommit`; this design's into an emptied
+  cache, with its pointer) and its presence check another (`nCheck`).
+  Another worker's activation (atomic here: `activate`) can land between
+  them and delete the cache; then the check fails the install
   (`regress_activation_mid_commit_fails_install`). In a browser the
   activation's `caches.keys()` and its `caches.delete()` are two steps, and
   a commit and check landing between them is not caught: that window is
@@ -83,11 +106,28 @@ in (19389), so its HTTP cache holds em.wasm by the time the install looks.
   the race: its `installEnd` writes the cache in one event here, while its
   code puts each asset as it arrives into a Cache handle held across the
   whole download, which an activation anywhere in it orphans.
+* This design's Force update: its downloads (`rMan`, `rNet`, `rNetLz`), the
+  check (`rVerify`), the puts into its own cache (`rPutJs`, `rPutWasm`: they
+  change nothing a fetch reads), then the pointer (`rCommit`: `cache w`,
+  `cman w` and `lazy w` become the new cache's at once). `rFail`, enabled at
+  every point, is a download or check failing and also the worker stopped
+  anywhere in the run: no reply comes, and the page's 20 s timeout takes the
+  same full reset. A cache it left part-way is an orphan no fetch reads
+  (dropped by the next Force update or activation), not modelled as a
+  lookup source: one source fewer, never a wrong copy.
+* A DS core fetch in a worker of this design: a hit (`lzHit`), or a miss that
+  reads the cache's manifest (`lzStart`) and then a download (`lzNet l b put`:
+  any build up to `dep`, the bare URL or the retry under a fresh one, each
+  one event), checked against that manifest; kept only in the cache that
+  manifest came from, and maybe not at all (`put`). An older worker's
+  (`lzOld`) keeps whatever arrives.
 * Two tabs of the app (`Bool`-indexed), each the current page instance: the
   bytes it booted (`running`), whether it is controlled and by which worker
   version, the index.js flags, and its in-flight continuations.
 * `reload t` replaces tab t's page: it boots from the active worker's cache
-  (or the network when there is no worker or the entry is missing).
+  (or the network when there is no worker or the entry is missing). `navQ t`
+  is a load with a query string: this design's worker serves it as `reload`
+  (`serveQ`); an older one takes the shell off the network.
 
 ## Abstractions
 
@@ -99,11 +139,15 @@ in (19389), so its HTTP cache holds em.wasm by the time the install looks.
   unregister makes the installing worker redundant, which another tab's
   applyUpdate watching it sees (`onRedundant`).
 * `update()` rejecting goes to `fullResetReload`. A reinstall that fails
-  (a download failing, or one whose bytes do not match) replies ok:false and
-  the asking tab takes `fullResetReload` (`rFail`, `rFailed`). Two tabs'
-  Force updates share one download (`rProbe`, `rMan`, `rsJs`, ...), run by
-  the worker that was active when the last one started (`rW`); its puts go
-  to that worker's cache.
+  replies ok:false (or nothing) and the asking tab takes `fullResetReload`
+  (`rFail`, `rFailed`). Two tabs' Force updates share one download (`rProbe`,
+  `rMan`, `rsJs`, ...; this design's `reinstalling`), run by the worker that
+  was active when the last one started (`rW`).
+* A page's boot is one event. sw.js keeps that true across this design's
+  pointer move: each page's later requests go to the cache its navigation
+  came from (`pins`), which stays for a grace after the move (`dropLater`).
+  Across an activation's claim it is not (another worker's cache serves the
+  rest of a boot in progress), in every design alike.
 * `updateForNewerState` is two events, `newerStart` and `newerApply`.
 * A page's own boot off the network is taken as one build (`dep`'s): a site
   without a worker has the same exposure, so it is not the worker's.
@@ -112,30 +156,48 @@ in (19389), so its HTTP cache holds em.wasm by the time the install looks.
   (`forcedMidGame`).
 * Not modelled: Chromium's reload after Force update can run the index.js
   the page before it ran from its memory cache (same worker, a copy younger
-  than its max-age); found in the e2e, and on origin/main's sw.js too.
-* Not modelled: a dev build (`CACHE_VERSION === "dev"`, no manifest).
+  than its max-age); found in the e2e, and on 0b7f1b57's sw.js too.
+* Not modelled: a dev build (`CACHE_VERSION === "dev"`, no manifest); the
+  HTTP cache as a source of DS core files; the DS core a page has loaded
+  (what is proved is what the worker serves it).
 
 ## Results
 
-Proved, for every interleaving and both designs side by side: no tab is
+Proved, for every interleaving and all three designs side by side: no tab is
 reloaded mid-game unless its own user asked (`no_forced_midgame`); with
 nothing asked, no tab is reloaded at all (`no_reload_without_a_click`); the
 button shows at most once per page (`shows_at_most_once`); an applyUpdate
 watching an install always has that install to wait on
-(`watching_has_install`). Without Force update and with H injective, every
-cache `dingbat-<v>` holds exactly build v's bytes (`cache_is_its_build`),
-however deploys, stale edges, older caches and the HTTP cache interleave
-with installs, so no page boots anything but one build
-(`no_mixed_boot_without_force`). With Force update, every cache holds
-builds' bytes (`cache_holds_builds`) and a reinstall's download only goes
-live as one build (`force_stage_one_build`). No double download: a new
-install's lookup takes a held copy whenever one has the right bytes
-(`lookup_takes_held`), an asset is marked for download only by a lookup that
-found none (`net_only_after_a_miss`), and downloaded at most once
-(`downloaded_once`). Liveness: from any reachable state with a worker
-active, a deploy-free run installs the deployed build whole
-(`stable_deploy_installs`). Still refuted: Force update's commit to the
-live cache is one put per asset (`bug_force_update_serves_half_written_cache`).
+(`watching_has_install`).
+
+With H injective, and with this design's Force update in, stopped wherever:
+every cache of this design holds exactly one build, its kept manifest's, DS
+core files included (`cache_is_one_build`); every DS core file it serves is
+that build's (`lazy_served_is_its_build`); and no page boots two builds
+(`no_mixed_boot`), the only steps left out being an older worker's Force
+update and its answer to a query navigation. A load with any query string is
+a bare load under this design (`navigation_query_is_the_shell`) and never
+goes to the network while a cache is live (`navigation_never_net_while_live`).
+This design's Force update leaves every cache as it was until the pointer
+moves (`force_leaves_live_cache_until_pointer`). Without any Force update,
+every cache `dingbat-<v>` holds exactly build v's bytes
+(`cache_is_its_build`, `no_mixed_boot_without_force`). With an older design's
+Force update too, every cache holds builds' bytes (`cache_holds_builds`) and
+a reinstall's download only goes live as one build (`force_stage_one_build`).
+
+No double download: a new install's lookup takes a held copy whenever one has
+the right bytes (`lookup_takes_held`, `lookupLz_takes_held`), an asset is
+marked for download only by a lookup that found none
+(`net_only_after_a_miss`), and downloaded at most once (`downloaded_once`); a
+DS core file is never downloaded by an install (`lazy_never_downloaded`).
+Liveness: from any reachable state with a worker active, a deploy-free run
+installs the deployed build whole (`stable_deploy_installs`).
+
+Was refuted, now regressions: Force update's commit into the live cache
+(`regress_force_update_serves_half_written_cache`), a query navigation's
+mixed boot (`regress_query_navigation_after_deploy`), an unchecked DS core
+file (`regress_tampered_lazy_refused`). The older designs keep doing all
+three until their worker updates (`legacy_*`).
 -/
 namespace WebState.ServiceWorker
 
@@ -146,17 +208,32 @@ inductive Asset where
   | wasm  -- em.wasm
   deriving DecidableEq, Repr
 
+/-- A file of the DS core (sw.js LAZY): nds/nds.js (with nds/gpu3d.js, which
+    behaves the same) and nds/nds.wasm. -/
+inductive Lz where
+  | js
+  | wasm
+  deriving DecidableEq, Repr
+
 structure Env where
   C : Asset → Nat → Nat   -- asset a's bytes in build b
   H : Nat → Nat           -- SHA-256 of some bytes
   N : Nat                 -- the first build whose sw.js uses the manifest
+  M : Nat                 -- the first build with the pointer and the DS core's digests (sw-limits)
+  L : Lz → Nat → Nat      -- DS core file l's bytes in build b
 
 /-- The assumption the digest check rests on: different bytes, different
     digests. -/
 def Injective (f : Nat → Nat) : Prop := ∀ x y, f x = f y → x = y
 
 def Env.newGen (E : Env) (v : Nat) : Bool := decide (E.N ≤ v)
+/-- This design (sw-limits): a manifest build (so its install is the manifest
+    one) at or past `M`. -/
+def Env.curGen (E : Env) (v : Nat) : Bool := decide (E.N ≤ v) && decide (E.M ≤ v)
 def Env.bytes (E : Env) (b : Nat) : Nat × Nat := (E.C .js b, E.C .wasm b)
+
+theorem Env.newGen_of_cur {E : Env} {v : Nat} (h : E.curGen v = true) : E.newGen v = true := by
+  simp only [Env.curGen, Env.newGen, Bool.and_eq_true, decide_eq_true_eq] at *; simp [h.1]
 
 def pick : Asset → Nat × Nat → Nat
   | .js, p => p.1
@@ -223,7 +300,13 @@ structure State where
   man        : Option Nat             -- new install: the manifest it accepted (its build)
   slot       : Asset → Slot           -- new install: each asset's copy
   committed  : Bool                   -- new install: commit's puts done, its check to come
-  cache      : Nat → Option (Nat × Nat)  -- dingbat-<v> : (index.js bytes, em.wasm bytes)
+  cache      : Nat → Option (Nat × Nat)  -- the cache serving v (dingbat-<v>, or the one v's
+                                      --   pointer names) : (index.js bytes, em.wasm bytes)
+  cman       : Nat → Option Nat       -- the manifest that cache keeps (this design): its build
+  lazy       : Nat → Lz → Option Nat  -- the DS core files that cache holds
+  lslot      : Lz → Option Nat        -- this design's install: the DS core copies it holds
+  lzF        : Lz → Option (Nat × Nat)  -- a DS core fetch in flight in a worker of this design:
+                                      --   (that worker, the build of the manifest it read)
   http       : Asset → Option Nat     -- the HTTP cache's copy of each asset
   skipQ      : Option Nat             -- skipWaiting posted to worker v
   rW         : Option Nat             -- the worker running the Force update
@@ -232,15 +315,21 @@ structure State where
   rsJs       : Option Nat             -- reinstall: the build index.js's download came from
   rsWasm     : Option Nat             -- ... and em.wasm's
   rOk        : Bool                   -- reinstall: the download passed its check
-  rJs        : Bool                   -- a reinstall has put index.js into the live cache
+  rJs        : Bool                   -- a reinstall has put index.js into its cache (the live
+                                      --   one for older designs, its own for this one)
   rWasm      : Bool                   -- ... and em.wasm
+  rsLz       : Lz → Option Nat        -- this design's reinstall: the DS core files downloaded again
+  rFlip      : Bool                   -- this design's reinstall: the pointer moved
   tabs       : Bool → Tab
   intents    : Nat                    -- ghost: Update / Force update / a newer build's state accepted
   autoReloads : Nat                   -- ghost: reloads the app itself triggered
   forcedMidGame : Bool                -- ghost: a tab reloaded mid-game its user never agreed to
   mixedBoot  : Bool                   -- ghost: a page booted bytes other than the build it booted
-                                      --   from (its worker's own, or the deployed one off the network)
+                                      --   from (its cache's: the manifest it keeps, else its
+                                      --   worker's own; or the deployed one off the network)
   dl         : Nat                    -- ghost: downloads by new installs
+  lzBad      : Bool                   -- ghost: a worker of this design served a DS core file
+                                      --   that is not its cache's build
 
 /-- Steady state: build 0 deployed, installed, both tabs booted from it. -/
 def init (E : Env) : State where
@@ -255,6 +344,10 @@ def init (E : Env) : State where
   slot := fun _ => .none
   committed := false
   cache := fun v => if v = 0 then some (E.bytes 0) else none
+  cman := fun v => if v = 0 && E.curGen 0 then some 0 else none
+  lazy := fun _ _ => none
+  lslot := fun _ => none
+  lzF := fun _ => none
   http := fun _ => none
   skipQ := none
   rW := none
@@ -265,18 +358,21 @@ def init (E : Env) : State where
   rOk := false
   rJs := false
   rWasm := false
+  rsLz := fun _ => none
+  rFlip := false
   tabs := fun _ => { running := E.bytes 0, coreIn := true }
   intents := 0
   autoReloads := 0
   forcedMidGame := false
   mixedBoot := false
   dl := 0
+  lzBad := false
 
 /-- A first visit: build d deployed, no worker, no cache, both tabs booted
     off the network (index.js in the HTTP cache, the core still coming). -/
 def initFresh (E : Env) (d : Nat) : State :=
   { init E with
-    dep := d, active := none, cache := fun _ => none,
+    dep := d, active := none, cache := fun _ => none, cman := fun _ => none,
     http := fun a => if a = .js then some (E.C .js d) else none,
     tabs := fun _ => { running := E.bytes d, controlled := false, ctrlV := 0, hadController := false } }
 
@@ -295,19 +391,37 @@ def showBtn (t : Bool) (v : Nat) (s : State) : State :=
                              shows := if x.updAvail then x.shows else x.shows + 1 }) s
 
 /-- What a page boots with: (controller, the build it boots from, the bytes):
-    the active worker's cache, else the network (sw.js 268, the fallback). -/
+    the active worker's cache, else the network (sw.js, the fetch handler's
+    fallback). A cache of this design keeps the manifest it was filled under,
+    which names its build (a Force update's may be another build than the
+    worker's); an older design's cache is its worker's build. -/
 def serve (E : Env) (s : State) : Option Nat × Nat × (Nat × Nat) :=
   match s.active with
   | some v => match s.cache v with
-    | some p => (some v, v, p)
+    | some p => (some v, (s.cman v).getD v, p)
     | none => (some v, s.dep, E.bytes s.dep)
   | none => (none, s.dep, E.bytes s.dep)
 
-/-- A page (re)load of tab t. `auto`: the app called location.reload(). A
-    page off the network leaves its index.js in the HTTP cache. -/
-def reload (E : Env) (t : Bool) (auto : Bool) (s : State) : State :=
+/-- A load of the app with a query string (?2p, ?gpu3d=1). This design's
+    worker answers it with "./" (`serve`, the same entry as a bare load). An
+    older worker's matches the exact URL, misses, and takes the page shell
+    (index.html, here with the js asset) off the network beside its cache's
+    em.wasm. -/
+def serveQ (E : Env) (s : State) : Option Nat × Nat × (Nat × Nat) :=
+  match s.active with
+  | some v =>
+    if E.curGen v then serve E s
+    else match s.cache v with
+      | some q => (some v, v, (E.C .js s.dep, q.2))
+      | none => (some v, s.dep, E.bytes s.dep)
+  | none => serve E s
+
+/-- A page boot of tab t from `sv` (controller, build, bytes). `auto`: the
+    app called location.reload(). A page off the network leaves its index.js
+    in the HTTP cache. -/
+def bootFrom (E : Env) (t : Bool) (auto : Bool) (sv : Option Nat × Nat × (Nat × Nat)) (s : State) : State :=
   let x := s.tabs t
-  match serve E s with
+  match sv with
   | (c, b, p) =>
     let s := { s with
       forcedMidGame := s.forcedMidGame || (auto && x.game && !x.appUpdating),
@@ -317,6 +431,9 @@ def reload (E : Env) (t : Bool) (auto : Bool) (s : State) : State :=
     updT t (fun _ => match c with
       | some v => { running := p, controlled := true, ctrlV := v, hadController := true }
       | none => { running := p, controlled := false, ctrlV := 0, hadController := false }) s
+
+/-- A page (re)load of tab t at its bare URL. -/
+def reload (E : Env) (t : Bool) (auto : Bool) (s : State) : State := bootFrom E t auto (serve E s) s
 
 /-- clients.claim(): the tab is now controlled by worker v; controllerchange queued. -/
 def claim (v : Nat) (x : Tab) : Tab := { x with controlled := true, ctrlV := v, ccQ := true }
@@ -334,17 +451,20 @@ def onRedundant (v : Nat) (x : Tab) : Tab :=
 
 def mapTabs (g : Tab → Tab) (s : State) : State := { s with tabs := fun u => g (s.tabs u) }
 
-/-- activate (sw.js 178): delete the other caches, claim every tab. -/
+/-- activate (sw.js): delete the other caches (the DS core files and kept
+    manifest inside them too), claim every tab. -/
 def activate (v : Nat) (s : State) : State :=
   mapTabs (claim v)
     { s with active := some v,
              waiting := if s.waiting = some v then none else s.waiting,
-             cache := fun u => if u = v then s.cache u else none }
+             cache := fun u => if u = v then s.cache u else none,
+             cman := fun u => if u = v then s.cman u else none,
+             lazy := fun u => if u = v then s.lazy u else fun _ => none }
 
 /-- Nothing installing, nothing staged. -/
 def clearInst (s : State) : State :=
   { s with installing := none, probe0 := none, stageJs := none, stageWasm := none,
-           man := none, slot := fun _ => .none, committed := false }
+           man := none, slot := fun _ => .none, committed := false, lslot := fun _ => none }
 
 /-- An install of the deployed build starts. -/
 def startInst (s : State) : State := { clearInst s with installing := some s.dep }
@@ -371,7 +491,7 @@ def installed (v : Nat) (s : State) : State :=
 
 /-- The first copy of asset a already on the device whose bytes hash to
     build m's digest: a dingbat-* cache's (any build's, any layout), then the
-    HTTP cache's (heldCopy, sw.js 89). Caches exist only for deployed
+    HTTP cache's (heldCopy). Caches exist only for deployed
     builds (`bounds_reachable`), so builds up to `dep` are all of them. -/
 def heldBytes (E : Env) (s : State) (a : Asset) (m : Nat) : Option Nat :=
   let ok := fun x => E.H x == E.H (E.C a m)
@@ -381,14 +501,28 @@ def heldBytes (E : Env) (s : State) (a : Asset) (m : Nat) : Option Nat :=
     | some x => if ok x then some x else none
     | none => none
 
+/-- The first DS core file held on the device whose bytes hash to build m's
+    digest: any dingbat-* cache's (heldCopy, through `collect`'s LAZY pass).
+    The HTTP cache, which `heldCopy` also reads, is not modelled as a source
+    of DS core files: one source fewer, never a wrong copy. -/
+def heldLazy (E : Env) (s : State) (l : Lz) (m : Nat) : Option Nat :=
+  ((List.range (s.dep + 1)).filterMap (fun u => s.lazy u l)).find? (fun x => E.H x == E.H (E.L l m))
+
 def oldInst (E : Env) (s : State) : Bool :=
   match s.installing with | some v => !E.newGen v | none => false
 def newInst (E : Env) (s : State) : Bool :=
   match s.installing with | some v => E.newGen v | none => false
+def curInst (E : Env) (s : State) : Bool :=
+  match s.installing with | some v => E.curGen v | none => false
 def oldR (E : Env) (s : State) : Bool :=
   match s.rW with | some w => !E.newGen w | none => false
 def newR (E : Env) (s : State) : Bool :=
   match s.rW with | some w => E.newGen w | none => false
+def curR (E : Env) (s : State) : Bool :=
+  match s.rW with | some w => E.curGen w | none => false
+/-- The reinstall's commit is over: this design's moved the pointer, an older
+    one's has put both assets into the live cache. -/
+def rDone (E : Env) (s : State) : Bool := if curR E s then s.rFlip else s.rJs && s.rWasm
 
 def staged (s : State) : Asset → Option Nat
   | .js => s.rsJs
@@ -401,7 +535,7 @@ def setStaged (s : State) (a : Asset) (b : Nat) : State :=
 
 def rClear (s : State) : State :=
   { s with rProbe := none, rMan := none, rsJs := none, rsWasm := none,
-           rOk := false, rJs := false, rWasm := false }
+           rOk := false, rJs := false, rWasm := false, rsLz := fun _ => none, rFlip := false }
 
 /-- A reinstall fails: the "reinstalled" ok:false reply sends every tab
     waiting on it into fullResetReload (index.js 324-329). -/
@@ -416,11 +550,11 @@ inductive Event where
   | fetchWasm                    -- ... em.wasm?v=
   | installEnd                   -- old install's tail: version.txt check, second probe
   | installFail                  -- an asset fetch failed: worker redundant
-  | nManifest (b : Nat)          -- new install: fetchManifest gets build b's manifest (52-63)
-  | nLook (a : Asset)            -- new install: heldCopy for asset a (89-104)
-  | nNet (a : Asset) (b : Nat)   -- new install: a's download (?v=) answers build b's bytes (124-127)
-  | nCommit                      -- new install: commit's puts (140-141)
-  | nCheck                       -- new install: commit's presence check (142-144)
+  | nManifest (b : Nat)          -- new install: fetchManifest gets build b's manifest
+  | nLook (a : Asset)            -- new install: heldCopy for asset a
+  | nNet (a : Asset) (b : Nat)   -- new install: a's download (?v=) answers build b's bytes
+  | nCommit                      -- new install: commit's puts
+  | nCheck                       -- new install: commit's presence check
   | regResolve (t : Bool)        -- register().then (99)
   | coreLoaded (t : Bool)        -- the core is in (19389): an uncontrolled page registers now
   | httpFill (a : Asset) (b : Nat) -- the HTTP cache gets build b's copy of a
@@ -444,11 +578,24 @@ inductive Event where
   | rMan (b : Nat)               -- new reinstall: the deployed manifest (build b's)
   | rNet (a : Asset) (b : Nat)   -- new reinstall: a's download answers build b's bytes
   | rVerify                      -- reinstall: the download passed its check
-  | rPutJs | rPutWasm            -- reinstall: one put into the worker's live cache (sw.js 207)
-  | rFail                        -- reinstall: a download failed: ok:false
+  | rPutJs | rPutWasm            -- reinstall: one put into its cache (older designs: the live one)
+  | rFail                        -- reinstall: a download or check failed, or the worker was
+                                 --   stopped at any point (the page's 20 s timeout): ok:false
   | forceDone (t : Bool)         -- "reinstalled" ok: location.reload()
   | newerStart (t : Bool)        -- a too-new state refused; updateForNewerState passes its checks
   | newerApply (t : Bool)        -- ...its awaits done: applyUpdate()
+  | navQ (t : Bool)              -- the user loads the app with a query string (?2p, ?gpu3d=1)
+  | lzOld (l : Lz) (b : Nat)     -- an older worker's DS core fetch: a miss is kept unchecked,
+                                 --   whatever build b the network answers
+  | lzHit (l : Lz)               -- this design: a DS core file served from the cache (lazyFrom)
+  | lzStart (l : Lz)             -- this design: a miss; the cache's manifest read (lazyFrom)
+  | lzNet (l : Lz) (b : Nat) (put : Bool)
+                                 -- ...the download answers build b's bytes: checked, then
+                                 --   served and (put) kept in the cache it read
+  | nLookLz (l : Lz)             -- this design's install: a held copy of DS core file l (collect)
+  | rNetLz (l : Lz) (b : Nat)    -- this design's reinstall: a held DS core file downloaded again
+  | rCommit                      -- this design's reinstall: commit into its own cache, then the
+                                 --   pointer moves (setLive)
   deriving DecidableEq, Repr
 
 def anyForce (s : State) : Bool := (s.tabs true).force || (s.tabs false).force
@@ -502,9 +649,20 @@ def en (E : Env) (s : State) : Event → Bool
   | .rPutJs => anyForce s && s.rOk && !s.rJs
   | .rPutWasm => anyForce s && s.rOk && !s.rWasm
   | .rFail => anyForce s
-  | .forceDone t => (s.tabs t).force && s.rJs && s.rWasm
+  | .forceDone t => (s.tabs t).force && rDone E s
   | .newerStart t => (s.tabs t).game && !(s.tabs t).appUpdating && !(s.tabs t).newer
   | .newerApply t => (s.tabs t).newer
+  | .navQ _ => true
+  | .lzOld _ b => (match s.active with | some v => !E.curGen v | none => false) && decide (b ≤ s.dep)
+  | .lzHit l => match s.active with | some v => E.curGen v && (s.lazy v l).isSome | none => false
+  | .lzStart l => (match s.active with
+      | some v => E.curGen v && (s.lazy v l).isNone && (s.cman v).isSome | none => false) &&
+      (s.lzF l).isNone
+  | .lzNet l b _ => (s.lzF l).isSome && decide (b ≤ s.dep)
+  | .nLookLz l => curInst E s && s.man.isSome && (s.lslot l).isNone
+  | .rNetLz l b => anyForce s && curR E s && s.rMan.isSome && (s.rsLz l).isNone && !s.rFlip &&
+      (match s.rW with | some w => (s.lazy w l).isSome | none => false) && decide (b ≤ s.dep)
+  | .rCommit => anyForce s && curR E s && s.rOk && s.rJs && s.rWasm && !s.rFlip
 
 /-- applyUpdate (243), first segment: flags, close the modal; then either the
     reload another tab's update left waiting (251), or `update()`. -/
@@ -543,12 +701,12 @@ def step (E : Env) (s : State) : Event → State
     match s.installing with
     | some v => installFailed v s
     | none => s
-  -- fetchManifest(CACHE_VERSION) (52-63): refused unless it is this build's
+  -- fetchManifest(CACHE_VERSION): refused unless it is this build's
   | .nManifest b =>
     match s.installing with
     | some v => if b == v then { s with man := some b } else installFailed v s
     | none => s
-  -- heldCopy (89-104): the first held copy with the manifest's digest, else
+  -- heldCopy: the first held copy with the manifest's digest, else
   -- to download
   | .nLook a =>
     match s.man with
@@ -556,7 +714,7 @@ def step (E : Env) (s : State) : Event → State
       | some x => { s with slot := setSlot s.slot a (.have x) }
       | none => { s with slot := setSlot s.slot a .net }
     | none => s
-  -- collect (124-127): the download, checked; a mismatch throws
+  -- collect: the download, checked; a mismatch throws
   | .nNet a b =>
     match s.installing, s.man with
     | some v, some m =>
@@ -564,13 +722,17 @@ def step (E : Env) (s : State) : Event → State
       if E.H (E.C a b) == E.H (E.C a m) then { s with slot := setSlot s.slot a (.have (E.C a b)) }
       else installFailed v s
     | _, _ => s
-  -- commit (139-141): caches.open(name) and the puts
+  -- commit: caches.open(name) and the puts
+  -- (this design: into an emptied cache, with the manifest and the DS core
+  -- files it holds; the pointer to it, setLive, is part of the same event)
   | .nCommit =>
     match s.installing, s.slot .js, s.slot .wasm with
     | some v, .have xj, .have xw =>
-      { s with cache := fun u => if u = v then some (xj, xw) else s.cache u, committed := true }
+      { s with cache := fun u => if u = v then some (xj, xw) else s.cache u, committed := true,
+               cman := fun u => if u = v && E.curGen v then some v else s.cman u,
+               lazy := fun u => if u = v && E.curGen v then s.lslot else s.lazy u }
     | _, _, _ => s
-  -- commit (142-144): the cache under that name still holds them
+  -- commit: the cache under that name still holds them
   | .nCheck =>
     match s.installing with
     | some v => if (s.cache v).isSome then installed v s else installFailed v s
@@ -630,9 +792,10 @@ def step (E : Env) (s : State) : Event → State
   -- fullResetReload (224): delete every cache, unregister, reload
   | .resetFire t =>
     reload E t true { clearInst (redund s) with cache := fun _ => none, active := none,
-                                                 waiting := none, skipQ := none }
+                                                 waiting := none, skipQ := none,
+                                                 cman := fun _ => none, lazy := fun _ _ => none }
   | .checkStart t => updT t (fun x => { x with chk := some {} }) s
-  -- fetch("version.txt"): the controller's own cache (sw.js 268), else network
+  -- fetch("version.txt"): the controller's own cache (sw.js fetch handler), else network
   | .chkCur t =>
     let x := s.tabs t
     let v := if x.controlled then (match s.cache x.ctrlV with | some p => p.1 | none => s.dep) else s.dep
@@ -662,10 +825,12 @@ def step (E : Env) (s : State) : Event → State
     | some m => if E.H (E.C a b) == E.H (E.C a m) then setStaged s a b else rFailed s
     | none => s
   | .rVerify => { s with rOk := true }
-  -- reinstall's commit (sw.js 206-207): one cache.put per asset into CACHE_NAME
+  -- an older design's reinstall: one cache.put per asset into the live cache;
+  -- this design's: into a cache of its own (commit), which nothing serves
   | .rPutJs =>
     match s.rW with
     | some w =>
+      if E.curGen w then { s with rJs := true } else
       let j := E.C .js (s.rsJs.getD s.dep)
       let c := fun u => if u = w then some (j, ((s.cache u).map Prod.snd).getD (E.C .wasm s.dep)) else s.cache u
       { s with rJs := true, cache := c }
@@ -673,6 +838,7 @@ def step (E : Env) (s : State) : Event → State
   | .rPutWasm =>
     match s.rW with
     | some w =>
+      if E.curGen w then { s with rWasm := true } else
       let x := E.C .wasm (s.rsWasm.getD s.dep)
       let c := fun u => if u = w then some (((s.cache u).map Prod.fst).getD (E.C .js s.dep), x) else s.cache u
       { s with rWasm := true, cache := c }
@@ -683,6 +849,73 @@ def step (E : Env) (s : State) : Event → State
   | .newerStart t =>
     updT t (fun x => { x with newer := true }) { s with intents := s.intents + 1 }
   | .newerApply t => applyStart E t (updT t (fun x => { x with newer := false }) s)
+  -- the fetch handler's `shell`: this design answers any query with "./"
+  | .navQ t => bootFrom E t false (serveQ E s) s
+  -- an older design's lazy branch: a miss is put as the network answers it
+  | .lzOld l b =>
+    match s.active with
+    | some v => match s.lazy v l with
+      | some _ => s
+      | none => { s with lazy := fun u => if u = v then (fun k => if k = l then some (E.L l b) else s.lazy v k)
+                                          else s.lazy u }
+    | none => s
+  -- lazyFrom: a hit is served as the cache holds it
+  | .lzHit l =>
+    match s.active with
+    | some v => match s.lazy v l with
+      | some x => { s with lzBad := s.lzBad || x != E.L l ((s.cman v).getD v) }
+      | none => s
+    | none => s
+  -- lazyFrom: a miss reads the manifest that cache keeps, then downloads
+  | .lzStart l =>
+    match s.active with
+    | some v => match s.cman v with
+      | some m => { s with lzF := fun k => if k = l then some (v, m) else s.lzF k }
+      | none => s
+    | none => s
+  -- ...the bare URL, then once more under a fresh one: bytes whose digest is
+  -- not the manifest's are neither served nor kept (each try is one of these
+  -- events; a miss on both fails the load). The put goes to the cache the
+  -- fetch read, by its handle: when the pointer has moved since (`cman` no
+  -- longer that manifest) it lands in a cache nothing serves; it may also not
+  -- land at all (`put`).
+  | .lzNet l b put =>
+    match s.lzF l with
+    | some (w, m) =>
+      let s := { s with lzF := fun k => if k = l then none else s.lzF k }
+      if E.H (E.L l b) == E.H (E.L l m) then
+        let s := { s with lzBad := s.lzBad || E.L l b != E.L l m }
+        if put && s.cman w == some m then
+          { s with lazy := fun u => if u = w then (fun k => if k = l then some (E.L l b) else s.lazy w k)
+                                     else s.lazy u }
+        else s
+      else s
+    | none => s
+  -- collect (reuse): a DS core file held with this build's digest; never a download
+  | .nLookLz l =>
+    match s.man with
+    | some m => { s with lslot := fun k => if k = l then heldLazy E s l m else s.lslot k }
+    | none => s
+  -- reinstall: a DS core file the live cache holds, downloaded again and
+  -- checked; a mismatch leaves it out (its next lazy fetch brings it)
+  | .rNetLz l b =>
+    match s.rMan with
+    | some m =>
+      if E.H (E.L l b) == E.H (E.L l m) then
+        { s with rsLz := fun k => if k = l then some (E.L l b) else s.rsLz k }
+      else s
+    | none => s
+  -- reinstall's commit into its own cache, then setLive: one put moves the
+  -- pointer, and every fetch from then on reads the new cache whole
+  | .rCommit =>
+    match s.rW with
+    | some w =>
+      { s with rFlip := true,
+               cache := fun u => if u = w then some (E.C .js (s.rsJs.getD s.dep), E.C .wasm (s.rsWasm.getD s.dep))
+                                 else s.cache u,
+               cman := fun u => if u = w then s.rMan else s.cman u,
+               lazy := fun u => if u = w then s.rsLz else s.lazy u }
+    | none => s
 
 inductive Reachable (E : Env) : State → Prop
   | init : Reachable E (init E)
@@ -740,8 +973,20 @@ def E0 : Env where
   C := fun a b => match a with | .js => b | .wasm => 100 + b / 2
   H := id
   N := 1
+  M := 2
+  L := fun l b => match l with | .js => 300 + b / 4 | .wasm => 400 + b / 4
 
-def E1 : Env := { E0 with N := 10 }
+def E1 : Env := { E0 with N := 10, M := 10 }
+
+/-- Every build of this design (the worker in `init` included). -/
+def E3 : Env := { E0 with N := 0, M := 0 }
+
+/-- Every build 0b7f1b57's design: the manifest, no pointer, no DS core digests. -/
+def E4 : Env := { E0 with N := 0, M := 10 }
+
+/-- Build 0 is 0b7f1b57's, every later one this design's: the update now
+    rolling out. -/
+def E5 : Env := { E0 with N := 0, M := 1 }
 
 /-- Some build up to d has exactly these bytes. -/
 def oneBuild (E : Env) (d : Nat) (p : Nat × Nat) : Bool :=
@@ -849,13 +1094,129 @@ theorem regress_activation_mid_commit_fails_install :
       (fun s => s.active == some 1 && s.waiting.isNone && s.installing.isNone &&
                 s.cache 2 == none && s.cache 1 == some (E0.bytes 1)) = true := by decide
 
-/-- Force update still commits to the live cache one put per asset. A tab
-    booted between the two puts gets the new index.js with the old em.wasm:
-    bytes no build has. -/
-theorem bug_force_update_serves_half_written_cache :
+/-- Was `bug_force_update_serves_half_written_cache`, which stands for the
+    older designs (`legacy_force_update_serves_half_written_cache`). This
+    design's Force update puts nothing into the live cache: its downloads go
+    into a cache of its own, so a tab booted between its two puts boots the
+    old build whole (`E3`: every build this design). -/
+theorem regress_force_update_serves_half_written_cache :
+    witnesses E3 [.deploy, .deploy, .forceStart false, .rMan 2, .rNet .js 2, .rNet .wasm 2, .rVerify,
+               .rPutJs, .userReload true]
+      (fun s => (s.tabs true).running == E3.bytes 0 && !s.mixedBoot &&
+                s.cache 0 == some (E3.bytes 0) && s.cman 0 == some 0) = true := by decide
+
+/-- ...and once both puts are in, the pointer moves in one step: the next
+    boot is the new build whole, under the same worker, its cache keeping
+    build 2's manifest. -/
+theorem force_commit_switches_whole :
+    witnesses E3 [.deploy, .deploy, .forceStart false, .rMan 2, .rNet .js 2, .rNet .wasm 2, .rVerify,
+               .rPutJs, .userReload true, .rPutWasm, .rCommit, .userReload true, .forceDone false]
+      (fun s => (s.tabs true).running == E3.bytes 2 && (s.tabs false).running == E3.bytes 2 &&
+                (s.tabs true).ctrlV == 0 && !s.mixedBoot && s.cman 0 == some 2) = true := by decide
+
+/-- The worker stopped mid-commit (after one put, before the pointer moves):
+    no reply comes, the asking tab's 20 s timeout takes its full reset, and a
+    tab loading meanwhile boots the old cache whole. -/
+theorem force_kill_mid_commit_old_cache_serves :
+    witnesses E3 [.deploy, .deploy, .forceStart false, .rMan 2, .rNet .js 2, .rNet .wasm 2, .rVerify,
+               .rPutJs, .rPutWasm, .rFail, .userReload true]
+      (fun s => (s.tabs true).running == E3.bytes 0 && !s.mixedBoot && !anyForce s &&
+                (s.tabs false).applyK == .resetting && s.cache 0 == some (E3.bytes 0)) = true := by decide
+
+/-- The older designs' Force update still commits to the live cache one put
+    per asset, and runs in a browser until its worker updates to this design.
+    0b7f1b57's (`E4`: every build that design): a tab booted between the two
+    puts gets the new index.js with the old em.wasm, bytes no build has. -/
+theorem legacy_force_update_serves_half_written_cache :
+    witnesses E4 [.deploy, .deploy, .forceStart false, .rMan 2, .rNet .js 2, .rNet .wasm 2, .rVerify,
+               .rPutJs, .userReload true]
+      (fun s => !oneBuild E4 s.dep (s.tabs true).running) = true := by decide
+
+/-- The same for the design before the manifest. -/
+theorem legacy_probed_force_update_serves_half_written_cache :
     witnesses E0 [.deploy, .deploy, .forceStart false, .rProbe0, .rFetchJs, .rFetchWasm, .rVerify,
                .rPutJs, .userReload true]
       (fun s => !oneBuild E0 s.dep (s.tabs true).running) = true := by decide
+
+/-- 0b7f1b57's worker answers a load with a query string (here after two
+    deploys, em.wasm changed) by the network's index.html beside its cache's
+    em.wasm: bytes no build has. -/
+theorem legacy_query_navigation_mixes_builds :
+    witnesses E4 [.deploy, .deploy, .navQ true]
+      (fun s => !oneBuild E4 s.dep (s.tabs true).running && s.mixedBoot) = true := by decide
+
+/-- This design answers it with "./": the cached build, whole, nothing off
+    the network (`navigation_never_net_while_live`). -/
+theorem regress_query_navigation_after_deploy :
+    witnesses E3 [.deploy, .deploy, .navQ true]
+      (fun s => (s.tabs true).running == E3.bytes 0 && !s.mixedBoot && (s.tabs true).ctrlV == 0 &&
+                s.http .js == none) = true := by decide
+
+/-- 0b7f1b57's worker keeps whatever the network answers for a DS core file:
+    after deploys that changed the DS core, an edge still on the old nds.js
+    and the origin's new nds.wasm leave a DS core of two builds in its cache. -/
+theorem legacy_lazy_unchecked :
+    witnesses E4 [.deploy, .deploy, .deploy, .deploy, .lzOld .js 0, .lzOld .wasm 4]
+      (fun s => s.lazy 0 .js == some (E4.L .js 0) && s.lazy 0 .wasm == some (E4.L .wasm 4) &&
+                E4.L .wasm 4 != E4.L .wasm 0) = true := by decide
+
+/-- This design's: the origin is on build 4, whose nds.wasm is not build 0's;
+    the download is neither served nor kept, and the next try (here an edge
+    still on build 0's object, or after the update) is. -/
+theorem regress_tampered_lazy_refused :
+    witnesses E3 [.deploy, .deploy, .deploy, .deploy, .lzStart .wasm, .lzNet .wasm 4 true,
+               .lzStart .wasm, .lzNet .wasm 0 true]
+      (fun s => s.lazy 0 .wasm == some (E3.L .wasm 0) && !s.lzBad && s.lzF .wasm == none) = true := by
+  decide
+
+/-- 0b7f1b57 → this design (`E5`: build 0 is 0b7f1b57's, every later build
+    this design's). The old worker has fetched the DS core; build 1 deploys
+    with the same DS core and em.wasm. Its install carries the DS core over
+    from the old cache with nothing downloaded but index.js, and the page
+    reloads onto build 1 with the DS core still there. -/
+theorem old_worker_ds_core_carried_over :
+    witnesses E5 [.regResolve false, .lzOld .js 0, .lzOld .wasm 0, .deploy, .browserCheck,
+               .nManifest 1, .nLook .js, .nLook .wasm, .nNet .js 1, .nLookLz .js, .nLookLz .wasm,
+               .nCommit, .nCheck, .instFire false, .updClick false, .applyResume false, .skipDeliver,
+               .ccFire false]
+      (fun s => s.dl == 1 && s.active == some 1 && s.cache 1 == some (E5.bytes 1) &&
+                s.lazy 1 .js == some (E5.L .js 1) && s.lazy 1 .wasm == some (E5.L .wasm 1) &&
+                s.cache 0 == none && (s.tabs false).running == E5.bytes 1 && !s.mixedBoot) = true := by
+  decide
+
+/-- 0b7f1b57's worker runs a Force update while this design's build 1 is
+    deployed (the old page's own button): build 1's bytes go into its cache
+    one put at a time, the page reloads onto them, and build 1's worker then
+    installs with nothing to download. -/
+theorem v1_worker_force_then_cur_worker_reuses :
+    witnesses E5 [.regResolve false, .deploy, .forceStart false, .rMan 1, .rNet .js 1, .rNet .wasm 1,
+               .rVerify, .rPutJs, .rPutWasm, .forceDone false, .browserCheck, .nManifest 1,
+               .nLook .js, .nLook .wasm, .nCommit, .nCheck]
+      (fun s => (s.tabs false).running == E5.bytes 1 && (s.tabs false).ctrlV == 0 &&
+                s.dl == 0 && s.waiting == some 1 && s.cache 1 == some (E5.bytes 1)) = true := by decide
+
+/-- 0b7f1b57's page left under this design's worker by another tab's Update
+    (B mid-game) asks it for a Force update after build 2 deploys: the
+    reinstall commits build 2 into a cache of its own, moves the pointer, and
+    B reloads onto build 2 whole. -/
+theorem old_page_force_under_cur_worker :
+    witnesses E5 [.gameOn true, .regResolve false, .regResolve true, .deploy, .browserCheck,
+               .nManifest 1, .nLook .js, .nLook .wasm, .nNet .js 1, .nCommit, .nCheck,
+               .instFire false, .updClick false, .applyResume false, .skipDeliver, .ccFire true,
+               .deploy, .gameOff true, .forceStart true, .rMan 2, .rNet .js 2, .rNet .wasm 2,
+               .rVerify, .rPutJs, .rPutWasm, .rCommit, .forceDone true]
+      (fun s => !s.forcedMidGame && !s.mixedBoot && (s.tabs true).running == E5.bytes 2 &&
+                (s.tabs true).ctrlV == 1 && s.cman 1 == some 2) = true := by decide
+
+/-- This design's Force update downloads again the DS core files its live
+    cache holds (nds.js here, after a DS game), checked against the new
+    manifest, and leaves the rest to their lazy fetch. -/
+theorem force_update_brings_held_ds_core_again :
+    witnesses E3 [.lzStart .js, .lzNet .js 0 true, .deploy, .deploy, .deploy, .deploy,
+               .forceStart false, .rMan 4, .rNet .js 4, .rNet .wasm 4, .rNetLz .js 4, .rVerify,
+               .rPutJs, .rPutWasm, .rCommit]
+      (fun s => s.lazy 0 .js == some (E3.L .js 4) && s.lazy 0 .wasm == none &&
+                s.cman 0 == some 4 && s.cache 0 == some (E3.bytes 4)) = true := by decide
 
 /-- An old worker's Force update while build 1 is deployed: build 1's bytes go
     into build 0's cache and the page reloads onto them, the new page under the
@@ -972,6 +1333,20 @@ variable (E : Env) (s : State) (t u : Bool) (f g : Tab → Tab) (v : Nat) (auto 
 @[simp] theorem mapTabs_mixedBoot : (mapTabs g s).mixedBoot = s.mixedBoot := rfl
 @[simp] theorem updT_dl : (updT t f s).dl = s.dl := rfl
 @[simp] theorem mapTabs_dl : (mapTabs g s).dl = s.dl := rfl
+@[simp] theorem updT_cman : (updT t f s).cman = s.cman := rfl
+@[simp] theorem mapTabs_cman : (mapTabs g s).cman = s.cman := rfl
+@[simp] theorem updT_lazy : (updT t f s).lazy = s.lazy := rfl
+@[simp] theorem mapTabs_lazy : (mapTabs g s).lazy = s.lazy := rfl
+@[simp] theorem updT_lslot : (updT t f s).lslot = s.lslot := rfl
+@[simp] theorem mapTabs_lslot : (mapTabs g s).lslot = s.lslot := rfl
+@[simp] theorem updT_lzF : (updT t f s).lzF = s.lzF := rfl
+@[simp] theorem mapTabs_lzF : (mapTabs g s).lzF = s.lzF := rfl
+@[simp] theorem updT_rsLz : (updT t f s).rsLz = s.rsLz := rfl
+@[simp] theorem mapTabs_rsLz : (mapTabs g s).rsLz = s.rsLz := rfl
+@[simp] theorem updT_rFlip : (updT t f s).rFlip = s.rFlip := rfl
+@[simp] theorem mapTabs_rFlip : (mapTabs g s).rFlip = s.rFlip := rfl
+@[simp] theorem updT_lzBad : (updT t f s).lzBad = s.lzBad := rfl
+@[simp] theorem mapTabs_lzBad : (mapTabs g s).lzBad = s.lzBad := rfl
 @[simp] theorem updT_intents : (updT t f s).intents = s.intents := rfl
 @[simp] theorem mapTabs_intents : (mapTabs g s).intents = s.intents := rfl
 @[simp] theorem clearInst_intents : (clearInst s).intents = s.intents := rfl
@@ -991,6 +1366,10 @@ variable (E : Env) (s : State) (t u : Bool) (f g : Tab → Tab) (v : Nat) (auto 
 @[simp] theorem applyStart_intents : (applyStart E t s).intents = s.intents + 1 := by
   unfold applyStart; simp only []; (repeat' split) <;> simp
 end proj
+
+@[simp] theorem bootFrom_intents (E : Env) (s : State) (t auto : Bool) (sv : Option Nat × Nat × (Nat × Nat)) :
+    (bootFrom E t auto sv s).intents = s.intents := by
+  unfold bootFrom; split; rfl
 
 theorem step_intents_mono (E : Env) (s : State) (e : Event) : s.intents ≤ (step E s e).intents := by
   cases e <;> simp only [step] <;> (repeat' split) <;> simp
@@ -1101,18 +1480,38 @@ theorem serve_ctrl {E : Env} {s : State} {c : Option Nat} {b : Nat} {p : Nat × 
   | none => simp only [ha] at hs; cases hs; rfl
   | some w => simp only [ha] at hs; split at hs <;> (cases hs; rfl)
 
-theorem q_reload_user {E : Env} {s : State} (h : Q s) (t : Bool) : Q (reload E t false s) := by
+theorem serveQ_ctrl {E : Env} {s : State} {c : Option Nat} {b : Nat} {p : Nat × Nat}
+    (hs : serveQ E s = (c, b, p)) : c = s.active := by
+  unfold serveQ at hs
+  cases ha : s.active with
+  | none => simp only [ha] at hs; exact (serve_ctrl hs).trans ha
+  | some w =>
+    simp only [ha] at hs; split at hs
+    · exact (serve_ctrl hs).trans ha
+    · split at hs <;> (cases hs; rfl)
+
+theorem q_boot_user {E : Env} {s : State} (h : Q s) (t : Bool) {c : Option Nat} {b : Nat} {p : Nat × Nat}
+    (hc : c = s.active) : Q (bootFrom E t false (c, b, p) s) := by
   obtain ⟨a1, a2, a3, a4⟩ := h
   simp only [QS, QT] at a4
-  unfold reload
-  generalize hs : serve E s = sv
-  obtain ⟨c, b, p⟩ := sv
-  have hc := serve_ctrl hs
+  unfold bootFrom
   refine ⟨a1, by simpa using a2, by simpa using a3, fun u => ?_⟩
   simp only [QS, QT, updT_tabs, updT_active]
   split
   · subst hc; cases ha : s.active <;> simp
   · exact a4 u
+
+theorem q_reload_user {E : Env} {s : State} (h : Q s) (t : Bool) : Q (reload E t false s) := by
+  unfold reload
+  generalize hs : serve E s = sv
+  obtain ⟨c, b, p⟩ := sv
+  exact q_boot_user h t (serve_ctrl hs)
+
+theorem q_navQ {E : Env} {s : State} (h : Q s) (t : Bool) : Q (step E s (.navQ t)) := by
+  simp only [step]
+  generalize hs : serveQ E s = sv
+  obtain ⟨c, b, p⟩ := sv
+  exact q_boot_user h t (serveQ_ctrl hs)
 
 /-- With no Update or Force-update accepted in any tab, the app never reloads a
     tab by itself: there is no reload loop without a user's click. -/
@@ -1223,6 +1622,11 @@ theorem i0_step {E : Env} {s : State} {e : Event} (h : I0 s) (he : en E s e = tr
   | forceDone t => have := (a4 t).1.2.2.1; simp [en, this] at he
   | newerStart t => simp [step] at hz
   | newerApply t => simp only [step, applyStart_intents, updT_intents] at hz; omega
+  | navQ t => exact q_navQ qs t
+  | lzOld _ _ | lzHit _ | lzStart _ | lzNet _ _ _ | nLookLz _ =>
+    (try simp only [step]); (repeat' split) <;> q_fr qs
+  | rNetLz _ _ | rCommit =>
+    have := (a4 true).1.2.2.1; have := (a4 false).1.2.2.1; simp_all [en, anyForce]
 
 theorem i0_reachable {E : Env} {s : State} (h : Reachable E s) : I0 s := by
   induction h with
@@ -1254,14 +1658,17 @@ theorem p_showBtn {s : State} (h : P s) (t : Bool) (v : Nat) : P (showBtn t v s)
   · have := h u; unfold PT at *; cases hu : (s.tabs u).updAvail <;> simp_all
   · exact h u
 
-theorem p_reload {E : Env} {s : State} (h : P s) (t : Bool) (auto : Bool) : P (reload E t auto s) := by
-  unfold reload
-  generalize serve E s = sv
+theorem p_boot {E : Env} {s : State} (h : P s) (t : Bool) (auto : Bool) (sv : Option Nat × Nat × (Nat × Nat)) :
+    P (bootFrom E t auto sv s) := by
   obtain ⟨c, b, p⟩ := sv
+  unfold bootFrom
   intro u; simp only [updT_tabs]
   split
   · cases c <;> simp [PT]
   · exact h u
+
+theorem p_reload {E : Env} {s : State} (h : P s) (t : Bool) (auto : Bool) : P (reload E t auto s) :=
+  p_boot h t auto _
 
 theorem p_installFailed {s : State} (h : P s) (v : Nat) : P (installFailed v s) :=
   p_frame h (fun u => by simp [installFailed])
@@ -1385,6 +1792,7 @@ theorem p_step {E : Env} {s : State} (h : P s) (e : Event) : P (step E s e) := b
   | rFail => exact p_rFailed h
   | coreLoaded t => simp only [step]; split <;> p_fr h
   | applyResume t => simp only [step]; split <;> p_fr h
+  | navQ t => exact p_boot h t false _
   | _ => (try simp only [step]); (repeat' split) <;> p_fr h
 
 /-- The Update button is shown at most once per page, however many checks,
@@ -1448,13 +1856,12 @@ macro "fi_fr" h:term : tactic => `(tactic| ((refine fi_frame $h ?_ ?_) <;> (try 
        split <;>
        refine ti_same hu ?_ ?_ ?_ <;> simp_all [claim] <;> done))))
 
-theorem fi_reload {E : Env} {s : State} (h : FI s) (t : Bool) (auto : Bool)
+theorem fi_boot {E : Env} {s : State} (h : FI s) (t : Bool) (auto : Bool) (sv : Option Nat × Nat × (Nat × Nat))
     (hok : auto = false ∨ (s.tabs t).appUpdating = true ∨ (s.tabs t).game = false) :
-    FI (reload E t auto s) := by
+    FI (bootFrom E t auto sv s) := by
   obtain ⟨a, b⟩ := h
-  unfold reload
-  generalize serve E s = sv
   obtain ⟨c, bb, p⟩ := sv
+  unfold bootFrom
   refine ⟨?_, fun u => ?_⟩
   · simp only [updT_forcedMidGame, a, Bool.false_or]
     rcases hok with hk | hk | hk <;> simp [hk]
@@ -1462,6 +1869,10 @@ theorem fi_reload {E : Env} {s : State} (h : FI s) (t : Bool) (auto : Bool)
     split
     · cases c <;> exact ⟨fun hk => absurd rfl hk, fun hf => by cases hf⟩
     · exact b u
+
+theorem fi_reload {E : Env} {s : State} (h : FI s) (t : Bool) (auto : Bool)
+    (hok : auto = false ∨ (s.tabs t).appUpdating = true ∨ (s.tabs t).game = false) :
+    FI (reload E t auto s) := fi_boot h t auto _ hok
 
 theorem fi_showBtn {s : State} (h : FI s) (t : Bool) (v : Nat) : FI (showBtn t v s) := by
   unfold showBtn; fi_fr h
@@ -1634,7 +2045,7 @@ theorem fi_step {E : Env} {s : State} {e : Event} (h : FI s) (he : en E s e = tr
   | rFail => exact fi_rFailed hs
   | forceDone t =>
     have hu : (s.tabs t).appUpdating = true := by
-      apply (b t).2; simp only [en, Bool.and_eq_true] at he; exact he.1.1
+      apply (b t).2; simp only [en, Bool.and_eq_true] at he; exact he.1
     simp only [step]
     apply fi_reload (fi_frame hs rfl (s' := updT t (fun x => { x with force := false }) s) ?_) t true
     · right; left; simp [hu]
@@ -1646,6 +2057,7 @@ theorem fi_step {E : Env} {s : State} {e : Event} (h : FI s) (he : en E s e = tr
     have h1 : FI (updT t (fun x => { x with newer := false }) s) := by fi_fr hs
     exact fi_applyStart h1 t
   | coreLoaded t => simp only [step]; split <;> fi_fr hs
+  | navQ t => exact fi_boot hs t false _ (Or.inl rfl)
   | _ => (try simp only [step]); (repeat' split) <;> fi_fr hs
 
 theorem fi_reachable {E : Env} {s : State} (h : Reachable E s) : FI s := by
@@ -1716,15 +2128,18 @@ theorem w_installed {s : State} (h : W s) (v : Nat) (hv : s.installing = some v)
     simp only [mapTabs, activate, clearInst, claim] at hw
     exact (key u w hw).elim
 
-theorem w_reload {E : Env} {s : State} (h : W s) (t : Bool) (auto : Bool) : W (reload E t auto s) := by
-  unfold reload
-  generalize serve E s = sv
+theorem w_boot {E : Env} {s : State} (h : W s) (t : Bool) (auto : Bool) (sv : Option Nat × Nat × (Nat × Nat)) :
+    W (bootFrom E t auto sv s) := by
   obtain ⟨c, bb, p⟩ := sv
+  unfold bootFrom
   intro u w hw
   simp only [updT_tabs] at hw
   split at hw
   · cases c <;> simp at hw
   · exact h u w hw
+
+theorem w_reload {E : Env} {s : State} (h : W s) (t : Bool) (auto : Bool) : W (reload E t auto s) :=
+  w_boot h t auto _
 
 theorem w_applyStart {E : Env} {s : State} (h : W s) (t : Bool) : W (applyStart E t s) := by
   unfold applyStart
@@ -1858,6 +2273,7 @@ theorem w_step {E : Env} {s : State} {e : Event} (h : W s) : W (step E s e) := b
     · exact h
   | rFail => exact w_rFailed h
   | coreLoaded t => simp only [step]; split <;> w_fr h
+  | navQ t => exact w_boot h t false _
   | _ => (try simp only [step]); (repeat' split) <;> w_fr h
 
 theorem w_reachable {E : Env} {s : State} (h : Reachable E s) : W s := by
@@ -1872,357 +2288,6 @@ theorem watching_has_install {E : Env} {s : State} (h : Reachable E s) (t : Bool
     (hw : (s.tabs t).applyK = .watch v) : s.installing = some v ∧ en E s .installFail = true := by
   have := w_reachable h t v hw
   exact ⟨this, by simp [en, this]⟩
-
-/-! ### Every cache holds its own build, without Force update
-
-With H injective, every cache `dingbat-<v>` holds exactly build v's bytes,
-whatever deploys land inside installs, whatever older objects stale edges,
-older caches or the HTTP cache hold, and with workers of both designs
-installing side by side. The old design gets there by its probes (deploys only
-move forward, so em.wasm's build lies between them); the new one by the
-digests, whatever its sources answer: its manifest is refused unless it is
-the worker's own build's, and nothing is kept whose digest is not that
-manifest's. The fetch handler's own-cache-only lookup keeps a waiting build out
-of the running one, and activation drops every other cache. -/
-
-def benignC : Event → Bool
-  | .forceStart _ => false
-  | _ => true
-
-inductive Reach3 (E : Env) : State → Prop
-  | init : Reach3 E (init E)
-  | fresh (d : Nat) : Reach3 E (initFresh E d)
-  | step {s : State} (e : Event) : Reach3 E s → en E s e = true → benignC e = true → Reach3 E (step E s e)
-
-def CS (E : Env) (s : State) : Prop :=
-  (∀ v p, s.cache v = some p → p = E.bytes v) ∧
-  (∀ p, s.probe0 = some p → s.installing.isSome = true ∧ p ≤ s.dep) ∧
-  (∀ j, s.stageJs = some j → ∃ p, s.probe0 = some p ∧ p ≤ j ∧ j ≤ s.dep) ∧
-  (∀ w, s.stageWasm = some w → ∃ p, s.probe0 = some p ∧ p ≤ w ∧ w ≤ s.dep) ∧
-  (∀ m, s.man = some m → s.installing = some m) ∧
-  (∀ a x, s.slot a = .have x → ∃ v, s.installing = some v ∧ E.H x = E.H (E.C a v)) ∧
-  s.mixedBoot = false
-
-def CInv (E : Env) (s : State) : Prop := CS E s ∧ ∀ t, (s.tabs t).force = false
-
-theorem cinv_frame {E : Env} {s s' : State} (h : CInv E s) (ec : s'.cache = s.cache)
-    (ep : s'.probe0 = s.probe0) (ej : s'.stageJs = s.stageJs) (ew : s'.stageWasm = s.stageWasm)
-    (ei : s'.installing = s.installing) (ed : s'.dep = s.dep) (em : s'.mixedBoot = s.mixedBoot)
-    (eman : s'.man = s.man) (es : s'.slot = s.slot)
-    (ef : ∀ u, (s'.tabs u).force = (s.tabs u).force) : CInv E s' := by
-  obtain ⟨⟨a1, a2, a3, a4, a5, a6, a7⟩, b⟩ := h
-  refine ⟨⟨?_, ?_, ?_, ?_, ?_, ?_, ?_⟩, fun u => ?_⟩
-  · rw [ec]; exact a1
-  · rw [ep, ei, ed]; exact a2
-  · rw [ej, ep, ed]; exact a3
-  · rw [ew, ep, ed]; exact a4
-  · rw [eman, ei]; exact a5
-  · rw [es, ei]; exact a6
-  · rw [em]; exact a7
-  · rw [ef]; exact b u
-
-macro "c_fr" h:term : tactic => `(tactic| ((refine cinv_frame $h ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_) <;> (try rfl) <;>
-  (intro u; first | (simp [claim]; done) |
-    (simp only [updT_tabs, mapTabs_tabs, startInst_tabs, clearInst_tabs]; split <;> simp))))
-
-/-- Nothing installing, nothing staged. -/
-theorem cinv_clear {E : Env} {s : State} (h : CInv E s) : CInv E (clearInst s) := by
-  obtain ⟨⟨a1, _, _, _, _, _, a7⟩, b⟩ := h
-  refine ⟨⟨a1, ?_, ?_, ?_, ?_, ?_, a7⟩, b⟩ <;> intros <;> simp_all [clearInst]
-
-theorem cinv_start {E : Env} {s : State} (h : CInv E s) : CInv E (startInst s) := by
-  obtain ⟨⟨a1, _, _, _, _, _, a7⟩, b⟩ := h
-  refine ⟨⟨a1, ?_, ?_, ?_, ?_, ?_, a7⟩, b⟩ <;> intros <;> simp_all [startInst, clearInst]
-
-theorem cinv_updCheck {E : Env} {s : State} (h : CInv E s) : CInv E (updCheck s) := by
-  unfold updCheck; split
-  · exact cinv_start h
-  · exact h
-
-theorem cinv_installFailed {E : Env} {s : State} (h : CInv E s) (v : Nat) : CInv E (installFailed v s) := by
-  have h1 := cinv_clear h
-  exact cinv_frame h1 rfl rfl rfl rfl rfl rfl rfl rfl rfl (fun u => by simp [installFailed])
-
-theorem cinv_activate {E : Env} {s : State} (h : CInv E s) (v : Nat) : CInv E (activate v s) := by
-  obtain ⟨⟨a1, a2, a3, a4, a5, a6, a7⟩, b⟩ := h
-  refine ⟨⟨fun u p hp => ?_, a2, a3, a4, a5, a6, a7⟩, fun u => by simp [claim, b u]⟩
-  simp only [activate, mapTabs_cache] at hp
-  split at hp
-  · exact a1 u p hp
-  · cases hp
-
-theorem cinv_installed {E : Env} {s : State} (h : CInv E s) (v : Nat) : CInv E (installed v s) := by
-  have h1 : CInv E (mapTabs (onInstalled v) (clearInst s)) :=
-    cinv_frame (cinv_clear h) rfl rfl rfl rfl rfl rfl rfl rfl rfl (fun u => by simp)
-  have hw : ∀ X : State, CInv E X → CInv E { X with waiting := some v } :=
-    fun X h => cinv_frame h rfl rfl rfl rfl rfl rfl rfl rfl rfl (fun _ => rfl)
-  have hq : ∀ X : State, CInv E X → CInv E { X with skipQ := some v } :=
-    fun X h => cinv_frame h rfl rfl rfl rfl rfl rfl rfl rfl rfl (fun _ => rfl)
-  unfold installed; simp only []
-  split <;> split <;> first
-    | exact cinv_activate h1 v
-    | exact hw _ h1
-    | exact hq _ (cinv_activate h1 v)
-    | exact hq _ (hw _ h1)
-
-theorem serve_build {E : Env} {s : State} (h : CS E s) {c : Option Nat} {b : Nat} {p : Nat × Nat}
-    (hs : serve E s = (c, b, p)) : p = E.bytes b := by
-  unfold serve at hs
-  split at hs
-  · split at hs
-    · cases hs; exact h.1 _ _ (by assumption)
-    · cases hs; rfl
-  · cases hs; rfl
-
-theorem cinv_reload {E : Env} {s : State} (h : CInv E s) (t : Bool) (auto : Bool) :
-    CInv E (reload E t auto s) := by
-  obtain ⟨hc, b⟩ := h
-  unfold reload
-  generalize hsv : serve E s = sv
-  obtain ⟨c, bb, p⟩ := sv
-  have hp := serve_build hc hsv
-  obtain ⟨a1, a2, a3, a4, a5, a6, a7⟩ := hc
-  refine ⟨⟨a1, a2, a3, a4, a5, a6, ?_⟩, fun u => ?_⟩
-  · simp [a7, hp]
-  · simp only [updT_tabs]; split
-    · cases c <;> rfl
-    · exact b u
-
-theorem cinv_showBtn {E : Env} {s : State} (h : CInv E s) (t : Bool) (v : Nat) : CInv E (showBtn t v s) := by
-  unfold showBtn; c_fr h
-
-theorem cinv_applyStart {E : Env} {s : State} (h : CInv E s) (t : Bool) : CInv E (applyStart E t s) := by
-  unfold applyStart
-  have h1 : CInv E (updT t (fun x => { x with appUpdating := true, modal := false })
-      { s with intents := s.intents + 1 }) := by c_fr h
-  simp only []
-  split
-  · exact cinv_reload h1 t true
-  · split
-    · have := cinv_updCheck h1; c_fr this
-    · c_fr h1
-
-theorem cinv_step {E : Env} (hH : Injective E.H) {s : State} {e : Event} (h : CInv E s)
-    (he : en E s e = true) (hb : benignC e = true) : CInv E (step E s e) := by
-  have hs := h
-  obtain ⟨⟨a1, a2, a3, a4, a5, a6, a7⟩, b⟩ := h
-  cases e with
-  | deploy =>
-    -- dep only grows: every bound stays a bound
-    refine ⟨⟨a1, fun p hp => ?_, fun j hj => ?_, fun w hw => ?_, a5, a6, a7⟩, b⟩
-    · have := a2 p hp; exact ⟨this.1, by simp only [step]; omega⟩
-    · obtain ⟨p, h1, h2, h3⟩ := a3 j hj; exact ⟨p, h1, h2, by simp only [step]; omega⟩
-    · obtain ⟨p, h1, h2, h3⟩ := a4 w hw; exact ⟨p, h1, h2, by simp only [step]; omega⟩
-  | browserCheck => exact cinv_updCheck hs
-  | probeFirst =>
-    have hi : s.installing.isSome = true := by
-      simp only [en, oldInst, Bool.and_eq_true] at he
-      obtain ⟨h1, _⟩ := he; split at h1 <;> simp_all
-    have hp0 : s.probe0 = none := by
-      simp only [en, Bool.and_eq_true, Option.isNone_iff_eq_none] at he; exact he.2
-    refine ⟨⟨a1, fun p hp => ?_, fun j hj => ?_, fun w hw => ?_, a5, a6, a7⟩, b⟩
-    · simp only [step, Option.some.injEq] at hp; subst hp; exact ⟨hi, Nat.le_refl _⟩
-    · obtain ⟨p, h1, _⟩ := a3 j hj; rw [hp0] at h1; cases h1
-    · obtain ⟨p, h1, _⟩ := a4 w hw; rw [hp0] at h1; cases h1
-  | fetchJs =>
-    have hp : s.probe0.isSome = true := by
-      simp only [en, Bool.and_eq_true] at he; exact he.1.2
-    obtain ⟨p, hp⟩ := Option.isSome_iff_exists.mp hp
-    refine ⟨⟨a1, a2, fun j hj => ?_, a4, a5, a6, a7⟩, b⟩
-    simp only [step, Option.some.injEq] at hj; subst hj
-    exact ⟨p, hp, (a2 p hp).2, Nat.le_refl _⟩
-  | fetchWasm =>
-    have hp : s.probe0.isSome = true := by
-      simp only [en, Bool.and_eq_true] at he; exact he.1.2
-    obtain ⟨p, hp⟩ := Option.isSome_iff_exists.mp hp
-    refine ⟨⟨a1, a2, a3, fun w hw => ?_, a5, a6, a7⟩, b⟩
-    simp only [step, Option.some.injEq] at hw; subst hw
-    exact ⟨p, hp, (a2 p hp).2, Nat.le_refl _⟩
-  | installEnd =>
-    simp only [step]
-    split
-    · rename_i v p j w _ hp hj hw
-      split
-      · rename_i hok
-        simp only [Bool.and_eq_true, beq_iff_eq] at hok
-        obtain ⟨⟨hjp, hdp⟩, hpv⟩ := hok
-        -- em.wasm's build is between the two probes, which agree
-        have ew : w = j := by
-          obtain ⟨p', hp', h1, h2⟩ := a4 w hw
-          rw [hp] at hp'; cases hp'
-          omega
-        apply cinv_installed
-        refine ⟨⟨fun u q hq => ?_, a2, a3, a4, a5, a6, a7⟩, b⟩
-        simp only [] at hq
-        split at hq
-        · rename_i hu; subst hu; cases hq; simp [Env.bytes, ew, hjp, hpv]
-        · exact a1 u q hq
-      · exact cinv_installFailed hs v
-    · exact hs
-  | installFail =>
-    simp only [step]; split
-    · exact cinv_installFailed hs _
-    · exact hs
-  | nManifest bb =>
-    simp only [step]; split
-    · rename_i v hv; split
-      · rename_i hbv; simp only [beq_iff_eq] at hbv; subst hbv
-        refine ⟨⟨a1, a2, a3, a4, fun m hm => ?_, a6, a7⟩, b⟩
-        simp only [Option.some.injEq] at hm; subst hm; exact hv
-      · exact cinv_installFailed hs v
-    · exact hs
-  | nLook a =>
-    simp only [step]; split
-    · rename_i m hm
-      have hi := a5 m hm
-      split
-      · rename_i x hx
-        have hok : E.H x = E.H (E.C a m) := by
-          unfold heldBytes at hx; simp only [] at hx
-          split at hx
-          · rename_i y hy; cases hx; have := List.find?_some hy; simpa using this
-          · split at hx
-            · split at hx
-              · cases hx; simpa using (by assumption : (E.H x == E.H (E.C a m)) = true)
-              · cases hx
-            · cases hx
-        refine ⟨⟨a1, a2, a3, a4, a5, fun a' x' hx' => ?_, a7⟩, b⟩
-        simp only [setSlot] at hx'; split at hx'
-        · rename_i ha; subst ha; cases hx'; exact ⟨m, hi, hok⟩
-        · exact a6 a' x' hx'
-      · refine ⟨⟨a1, a2, a3, a4, a5, fun a' x' hx' => ?_, a7⟩, b⟩
-        simp only [setSlot] at hx'; split at hx'
-        · cases hx'
-        · exact a6 a' x' hx'
-    · exact hs
-  | nNet a bb =>
-    simp only [step]; split
-    · rename_i v m hv hm
-      have hmv : m = v := by have := a5 m hm; rw [hv] at this; cases this; rfl
-      subst hmv
-      split
-      · rename_i hok; simp only [beq_iff_eq] at hok
-        refine ⟨⟨a1, a2, a3, a4, a5, fun a' x' hx' => ?_, a7⟩, b⟩
-        simp only [setSlot] at hx'; split at hx'
-        · rename_i ha; subst ha; cases hx'; exact ⟨m, hv, hok⟩
-        · exact a6 a' x' hx'
-      · exact cinv_installFailed (s := { s with dl := s.dl + 1 }) ⟨⟨a1, a2, a3, a4, a5, a6, a7⟩, b⟩ _
-    · exact hs
-  | nCommit =>
-    simp only [step]; split
-    · rename_i v xj xw hv hj hw
-      obtain ⟨v1, hv1, hj'⟩ := a6 .js xj hj
-      obtain ⟨v2, hv2, hw'⟩ := a6 .wasm xw hw
-      rw [hv] at hv1 hv2; cases hv1; cases hv2
-      have e1 := hH _ _ hj'
-      have e2 := hH _ _ hw'
-      refine ⟨⟨fun u q hq => ?_, a2, a3, a4, a5, a6, a7⟩, b⟩
-      simp only [] at hq; split at hq
-      · rename_i hu; subst hu; cases hq; simp [Env.bytes, e1, e2]
-      · exact a1 u q hq
-    · exact hs
-  | nCheck =>
-    simp only [step]; split
-    · split
-      · exact cinv_installed hs _
-      · exact cinv_installFailed hs _
-    · exact hs
-  | regResolve t =>
-    have h1 : CInv E (updT t (fun x => { x with regd := true }) s) := by c_fr hs
-    simp only [step]; split
-    · exact cinv_showBtn h1 t _
-    · split
-      · exact cinv_start h1
-      · exact h1
-  | coreLoaded t => simp only [step]; split <;> c_fr hs
-  | httpFill a bb => simp only [step]; c_fr hs
-  | httpEvict a => simp only [step]; c_fr hs
-  | instFire t =>
-    have h1 : CInv E (updT t (fun x => { x with instQ := none }) s) := by c_fr hs
-    simp only [step]; split
-    · split
-      · exact cinv_showBtn h1 t _
-      · exact h1
-    · exact h1
-  | skipDeliver =>
-    simp only [step]; split
-    · split
-      · exact cinv_activate (s := { s with skipQ := none }) hs _
-      · exact hs
-    · exact hs
-  | ccFire t =>
-    have h1 : CInv E (updT t (fun x => { x with ccQ := false }) s) := by c_fr hs
-    simp only [step]; split
-    · split
-      · exact cinv_reload h1 t true
-      · have h2 : CInv E (updT t (fun x => { x with ready := true, hadController := true })
-            (updT t (fun x => { x with ccQ := false }) s)) := by c_fr h1
-        split
-        · exact cinv_showBtn h2 t _
-        · exact h2
-    · c_fr h1
-  | userReload t => exact cinv_reload hs t false
-  | gameOn t => simp only [step]; c_fr hs
-  | gameOff t => simp only [step]; c_fr hs
-  | updClick t =>
-    simp only [step]; split
-    · c_fr hs
-    · exact cinv_applyStart hs t
-  | confirm t => exact cinv_applyStart hs t
-  | notNow t => simp only [step]; c_fr hs
-  | applyResume t => simp only [step]; split <;> c_fr hs
-  | resetFire t =>
-    simp only [step]
-    apply cinv_reload
-    have hr : ∀ u, ((redund s).tabs u).force = false := by
-      intro u; unfold redund; split <;> simp [b u]
-    refine ⟨⟨fun _ _ h => by simp at h, fun _ h => by simp [clearInst] at h,
-      fun _ h => by simp [clearInst] at h, fun _ h => by simp [clearInst] at h,
-      fun _ h => by simp [clearInst] at h, fun _ _ h => by simp [clearInst] at h, ?_⟩, fun u => hr u⟩
-    show (redund s).mixedBoot = false
-    unfold redund; split <;> simpa using a7
-  | checkStart t => simp only [step]; c_fr hs
-  | chkCur t => simp only [step]; c_fr hs
-  | chkLatest t => simp only [step]; c_fr hs
-  | chkSw t => simp only [step]; c_fr hs
-  | chkEval t =>
-    simp only [step]; split
-    · have h1 : CInv E (updT t (fun x => { x with chk := none }) s) := by c_fr hs
-      split
-      · exact cinv_showBtn h1 t _
-      · exact h1
-    · exact hs
-  | forceStart t => simp [benignC] at hb
-  | rProbe0 | rFetchJs | rFetchWasm | rMan _ | rNet _ _ | rVerify | rPutJs | rPutWasm | rFail =>
-    simp [en, anyForce, b] at he
-  | forceDone t => simp [en, b] at he
-  | newerStart t => simp only [step]; c_fr hs
-  | newerApply t =>
-    have h1 : CInv E (updT t (fun x => { x with newer := false }) s) := by c_fr hs
-    exact cinv_applyStart h1 t
-
-theorem cinv_reach3 {E : Env} (hH : Injective E.H) {s : State} (h : Reach3 E s) : CInv E s := by
-  induction h with
-  | init =>
-    refine ⟨⟨?_, ?_, ?_, ?_, ?_, ?_, ?_⟩, ?_⟩ <;> simp [init]
-  | fresh d => refine ⟨⟨?_, ?_, ?_, ?_, ?_, ?_, ?_⟩, ?_⟩ <;> simp [initFresh, init]
-  | step e _ he hb ih => exact cinv_step hH ih he hb
-
-/-- **Consistency.** Without Force update, and with the digest injective,
-    every cache `dingbat-<v>` holds exactly build v's bytes, in every
-    interleaving of deploys with installs of either design, stale edges,
-    older caches and the HTTP cache. In particular so does the active
-    worker's, the only one the fetch handler serves. -/
-theorem cache_is_its_build {E : Env} (hH : Injective E.H) {s : State} (h : Reach3 E s) {v : Nat}
-    {p : Nat × Nat} (hc : s.cache v = some p) : p = E.bytes v :=
-  (cinv_reach3 hH h).1.1 v p hc
-
-/-- Without Force update, every page boots exactly the bytes of the build it
-    boots from: its worker's own build, or the deployed one off the network.
-    (With Force update: `bug_force_update_serves_half_written_cache`.) -/
-theorem no_mixed_boot_without_force {E : Env} (hH : Injective E.H) {s : State} (h : Reach3 E s) :
-    s.mixedBoot = false :=
-  (cinv_reach3 hH h).1.2.2.2.2.2.2
 
 /-! ### Force update only commits one build
 
@@ -2393,8 +2458,8 @@ theorem ri_step {E : Env} {s : State} {e : Event} (h : RI E s) (he : en E s e = 
       obtain ⟨w, hw⟩ := Option.isSome_iff_exists.mp hw
       exact ⟨j, w, hj, hw, Or.inr ⟨hnew, hman⟩⟩
   | rFail => exact ri_rFailed hs
-  | rPutJs => simp only [step]; split <;> r_fr hs
-  | rPutWasm => simp only [step]; split <;> r_fr hs
+  | rPutJs => simp only [step]; (repeat' split) <;> r_fr hs
+  | rPutWasm => simp only [step]; (repeat' split) <;> r_fr hs
   | browserCheck => exact ri_updCheck hs
   | installEnd =>
     simp only [step]; split
@@ -2459,8 +2524,9 @@ theorem ri_reachable {E : Env} {s : State} (h : Reachable E s) : RI E s := by
     it passes its check, what is staged for index.js and for em.wasm is one
     build's bytes, even when deploys landed during the download (an old
     worker's: by its probes; a new worker's: by the digests, with H
-    injective). Its commit is still two puts:
-    `bug_force_update_serves_half_written_cache`. -/
+    injective). An older design's commit is still two puts into the live
+    cache (`legacy_force_update_serves_half_written_cache`); this design's
+    moves the pointer once (`cache_is_one_build`). -/
 theorem force_stage_one_build {E : Env} (hH : Injective E.H) {s : State} (h : Reachable E s)
     (ho : s.rOk = true) :
     ∃ j w b, s.rsJs = some j ∧ s.rsWasm = some w ∧ E.C .js j = E.C .js b ∧ E.C .wasm w = E.C .wasm b := by
@@ -2586,19 +2652,35 @@ theorem wf_installed {E : Env} {s : State} (h : Wf E s) (v : Nat) (hv : v ≤ s.
     | exact hq _ ha
     | exact hq _ (hw _ h1 rfl)
 
-theorem wf_reload {E : Env} {s : State} (h : Wf E s) (t : Bool) (auto : Bool) : Wf E (reload E t auto s) := by
-  obtain ⟨a1, a2, a3, a4, a5, a6, a7, a8⟩ := h
+theorem serve_isB {E : Env} {s : State} (h : Wf E s) {c : Option Nat} {bb : Nat} {p : Nat × Nat}
+    (hsv : serve E s = (c, bb, p)) : IsB E .js p.1 ∧ IsB E .wasm p.2 := by
   have hb : IsB E .js (E.bytes s.dep).1 ∧ IsB E .wasm (E.bytes s.dep).2 := ⟨⟨_, rfl⟩, ⟨_, rfl⟩⟩
-  unfold reload
-  generalize hsv : serve E s = sv
-  obtain ⟨c, bb, p⟩ := sv
-  have hp : IsB E .js p.1 ∧ IsB E .wasm p.2 := by
-    unfold serve at hsv
-    split at hsv
-    · split at hsv
-      · cases hsv; exact (a5 _ _ (by assumption)).2
-      · cases hsv; exact hb
+  unfold serve at hsv
+  split at hsv
+  · split at hsv
+    · cases hsv; exact (h.2.2.2.2.1 _ _ (by assumption)).2
     · cases hsv; exact hb
+  · cases hsv; exact hb
+
+theorem serveQ_isB {E : Env} {s : State} (h : Wf E s) {c : Option Nat} {bb : Nat} {p : Nat × Nat}
+    (hsv : serveQ E s = (c, bb, p)) : IsB E .js p.1 ∧ IsB E .wasm p.2 := by
+  unfold serveQ at hsv
+  cases ha : s.active with
+  | none => simp only [ha] at hsv; exact serve_isB h hsv
+  | some v =>
+    by_cases hg : E.curGen v = true
+    · simp only [ha, hg, ↓reduceIte] at hsv; exact serve_isB h hsv
+    · cases hc : s.cache v with
+      | none => simp only [ha, hg, hc, Bool.false_eq_true, ↓reduceIte] at hsv; cases hsv; exact ⟨⟨_, rfl⟩, ⟨_, rfl⟩⟩
+      | some q =>
+        have hq := (h.2.2.2.2.1 v q hc).2.2
+        simp only [ha, hg, hc, Bool.false_eq_true, ↓reduceIte] at hsv; cases hsv
+        exact ⟨⟨_, rfl⟩, hq⟩
+
+theorem wf_boot {E : Env} {s : State} (h : Wf E s) (t : Bool) (auto : Bool) {c : Option Nat} {bb : Nat}
+    {p : Nat × Nat} (hp : IsB E .js p.1 ∧ IsB E .wasm p.2) : Wf E (bootFrom E t auto (c, bb, p) s) := by
+  obtain ⟨a1, a2, a3, a4, a5, a6, a7, a8⟩ := h
+  unfold bootFrom
   refine ⟨a1, a2, a3, a4, a5, fun a x hx => ?_, a7, fun u => ?_⟩
   · simp only [updT_http] at hx
     split at hx
@@ -2609,6 +2691,12 @@ theorem wf_reload {E : Env} {s : State} (h : Wf E s) (t : Bool) (auto : Bool) : 
   · simp only [updT_tabs]; split
     · cases c <;> exact hp
     · exact a8 u
+
+theorem wf_reload {E : Env} {s : State} (h : Wf E s) (t : Bool) (auto : Bool) : Wf E (reload E t auto s) := by
+  unfold reload
+  generalize hsv : serve E s = sv
+  obtain ⟨c, bb, p⟩ := sv
+  exact wf_boot h t auto (serve_isB h hsv)
 
 theorem wf_showBtn {E : Env} {s : State} (h : Wf E s) (t : Bool) (v : Nat) : Wf E (showBtn t v s) := by
   unfold showBtn; wf_fr h
@@ -2795,6 +2883,8 @@ theorem wf_step {E : Env} {s : State} {e : Event} (h : Wf E s) (he : en E s e = 
   | rPutJs =>
     simp only [step]; split
     · rename_i w hw
+      split
+      · wf_fr hs
       refine ⟨a1, a2, a3, a4, fun u q hq => ?_, a6, a7, a8⟩
       simp only [] at hq; split at hq
       · rename_i hu; subst hu; cases hq
@@ -2808,6 +2898,8 @@ theorem wf_step {E : Env} {s : State} {e : Event} (h : Wf E s) (he : en E s e = 
   | rPutWasm =>
     simp only [step]; split
     · rename_i w hw
+      split
+      · wf_fr hs
       refine ⟨a1, a2, a3, a4, fun u q hq => ?_, a6, a7, a8⟩
       simp only [] at hq; split at hq
       · rename_i hu; subst hu; cases hq
@@ -2828,6 +2920,19 @@ theorem wf_step {E : Env} {s : State} {e : Event} (h : Wf E s) (he : en E s e = 
   | forceDone t =>
     have h1 : Wf E (updT t (fun x => { x with force := false }) s) := by wf_fr hs
     exact wf_reload h1 t true
+  | navQ t =>
+    simp only [step]
+    generalize hsv : serveQ E s = sv
+    obtain ⟨c, bb, p⟩ := sv
+    exact wf_boot hs t false (serveQ_isB hs hsv)
+  | rCommit =>
+    simp only [step]; split
+    · rename_i w hw
+      refine ⟨a1, a2, a3, a4, fun u q hq => ?_, a6, a7, a8⟩
+      simp only [] at hq; split at hq
+      · rename_i hu; subst hu; cases hq; exact ⟨a4 _ hw, ⟨_, rfl⟩, ⟨_, rfl⟩⟩
+      · exact a5 u q hq
+    · exact hs
   | _ => (try simp only [step]); (repeat' split) <;> wf_fr hs
 
 theorem wf_reachable {E : Env} {s : State} (h : Reachable E s) : Wf E s := by
@@ -2845,6 +2950,1169 @@ theorem wf_reachable {E : Env} {s : State} (h : Reachable E s) : Wf E s := by
 theorem cache_holds_builds {E : Env} {s : State} (h : Reachable E s) {v : Nat} {p : Nat × Nat}
     (hc : s.cache v = some p) : v ≤ s.dep ∧ (∃ b, p.1 = E.C .js b) ∧ (∃ b, p.2 = E.C .wasm b) :=
   (wf_reachable h).2.2.2.2.1 v p hc
+/-! ### This design's caches each hold one build, Force update and all
+
+With H injective, every cache of this design holds exactly one build's
+bytes, the build of the manifest it keeps, DS core files included: for every
+interleaving of deploys, installs of all three designs, stale edges, the HTTP
+cache, this design's Force update (whatever build it brings in) and its
+worker stopped at any point of one (`rFail`, enabled throughout). The install
+commits into an emptied cache, whose assets and DS core files each hash to
+its manifest; Force update commits into a cache of its own and moves the
+pointer only once that holds everything (`rCommit`), so the cache a fetch
+reads is always the old one whole or the new one whole; a DS core file is
+kept only when its digest is that cache's manifest's, and put only into the
+cache whose manifest it was checked against. Every DS core file this design
+serves is therefore its cache's build (`lzBad`). -/
+
+def NI (E : Env) (s : State) : Prop :=
+  (∀ v p, E.curGen v = true → s.cache v = some p → ∃ m, s.cman v = some m ∧ p = E.bytes m) ∧
+  (∀ v l x, E.curGen v = true → s.lazy v l = some x → ∃ m, s.cman v = some m ∧ x = E.L l m) ∧
+  (∀ v m, s.cman v = some m → E.curGen v = true) ∧
+  (∀ m, s.man = some m → s.installing = some m) ∧
+  (∀ a x, s.slot a = .have x → ∃ v, s.installing = some v ∧ E.H x = E.H (E.C a v)) ∧
+  (∀ l x, s.lslot l = some x → ∃ v, s.installing = some v ∧ E.H x = E.H (E.L l v)) ∧
+  (∀ l x, s.rsLz l = some x → ∃ m, s.rMan = some m ∧ E.H x = E.H (E.L l m)) ∧
+  s.lzBad = false ∧
+  (∀ u l x, s.lazy u l = some x → u ≤ s.dep) ∧
+  (∀ l w m, s.lzF l = some (w, m) → w ≤ s.dep)
+
+theorem ni_frame {E : Env} {s s' : State} (h : NI E s) (e1 : s'.cache = s.cache) (e2 : s'.cman = s.cman)
+    (e3 : s'.lazy = s.lazy) (e4 : s'.man = s.man) (e5 : s'.installing = s.installing) (e6 : s'.slot = s.slot)
+    (e7 : s'.lslot = s.lslot) (e8 : s'.rsLz = s.rsLz) (e9 : s'.rMan = s.rMan) (e10 : s'.lzBad = s.lzBad)
+    (e11 : s'.dep = s.dep) (e12 : s'.lzF = s.lzF) : NI E s' := by
+  obtain ⟨a1, a2, a3, a4, a5, a6, a7, a8, a9, a10⟩ := h
+  refine ⟨?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩ <;>
+    simp only [e1, e2, e3, e4, e5, e6, e7, e8, e9, e10, e11, e12] <;> assumption
+
+macro "n_fr" h:term : tactic => `(tactic| (exact ni_frame $h rfl rfl rfl rfl rfl rfl rfl rfl rfl rfl rfl rfl))
+
+theorem cur_false_of_not_new {E : Env} {v : Nat} (h : E.newGen v = false) : E.curGen v = false := by
+  cases hc : E.curGen v
+  · rfl
+  · rw [Env.newGen_of_cur hc] at h; cases h
+
+theorem ni_clear {E : Env} {s : State} (h : NI E s) : NI E (clearInst s) := by
+  obtain ⟨a1, a2, a3, _, _, _, a7, a8, a9, a10⟩ := h
+  refine ⟨a1, a2, a3, ?_, ?_, ?_, a7, a8, a9, a10⟩ <;> intros <;> simp_all [clearInst]
+
+theorem ni_start {E : Env} {s : State} (h : NI E s) : NI E (startInst s) := by
+  obtain ⟨a1, a2, a3, _, _, _, a7, a8, a9, a10⟩ := h
+  refine ⟨a1, a2, a3, ?_, ?_, ?_, a7, a8, a9, a10⟩ <;> intros <;> simp_all [startInst, clearInst]
+
+theorem ni_updCheck {E : Env} {s : State} (h : NI E s) : NI E (updCheck s) := by
+  unfold updCheck; split
+  · exact ni_start h
+  · exact h
+
+theorem ni_installFailed {E : Env} {s : State} (h : NI E s) (v : Nat) : NI E (installFailed v s) := by
+  have h1 := ni_clear h
+  exact ni_frame h1 rfl rfl rfl rfl rfl rfl rfl rfl rfl rfl rfl rfl
+
+theorem ni_activate {E : Env} {s : State} (h : NI E s) (v : Nat) : NI E (activate v s) := by
+  obtain ⟨a1, a2, a3, a4, a5, a6, a7, a8, a9, a10⟩ := h
+  refine ⟨fun u p hg hp => ?_, fun u l x hg hx => ?_, fun u m hm => ?_, a4, a5, a6, a7, a8,
+    fun u l x hx => ?_, a10⟩
+  · simp only [activate, mapTabs_cache, mapTabs_cman] at hp ⊢
+    by_cases hu : u = v
+    · subst hu; simp only [↓reduceIte] at hp ⊢; exact a1 _ _ hg hp
+    · simp only [hu, ↓reduceIte] at hp; cases hp
+  · simp only [activate, mapTabs_lazy, mapTabs_cman] at hx ⊢
+    by_cases hu : u = v
+    · subst hu; simp only [↓reduceIte] at hx ⊢; exact a2 _ _ _ hg hx
+    · simp only [hu, ↓reduceIte] at hx; cases hx
+  · simp only [activate, mapTabs_cman] at hm
+    by_cases hu : u = v
+    · subst hu; simp only [↓reduceIte] at hm; exact a3 _ _ hm
+    · simp only [hu, ↓reduceIte] at hm; cases hm
+  · simp only [activate, mapTabs_lazy] at hx
+    by_cases hu : u = v
+    · subst hu; simp only [↓reduceIte] at hx; exact a9 _ _ _ hx
+    · simp only [hu, ↓reduceIte] at hx; cases hx
+
+theorem ni_installed {E : Env} {s : State} (h : NI E s) (v : Nat) : NI E (installed v s) := by
+  have h1 : NI E (mapTabs (onInstalled v) (clearInst s)) :=
+    ni_frame (ni_clear h) rfl rfl rfl rfl rfl rfl rfl rfl rfl rfl rfl rfl
+  have hw : ∀ X : State, NI E X → NI E { X with waiting := some v } :=
+    fun X h => ni_frame h rfl rfl rfl rfl rfl rfl rfl rfl rfl rfl rfl rfl
+  have hq : ∀ X : State, NI E X → NI E { X with skipQ := some v } :=
+    fun X h => ni_frame h rfl rfl rfl rfl rfl rfl rfl rfl rfl rfl rfl rfl
+  unfold installed; simp only []
+  split <;> split <;> first
+    | exact ni_activate h1 v
+    | exact hw _ h1
+    | exact hq _ (ni_activate h1 v)
+    | exact hq _ (hw _ h1)
+
+theorem ni_boot {E : Env} {s : State} (h : NI E s) (t : Bool) (auto : Bool) (sv : Option Nat × Nat × (Nat × Nat)) :
+    NI E (bootFrom E t auto sv s) := by
+  obtain ⟨c, b, p⟩ := sv; unfold bootFrom; n_fr h
+
+theorem ni_reload {E : Env} {s : State} (h : NI E s) (t : Bool) (auto : Bool) : NI E (reload E t auto s) :=
+  ni_boot h t auto _
+
+theorem ni_rFailed {E : Env} {s : State} (h : NI E s) : NI E (rFailed s) := by
+  obtain ⟨a1, a2, a3, a4, a5, a6, _, a8, a9, a10⟩ := h
+  exact ⟨a1, a2, a3, a4, a5, a6, fun l x hx => by simp [rFailed, rClear] at hx, a8, a9, a10⟩
+
+theorem ni_applyStart {E : Env} {s : State} (h : NI E s) (t : Bool) : NI E (applyStart E t s) := by
+  unfold applyStart
+  have h1 : NI E (updT t (fun x => { x with appUpdating := true, modal := false })
+      { s with intents := s.intents + 1 }) := by n_fr h
+  simp only []
+  split
+  · exact ni_reload h1 t true
+  · split
+    · have := ni_updCheck h1; n_fr this
+    · n_fr h1
+
+theorem ni_step {E : Env} (hH : Injective E.H) {s : State} {e : Event} (h : NI E s) (hw : Wf E s)
+    (hr : RI E s) (he : en E s e = true) : NI E (step E s e) := by
+  have hs := h
+  obtain ⟨a1, a2, a3, a4, a5, a6, a7, a8, a9, a10⟩ := h
+  cases e with
+  | deploy =>
+    refine ⟨a1, a2, a3, a4, a5, a6, a7, a8, fun u l x hx => ?_, fun l w m hf => ?_⟩
+    · have := a9 u l x hx; simp only [step]; omega
+    · have := a10 l w m hf; simp only [step]; omega
+  | browserCheck => exact ni_updCheck hs
+  | probeFirst | fetchJs | fetchWasm | httpFill _ _ | httpEvict _ | rProbe0 | rFetchJs | rFetchWasm | rVerify
+  | gameOn _ | gameOff _ | notNow _ | checkStart _ | chkCur _ | chkLatest _ | chkSw _ | newerStart _ =>
+    simp only [step]; n_fr hs
+  | installEnd =>
+    simp only [step]; split
+    · rename_i v p j w hv _ _ _
+      have hg : E.curGen v = false := by
+        apply cur_false_of_not_new
+        simp only [en, oldInst, hv, Bool.and_eq_true, Bool.not_eq_true'] at he; exact he.1.1
+      split
+      · apply ni_installed
+        refine ⟨fun u q hgu hq => ?_, a2, a3, a4, a5, a6, a7, a8, a9, a10⟩
+        simp only [] at hq; split at hq
+        · rename_i hu; subst hu; rw [hg] at hgu; cases hgu
+        · exact a1 u q hgu hq
+      · exact ni_installFailed hs v
+    · exact hs
+  | installFail =>
+    simp only [step]; split
+    · exact ni_installFailed hs _
+    · exact hs
+  | nManifest bb =>
+    simp only [step]; split
+    · rename_i v hv; split
+      · rename_i hbv; simp only [beq_iff_eq] at hbv; subst hbv
+        refine ⟨a1, a2, a3, fun m hm => ?_, a5, a6, a7, a8, a9, a10⟩
+        simp only [Option.some.injEq] at hm; subst hm; exact hv
+      · exact ni_installFailed hs v
+    · exact hs
+  | nLook a =>
+    simp only [step]; split
+    · rename_i m hm
+      have hi := a4 m hm
+      split
+      · rename_i x hx
+        have hok : E.H x = E.H (E.C a m) := heldBytes_ok hx
+        refine ⟨a1, a2, a3, a4, fun a' x' hx' => ?_, a6, a7, a8, a9, a10⟩
+        simp only [setSlot] at hx'; split at hx'
+        · rename_i ha; subst ha; cases hx'; exact ⟨m, hi, hok⟩
+        · exact a5 a' x' hx'
+      · refine ⟨a1, a2, a3, a4, fun a' x' hx' => ?_, a6, a7, a8, a9, a10⟩
+        simp only [setSlot] at hx'; split at hx'
+        · cases hx'
+        · exact a5 a' x' hx'
+    · exact hs
+  | nNet a bb =>
+    simp only [step]; split
+    · rename_i v m hv hm
+      have hmv : m = v := by have := a4 m hm; rw [hv] at this; cases this; rfl
+      subst hmv
+      split
+      · rename_i hok; simp only [beq_iff_eq] at hok
+        refine ⟨a1, a2, a3, a4, fun a' x' hx' => ?_, a6, a7, a8, a9, a10⟩
+        simp only [setSlot] at hx'; split at hx'
+        · rename_i ha; subst ha; cases hx'; exact ⟨m, hv, hok⟩
+        · exact a5 a' x' hx'
+      · exact ni_installFailed (s := { s with dl := s.dl + 1 }) ⟨a1, a2, a3, a4, a5, a6, a7, a8, a9, a10⟩ _
+    · exact hs
+  | nCommit =>
+    simp only [step]; split
+    · rename_i v xj xw hv hj hw'
+      obtain ⟨v1, hv1, hj'⟩ := a5 .js xj hj
+      obtain ⟨v2, hv2, hw''⟩ := a5 .wasm xw hw'
+      rw [hv] at hv1 hv2; cases hv1; cases hv2
+      have e1 := hH _ _ hj'
+      have e2 := hH _ _ hw''
+      have hvd : v ≤ s.dep := hw.1 v hv
+      have hl : ∀ l x, s.lslot l = some x → x = E.L l v := by
+        intro l x hx; obtain ⟨v', hv', hh⟩ := a6 l x hx; rw [hv] at hv'; cases hv'; exact hH _ _ hh
+      refine ⟨fun u q hg hq => ?_, fun u l x hg hx => ?_, fun u m hm => ?_, a4, a5, a6, a7, a8,
+        fun u l x hx => ?_, a10⟩
+      · by_cases hu : u = v
+        · subst hu; simp only [↓reduceIte, Option.some.injEq] at hq; subst hq
+          exact ⟨u, by simp [hg], by simp [Env.bytes, e1, e2]⟩
+        · simp only [hu, ↓reduceIte] at hq; simp only [hu, decide_false, Bool.false_and, Bool.false_eq_true,
+            ↓reduceIte]; exact a1 u q hg hq
+      · by_cases hu : u = v
+        · subst hu; simp only [hg, decide_true, Bool.and_self, ↓reduceIte] at hx ⊢
+          exact ⟨u, rfl, hl l x hx⟩
+        · simp only [hu, decide_false, Bool.false_and, Bool.false_eq_true, ↓reduceIte] at hx ⊢
+          exact a2 u l x hg hx
+      · by_cases hu : u = v
+        · subst hu; by_cases hg : E.curGen u = true
+          · exact hg
+          · simp only [hg, decide_true, Bool.and_false, Bool.false_eq_true, ↓reduceIte] at hm; exact a3 u m hm
+        · simp only [hu, decide_false, Bool.false_and, Bool.false_eq_true, ↓reduceIte] at hm; exact a3 u m hm
+      · by_cases hu : u = v
+        · subst hu; exact hvd
+        · simp only [hu, decide_false, Bool.false_and, Bool.false_eq_true, ↓reduceIte] at hx; exact a9 u l x hx
+    · exact hs
+  | nCheck =>
+    simp only [step]; split
+    · split
+      · exact ni_installed hs _
+      · exact ni_installFailed hs _
+    · exact hs
+  | regResolve t =>
+    have h1 : NI E (updT t (fun x => { x with regd := true }) s) := by n_fr hs
+    simp only [step]; split
+    · unfold showBtn; n_fr h1
+    · split
+      · exact ni_start h1
+      · exact h1
+  | coreLoaded t => simp only [step]; split <;> n_fr hs
+  | instFire t =>
+    have h1 : NI E (updT t (fun x => { x with instQ := none }) s) := by n_fr hs
+    simp only [step]; split
+    · split
+      · unfold showBtn; n_fr h1
+      · exact h1
+    · exact h1
+  | skipDeliver =>
+    simp only [step]; split
+    · split
+      · exact ni_activate (s := { s with skipQ := none }) hs _
+      · exact hs
+    · exact hs
+  | ccFire t =>
+    have h1 : NI E (updT t (fun x => { x with ccQ := false }) s) := by n_fr hs
+    simp only [step]; split
+    · split
+      · exact ni_reload h1 t true
+      · split
+        · unfold showBtn; n_fr h1
+        · n_fr h1
+    · n_fr h1
+  | userReload t => exact ni_reload hs t false
+  | updClick t =>
+    simp only [step]; split
+    · n_fr hs
+    · exact ni_applyStart hs t
+  | confirm t => exact ni_applyStart hs t
+  | applyResume t => simp only [step]; split <;> n_fr hs
+  | resetFire t =>
+    simp only [step]
+    apply ni_reload
+    refine ⟨fun _ _ _ h => by simp at h, fun _ _ _ _ h => by simp at h, fun _ _ h => by simp at h,
+      fun _ h => by simp [clearInst] at h, fun _ _ h => by simp [clearInst] at h,
+      fun _ _ h => by simp [clearInst] at h, ?_, ?_, fun _ _ _ h => by simp at h, fun l w m hf => ?_⟩
+    · intro l x hx; have : (redund s).rsLz = s.rsLz := by unfold redund; split <;> rfl
+      simp only [clearInst, this] at hx ⊢
+      have : (redund s).rMan = s.rMan := by unfold redund; split <;> rfl
+      rw [this]; exact a7 l x hx
+    · show (redund s).lzBad = false
+      unfold redund; split <;> simpa using a8
+    · have e1 : (redund s).lzF = s.lzF := by unfold redund; split <;> rfl
+      have e2 : (redund s).dep = s.dep := by unfold redund; split <;> rfl
+      simp only [clearInst, e1, e2] at hf ⊢; exact a10 l w m hf
+  | chkEval t =>
+    simp only [step]; split
+    · have h1 : NI E (updT t (fun x => { x with chk := none }) s) := by n_fr hs
+      split
+      · unfold showBtn; n_fr h1
+      · exact h1
+    · exact hs
+  | forceStart t =>
+    simp only [step]
+    exact ⟨a1, a2, a3, a4, a5, a6, fun l x hx => by simp [rClear] at hx, a8, a9, a10⟩
+  | rMan b =>
+    have hn : s.rMan = none := by
+      simp only [en, Bool.and_eq_true, Option.isNone_iff_eq_none] at he; exact he.1.2
+    refine ⟨a1, a2, a3, a4, a5, a6, fun l x hx => ?_, a8, a9, a10⟩
+    obtain ⟨m, hm, _⟩ := a7 l x hx; rw [hn] at hm; cases hm
+  | rNet a b =>
+    simp only [step]; split
+    · split
+      · cases a <;> n_fr hs
+      · exact ni_rFailed hs
+    · exact hs
+  | rFail => exact ni_rFailed hs
+  | rPutJs | rPutWasm =>
+    simp only [step]; split
+    · rename_i w hw'
+      split
+      · n_fr hs
+      · rename_i hg
+        refine ⟨fun u q hgu hq => ?_, a2, a3, a4, a5, a6, a7, a8, a9, a10⟩
+        simp only [] at hq; split at hq
+        · rename_i hu; subst hu; simp [hg] at hgu
+        · exact a1 u q hgu hq
+    · exact hs
+  | forceDone t => exact ni_reload (s := updT t _ s) (by n_fr hs) t true
+  | newerApply t => exact ni_applyStart (s := updT t _ s) (by n_fr hs) t
+  | navQ t => exact ni_boot hs t false _
+  | lzOld l b =>
+    simp only [step]; split
+    · rename_i v hv
+      have hg : E.curGen v = false := by
+        simp only [en, hv, Bool.and_eq_true, Bool.not_eq_true'] at he; exact he.1
+      split
+      · exact hs
+      · refine ⟨a1, fun u k x hgu hx => ?_, a3, a4, a5, a6, a7, a8, fun u k x hx => ?_, a10⟩
+        · simp only [] at hx; split at hx
+          · rename_i hu; subst hu; simp [hg] at hgu
+          · exact a2 u k x hgu hx
+        · simp only [] at hx; split at hx
+          · rename_i hu; subst hu; exact hw.2.2.1 _ hv
+          · exact a9 u k x hx
+    · exact hs
+  | lzHit l =>
+    simp only [step]; split
+    · rename_i v hv
+      have hg : E.curGen v = true := by simp only [en, hv, Bool.and_eq_true] at he; exact he.1
+      split
+      · rename_i x hx
+        obtain ⟨m, hm, hxm⟩ := a2 v l x hg hx
+        exact ⟨a1, a2, a3, a4, a5, a6, a7, by simp [a8, hm, hxm], a9, a10⟩
+      · exact hs
+    · exact hs
+  | lzStart l =>
+    simp only [step]; split
+    · rename_i v hv
+      split
+      · refine ⟨a1, a2, a3, a4, a5, a6, a7, a8, a9, fun k w m hf => ?_⟩
+        simp only [] at hf; split at hf
+        · simp only [Option.some.injEq, Prod.mk.injEq] at hf; obtain ⟨rfl, -⟩ := hf; exact hw.2.2.1 _ hv
+        · exact a10 k w m hf
+      · exact hs
+    · exact hs
+  | lzNet l b put =>
+    simp only [step]; split
+    · rename_i w m hf
+      have hwd : w ≤ s.dep := a10 l w m hf
+      have b10 : ∀ k w' m', (if k = l then none else s.lzF k) = some (w', m') → w' ≤ s.dep := by
+        intro k w' m' h'; split at h'
+        · cases h'
+        · exact a10 k w' m' h'
+      split
+      · rename_i hok; simp only [beq_iff_eq] at hok
+        have hb : E.L l b = E.L l m := hH _ _ hok
+        split
+        · rename_i hp; simp only [Bool.and_eq_true, beq_iff_eq] at hp
+          refine ⟨a1, fun u k x hgu hx => ?_, a3, a4, a5, a6, a7, by simp [a8, hb], fun u k x hx => ?_, b10⟩
+          · simp only [] at hx; split at hx
+            · rename_i hu; subst hu; dsimp only at hx; split at hx
+              · rename_i hk; subst hk; cases hx; exact ⟨m, hp.2, hb⟩
+              · exact a2 u k x hgu hx
+            · exact a2 u k x hgu hx
+          · simp only [] at hx; split at hx
+            · rename_i hu; subst hu; exact hwd
+            · exact a9 u k x hx
+        · exact ⟨a1, a2, a3, a4, a5, a6, a7, by simp [a8, hb], a9, b10⟩
+      · exact ⟨a1, a2, a3, a4, a5, a6, a7, a8, a9, b10⟩
+    · exact hs
+  | nLookLz l =>
+    simp only [step]; split
+    · rename_i m hm
+      have hi := a4 m hm
+      refine ⟨a1, a2, a3, a4, a5, fun k x hx => ?_, a7, a8, a9, a10⟩
+      simp only [] at hx; split at hx
+      · rename_i hk; subst hk
+        refine ⟨m, hi, ?_⟩
+        unfold heldLazy at hx
+        have := List.find?_some hx; simpa using this
+      · exact a6 k x hx
+    · exact hs
+  | rNetLz l b =>
+    simp only [step]; split
+    · rename_i m hm
+      split
+      · rename_i hok; simp only [beq_iff_eq] at hok
+        refine ⟨a1, a2, a3, a4, a5, a6, fun k x hx => ?_, a8, a9, a10⟩
+        simp only [] at hx; split at hx
+        · rename_i hk; subst hk; cases hx; exact ⟨m, hm, hok⟩
+        · exact a7 k x hx
+      · exact hs
+    · exact hs
+  | rCommit =>
+    have hcur : curR E s = true := by simp only [en, Bool.and_eq_true] at he; exact he.1.1.1.1.2
+    have hok : s.rOk = true := by simp only [en, Bool.and_eq_true] at he; exact he.1.1.1.2
+    simp only [step]; split
+    · rename_i w hrw
+      have hg : E.curGen w = true := by simpa [curR, hrw] using hcur
+      have hnew : newR E s = true := by simp [newR, hrw, Env.newGen_of_cur hg]
+      obtain ⟨_, _, r3, r4⟩ := hr
+      obtain ⟨j, ww, hj, hww, hc⟩ := r4 hok
+      have hm : s.rMan.isSome = true := by
+        rcases hc with ⟨ho, _⟩ | ⟨_, hm⟩
+        · simp [oldR, hrw, Env.newGen_of_cur hg] at ho
+        · exact hm
+      obtain ⟨m, hm⟩ := Option.isSome_iff_exists.mp hm
+      obtain ⟨m1, hm1, hj'⟩ := r3 hnew .js j (by simp [staged, hj])
+      obtain ⟨m2, hm2, hw'⟩ := r3 hnew .wasm ww (by simp [staged, hww])
+      rw [hm] at hm1 hm2; cases hm1; cases hm2
+      have e1 := hH _ _ hj'
+      have e2 := hH _ _ hw'
+      have hwd : w ≤ s.dep := hw.2.2.2.1 w hrw
+      refine ⟨fun u q hgu hq => ?_, fun u k x hgu hx => ?_, fun u m' hm' => ?_, a4, a5, a6, a7, a8,
+        fun u k x hx => ?_, a10⟩
+      · simp only [] at hq ⊢; split at hq
+        · rename_i hu; subst hu; simp only [↓reduceIte, Option.some.injEq] at hq ⊢; subst hq
+          exact ⟨m, hm, by simp [Env.bytes, hj, hww, e1, e2]⟩
+        · rename_i hu; simp only [hu, ↓reduceIte]; exact a1 u q hgu hq
+      · simp only [] at hx ⊢; split at hx
+        · rename_i hu; subst hu; simp only [↓reduceIte]
+          obtain ⟨m', hm', hx'⟩ := a7 k x hx; rw [hm] at hm'; cases hm'
+          exact ⟨m, hm, hH _ _ hx'⟩
+        · rename_i hu; simp only [hu, ↓reduceIte]; exact a2 u k x hgu hx
+      · simp only [] at hm'; split at hm'
+        · rename_i hu; subst hu; exact hg
+        · exact a3 u m' hm'
+      · simp only [] at hx; split at hx
+        · rename_i hu; subst hu; exact hwd
+        · exact a9 u k x hx
+    · exact hs
+
+theorem ni_reachable {E : Env} (hH : Injective E.H) {s : State} (h : Reachable E s) : NI E s := by
+  induction h with
+  | init =>
+    refine ⟨fun v p hg hp => ?_, ?_, fun v m hm => ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩ <;> try (simp [init]; done)
+    · simp only [init] at hp ⊢; split at hp
+      · rename_i hv; subst hv; cases hp; exact ⟨0, by simp [hg], rfl⟩
+      · cases hp
+    · simp only [init] at hm; split at hm
+      · rename_i hv; simp only [Bool.and_eq_true, decide_eq_true_eq] at hv; rw [hv.1]; exact hv.2
+      · cases hm
+  | fresh d => refine ⟨?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩ <;> simp [initFresh, init]
+  | step e hreach he ih => exact ni_step hH ih (wf_reachable hreach) (ri_reachable hreach) he
+
+/-- **One build per cache, Force update and all.** With the digest
+    injective, every cache of this design holds exactly the bytes of one
+    build, the one whose manifest it keeps, its DS core files included, in
+    every reachable state: whatever deploys, stale edges and older designs'
+    workers do, and wherever this design's Force update is stopped. The fetch
+    handler reads only the active worker's cache, so no fetch observes a
+    cache holding two builds. -/
+theorem cache_is_one_build {E : Env} (hH : Injective E.H) {s : State} (h : Reachable E s) {v : Nat}
+    (hv : E.curGen v = true) {p : Nat × Nat} (hc : s.cache v = some p) :
+    ∃ m, s.cman v = some m ∧ p = E.bytes m ∧ ∀ l x, s.lazy v l = some x → x = E.L l m := by
+  obtain ⟨a1, a2, _⟩ := ni_reachable hH h
+  obtain ⟨m, hm, hp⟩ := a1 v p hv hc
+  refine ⟨m, hm, hp, fun l x hx => ?_⟩
+  obtain ⟨m', hm', hx'⟩ := a2 v l x hv hx
+  rw [hm] at hm'; cases hm'; exact hx'
+
+/-- **Every DS core file this design serves is its cache's build**: a copy
+    from the cache (checked when it was kept) or a download whose digest is
+    the manifest's. A stale edge's nds.wasm beside a fresh nds.js is refused
+    (`regress_tampered_lazy_refused`). -/
+theorem lazy_served_is_its_build {E : Env} (hH : Injective E.H) {s : State} (h : Reachable E s) :
+    s.lzBad = false :=
+  (ni_reachable hH h).2.2.2.2.2.2.2.1
+
+/-- Wherever this design's Force update is stopped before the pointer moves,
+    the old cache serves as it was: no step of its download, check or commit
+    but `rCommit` writes any cache, kept manifest or DS core file. -/
+theorem force_leaves_live_cache_until_pointer {E : Env} {s : State} (hc : curR E s = true) (e : Event)
+    (he : e = .rProbe0 ∨ e = .rFetchJs ∨ e = .rFetchWasm ∨ (∃ b, e = .rMan b) ∨ (∃ a b, e = .rNet a b) ∨
+      (∃ l b, e = .rNetLz l b) ∨ e = .rVerify ∨ e = .rPutJs ∨ e = .rPutWasm ∨ e = .rFail) :
+    (step E s e).cache = s.cache ∧ (step E s e).cman = s.cman ∧ (step E s e).lazy = s.lazy := by
+  have hw : ∃ w, s.rW = some w ∧ E.curGen w = true := by
+    unfold curR at hc; split at hc
+    · rename_i w hw; exact ⟨w, hw, hc⟩
+    · cases hc
+  obtain ⟨w, hrw, hg⟩ := hw
+  rcases he with rfl | rfl | rfl | ⟨b, rfl⟩ | ⟨a, b, rfl⟩ | ⟨l, b, rfl⟩ | rfl | rfl | rfl | rfl
+  all_goals simp only [step, hrw, hg, ↓reduceIte]
+  all_goals (try (repeat' split) <;> (try (cases ‹Asset›)) <;> simp [setStaged, rFailed, rClear])
+  all_goals (try exact ⟨rfl, rfl, rfl⟩)
+
+/-! ### Loads of the app with a query string -/
+
+/-- A load of the app with any query string is served from the same cache
+    entry as "./": under a worker of this design it is the bare load, step
+    for step, so every theorem about bare loads covers it. -/
+theorem navigation_query_is_the_shell (E : Env) (s : State) (t : Bool) {v : Nat}
+    (ha : s.active = some v) (hv : E.curGen v = true) :
+    step E s (.navQ t) = step E s (.userReload t) := by
+  simp only [step, reload, serveQ, ha, hv, ↓reduceIte]
+
+/-- ...and while that worker's cache is there, no such load goes to the
+    network: the page boots the cache's bytes and nothing reaches the HTTP
+    cache. (An older worker's took index.html off the network:
+    `legacy_query_navigation_mixes_builds`.) -/
+theorem navigation_never_net_while_live (E : Env) (s : State) (t : Bool) {v : Nat} {p : Nat × Nat}
+    (ha : s.active = some v) (hv : E.curGen v = true) (hc : s.cache v = some p) :
+    ((step E s (.navQ t)).tabs t).running = p ∧ (step E s (.navQ t)).http = s.http := by
+  simp [step, serveQ, serve, bootFrom, ha, hv, hc]
+
+/-! ### The install carries the DS core over, never downloads it -/
+
+section lslotlemmas
+variable (E : Env) (s : State) (v : Nat) (t : Bool) (auto : Bool)
+@[simp] theorem installed_lslot : (installed v s).lslot = fun _ => none := by
+  unfold installed; simp only []; split <;> split <;> rfl
+@[simp] theorem installFailed_lslot : (installFailed v s).lslot = fun _ => none := rfl
+@[simp] theorem startInst_lslot : (startInst s).lslot = fun _ => none := rfl
+@[simp] theorem clearInst_lslot : (clearInst s).lslot = fun _ => none := rfl
+@[simp] theorem bootFrom_lslot (sv : Option Nat × Nat × (Nat × Nat)) : (bootFrom E t auto sv s).lslot = s.lslot := by
+  obtain ⟨c, b, p⟩ := sv; rfl
+@[simp] theorem reload_lslot : (reload E t auto s).lslot = s.lslot := bootFrom_lslot E s t auto _
+@[simp] theorem showBtn_lslot : (showBtn t v s).lslot = s.lslot := rfl
+@[simp] theorem activate_lslot : (activate v s).lslot = s.lslot := rfl
+@[simp] theorem rFailed_lslot : (rFailed s).lslot = s.lslot := rfl
+@[simp] theorem rClear_lslot : (rClear s).lslot = s.lslot := rfl
+@[simp] theorem setStaged_lslot (a : Asset) (b : Nat) : (setStaged s a b).lslot = s.lslot := by
+  cases a <;> rfl
+@[simp] theorem updCheck_lslot_none (l : Lz) : (updCheck s).lslot l = none ∨ (updCheck s).lslot l = s.lslot l := by
+  unfold updCheck; split <;> simp
+end lslotlemmas
+
+/-- Only an install's lookup of a DS core file gives it one, and the lookup
+    takes the first held copy with the manifest's digest: no step of an
+    install downloads a DS core file. -/
+theorem lazy_never_downloaded {E : Env} {s : State} {e : Event} {l : Lz} {x : Nat}
+    (h : (step E s e).lslot l = some x) :
+    s.lslot l = some x ∨ (e = .nLookLz l ∧ ∃ m, s.man = some m ∧ heldLazy E s l m = some x) := by
+  have upd : ∀ X : State, (updCheck X).lslot l = some x → X.lslot l = some x := by
+    intro X hX; rcases updCheck_lslot_none X l with h1 | h1 <;> rw [h1] at hX
+    · cases hX
+    · exact hX
+  have app : ∀ X : State, ∀ t, (applyStart E t X).lslot l = some x → X.lslot l = some x := by
+    intro X t hX; unfold applyStart at hX; simp only [] at hX
+    split at hX
+    · simpa using hX
+    · split at hX
+      · have := upd _ (by simpa only [updT_lslot] using hX); simpa using this
+      · simpa using hX
+  cases e with
+  | nLookLz l' =>
+    simp only [step] at h; split at h
+    · rename_i m hm
+      simp only [] at h; split at h
+      · rename_i hl; subst hl; exact Or.inr ⟨rfl, m, hm, h⟩
+      · exact Or.inl h
+    · exact Or.inl h
+  | browserCheck => exact Or.inl (upd _ (by simpa [step] using h))
+  | updClick t =>
+    simp only [step] at h; split at h
+    · exact Or.inl (by simpa using h)
+    · exact Or.inl (app _ _ h)
+  | confirm t => exact Or.inl (app _ _ (by simpa [step] using h))
+  | newerApply t =>
+    simp only [step] at h
+    have := app _ _ h; exact Or.inl (by simpa using this)
+  | resetFire t => simp [step] at h
+  | regResolve t =>
+    simp only [step] at h; split at h
+    · exact Or.inl (by simpa using h)
+    · split at h
+      · simp at h
+      · exact Or.inl (by simpa using h)
+  | navQ t => exact Or.inl (by simpa [step] using h)
+  | _ =>
+    left
+    simp only [step] at h
+    (repeat' split at h) <;> simp_all <;> (try (cases ‹Asset› <;> simp_all))
+
+/-- And the lookup finds a held copy whenever one has the manifest's digest,
+    in any cache, whatever build and design wrote it
+    (`old_worker_ds_core_carried_over`). -/
+theorem lookupLz_takes_held {E : Env} (hH : Injective E.H) {s : State} (h : Reachable E s) {l : Lz}
+    {m : Nat} (hm : s.man = some m) (held : ∃ u x, s.lazy u l = some x ∧ E.H x = E.H (E.L l m)) :
+    ∃ x, (step E s (.nLookLz l)).lslot l = some x ∧ E.H x = E.H (E.L l m) := by
+  have hb : ∃ x, heldLazy E s l m = some x := by
+    unfold heldLazy
+    cases hf : ((List.range (s.dep + 1)).filterMap (fun u => s.lazy u l)).find?
+        (fun x => E.H x == E.H (E.L l m)) with
+    | some x => exact ⟨x, rfl⟩
+    | none =>
+      exfalso
+      rw [List.find?_eq_none] at hf
+      obtain ⟨u, x, hx, hok⟩ := held
+      have hu := (ni_reachable hH h).2.2.2.2.2.2.2.2.1 u l x hx
+      apply hf x
+      · simp only [List.mem_filterMap, List.mem_range]
+        exact ⟨u, by omega, hx⟩
+      · simp [hok]
+  obtain ⟨x, hx⟩ := hb
+  refine ⟨x, by simp [step, hm, hx], ?_⟩
+  unfold heldLazy at hx
+  have := List.find?_some hx; simpa using this
+
+/-! ### No page boots two builds
+
+The consistency of every boot, with this design's Force update and query
+navigations in: the only steps left out are an older design's Force update
+(one put per asset into its live cache:
+`legacy_force_update_serves_half_written_cache`) and an older worker's
+answer to a query navigation (`legacy_query_navigation_mixes_builds`), both
+in code a browser runs only until its worker updates to this design. -/
+
+def benign4 (E : Env) (s : State) : Event → Bool
+  | .forceStart _ => match s.active with | some v => E.curGen v | none => true
+  | .navQ _ => match s.active with | some v => E.curGen v | none => true
+  | _ => true
+
+inductive Reach4 (E : Env) : State → Prop
+  | init : Reach4 E (init E)
+  | fresh (d : Nat) : Reach4 E (initFresh E d)
+  | step {s : State} (e : Event) : Reach4 E s → en E s e = true → benign4 E s e = true → Reach4 E (step E s e)
+
+theorem reach4_reachable {E : Env} {s : State} (h : Reach4 E s) : Reachable E s := by
+  induction h with
+  | init => exact .init
+  | fresh d => exact .fresh d
+  | step e _ he _ ih => exact .step e ih he
+
+/-- What the older designs' caches and installs keep (this design's caches:
+    `NI`), and that no older design's reinstall runs. -/
+def CS (E : Env) (s : State) : Prop :=
+  (∀ v p, E.curGen v = false → s.cache v = some p → p = E.bytes v) ∧
+  (∀ p, s.probe0 = some p → s.installing.isSome = true ∧ p ≤ s.dep) ∧
+  (∀ j, s.stageJs = some j → ∃ p, s.probe0 = some p ∧ p ≤ j ∧ j ≤ s.dep) ∧
+  (∀ w, s.stageWasm = some w → ∃ p, s.probe0 = some p ∧ p ≤ w ∧ w ≤ s.dep) ∧
+  (∀ w, s.rW = some w → E.curGen w = true) ∧
+  s.mixedBoot = false
+
+theorem cs_frame {E : Env} {s s' : State} (h : CS E s) (ec : s'.cache = s.cache)
+    (ep : s'.probe0 = s.probe0) (ej : s'.stageJs = s.stageJs) (ew : s'.stageWasm = s.stageWasm)
+    (ei : s'.installing = s.installing) (ed : s'.dep = s.dep) (em : s'.mixedBoot = s.mixedBoot)
+    (er : s'.rW = s.rW) : CS E s' := by
+  obtain ⟨a1, a2, a3, a4, a5, a6⟩ := h
+  refine ⟨?_, ?_, ?_, ?_, ?_, ?_⟩
+  · rw [ec]; exact a1
+  · rw [ep, ei, ed]; exact a2
+  · rw [ej, ep, ed]; exact a3
+  · rw [ew, ep, ed]; exact a4
+  · rw [er]; exact a5
+  · rw [em]; exact a6
+
+macro "c_fr" h:term : tactic => `(tactic| (exact cs_frame $h rfl rfl rfl rfl rfl rfl rfl rfl))
+
+theorem cs_clear {E : Env} {s : State} (h : CS E s) : CS E (clearInst s) := by
+  obtain ⟨a1, _, _, _, a5, a6⟩ := h
+  refine ⟨a1, ?_, ?_, ?_, a5, a6⟩ <;> intros <;> simp_all [clearInst]
+
+theorem cs_start {E : Env} {s : State} (h : CS E s) : CS E (startInst s) := by
+  obtain ⟨a1, _, _, _, a5, a6⟩ := h
+  refine ⟨a1, ?_, ?_, ?_, a5, a6⟩ <;> intros <;> simp_all [startInst, clearInst]
+
+theorem cs_updCheck {E : Env} {s : State} (h : CS E s) : CS E (updCheck s) := by
+  unfold updCheck; split
+  · exact cs_start h
+  · exact h
+
+theorem cs_installFailed {E : Env} {s : State} (h : CS E s) (v : Nat) : CS E (installFailed v s) := by
+  have h1 := cs_clear h
+  exact cs_frame h1 rfl rfl rfl rfl rfl rfl rfl rfl
+
+theorem cs_activate {E : Env} {s : State} (h : CS E s) (v : Nat) : CS E (activate v s) := by
+  obtain ⟨a1, a2, a3, a4, a5, a6⟩ := h
+  refine ⟨fun u p hg hp => ?_, a2, a3, a4, a5, a6⟩
+  simp only [activate, mapTabs_cache] at hp
+  split at hp
+  · exact a1 u p hg hp
+  · cases hp
+
+theorem cs_installed {E : Env} {s : State} (h : CS E s) (v : Nat) : CS E (installed v s) := by
+  have h1 : CS E (mapTabs (onInstalled v) (clearInst s)) :=
+    cs_frame (cs_clear h) rfl rfl rfl rfl rfl rfl rfl rfl
+  have hw : ∀ X : State, CS E X → CS E { X with waiting := some v } :=
+    fun X h => cs_frame h rfl rfl rfl rfl rfl rfl rfl rfl
+  have hq : ∀ X : State, CS E X → CS E { X with skipQ := some v } :=
+    fun X h => cs_frame h rfl rfl rfl rfl rfl rfl rfl rfl
+  unfold installed; simp only []
+  split <;> split <;> first
+    | exact cs_activate h1 v
+    | exact hw _ h1
+    | exact hq _ (cs_activate h1 v)
+    | exact hq _ (hw _ h1)
+
+/-- A bare load boots one build: a cache of this design is its manifest's
+    build (`NI`), an older one its worker's. -/
+theorem serve_build {E : Env} {s : State} (hn : NI E s) (h : CS E s) {c : Option Nat} {b : Nat}
+    {p : Nat × Nat} (hs : serve E s = (c, b, p)) : p = E.bytes b := by
+  unfold serve at hs
+  cases ha : s.active with
+  | none => simp only [ha] at hs; cases hs; rfl
+  | some v =>
+    cases hc : s.cache v with
+    | none => simp only [ha, hc] at hs; cases hs; rfl
+    | some q =>
+      simp only [ha, hc, Prod.mk.injEq] at hs
+      obtain ⟨-, hb, hp⟩ := hs
+      subst hp; subst hb
+      cases hg : E.curGen v
+      · have hn' : s.cman v = none := by
+          cases hm : s.cman v with
+          | none => rfl
+          | some m => have := hn.2.2.1 v m hm; rw [hg] at this; cases this
+        rw [hn']; exact h.1 v q hg hc
+      · obtain ⟨m, hm, hq⟩ := hn.1 v q hg hc
+        rw [hm]; exact hq
+
+theorem cs_boot {E : Env} {s : State} (h : CS E s) (t : Bool) (auto : Bool) {c : Option Nat} {b : Nat}
+    {p : Nat × Nat} (hp : p = E.bytes b) : CS E (bootFrom E t auto (c, b, p) s) := by
+  obtain ⟨a1, a2, a3, a4, a5, a6⟩ := h
+  unfold bootFrom
+  exact ⟨a1, a2, a3, a4, a5, by simp [a6, hp]⟩
+
+theorem cs_reload {E : Env} {s : State} (hn : NI E s) (h : CS E s) (t : Bool) (auto : Bool) :
+    CS E (reload E t auto s) := by
+  unfold reload
+  generalize hsv : serve E s = sv
+  obtain ⟨c, b, p⟩ := sv
+  exact cs_boot h t auto (serve_build hn h hsv)
+
+theorem cs_applyStart {E : Env} {s : State} (hn : NI E s) (h : CS E s) (t : Bool) : CS E (applyStart E t s) := by
+  unfold applyStart
+  let s1 := updT t (fun x => { x with appUpdating := true, modal := false }) { s with intents := s.intents + 1 }
+  have h1 : CS E s1 := by c_fr h
+  have hn1 : NI E s1 := by n_fr hn
+  simp only []
+  split
+  · exact cs_reload hn1 h1 t true
+  · split
+    · have := cs_updCheck h1; c_fr this
+    · c_fr h1
+
+theorem cs_step {E : Env} (hH : Injective E.H) {s : State} {e : Event} (h : CS E s) (hn : NI E s)
+    (he : en E s e = true) (hb : benign4 E s e = true) : CS E (step E s e) := by
+  have hs := h
+  obtain ⟨a1, a2, a3, a4, a5, a6⟩ := h
+  cases e with
+  | deploy =>
+    refine ⟨a1, fun p hp => ?_, fun j hj => ?_, fun w hw => ?_, a5, a6⟩
+    · have := a2 p hp; exact ⟨this.1, by simp only [step]; omega⟩
+    · obtain ⟨p, h1, h2, h3⟩ := a3 j hj; exact ⟨p, h1, h2, by simp only [step]; omega⟩
+    · obtain ⟨p, h1, h2, h3⟩ := a4 w hw; exact ⟨p, h1, h2, by simp only [step]; omega⟩
+  | browserCheck => exact cs_updCheck hs
+  | probeFirst =>
+    have hi : s.installing.isSome = true := by
+      simp only [en, oldInst, Bool.and_eq_true] at he
+      obtain ⟨h1, _⟩ := he; split at h1 <;> simp_all
+    have hp0 : s.probe0 = none := by
+      simp only [en, Bool.and_eq_true, Option.isNone_iff_eq_none] at he; exact he.2
+    refine ⟨a1, fun p hp => ?_, fun j hj => ?_, fun w hw => ?_, a5, a6⟩
+    · simp only [step, Option.some.injEq] at hp; subst hp; exact ⟨hi, Nat.le_refl _⟩
+    · obtain ⟨p, h1, _⟩ := a3 j hj; rw [hp0] at h1; cases h1
+    · obtain ⟨p, h1, _⟩ := a4 w hw; rw [hp0] at h1; cases h1
+  | fetchJs =>
+    have hp : s.probe0.isSome = true := by
+      simp only [en, Bool.and_eq_true] at he; exact he.1.2
+    obtain ⟨p, hp⟩ := Option.isSome_iff_exists.mp hp
+    refine ⟨a1, a2, fun j hj => ?_, a4, a5, a6⟩
+    simp only [step, Option.some.injEq] at hj; subst hj
+    exact ⟨p, hp, (a2 p hp).2, Nat.le_refl _⟩
+  | fetchWasm =>
+    have hp : s.probe0.isSome = true := by
+      simp only [en, Bool.and_eq_true] at he; exact he.1.2
+    obtain ⟨p, hp⟩ := Option.isSome_iff_exists.mp hp
+    refine ⟨a1, a2, a3, fun w hw => ?_, a5, a6⟩
+    simp only [step, Option.some.injEq] at hw; subst hw
+    exact ⟨p, hp, (a2 p hp).2, Nat.le_refl _⟩
+  | installEnd =>
+    simp only [step]
+    split
+    · rename_i v p j w hv hp hj hw
+      split
+      · rename_i hok
+        simp only [Bool.and_eq_true, beq_iff_eq] at hok
+        obtain ⟨⟨hjp, hdp⟩, hpv⟩ := hok
+        -- em.wasm's build is between the two probes, which agree
+        have ew : w = j := by
+          obtain ⟨p', hp', h1, h2⟩ := a4 w hw
+          rw [hp] at hp'; cases hp'
+          omega
+        apply cs_installed
+        refine ⟨fun u q _ hq => ?_, a2, a3, a4, a5, a6⟩
+        simp only [] at hq
+        split at hq
+        · rename_i hu; subst hu; cases hq; simp [Env.bytes, ew, hjp, hpv]
+        · exact a1 u q (by assumption) hq
+      · exact cs_installFailed hs v
+    · exact hs
+  | installFail =>
+    simp only [step]; split
+    · exact cs_installFailed hs _
+    · exact hs
+  | nManifest bb =>
+    simp only [step]; split
+    · split
+      · c_fr hs
+      · exact cs_installFailed hs _
+    · exact hs
+  | nLook a => simp only [step]; (repeat' split) <;> c_fr hs
+  | nNet a bb =>
+    simp only [step]; split
+    · split
+      · c_fr hs
+      · exact cs_installFailed (s := { s with dl := s.dl + 1 }) ⟨a1, a2, a3, a4, a5, a6⟩ _
+    · exact hs
+  | nCommit =>
+    simp only [step]; split
+    · rename_i v xj xw hv hj hw
+      refine ⟨fun u q hg hq => ?_, a2, a3, a4, a5, a6⟩
+      simp only [] at hq; split at hq
+      · rename_i hu; subst hu; cases hq
+        obtain ⟨v1, hv1, hj'⟩ := hn.2.2.2.2.1 .js xj hj
+        obtain ⟨v2, hv2, hw'⟩ := hn.2.2.2.2.1 .wasm xw hw
+        rw [hv] at hv1 hv2; cases hv1; cases hv2
+        -- an older design's install keeps only its own build's bytes too
+        simp [Env.bytes, hH _ _ hj', hH _ _ hw']
+      · exact a1 u q hg hq
+    · exact hs
+  | nCheck =>
+    simp only [step]; split
+    · split
+      · exact cs_installed hs _
+      · exact cs_installFailed hs _
+    · exact hs
+  | regResolve t =>
+    have h1 : CS E (updT t (fun x => { x with regd := true }) s) := by c_fr hs
+    simp only [step]; split
+    · unfold showBtn; c_fr h1
+    · split
+      · exact cs_start h1
+      · exact h1
+  | coreLoaded t => simp only [step]; split <;> c_fr hs
+  | instFire t =>
+    have h1 : CS E (updT t (fun x => { x with instQ := none }) s) := by c_fr hs
+    simp only [step]; split
+    · split
+      · unfold showBtn; c_fr h1
+      · exact h1
+    · exact h1
+  | skipDeliver =>
+    simp only [step]; split
+    · split
+      · exact cs_activate (s := { s with skipQ := none }) hs _
+      · exact hs
+    · exact hs
+  | ccFire t =>
+    let s1 := updT t (fun x => { x with ccQ := false }) s
+    have h1 : CS E s1 := by c_fr hs
+    have hn1 : NI E s1 := by n_fr hn
+    simp only [step]; split
+    · split
+      · exact cs_reload hn1 h1 t true
+      · split
+        · unfold showBtn; c_fr h1
+        · c_fr h1
+    · c_fr h1
+  | userReload t => exact cs_reload hn hs t false
+  | updClick t =>
+    simp only [step]; split
+    · c_fr hs
+    · exact cs_applyStart hn hs t
+  | confirm t => exact cs_applyStart hn hs t
+  | applyResume t => simp only [step]; split <;> c_fr hs
+  | resetFire t =>
+    simp only [step]
+    -- nothing cached: the page boots off the network, one build
+    apply cs_reload
+    · refine ⟨fun _ _ _ h => by simp at h, fun _ _ _ _ h => by simp at h, fun _ _ h => by simp at h,
+        fun _ h => by simp [clearInst] at h, fun _ _ h => by simp [clearInst] at h,
+        fun _ _ h => by simp [clearInst] at h, ?_, ?_, fun _ _ _ h => by simp at h, ?_⟩
+      · intro l x hx
+        have e1 : (redund s).rsLz = s.rsLz := by unfold redund; split <;> rfl
+        have e2 : (redund s).rMan = s.rMan := by unfold redund; split <;> rfl
+        simp only [clearInst, e1, e2] at hx ⊢; exact hn.2.2.2.2.2.2.1 l x hx
+      · show (redund s).lzBad = false
+        unfold redund; split <;> simpa using hn.2.2.2.2.2.2.2.1
+      · intro l w m hf
+        have e1 : (redund s).lzF = s.lzF := by unfold redund; split <;> rfl
+        have e2 : (redund s).dep = s.dep := by unfold redund; split <;> rfl
+        simp only [clearInst, e1, e2] at hf ⊢; exact hn.2.2.2.2.2.2.2.2.2 l w m hf
+    · have er : (redund s).rW = s.rW := by unfold redund; split <;> rfl
+      refine ⟨fun _ _ _ h => by simp at h, fun _ h => by simp [clearInst] at h,
+        fun _ h => by simp [clearInst] at h, fun _ h => by simp [clearInst] at h, ?_, ?_⟩
+      · intro w hw; simp only [clearInst, er] at hw; exact a5 w hw
+      · show (redund s).mixedBoot = false
+        unfold redund; split <;> simpa using a6
+  | checkStart t | chkCur t | chkLatest t | chkSw t | gameOn t | gameOff t | notNow t | newerStart t =>
+    simp only [step]; c_fr hs
+  | chkEval t =>
+    simp only [step]; split
+    · have h1 : CS E (updT t (fun x => { x with chk := none }) s) := by c_fr hs
+      split
+      · unfold showBtn; c_fr h1
+      · exact h1
+    · exact hs
+  | forceStart t =>
+    -- benign4: the worker running it is of this design (or there is none)
+    refine ⟨a1, a2, a3, a4, fun w hw => ?_, a6⟩
+    simp only [step, updT_rW] at hw
+    simp only [benign4] at hb
+    rw [hw] at hb; exact hb
+  | rProbe0 | rFetchJs | rFetchWasm | rMan _ | rVerify => simp only [step]; c_fr hs
+  | rNet a b =>
+    simp only [step]; split
+    · split
+      · cases a <;> c_fr hs
+      · exact cs_frame hs rfl rfl rfl rfl rfl rfl rfl rfl
+    · exact hs
+  | rFail => exact cs_frame hs rfl rfl rfl rfl rfl rfl rfl rfl
+  | rPutJs | rPutWasm =>
+    simp only [step]; split
+    · rename_i w hw
+      have := a5 w hw
+      simp only [this, ↓reduceIte]; c_fr hs
+    · exact hs
+  | forceDone t =>
+    exact cs_reload (s := updT t _ s) (by n_fr hn) (by c_fr hs) t true
+  | newerApply t =>
+    exact cs_applyStart (s := updT t _ s) (by n_fr hn) (by c_fr hs) t
+  | navQ t =>
+    -- benign4: no worker, or one of this design: "./" (serve) answers it
+    have hq : serveQ E s = serve E s := by
+      unfold serveQ; simp only [benign4] at hb
+      split
+      · rename_i v hv; rw [hv] at hb; simp [hb]
+      · rfl
+    simp only [step, hq]
+    generalize hsv : serve E s = sv
+    obtain ⟨c, b, p⟩ := sv
+    exact cs_boot hs t false (serve_build hn hs hsv)
+  | httpFill _ _ | httpEvict _ | lzOld _ _ | lzHit _ | lzStart _ | lzNet _ _ _ | nLookLz _ | rNetLz _ _ =>
+    simp only [step]; (repeat' split) <;> c_fr hs
+  | rCommit =>
+    simp only [step]; split
+    · rename_i w hw
+      refine ⟨fun u q hg hq => ?_, a2, a3, a4, a5, a6⟩
+      simp only [] at hq; split at hq
+      · rename_i hu; subst hu; rw [a5 _ hw] at hg; cases hg
+      · exact a1 u q hg hq
+    · exact hs
+
+
+theorem cs_reach4 {E : Env} (hH : Injective E.H) {s : State} (h : Reach4 E s) : CS E s := by
+  induction h with
+  | init => refine ⟨?_, ?_, ?_, ?_, ?_, ?_⟩ <;> intros <;> simp_all [init]
+  | fresh d => refine ⟨?_, ?_, ?_, ?_, ?_, ?_⟩ <;> intros <;> simp_all [initFresh, init]
+  | step e hr he hb ih => exact cs_step hH ih (ni_reachable hH (reach4_reachable hr)) he hb
+
+/-- **No page boots two builds.** With the digest injective, every page boots
+    exactly the bytes of the build it boots from (its cache's, or the
+    deployed one off the network), with this design's Force update in,
+    stopped wherever, and with query navigations: an older design's Force
+    update and its answer to a query navigation are the only steps left out. -/
+theorem no_mixed_boot {E : Env} (hH : Injective E.H) {s : State} (h : Reach4 E s) :
+    s.mixedBoot = false :=
+  (cs_reach4 hH h).2.2.2.2.2
+
+/-! ### Without any Force update, each cache is its own worker's build -/
+
+def benignC (E : Env) (s : State) (e : Event) : Bool :=
+  (match e with | .forceStart _ => false | _ => true) && benign4 E s e
+
+inductive Reach3 (E : Env) : State → Prop
+  | init : Reach3 E (init E)
+  | fresh (d : Nat) : Reach3 E (initFresh E d)
+  | step {s : State} (e : Event) : Reach3 E s → en E s e = true → benignC E s e = true → Reach3 E (step E s e)
+
+theorem reach3_reach4 {E : Env} {s : State} (h : Reach3 E s) : Reach4 E s := by
+  induction h with
+  | init => exact .init
+  | fresh d => exact .fresh d
+  | step e _ he hb ih =>
+    refine .step e ih he ?_
+    simp only [benignC, Bool.and_eq_true] at hb; exact hb.2
+
+/-- No Force update in flight, and every kept manifest is its cache's own
+    worker's build. -/
+def K3 (s : State) : Prop := (∀ t, (s.tabs t).force = false) ∧ (∀ v m, s.cman v = some m → m = v)
+
+theorem k3_frame {s s' : State} (h : K3 s) (ec : s'.cman = s.cman)
+    (ef : ∀ u, (s'.tabs u).force = (s.tabs u).force) : K3 s' :=
+  ⟨fun u => by rw [ef]; exact h.1 u, fun v m hm => h.2 v m (by rw [← ec]; exact hm)⟩
+
+macro "k_fr" h:term : tactic => `(tactic| ((refine k3_frame $h ?_ ?_) <;> (try rfl) <;>
+  (intro u; first | (simp [claim]; done) |
+    (simp only [updT_tabs, mapTabs_tabs, startInst_tabs, clearInst_tabs, rClear_tabs]; split <;> simp))))
+
+theorem k3_updCheck {s : State} (h : K3 s) : K3 (updCheck s) := by
+  unfold updCheck; split
+  · exact k3_frame h rfl (fun _ => rfl)
+  · exact h
+
+theorem k3_activate {s : State} (h : K3 s) (v : Nat) : K3 (activate v s) := by
+  refine ⟨fun u => by simp [claim, h.1 u], fun u m hm => ?_⟩
+  simp only [activate, mapTabs_cman] at hm; split at hm
+  · exact h.2 u m hm
+  · cases hm
+
+theorem k3_installed {s : State} (h : K3 s) (v : Nat) : K3 (installed v s) := by
+  have h1 : K3 (mapTabs (onInstalled v) (clearInst s)) := k3_frame h rfl (fun u => by simp)
+  unfold installed; simp only []
+  split <;> split <;> first
+    | exact k3_activate h1 v
+    | exact k3_frame h1 rfl (fun _ => rfl)
+    | exact k3_frame (k3_activate h1 v) rfl (fun _ => rfl)
+
+theorem k3_installFailed {s : State} (h : K3 s) (v : Nat) : K3 (installFailed v s) :=
+  k3_frame h rfl (fun u => by simp [installFailed])
+
+theorem k3_boot {E : Env} {s : State} (h : K3 s) (t : Bool) (auto : Bool) (sv : Option Nat × Nat × (Nat × Nat)) :
+    K3 (bootFrom E t auto sv s) := by
+  obtain ⟨c, b, p⟩ := sv; unfold bootFrom
+  refine k3_frame h rfl (fun u => ?_)
+  simp only [updT_tabs]; split
+  · cases c <;> exact (h.1 u).symm
+  · rfl
+
+theorem k3_applyStart {E : Env} {s : State} (h : K3 s) (t : Bool) : K3 (applyStart E t s) := by
+  unfold applyStart
+  have h1 : K3 (updT t (fun x => { x with appUpdating := true, modal := false })
+      { s with intents := s.intents + 1 }) := by k_fr h
+  simp only []
+  split
+  · exact k3_boot h1 t true _
+  · split
+    · have := k3_updCheck h1; k_fr this
+    · k_fr h1
+
+theorem k3_step {E : Env} {s : State} {e : Event} (h : K3 s) (he : en E s e = true)
+    (hb : benignC E s e = true) : K3 (step E s e) := by
+  have hf := h.1
+  cases e with
+  | forceStart t => simp [benignC] at hb
+  | rProbe0 | rFetchJs | rFetchWasm | rMan _ | rNet _ _ | rVerify | rPutJs | rPutWasm | rFail
+  | rNetLz _ _ | rCommit =>
+    simp [en, anyForce, hf] at he
+  | forceDone t => simp [en, hf] at he
+  | nCommit =>
+    simp only [step]; split
+    · rename_i v xj xw hv _ _
+      refine ⟨h.1, fun u m hm => ?_⟩
+      simp only [] at hm; split at hm
+      · rename_i hu; simp only [Bool.and_eq_true, decide_eq_true_eq] at hu
+        simp only [Option.some.injEq] at hm; rw [← hm, hu.1]
+      · exact h.2 u m hm
+    · exact h
+  | installEnd =>
+    simp only [step]; split
+    · split
+      · apply k3_installed; exact k3_frame h rfl (fun _ => rfl)
+      · exact k3_installFailed h _
+    · exact h
+  | installFail => simp only [step]; split
+                   · exact k3_installFailed h _
+                   · exact h
+  | nManifest b =>
+    simp only [step]; split
+    · split
+      · exact k3_frame h rfl (fun _ => rfl)
+      · exact k3_installFailed h _
+    · exact h
+  | nNet a b =>
+    simp only [step]; split
+    · split
+      · exact k3_frame h rfl (fun _ => rfl)
+      · exact k3_installFailed (s := { s with dl := s.dl + 1 }) h _
+    · exact h
+  | nCheck =>
+    simp only [step]; split
+    · split
+      · exact k3_installed h _
+      · exact k3_installFailed h _
+    · exact h
+  | browserCheck => exact k3_updCheck h
+  | regResolve t =>
+    have h1 : K3 (updT t (fun x => { x with regd := true }) s) := by k_fr h
+    simp only [step]; split
+    · unfold showBtn; k_fr h1
+    · split
+      · exact k3_frame h1 rfl (fun _ => rfl)
+      · exact h1
+  | instFire t =>
+    have h1 : K3 (updT t (fun x => { x with instQ := none }) s) := by k_fr h
+    simp only [step]; split
+    · split
+      · unfold showBtn; k_fr h1
+      · exact h1
+    · exact h1
+  | skipDeliver =>
+    simp only [step]; split
+    · split
+      · exact k3_activate (s := { s with skipQ := none }) h _
+      · exact h
+    · exact h
+  | ccFire t =>
+    have h1 : K3 (updT t (fun x => { x with ccQ := false }) s) := by k_fr h
+    simp only [step]; split
+    · split
+      · exact k3_boot h1 t true _
+      · split
+        · unfold showBtn; k_fr h1
+        · k_fr h1
+    · k_fr h1
+  | userReload t => exact k3_boot h t false _
+  | navQ t => exact k3_boot h t false _
+  | updClick t =>
+    simp only [step]; split
+    · k_fr h
+    · exact k3_applyStart h t
+  | confirm t => exact k3_applyStart h t
+  | newerApply t =>
+    have h1 : K3 (updT t (fun x => { x with newer := false }) s) := by k_fr h
+    exact k3_applyStart h1 t
+  | resetFire t =>
+    simp only [step]
+    apply k3_boot
+    refine ⟨fun u => ?_, fun _ _ hm => by simp at hm⟩
+    simp only [clearInst_tabs]; unfold redund; split
+    · simp [hf u]
+    · exact hf u
+  | chkEval t =>
+    simp only [step]; split
+    · have h1 : K3 (updT t (fun x => { x with chk := none }) s) := by k_fr h
+      split
+      · unfold showBtn; k_fr h1
+      · exact h1
+    · exact h
+  | _ => (try simp only [step]); (repeat' split) <;> k_fr h
+
+theorem k3_reach3 {E : Env} {s : State} (h : Reach3 E s) : K3 s := by
+  induction h with
+  | init =>
+    refine ⟨fun _ => rfl, fun v m hm => ?_⟩
+    simp only [init] at hm; split at hm
+    · rename_i hv; simp only [Bool.and_eq_true, decide_eq_true_eq] at hv
+      simp only [Option.some.injEq] at hm; rw [← hm, hv.1]
+    · cases hm
+  | fresh d => exact ⟨fun _ => rfl, fun _ _ hm => by simp [initFresh, init] at hm⟩
+  | step e _ he hb ih => exact k3_step ih he hb
+
+/-- **Consistency without Force update.** With the digest injective and no
+    Force update, every cache holds exactly its own worker's build, in every
+    interleaving of deploys with installs of all three designs, stale edges,
+    older caches, the HTTP cache and query navigations served by this
+    design. In particular so does the active worker's, the only one the fetch
+    handler serves. -/
+theorem cache_is_its_build {E : Env} (hH : Injective E.H) {s : State} (h : Reach3 E s) {v : Nat}
+    {p : Nat × Nat} (hc : s.cache v = some p) : p = E.bytes v := by
+  cases hg : E.curGen v
+  · exact (cs_reach4 hH (reach3_reach4 h)).1 v p hg hc
+  · obtain ⟨m, hm, hp, _⟩ := cache_is_one_build hH (reach4_reachable (reach3_reach4 h)) hg hc
+    rw [(k3_reach3 h).2 v m hm] at hp; exact hp
+
+/-- `no_mixed_boot`, without any Force update. -/
+theorem no_mixed_boot_without_force {E : Env} (hH : Injective E.H) {s : State} (h : Reach3 E s) :
+    s.mixedBoot = false :=
+  no_mixed_boot hH (reach3_reach4 h)
+
+
 
 /-! ### No double download
 
@@ -2954,6 +4222,10 @@ theorem net_only_after_a_miss {E : Env} {s : State} {e : Event} {a : Asset}
     · split at h
       · simp at h
       · exact Or.inl h
+  | navQ t =>
+    left; simp only [step] at h
+    generalize serveQ E s = sv at h; obtain ⟨c, bb, p⟩ := sv
+    simpa [bootFrom] using h
   | _ =>
     left
     simp only [step] at h

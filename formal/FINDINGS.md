@@ -81,7 +81,9 @@ Drive v3 and GIS documentation. The pass found three bugs and fixed them
   batch overwriting a pulled frame (`Thumbnails`). A delete racing the frame
   chain or a pull is no longer reachable, and a pull racing a rename is
   fixed (bfe5d5c5; see the re-audit at the end).
-- A force update's copy into the live cache is not atomic (`ServiceWorker`).
+- ~~A force update's copy into the live cache is not atomic (`ServiceWorker`).~~
+  Fixed on branch sw-limits: the commit goes into a cache of its own and a
+  pointer moves (see "Three limits" at the end).
 - The merge is still non-commutative on a same-millisecond rename tie and
   non-associative on `imp`.
 - Two devices uploading the same save at once can leave duplicate save files
@@ -326,7 +328,8 @@ Line numbers are `web/index.js` unless marked. No JS was changed.
 - **Netplay** (`Netplay`):
   - A manual-code retry closes its own channel.
   - A cancelled dial's `onerror` marks the server down.
-- **Service worker:** a force update serves a half-written cache.
+- **Service worker:** a force update serves a half-written cache (fixed on
+  sw-limits for this design's worker; older workers do it until they update).
 - **Merge algebra:** the merge is non-commutative on a same-millisecond
   rename tie and non-associative on `imp` across a delete (both very low).
 
@@ -886,3 +889,83 @@ Not modelled: the dev build (no manifest), `collect`'s digest groups ("./"
 and "./index.html" share one copy), the lookups' per-source awaits (one
 event here; a copy appearing or going mid-lookup is downloaded, never kept
 wrong), and the old design's Cache-handle orphaning.
+
+## Three limits (2026-11-10, branch sw-limits on 0b7f1b57, `WebState/ServiceWorker`)
+
+Three things 0b7f1b57's worker could not do, now done, and the model brought
+to a third design beside the two before it (`Env.M`, the first sw-limits
+build; `E5` is the rollout now due, a 0b7f1b57 worker updating to one of
+these):
+
+1. **A load with a query string** (`?2p`, `?gpu3d=1`) missed the cache (the
+   handler matched the exact URL): offline nothing loaded, and online
+   index.html came off the network beside the cache's scripts and em.wasm,
+   a mixed build right after a deploy (`legacy_query_navigation_mixes_builds`).
+   Every navigation to "./" or index.html, whatever its query, is now
+   answered with the live cache's "./". Proved: such a load is the bare load
+   step for step (`navigation_query_is_the_shell`), never reaches the
+   network while a cache is live (`navigation_never_net_while_live`), and the
+   consistency theorems cover it (`regress_query_navigation_after_deploy`).
+2. **The DS core** (nds.js, nds.wasm, gpu3d.js) was cached as the network
+   answered it, outside the manifest: every update threw it away (a DS
+   player downloaded it again) and nothing checked it, so a stale edge could
+   pair a new nds.js with an old nds.wasm (`legacy_lazy_unchecked`). The
+   manifest now lists its digests under `lazy`, apart from `files`, which
+   0b7f1b57's workers check against their ASSETS and still find exact. Each
+   cache keeps the manifest it was filled under; a DS core file is served
+   from the cache or downloaded (the bare URL, then once under a fresh one),
+   checked against that manifest, and kept only in the cache whose manifest
+   it matched. An install carries a held copy over when its digest is the new
+   build's and never downloads one. Proved: every DS core file served is its
+   cache's build (`lazy_served_is_its_build`), every one kept is
+   (`cache_is_one_build`), an install's DS core files are only held copies
+   (`lazy_never_downloaded`) and the lookup finds one whenever it is held
+   (`lookupLz_takes_held`); traces: a 0b7f1b57 worker's DS core carried over
+   with only index.js downloaded (`old_worker_ds_core_carried_over`), a wrong
+   nds.wasm refused and the next try kept (`regress_tampered_lazy_refused`),
+   Force update bringing the held DS core again
+   (`force_update_brings_held_ds_core_again`).
+3. **Force update** wrote into the live cache one put at a time. It now
+   commits into `dingbat-<v>-<nonce>` and moves a pointer (one put into the
+   `dingbat-live` cache, which the fetch handler reads the live cache's name
+   from, again when the worker starts cold); the old cache goes after a
+   10 s grace, during which a page booting from it keeps it (pinned by
+   client id). Proved, unconditionally for this design's caches (H
+   injective): each holds one build, its kept manifest's, whatever point the
+   worker is stopped at (`cache_is_one_build`; `rFail` is enabled throughout),
+   and nothing but the pointer's move changes a cache while one runs
+   (`force_leaves_live_cache_until_pointer`). `no_mixed_boot` drops "without
+   Force update": it holds with this design's Force update and query loads
+   in, leaving out only an older worker's Force update and its answer to a
+   query load. `bug_force_update_serves_half_written_cache` is
+   `regress_force_update_serves_half_written_cache`, with
+   `force_commit_switches_whole` and `force_kill_mid_commit_old_cache_serves`;
+   the older designs' behaviour stays as `legacy_*` traces (a browser runs it
+   until its worker updates).
+
+The old guarantees hold across all three designs: `no_forced_midgame`,
+`no_reload_without_a_click`, `shows_at_most_once`, `watching_has_install`,
+`cache_is_its_build` and `no_mixed_boot_without_force` (no Force update at
+all), `cache_holds_builds`, `force_stage_one_build`, `lookup_takes_held`,
+`net_only_after_a_miss`, `downloaded_once`, `stable_deploy_installs`, and the
+pairings (`v1_worker_force_then_cur_worker_reuses`,
+`old_page_force_under_cur_worker`, with the earlier ones).
+
+**Compatibility.** A 0b7f1b57 worker reads the new manifest's `files` and
+finds them exact, so its install and Force update still pass; it never reads
+`dingbat-live`, and deletes it with every other dingbat-* cache if it ever
+activates again (a rollback). The page protocol is unchanged (index.js is
+untouched), so a 0b7f1b57 page's Force update under either worker gets its
+"reinstalled" reply. A rollback to a manifest without `lazy` fails this
+design's Force update (ok:false: the page's full reset).
+
+**Not modelled / left open.** A page booting across an activation's claim
+(rather than a pointer move) still has its later requests served by the new
+worker, as in every design. A page from an older build under this design's
+worker (left by another tab's Update, mid-game) gets the current cache's DS
+core, which its own index.js may not match (as before). A worker stopped in
+the grace leaves the old cache until the next Force update or activation.
+The HTTP cache is a DS core source in sw.js (`heldCopy`) but not in the
+model. A tab still controlled by a worker whose caches another tab's full
+reset deleted gets its assets off the network (as before) and its DS core
+loads fail (no manifest to check them against) until it reloads.
