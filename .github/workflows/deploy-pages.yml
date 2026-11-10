@@ -86,8 +86,13 @@ jobs:
 
       - name: Minify web assets
         # sw.js is never minified: index.js's update checker regex-matches the
-        # literal `CACHE_VERSION = "..."` the stamp below writes.
-        # JS gets --minify-whitespace --minify-syntax only, never
+        # literal `CACHE_VERSION = "..."` the stamp below writes, and
+        # asset-manifest.mjs reads `const ASSETS = [...]` and `const LAZY =
+        # [...]`. It is only reprinted without its comments (esbuild, no
+        # minify flags: the same code, as written), which halves what every
+        # boot's update check fetches (7.4 -> 3.6 KB gzip); the check after
+        # makes sure all three are still there to find.
+        # The rest of the JS gets --minify-whitespace --minify-syntax only, never
         # --minify-identifiers: these are classic <script> files sharing one
         # global scope (createGlRenderer, SDPCodec, window.* hooks, `Module`)
         # and esbuild minifies each file independently. Filenames are kept:
@@ -109,6 +114,13 @@ jobs:
           for f in styles.css embed.css; do
             npx esbuild "web/$f" --minify --sourcemap --source-root=source/ \
               --outfile="web/$f" --allow-overwrite
+          done
+          npx esbuild web/sw.js --outfile=web/sw.js --allow-overwrite
+          for p in 'const CACHE_VERSION = "dev"' 'const ASSETS = \[' 'const LAZY = \['; do
+            grep -q "$p" web/sw.js || {
+              echo "::error::web/sw.js lost '$p' when its comments were stripped"
+              exit 1
+            }
           done
           # index.html's comments: a fifth of its gzip (26.3 -> 20.6 KB),
           # all of it ahead of the first paint. Its inline scripts hold no

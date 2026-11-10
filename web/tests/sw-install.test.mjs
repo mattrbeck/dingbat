@@ -58,11 +58,16 @@ const mkBuild = (version, from = null, changed = []) => {
 };
 
 class FakeCache {
-  constructor(name, server) { this.name = name; this.server = server; this.entries = new Map(); } // bare URL -> body text
+  constructor(name, server) {
+    this.name = name; this.server = server;
+    this.entries = new Map(); // bare URL -> body text
+    this.cacheControl = new Map(); // bare URL -> the Cache-Control it was kept with
+  }
   async put(req, res) {
     const body = await res.text();
     this.server?.beforePut?.(this.name, bare(req));
     this.entries.set(bare(req), body);
+    this.cacheControl.set(bare(req), res.headers.get("Cache-Control"));
     this.server?.onPut?.(this.name, bare(req));
   }
   // By URL, query and all (the worker puts bare URLs).
@@ -103,6 +108,7 @@ const setup = ({ worker, deployed = worker, http = {}, cachesHeld = {}, from = n
   const sandbox = {
     Request: class { constructor(url) { this.url = new URL(url, ORIGIN + "/").href; } },
     Response,
+    Headers,
     URL,
     location: new URL(ORIGIN + "/sw.js"),
     crypto: globalThis.crypto,
@@ -451,6 +457,19 @@ test("a quiet Force update downloads every asset again into a cache of its own, 
     assert.deepEqual([...sw.caches.keys()].sort(), [POINTER, sw.live()].sort(), "the old cache dropped");
     assert.equal(await sw.fetchAs("./", { nav: true }), B.files["index.html"]);
   });
+
+test("every copy the worker keeps says no-cache, installed or Force-updated", async () => {
+  // Kept with Pages' max-age, a copy the worker served let Chromium's reload
+  // after a Force update run the index.js the page had already run.
+  const sw = await activeOn(A);
+  const kept = (name) => sw.caches.get(name).cacheControl;
+  for (const u of ASSETS) assert.equal(kept(sw.live()).get(bare(u)), "no-cache", u);
+  sw.server.deployed = B;
+  const r = sw.reinstallRun(34567);
+  assert.deepEqual(await r.reply, { type: "reinstalled", ok: true });
+  await r.settled;
+  for (const u of ASSETS) assert.equal(kept(sw.live()).get(bare(u)), "no-cache", u + ", Force-updated");
+});
 
 test("Force update never writes into the live cache: a page loading mid-commit sees one build " +
      "(regress_force_update_serves_half_written_cache)", async () => {

@@ -176,9 +176,23 @@ const collect = async (m, bust, reuse) => {
   return got;
 };
 
+// A copy as this worker keeps it: its bytes and type, saying no-cache. The
+// copy came with Pages' ten-minute max-age, and a page's memory cache honours
+// that for a response a worker served it: after a Force update (the same
+// worker still in charge) Chromium's reload ran the index.js the page before
+// it had run, though the worker was serving the new one. Told no-cache, the
+// page asks again on every load, and the worker answers from this cache
+// as before.
+const asked = (/** @type {Response} */ res) => {
+  const headers = new Headers(res.headers);
+  headers.set("Cache-Control", "no-cache");
+  return new Response(res.body, { status: res.status, statusText: res.statusText, headers });
+};
+
 // The responses into the cache `name` (with the manifest they were checked
-// against, when there is one), then a check that the cache under that name
-// holds every asset: another worker's activation deletes every dingbat-*
+// against, when there is one), each kept as `asked` makes it, then a check
+// that the cache under that name holds every asset: another worker's
+// activation deletes every dingbat-*
 // cache but its own, and one landing mid-put leaves the puts in a cache no
 // name reaches any more. The DS core's files are optional: one missing is
 // fetched (and checked) when a DS game starts. The cache starts empty: what a
@@ -187,7 +201,7 @@ const collect = async (m, bust, reuse) => {
 const commit = async (name, got, m) => {
   await caches.delete(name);
   const cache = await caches.open(name);
-  const puts = [...got].map(([u, res]) => cache.put(new Request(u), res));
+  const puts = [...got].map(([u, res]) => cache.put(new Request(u), asked(res)));
   if (m) puts.push(cache.put(new Request(MANIFEST), manifestResponse(m)));
   await Promise.all(puts);
   const check = await caches.open(name);
@@ -368,7 +382,7 @@ const lazyFrom = async (/** @type {FetchEvent} */ event, u, name) => {
     // Its own response, not the download's: under the retry's URL a module
     // would resolve against ?v=.
     const type = res.headers.get("Content-Type") || TYPE_BY_EXT[u.split(".").pop()] || "";
-    const out = new Response(body, { headers: { "Content-Type": type } });
+    const out = new Response(body, { headers: { "Content-Type": type, "Cache-Control": "no-cache" } });
     event.waitUntil(cache.put(new Request(u), out.clone()).catch(() => {}));
     return out;
   }

@@ -525,13 +525,14 @@ for (const engine of ENGINES) {
         await stage(WEB, dir, "n4", "N5");
         const f0 = site.log.length;
         await reloadedBy(page, () => { forceUpdate(); });
-        // What the worker now serves is the new build. Chromium's reload can
-        // still run the index.js the page before it ran, out of its memory
-        // cache: the same worker served it, under ten minutes ago, with
-        // Pages' max-age=600 (origin/main's sw.js does the same).
+        // What the worker now serves is the new build, and the reloaded page
+        // runs it, Chromium included: the worker keeps its copies no-cache
+        // (sw.js `asked`), so the page's memory cache does not hand back the
+        // index.js it ran before, which the same worker had served it under
+        // Pages' max-age=600.
         assert.ok(await page.evaluate(async () =>
           (await (await fetch("index.js")).text()).includes('var __build = "N5"')));
-        if (engine !== "chromium") assert.equal(await letter(page), "N5");
+        assert.equal(await letter(page), "N5");
         const fg = assetGets(site, f0).filter((e) => /^\?v=\d+$/.test(e.query));
         const ft = tally(fg);
         assert.deepEqual(Object.entries(ft).filter(([, n]) => n > 1), [], JSON.stringify(ft));

@@ -969,3 +969,14 @@ The HTTP cache is a DS core source in sw.js (`heldCopy`) but not in the
 model. A tab still controlled by a worker whose caches another tab's full
 reset deleted gets its assets off the network (as before) and its DS core
 loads fail (no manifest to check them against) until it reloads.
+
+**Headers, outside the model.** The model's caches hold bytes; a response's
+headers are not in it. One mattered: the copies kept Pages' max-age=600, and
+Chromium's memory cache honours it for a response a worker served, so the
+reload after a Force update (the same worker still in charge) ran the
+index.js the page had already run while the worker served the new one
+(reproduced 3/3 in Chromium; the e2e held that one assertion back for
+Chromium). The worker now keeps every copy, and every DS core file it serves,
+as `Cache-Control: no-cache` (sw.js `asked`): the bytes and where they live
+are unchanged, so every theorem here stands as stated, and the e2e asserts
+the reloaded page runs the new build in every engine.
