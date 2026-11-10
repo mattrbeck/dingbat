@@ -67,6 +67,10 @@ declare var SaveImport: {
 declare var module: { exports: unknown } | undefined;
 
 interface Window {
+  // index.html's early Add a game / drop handlers <-> index.js: a file
+  // picked or dropped before index.js ran is held here, then handed over.
+  dingbatEarlyFile?: File | null;
+  dingbatTakeFile?: (file: File) => void;
   // netplay.js <-> index.js rollback/link contracts
   enterRollbackMode?: (...args: any[]) => any;
   leaveRollbackMode?: (...args: any[]) => any;
