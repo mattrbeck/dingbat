@@ -241,11 +241,11 @@ const fullResetReload = async () => {
 // would only be lost to the reload. Update shows nothing for its first half
 // second, as it is nearly always ready before it is tapped and a card gone
 // as soon as it shows is only a flicker; Force update shows at once, being a
-// download of the whole app. The bat flaps on the card, the bar follows the
-// worker's progress messages (sw.js tracker), and the reload waits for the
-// wingbeat in flight to land (reloadAfterUpdate).
+// download of the whole app. The logo flaps from the first instant of
+// either (the home screen's, and the bar's when a game has it), the card's
+// bar follows the worker's progress messages (sw.js tracker), and the
+// reload waits for the wingbeat in flight to land (reloadAfterUpdate).
 const updatingEl = document.getElementById("updating");
-const updatingFlap = /** @type {HTMLElement | null} */ (updatingEl?.querySelector(".updating-flap") ?? null);
 const updatingFill = /** @type {HTMLElement | null} */ (updatingEl?.querySelector(".updating-bar span") ?? null);
 const updatingPct = updatingEl?.querySelector(".updating-pct") ?? null;
 const UPDATING_CARD_MS = 500;
@@ -270,6 +270,23 @@ const showUpdatingCard = () => {
   clearTimeout(updatingTimer);
   updatingEl?.classList.add("shown");
 };
+// The library page's bat flapping (styles.css #home-brand.flapping: drawn
+// over the logo, out of the flow, so the page does not move). Its frame 0
+// is the still, so it starts and stops where the logo rests. flap.png is in
+// the page already (the clip's progress panel loads it), so it draws at once.
+const homeBrandEl = document.getElementById("home-brand");
+const flapLogos = (/** @type {boolean} */ on) => {
+  homeBrandEl?.classList.toggle("flapping", on);
+};
+// What is left of the wingbeat in flight, when the bat is on screen (a game
+// loaded hides the brand: nobody is watching it then): 0 with none.
+const flapLeftMs = () => {
+  if (!homeBrandEl?.classList.contains("flapping") || !homeBrandEl.getClientRects?.().length) return 0;
+  const anim = homeBrandEl.getAnimations?.({ subtree: true })
+    .find((a) => /** @type {CSSAnimation} */ (a).animationName === "net-transfer-flap");
+  const t = typeof anim?.currentTime === "number" ? anim.currentTime % FLAP_BEAT_MS : 0;
+  return t > 0 ? FLAP_BEAT_MS - t : 0;
+};
 const beginUpdating = (/** @type {"update" | "force"} */ kind) => {
   if (!updatingEl) return;
   updatingKind = kind;
@@ -278,6 +295,8 @@ const beginUpdating = (/** @type {"update" | "force"} */ kind) => {
   if (updatingFill) updatingFill.style.transform = "";
   if (updatingPct) updatingPct.textContent = "";
   setUpdatingText(kind);
+  clearTimeout(logoSettleTimer); // Try Again while the last beat lands: it flaps on
+  flapLogos(true);
   // Nothing behind the shield keeps the keyboard either.
   /** @type {HTMLElement | null} */ (document.activeElement)?.blur?.();
   clearTimeout(updatingTimer);
@@ -287,6 +306,7 @@ const beginUpdating = (/** @type {"update" | "force"} */ kind) => {
 const endUpdating = () => {
   clearTimeout(updatingTimer);
   updatingKind = null;
+  settleLogos();
   if (!updatingEl) return;
   updatingEl.classList.remove("shown", "failed", "known");
   updatingEl.hidden = true;
@@ -298,23 +318,31 @@ const updatingProgress = (done, total) => {
   if (updatingFill) updatingFill.style.transform = "scaleX(" + f + ")";
   if (updatingPct) updatingPct.textContent = Math.floor(f * 100) + "%";
 };
+// The bat comes to rest once the wingbeat in flight has landed (a Force
+// update that failed, or the card closed), never cut off mid-wing; unless an
+// update has started again by then.
+let logoSettleTimer = 0;
+const settleLogos = () => {
+  clearTimeout(logoSettleTimer);
+  logoSettleTimer = setTimeout(() => { if (!updatingKind || updatingEl?.classList.contains("failed")) flapLogos(false); },
+                           flapLeftMs());
+};
 const failUpdating = () => {
   if (!updatingEl) return;
   setUpdatingText("failed");
   updatingEl.classList.add("failed");
   showUpdatingCard();
+  settleLogos();
   document.getElementById("updating-retry")?.focus();
 };
-// The reload every update ends in. With the card up, once the wingbeat in
-// flight has landed (the bat at rest, as the reloaded page draws it), so it
-// never vanishes mid-wing; with no card yet (a quick update), or no
-// animation (reduced motion), at once. A card not shown yet stays unshown.
+// The reload every update ends in, once the logo's wingbeat in flight has
+// landed (the bat at rest, as the reloaded page draws it): a flap is never
+// cut off mid-wing. None in flight (reduced motion, or no logo on screen):
+// at once. A card not shown yet stays unshown.
 const reloadAfterUpdate = () => {
   clearTimeout(updatingTimer);
-  const shown = !!updatingEl?.classList.contains("shown");
-  const anim = shown ? updatingFlap?.getAnimations?.()[0] : null;
-  const t = typeof anim?.currentTime === "number" ? anim.currentTime % FLAP_BEAT_MS : 0;
-  if (t > 0) setTimeout(() => location.reload(), FLAP_BEAT_MS - t);
+  const left = flapLeftMs();
+  if (left > 0) setTimeout(() => location.reload(), left);
   else location.reload();
 };
 // The worker's progress: an install's for Update, a Force update's own.

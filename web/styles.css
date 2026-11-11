@@ -3253,6 +3253,37 @@ body.home-card #home-brand {
   margin-bottom: 14px;
 }
 
+/* An update on its way (index.js, "Updating"): the bat flaps. Drawn over
+   the logo by the brand's ::before, out of the flow, so nothing on the page
+   moves (the logo itself only hides): flap.png's frames are 52 x 28 art px
+   with the still at (6, 2), so at 2x the frame box sits 12 px left of and
+   4 px above the logo, which text-align centres in the brand and which is
+   its first line. Frame 0 is the still exactly; the first beat steps by as
+   on the link screen (net-transfer-flap). */
+#home-brand.flapping {
+  position: relative;
+}
+#home-brand.flapping #home-logo {
+  visibility: hidden;
+}
+#home-brand.flapping::before {
+  content: "";
+  position: absolute;
+  top: -4px;
+  left: calc(50% - 54px);
+  width: 104px;
+  height: 56px;
+  background: url("flap.png") 0 0 / 3224px 56px no-repeat;
+  image-rendering: pixelated;
+  pointer-events: none;
+  animation: net-transfer-flap 667ms steps(16) infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  #home-brand.flapping::before {
+    animation: none;
+  }
+}
+
 #home-brand h1 {
   margin: 0;
   font-size: 30px;
@@ -4455,25 +4486,24 @@ body.game-menu-open #toast {
 /* --- Updating (index.js, "Updating") ---
    The shield is there from the tap, invisible; .shown fades in the dim and
    the card. Above everything, toasts included: nothing else can be used
-   until the reload. The bat is flap.png's first wingbeat (frames 0-15, as
-   the clip's progress panel flaps it); .failed rests it on frame 0. */
+   until the reload. What says it is working is the logo itself, flapping
+   (#home-logo.flapping): so the card sits low, clear of the brand, and the
+   dim is light enough to leave the bat in plain view. */
 #updating {
   position: fixed;
   inset: 0;
   z-index: 900;
   display: grid;
-  place-items: center;
-  padding: 16px;
+  place-items: end center;
+  padding: 16px 16px max(14vh, calc(24px + var(--safe-b, 0px)));
   background: rgba(var(--stage-rgb), 0);
   transition: background 0.2s ease-out;
 }
 #updating[hidden] {
   display: none;
 }
-/* Deep enough that the home screen's own bat, which the card often sits
-   over, reads as background to the one flapping on the card. */
 #updating.shown {
-  background: rgba(var(--stage-rgb), 0.7);
+  background: rgba(var(--stage-rgb), 0.3);
 }
 .updating-card {
   width: min(300px, 100%);
@@ -4494,18 +4524,6 @@ body.game-menu-open #toast {
 #updating.shown .updating-card {
   opacity: 1;
   transform: none;
-}
-.updating-flap {
-  display: block;
-  width: 104px;
-  height: 56px;
-  margin: 0 auto 4px;
-  object-fit: cover;
-  object-position: 0 0;
-  image-rendering: pixelated;
-}
-#updating.shown:not(.failed) .updating-flap {
-  animation: clip-flap 667ms steps(16, jump-end) infinite;
 }
 .updating-head {
   display: flex;
@@ -4573,9 +4591,6 @@ body.game-menu-open #toast {
   .updating-card,
   .updating-bar span {
     transition: none;
-  }
-  #updating.shown:not(.failed) .updating-flap {
-    animation: none;
   }
   #updating:not(.known) .updating-bar span {
     animation: none;
