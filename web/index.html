@@ -738,13 +738,12 @@
 
     <!-- An update on its way to the reload (index.js, "Updating"). From the
          tap it holds every other tap (a game started now would be lost to
-         the reload) while showing nothing; .shown dims the page and brings
-         the card, at once for Force update, after half a second for Update
-         (usually done before then). .failed is a Force update that could
-         not finish. -->
+         the reload) while the logo flaps; .shown lightly dims the page and
+         brings the card up low on the screen, under the bat, at once for
+         Force update, after half a second for Update (usually done before
+         then). .failed is a Force update that could not finish. -->
     <div id="updating" hidden>
       <div class="updating-card" role="status" aria-live="polite" aria-labelledby="updating-title" aria-describedby="updating-body">
-        <img src="flap.png" alt="" class="updating-flap" width="104" height="56" />
         <div class="updating-head">
           <span id="updating-title"></span>
           <span class="updating-pct" aria-hidden="true"></span>
