@@ -736,6 +736,28 @@
       <div id="toast" role="status" aria-live="polite" aria-atomic="false"></div>
     </main>
 
+    <!-- An update on its way to the reload (index.js, "Updating"). From the
+         tap it holds every other tap (a game started now would be lost to
+         the reload) while showing nothing; .shown dims the page and brings
+         the card, at once for Force update, after half a second for Update
+         (usually done before then). .failed is a Force update that could
+         not finish. -->
+    <div id="updating" hidden>
+      <div class="updating-card" role="status" aria-live="polite" aria-labelledby="updating-title" aria-describedby="updating-body">
+        <img src="flap.png" alt="" class="updating-flap" width="104" height="56" />
+        <div class="updating-head">
+          <span id="updating-title"></span>
+          <span class="updating-pct" aria-hidden="true"></span>
+        </div>
+        <p id="updating-body"></p>
+        <div class="updating-bar" aria-hidden="true"><span></span></div>
+        <div class="updating-actions">
+          <button type="button" class="button" id="updating-close">Close</button>
+          <button type="button" class="button button-primary" id="updating-retry">Try Again</button>
+        </div>
+      </div>
+    </div>
+
     <!-- =========================== Modals =========================== -->
     <div id="update-modal" class="modal-overlay">
       <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title-0">
