@@ -15,7 +15,7 @@
 // reproducible.
 
 import { createHash } from "node:crypto";
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -41,7 +41,13 @@ export const buildManifest = (dir) => {
   const sw = readFileSync(join(dir, "sw.js"), "utf8");
   const digests = (urls) =>
     Object.fromEntries(urls.map((u) => [u, sha256(readFileSync(join(dir, fileFor(u))))]));
-  return { version: swVersion(sw), files: digests(swAssets(sw)), lazy: digests(swLazy(sw)) };
+  // Each file's size in bytes (decoded, as the worker reads it): what an
+  // install or a Force update has to come is the sum of these, for the
+  // progress it shows the page. Workers from before it ignore the key.
+  const sizes = (urls) =>
+    Object.fromEntries(urls.map((u) => [u, statSync(join(dir, fileFor(u))).size]));
+  return { version: swVersion(sw), files: digests(swAssets(sw)), lazy: digests(swLazy(sw)),
+           sizes: sizes([...swAssets(sw), ...swLazy(sw)]) };
 };
 
 export const writeManifest = (dir) => {

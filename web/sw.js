@@ -132,6 +132,55 @@ const heldCopy = async (urls, want, names) => {
   return null;
 };
 
+// How far an install or a Force update has got, for the page's updating
+// card (index.js, "Updating"): bytes in hand of the bytes to come, from the
+// manifest's sizes. A held copy counts at once, a download as its bytes
+// arrive. Posted to every open page at most every PROGRESS_MS, and once at
+// the end; a manifest without sizes gives total 0 (the card shows motion,
+// not a figure). Nothing here touches a cache.
+const PROGRESS_MS = 150;
+const tell = (/** @type {object} */ msg) => {
+  const clients = /** @type {ServiceWorkerGlobalScope} */ (/** @type {*} */ (self)).clients;
+  if (!clients) return;
+  clients.matchAll({ type: "window", includeUncontrolled: true })
+    .then((cs) => { for (const c of cs) c.postMessage(msg); })
+    .catch(() => {});
+};
+const tracker = (/** @type {string} */ of, /** @type {number} */ total) => {
+  let done = 0;
+  let last = 0;
+  const post = (end) => {
+    const now = Date.now();
+    if (!end && now - last < PROGRESS_MS) return;
+    last = now;
+    tell({ type: "progress", of, version: CACHE_VERSION, done: end ? total : Math.min(done, total), total });
+  };
+  return {
+    add: (/** @type {number} */ n) => { done += n; post(false); },
+    end: () => post(true),
+  };
+};
+// The bytes one build's assets come to: one file per digest ("./" and
+// "./index.html" are one), as `collect` fetches them.
+const assetBytes = (m) => {
+  const seen = new Map();
+  for (const u of ASSETS) seen.set(m.files[u], m.sizes?.[u] || 0);
+  return [...seen.values()].reduce((a, b) => a + b, 0);
+};
+// A download's bytes into `track` as they arrive, read off a clone (the
+// response itself goes on to be checked and kept).
+const countInto = (/** @type {Response} */ res, track) => {
+  const reader = res.clone().body?.getReader();
+  if (!reader) return;
+  (async () => {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      track.add(value.byteLength);
+    }
+  })().catch(() => {});
+};
+
 // The manifest `m` itself, for the cache that will hold its build.
 const manifestResponse = (m) =>
   new Response(JSON.stringify(m), { headers: { "Content-Type": "application/json" } });
@@ -145,7 +194,7 @@ const manifestResponse = (m) =>
 // held with this build's digest (an older build's cache keeps the ones it
 // fetched): never a download, since a player who never starts a DS game must
 // not pay for one.
-const collect = async (m, bust, reuse) => {
+const collect = async (m, bust, reuse, track = null) => {
   const names = reuse ? await assetCaches() : [];
   /** @type {Map<string, string[]>} */
   const byDigest = new Map();
@@ -158,9 +207,11 @@ const collect = async (m, bust, reuse) => {
   const got = new Map();
   await Promise.all([...byDigest].map(async ([d, urls]) => {
     let res = reuse ? await heldCopy(urls, d, names) : null;
+    if (res) track?.add(m.sizes?.[urls[0]] || 0);
     if (!res) {
       const net = await fetchFresh(urls[urls.length - 1], bust);
       if (!net.ok) throw new Error("asset fetch failed: " + urls[0] + " " + net.status);
+      if (track) countInto(net, track);
       res = await verified(net, d);
       if (!res) throw new Error("not this build's bytes: " + urls[0]);
     }
@@ -248,7 +299,10 @@ const install = async () => {
     await commit(CACHE_NAME, await collectDev(CACHE_VERSION), null);
   } else {
     const m = await fetchManifest(CACHE_VERSION);
-    await commit(CACHE_NAME, await collect(m, CACHE_VERSION, true), m);
+    const track = tracker("install", assetBytes(m));
+    const got = await collect(m, CACHE_VERSION, true, track);
+    track.end();
+    await commit(CACHE_NAME, got, m);
   }
   await setLive(CACHE_NAME);
 };
@@ -314,14 +368,21 @@ const dropLater = async (/** @type {string} */ prev) => {
 const reinstall = async (nonce) => {
   const prev = await liveName();
   const m = CACHE_VERSION === "dev" ? null : await fetchManifest();
-  const got = m ? await collect(m, nonce, false) : await collectDev(nonce);
+  // The DS core files the live cache holds come again too: they count.
+  const lazyHeld = m ? (await Promise.all(LAZY.map(async (u) =>
+    (await caches.match(u, { cacheName: prev }).catch(() => undefined)) ? u : null))).filter(Boolean) : [];
+  const track = tracker("reinstall",
+    m ? assetBytes(m) + lazyHeld.reduce((n, u) => n + (m.sizes?.[u] || 0), 0) : 0);
+  const got = m ? await collect(m, nonce, false, track) : await collectDev(nonce);
   if (m) {
-    await Promise.all(LAZY.map(async (u) => {
-      if (!(await caches.match(u, { cacheName: prev }).catch(() => undefined))) return;
-      const res = await verified(await fetchFresh(u, nonce).catch(() => null), m.lazy[u]);
+    await Promise.all(lazyHeld.map(async (u) => {
+      const net = await fetchFresh(u, nonce).catch(() => null);
+      if (net?.ok) countInto(net, track);
+      const res = await verified(net, m.lazy[u]);
       if (res) got.set(u, res);
     }));
   }
+  track.end();
   const name = CACHE_NAME + "-" + nonce + "-" + Math.random().toString(36).slice(2, 8);
   await dropCaches((k) => (k === CACHE_NAME || k.startsWith(CACHE_NAME + "-")) && k !== prev);
   await commit(name, got, m);

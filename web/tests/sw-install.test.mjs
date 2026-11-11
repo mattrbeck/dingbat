@@ -53,7 +53,8 @@ const mkBuild = (version, from = null, changed = []) => {
       : from && !changed.includes(f) ? from.files[f] : `${version}:${f}`;
   }
   const digests = (urls) => Object.fromEntries(urls.map((u) => [u, sha256(enc.encode(files[fileFor(u)]))]));
-  const manifest = { version, files: digests(ASSETS), lazy: digests(LAZY) };
+  const sizes = Object.fromEntries([...ASSETS, ...LAZY].map((u) => [u, enc.encode(files[fileFor(u)]).length]));
+  const manifest = { version, files: digests(ASSETS), lazy: digests(LAZY), sizes };
   return { version, files, manifest };
 };
 
@@ -83,6 +84,8 @@ class FakeCache {
 // The storage and the server outlive a worker: setup({..., from: sw}) starts
 // another worker over them (a cold start, or the next build's).
 const setup = ({ worker, deployed = worker, http = {}, cachesHeld = {}, from = null }) => {
+  /** @type {object[]} */
+  const posted = []; // every message the worker posted its pages
   const server = from?.server || {
     deployed,      // the build the origin serves
     net: [],       // every network fetch the worker made, as "path?query"
@@ -150,7 +153,11 @@ const setup = ({ worker, deployed = worker, http = {}, cachesHeld = {}, from = n
     },
     addEventListener: (type, fn) => { listeners[type] = fn; },
     skipWaiting() {},
-    clients: { claim() {} },
+    // One open page, keeping every message the worker posts it (progress).
+    clients: {
+      claim() {},
+      matchAll: async () => [{ postMessage: (m) => posted.push({ ...m }) }],
+    },
     Date, Math, Promise, Error, TypeError, Map, Object, Uint8Array, JSON, String,
   };
   sandbox.self = sandbox;
@@ -205,7 +212,7 @@ const setup = ({ worker, deployed = worker, http = {}, cachesHeld = {}, from = n
   // The assets the worker fetched from the network, bare.
   const downloads = () => server.net.map(bare).filter((p) => p !== MANIFEST);
   return { server, caches, httpCache, install, activate, reinstall, reinstallRun, fetchAs, live,
-           contents, isBuild, downloads, body, name: "dingbat-" + worker.version };
+           contents, isBuild, downloads, body, posted, name: "dingbat-" + worker.version };
 };
 
 const A = mkBuild("aaaaaaa");
@@ -456,6 +463,49 @@ test("a quiet Force update downloads every asset again into a cache of its own, 
               "no held copy reused");
     assert.deepEqual([...sw.caches.keys()].sort(), [POINTER, sw.live()].sort(), "the old cache dropped");
     assert.equal(await sw.fetchAs("./", { nav: true }), B.files["index.html"]);
+  });
+
+// The bytes a build's assets come to, one file per digest (index.js assetBytes).
+const bytesOf = (b) => {
+  const seen = new Map();
+  for (const u of ASSETS) seen.set(b.manifest.files[u], b.manifest.sizes[u]);
+  return [...seen.values()].reduce((x, y) => x + y, 0);
+};
+const settle = () => new Promise((r) => setTimeout(r, 0));
+
+test("an install tells the open pages how far it has got, ending at the whole build", async () => {
+  const sw = setup({ worker: B, cachesHeld: { "dingbat-aaaaaaa": cacheOf(A) } });
+  assert.equal(await sw.install(), "installed");
+  await settle();
+  const p = sw.posted.filter((m) => m.type === "progress");
+  assert.ok(p.length >= 1, "at least the end");
+  assert.ok(p.every((m) => m.of === "install" && m.version === B.version && m.total === bytesOf(B)));
+  assert.ok(p.every((m, i) => i === 0 || m.done >= p[i - 1].done), "never backwards");
+  assert.equal(p.at(-1).done, p.at(-1).total, "the end is the whole");
+});
+
+test("a Force update tells the pages its own progress, the DS core it brings again included", async () => {
+  const sw = await activeOn(A);
+  await sw.fetchAs("./nds/nds.js"); // a DS game has run: the live cache holds that file
+  sw.posted.length = 0;
+  sw.server.deployed = B;
+  const r = sw.reinstallRun(45678);
+  assert.deepEqual(await r.reply, { type: "reinstalled", ok: true });
+  await r.settled;
+  await settle();
+  const p = sw.posted.filter((m) => m.type === "progress");
+  assert.ok(p.length >= 1);
+  assert.ok(p.every((m) => m.of === "reinstall" && m.total === bytesOf(B) + B.manifest.sizes["./nds/nds.js"]));
+  assert.equal(p.at(-1).done, p.at(-1).total);
+});
+
+test("a manifest without sizes (one from before them) installs as before, its progress without a total",
+  async () => {
+    const old = { ...B, manifest: { ...B.manifest, sizes: undefined } };
+    const sw = setup({ worker: old, cachesHeld: { "dingbat-aaaaaaa": cacheOf(A) } });
+    assert.equal(await sw.install(), "installed");
+    await settle();
+    assert.ok(sw.posted.filter((m) => m.type === "progress").every((m) => m.total === 0));
   });
 
 test("every copy the worker keeps says no-cache, installed or Force-updated", async () => {

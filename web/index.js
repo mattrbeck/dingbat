@@ -133,7 +133,9 @@ if ("serviceWorker" in navigator) {
     if ((hadController || appUpdating) && !refreshing) {
       if (appUpdating || !(currentRomName || linkMode || rollbackMode || netActive())) {
         refreshing = true;
-        location.reload();
+        // This tab's own update lands its bat's wingbeat first.
+        if (appUpdating) reloadAfterUpdate();
+        else location.reload();
       } else {
         updateActivated = true;
         showUpdateButton();
@@ -230,8 +232,101 @@ const fullResetReload = async () => {
     let regs = await navigator.serviceWorker.getRegistrations();
     await Promise.all(regs.map((r) => r.unregister()));
   }
-  location.reload();
+  reloadAfterUpdate();
 };
+
+// --- Updating ---
+// An update on its way to its reload (index.html #updating). Every other tap
+// is held from the moment it starts, invisibly: a game started meanwhile
+// would only be lost to the reload. Update shows nothing for its first half
+// second, as it is nearly always ready before it is tapped and a card gone
+// as soon as it shows is only a flicker; Force update shows at once, being a
+// download of the whole app. The bat flaps on the card, the bar follows the
+// worker's progress messages (sw.js tracker), and the reload waits for the
+// wingbeat in flight to land (reloadAfterUpdate).
+const updatingEl = document.getElementById("updating");
+const updatingFlap = /** @type {HTMLElement | null} */ (updatingEl?.querySelector(".updating-flap") ?? null);
+const updatingFill = /** @type {HTMLElement | null} */ (updatingEl?.querySelector(".updating-bar span") ?? null);
+const updatingPct = updatingEl?.querySelector(".updating-pct") ?? null;
+const UPDATING_CARD_MS = 500;
+const FLAP_BEAT_MS = 667; // styles.css clip-flap: one wingbeat
+let updatingTimer = 0;
+/** @type {"update" | "force" | null} */
+let updatingKind = null;
+const UPDATING_TEXT = {
+  update: ["Updating dingbat…", "The app reloads when it’s ready."],
+  force: ["Downloading dingbat again…",
+    "Your games and saves stay on this device. The app reloads when it’s done."],
+  failed: ["Couldn’t finish the download",
+    "Nothing has changed: dingbat is still on the version you had. Check the connection and try again."],
+};
+const setUpdatingText = (/** @type {keyof UPDATING_TEXT} */ k) => {
+  const title = document.getElementById("updating-title");
+  const body = document.getElementById("updating-body");
+  if (title) title.textContent = UPDATING_TEXT[k][0];
+  if (body) body.textContent = UPDATING_TEXT[k][1];
+};
+const showUpdatingCard = () => {
+  clearTimeout(updatingTimer);
+  updatingEl?.classList.add("shown");
+};
+const beginUpdating = (/** @type {"update" | "force"} */ kind) => {
+  if (!updatingEl) return;
+  updatingKind = kind;
+  updatingEl.hidden = false;
+  updatingEl.classList.remove("failed", "known");
+  if (updatingFill) updatingFill.style.transform = "";
+  if (updatingPct) updatingPct.textContent = "";
+  setUpdatingText(kind);
+  // Nothing behind the shield keeps the keyboard either.
+  /** @type {HTMLElement | null} */ (document.activeElement)?.blur?.();
+  clearTimeout(updatingTimer);
+  if (kind === "force") showUpdatingCard();
+  else updatingTimer = setTimeout(showUpdatingCard, UPDATING_CARD_MS);
+};
+const endUpdating = () => {
+  clearTimeout(updatingTimer);
+  updatingKind = null;
+  if (!updatingEl) return;
+  updatingEl.classList.remove("shown", "failed", "known");
+  updatingEl.hidden = true;
+};
+const updatingProgress = (done, total) => {
+  if (!updatingKind || !(total > 0) || !updatingEl) return;
+  updatingEl.classList.add("known");
+  const f = Math.max(0, Math.min(1, done / total));
+  if (updatingFill) updatingFill.style.transform = "scaleX(" + f + ")";
+  if (updatingPct) updatingPct.textContent = Math.floor(f * 100) + "%";
+};
+const failUpdating = () => {
+  if (!updatingEl) return;
+  setUpdatingText("failed");
+  updatingEl.classList.add("failed");
+  showUpdatingCard();
+  document.getElementById("updating-retry")?.focus();
+};
+// The reload every update ends in. With the card up, once the wingbeat in
+// flight has landed (the bat at rest, as the reloaded page draws it), so it
+// never vanishes mid-wing; with no card yet (a quick update), or no
+// animation (reduced motion), at once. A card not shown yet stays unshown.
+const reloadAfterUpdate = () => {
+  clearTimeout(updatingTimer);
+  const shown = !!updatingEl?.classList.contains("shown");
+  const anim = shown ? updatingFlap?.getAnimations?.()[0] : null;
+  const t = typeof anim?.currentTime === "number" ? anim.currentTime % FLAP_BEAT_MS : 0;
+  if (t > 0) setTimeout(() => location.reload(), FLAP_BEAT_MS - t);
+  else location.reload();
+};
+// The worker's progress: an install's for Update, a Force update's own.
+navigator.serviceWorker?.addEventListener?.("message", (e) => {
+  const d = e.data;
+  if (d?.type !== "progress") return;
+  if ((updatingKind === "update" && d.of === "install") || (updatingKind === "force" && d.of === "reinstall")) {
+    updatingProgress(d.done, d.total);
+  }
+});
+document.getElementById("updating-close")?.addEventListener("click", endUpdating);
+document.getElementById("updating-retry")?.addEventListener("click", () => { startForceUpdate(); });
 
 // True once an update reload is committed; the Drive token renewal must not
 // start a popup the reload will orphan.
@@ -248,8 +343,9 @@ const applyUpdate = async () => {
   updateBtn.classList.add("updating");
   document.getElementById("update-label").textContent = "Updating…";
   closeUpdateModal();
+  beginUpdating("update");
   if (updateActivated) {
-    location.reload();
+    reloadAfterUpdate();
     return;
   }
   if (swRegistration) {
@@ -304,12 +400,22 @@ updateModal.addEventListener("click", (e) => {
 
 // Force update: the live worker re-downloads every asset under a nonce
 // (skips stale CDN edges and the browser HTTP cache), which works while the
-// CDN still serves the previous sw.js. Falls back to the full reset.
+// CDN still serves the previous sw.js. It gives up on a worker that says
+// nothing - no reply and no progress - for FORCE_SILENCE_MS (the page's full
+// reset then: a worker that cannot answer is the thing to replace), and
+// throws when the worker answers that it could not finish, which leaves its
+// cache as it was: the caller says so (startForceUpdate). No worker at all:
+// the full reset.
+const FORCE_SILENCE_MS = 20000;
 const forceUpdate = async () => {
   const ctrl = navigator.serviceWorker?.controller;
   if (ctrl) {
     const ok = await new Promise((resolve) => {
-      const timer = setTimeout(() => done(false), 20000);
+      let timer = 0;
+      const arm = () => {
+        clearTimeout(timer);
+        timer = setTimeout(() => done(null), FORCE_SILENCE_MS);
+      };
       const done = (v) => {
         clearTimeout(timer);
         navigator.serviceWorker.removeEventListener("message", onMsg);
@@ -317,28 +423,50 @@ const forceUpdate = async () => {
       };
       const onMsg = (e) => {
         if (e.data?.type === "reinstalled") done(e.data.ok);
+        else if (e.data?.type === "progress" && e.data.of === "reinstall") arm();
       };
       navigator.serviceWorker.addEventListener("message", onMsg);
+      arm();
       ctrl.postMessage({ type: "reinstall", nonce: Date.now() });
     });
     if (ok) {
-      location.reload();
+      reloadAfterUpdate();
       return;
     }
+    if (ok === false) throw new Error("the download did not finish");
   }
   await fullResetReload();
 };
 
-document.getElementById("force-update").addEventListener("click", async () => {
-  document.getElementById("menu-dropdown").hidden = true;
-  if (!confirm("This will re-download the app and reload. Continue?")) return;
+// Every Force update: the menu's, and the core's own when its files do not
+// match. The card is up throughout; a worker that could not finish shows the
+// failed card (Close, or Try Again), with nothing changed - the full reset
+// used to follow at once, and offline it took the app's only copy with it.
+// A second failure in a row while online is past what a retry fixes (a
+// rollback to a deploy older than the worker's manifest, say): the full
+// reset then, as before.
+let forceFailures = 0;
+const startForceUpdate = async () => {
   appUpdating = true; // see applyUpdate: no Drive popups once a reload is committed
+  beginUpdating("force");
   try {
     await forceUpdate();
-  } catch (e) {
-    appUpdating = false; // no reload happened after all; renewals may resume
-    alert("Force update failed: " + e.message);
+  } catch {
+    forceFailures++;
+    if (forceFailures >= 2 && navigator.onLine !== false) {
+      await fullResetReload();
+      return;
+    }
+    appUpdating = false; // no reload after all; renewals may resume
+    failUpdating();
   }
+};
+
+document.getElementById("force-update").addEventListener("click", () => {
+  document.getElementById("menu-dropdown").hidden = true;
+  if (!confirm("This will re-download the app and reload. Continue?")) return;
+  forceFailures = 0;
+  startForceUpdate();
 });
 
 const showLogButton = document.getElementById("show-log");
@@ -7386,6 +7514,9 @@ const touchRecent = async (name) => {
 // `session`: a moment to go back into instead (resumeMoment).
 const launchRom = async (name, { resume = false, fresh = false, flyFrom = null,
                                  session: chosen = null } = {}) => {
+  // An update's reload is coming: a game started now is lost to it. The
+  // shield (#updating) holds taps; this holds a pad's or a key's.
+  if (appUpdating) return;
   const gen = nextLoadGen(); // a later tap supersedes this one (loadGen)
   // The grid renders before the wasm runtime is up; wait here.
   await ensureRuntimeReady();
@@ -13464,6 +13595,7 @@ const handleZipFile = async (file) => {
 };
 
 let handleRomFile = (file) => {
+  if (appUpdating) return; // as launchRom: the reload would take it
   let ext = extOf(file.name);
   if (ext === ".zip") return handleZipFile(file);
   if (!ROM_EXTS.includes(ext)) {
@@ -13537,6 +13669,7 @@ applyDsBeta();
 dsBetaToggle?.addEventListener("change", () => setDsBeta(dsBetaToggle.checked));
 
 const handleDroppedFile = (file) => {
+  if (appUpdating) return; // as launchRom: the reload would take it
   let ext = extOf(file.name);
   if (SAVE_IMPORT_EXTS.has(ext) || ext === ".state") {
     let kind = ext === ".state" ? "save state" : "save file";
@@ -20224,11 +20357,8 @@ const showCoreFailed = (broken) => {
   coreFailToast = broken
     ? showActionToast("The emulator's files don't match this version.", "Update", () => {
         coreFailToast = null;
-        appUpdating = true; // as the Force update row: a reload is committed
-        forceUpdate().catch((err) => {
-          appUpdating = false;
-          alert("Force update failed: " + err.message);
-        });
+        forceFailures = 0;
+        startForceUpdate(); // as the Force update row: its card, its failure
       }, 20000)
     : showActionToast("Couldn't download the emulator. Check the connection.", "Try Again", () => {
         coreFailToast = null;

@@ -4,7 +4,8 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { loadApp } from "./helpers.mjs";
+import { readFileSync } from "node:fs";
+import { loadApp, fakeFile } from "./helpers.mjs";
 
 const settle = () => new Promise((r) => setTimeout(r, 0));
 
@@ -166,4 +167,92 @@ test("a page already controlled registers at load, ahead of the core", async () 
   const app = await loadApp({ serviceWorker: { controlled: true } });
   await settle();
   assert.equal(app.sw.container.registerCalls, 1);
+});
+
+// --- The updating card (index.js "Updating") ---------------------------------
+const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+
+test("Update holds every tap at once, and shows its card only past half a second", async () => {
+  const app = await bootApp({ serviceWorker: { controlled: true } });
+  await settle();
+  await clickUpdateWithWaiting(app); // the new worker told to take over; no handover yet
+  const el = app.elements.get("updating");
+  assert.equal(el.hidden, false, "the shield is up from the tap");
+  assert.ok(!el.classList.contains("shown"), "and nothing shows yet");
+  await wait(600);
+  assert.ok(el.classList.contains("shown"), "past half a second, the card");
+});
+
+test("a quick Update reloads before its card, which never shows", async () => {
+  const app = await bootApp({ serviceWorker: { controlled: true } });
+  await settle();
+  const waiting = await clickUpdateWithWaiting(app);
+  app.sw.takeControl(waiting);
+  await settle();
+  assert.equal(app.state.reloads, 1);
+  await wait(600);
+  assert.ok(!app.elements.get("updating").classList.contains("shown"),
+            "the reload took the card's timer with it");
+});
+
+test("a game can't be started behind an update: its reload would take it", async () => {
+  // The control: the same file, no update under way, is taken in.
+  // A real Game Boy ROM (the repo's own test ROM), so the not-a-ROM prompt
+  // never comes up.
+  const rom = new Uint8Array(readFileSync(new URL("../../tests/roms/lcdflicker.gb", import.meta.url)));
+  const before = await bootApp({ serviceWorker: { controlled: true } });
+  await settle();
+  before.runIn("Module.ccall = () => 0"); // the boot after it: no core here
+  await before.api.handleRomFile(fakeFile("G.gb", rom));
+  await wait(50);
+  assert.equal(before.idb.has("rom:G.gb"), true, "taken in with no update");
+
+  const app = await bootApp({ serviceWorker: { controlled: true } });
+  await settle();
+  app.runIn("Module.ccall = () => 0");
+  await clickUpdateWithWaiting(app);
+  assert.equal(app.runIn("appUpdating"), true);
+  await app.api.handleRomFile(fakeFile("G.gb", rom));
+  await wait(50);
+  assert.equal(app.idb.has("rom:G.gb"), false, "the file was not taken in");
+});
+
+test("Force update shows its card at once; one the worker can't finish shows the failed card, " +
+     "nothing reset, and a second failure takes the full reset", async () => {
+  const app = await bootApp({ serviceWorker: { controlled: true } });
+  await settle();
+  app.setConfirmResult(true);
+  await app.elements.get("force-update").dispatch("click");
+  await settle();
+  const el = app.elements.get("updating");
+  assert.ok(el.classList.contains("shown"), "a whole download: the card at once");
+  assert.ok(app.sw.container.controller.messages.some((m) => m.type === "reinstall"));
+  app.sw.container.dispatch("message", { data: { type: "reinstalled", ok: false } });
+  await settle();
+  assert.ok(el.classList.contains("failed"));
+  assert.equal(app.sw.registration.unregisterCalls, 0, "nothing reset: the app's copy is as it was");
+  assert.equal(app.state.reloads, 0);
+  assert.equal(app.runIn("appUpdating"), false, "Drive renewals may go on");
+  await app.elements.get("updating-retry").dispatch("click");
+  await settle();
+  assert.ok(!el.classList.contains("failed"), "Try Again: downloading again");
+  app.sw.container.dispatch("message", { data: { type: "reinstalled", ok: false } });
+  await settle();
+  await settle();
+  assert.equal(app.sw.registration.unregisterCalls, 1, "a second failure online: the full reset");
+  assert.equal(app.state.reloads, 1);
+});
+
+test("Close puts the page back after a failed Force update", async () => {
+  const app = await bootApp({ serviceWorker: { controlled: true } });
+  await settle();
+  app.setConfirmResult(true);
+  await app.elements.get("force-update").dispatch("click");
+  await settle();
+  app.sw.container.dispatch("message", { data: { type: "reinstalled", ok: false } });
+  await settle();
+  await app.elements.get("updating-close").dispatch("click");
+  const el = app.elements.get("updating");
+  assert.equal(el.hidden, true);
+  assert.ok(!el.classList.contains("shown"));
 });
