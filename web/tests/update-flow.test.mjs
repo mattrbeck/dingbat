@@ -218,7 +218,7 @@ test("a game can't be started behind an update: its reload would take it", async
 });
 
 test("Force update shows its card at once; one the worker can't finish shows the failed card, " +
-     "nothing reset, and a second failure takes the full reset", async () => {
+     "nothing reset, however often it is tried again", async () => {
   const app = await bootApp({ serviceWorker: { controlled: true } });
   await settle();
   app.setConfirmResult(true);
@@ -239,8 +239,53 @@ test("Force update shows its card at once; one the worker can't finish shows the
   app.sw.container.dispatch("message", { data: { type: "reinstalled", ok: false } });
   await settle();
   await settle();
-  assert.equal(app.sw.registration.unregisterCalls, 1, "a second failure online: the full reset");
+  // On Matt's phone, with the server's manifest gone, a second failure's
+  // full reset threw away a working offline copy: a failure the worker
+  // reports never resets now.
+  assert.ok(el.classList.contains("failed"), "the failed card again");
+  assert.equal(app.sw.registration.unregisterCalls, 0, "still nothing reset");
+  assert.equal(app.state.reloads, 0);
+});
+
+test("a Force update whose worker never answers still takes the full reset", async () => {
+  // No reply and no progress for forceSilenceMs: the worker is what is
+  // broken. Shortened here.
+  const app = await bootApp({ serviceWorker: { controlled: true } });
+  await settle();
+  app.runIn("forceSilenceMs = 30");
+  app.setConfirmResult(true);
+  await app.elements.get("force-update").dispatch("click");
+  await wait(80);
+  await settle();
+  assert.equal(app.sw.registration.unregisterCalls, 1, "the full reset");
   assert.equal(app.state.reloads, 1);
+});
+
+// ServiceWorker.lean's bug_force_failure_mid_update_reloads_midgame: an
+// Update under way (its reload certain), a Force update started over it
+// fails; taking appUpdating down then let a game start, and the Update's own
+// end (here a failed install's full reset) reloaded it away.
+test("a Force update failing while an Update's reload is on its way keeps the shield, " +
+     "and no game starts (regress_force_failure_mid_update_reloads_midgame)", async () => {
+  const app = await bootApp({ serviceWorker: { controlled: true } });
+  await settle();
+  app.runIn("Module.ccall = () => 0");
+  const installing = app.sw.makeWorker("installing");
+  app.state.swUpdateImpl = async () => { app.sw.registration.installing = installing; };
+  await app.elements.get("update-btn").dispatch("click"); // the Update, watching its install
+  await settle();
+  app.setConfirmResult(true);
+  await app.elements.get("force-update").dispatch("click");
+  await settle();
+  app.sw.container.dispatch("message", { data: { type: "reinstalled", ok: false } });
+  await settle();
+  const el = app.elements.get("updating");
+  assert.equal(app.runIn("appUpdating"), true, "still updating: the Update's reload is coming");
+  assert.ok(!el.classList.contains("failed"), "no \"nothing has changed\": something is about to");
+  const rom = new Uint8Array(readFileSync(new URL("../../tests/roms/lcdflicker.gb", import.meta.url)));
+  await app.api.handleRomFile(fakeFile("G.gb", rom));
+  await wait(50);
+  assert.equal(app.idb.has("rom:G.gb"), false, "no game started for the reload to take");
 });
 
 test("Close puts the page back after a failed Force update", async () => {
