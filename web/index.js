@@ -266,8 +266,19 @@ const setUpdatingText = (/** @type {keyof UPDATING_TEXT} */ k) => {
   if (title) title.textContent = UPDATING_TEXT[k][0];
   if (body) body.textContent = UPDATING_TEXT[k][1];
 };
+// The card goes just under the library page's brand, the bat flapping above
+// it, when that is on screen with room below; else in the middle.
+const UPDATING_UNDER_BRAND_GAP = 24;
+const placeUpdatingCard = () => {
+  if (!updatingEl) return;
+  const r = document.getElementById("home-brand")?.getBoundingClientRect?.();
+  const under = !!r && r.height > 0 && r.bottom > 0 && r.bottom < window.innerHeight * 0.6;
+  updatingEl.classList.toggle("under-brand", under);
+  if (under) updatingEl.style.setProperty("--updating-top", Math.round(r.bottom + UPDATING_UNDER_BRAND_GAP) + "px");
+};
 const showUpdatingCard = () => {
   clearTimeout(updatingTimer);
+  placeUpdatingCard();
   updatingEl?.classList.add("shown");
 };
 // The library page's bat flapping (styles.css #home-brand.flapping: drawn
