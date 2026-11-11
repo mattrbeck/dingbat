@@ -10242,3 +10242,22 @@ file instead of a blank one; Excitebike (J)'s script
 (`ad9a633c`) passes in dingbat and dingbat-bios (8 KB EEPROM; the second
 reference writes 32 KB of SRAM); the 23 corpus games whose ROMs name no
 library or EEPROM-plus-other all PASS.
+
+**The sweeps behind it (2026-11-11).** `inputsweep.py --pattern deep
+--frames 12000` in dingbat, mgba and the second reference over one dump of
+every game in two groups: the 35 conflicting-string games not in the corpus
+(tag save-conflict) and 625 commercial-looking ROMs with no save string
+(save-nostring: 178 before the change, save-nostring2: 447 after). The
+conflicting group gave Breath of Fire (J) (above) and Rocky (E), which is the
+second reference's (it stops drawing at f316). The no-string group flagged 12
+of 625: Action Man (dingbat enters Stop mode, which neither reference
+models), Daigasso Band Bros. Request Selection (a DS add-on cart, blank in the
+second reference), screenshot-noise and reset flags on games all three freeze
+at the same frame for the same length (Extreme Ghostbusters, F-14 Tomcat, Les
+Razmoket, March of the Penguins, Mortal Kombat Advance, Sega Smash Pack,
+Super Hornet, The Three Stooges: phases), and Stuart Little 2 (U, F), where
+mgba writes a 32 KB SRAM file whose only data is 18h in its last four bytes:
+a DMA running into 0FFFFFFCh, the same stray access as Super Monkey Ball Jr,
+which dingbat no longer turns into a save. No other game loses a save in the
+time the pattern plays; Famicom Mini Excitebike (J) was found by scripting
+its design-mode save, which no blind pattern reaches.
