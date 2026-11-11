@@ -1,15 +1,60 @@
 -- What this models, for formal/anchors.mjs (which lists stale models):
--- @models web/index.js: applyUpdate checkForUpdate fullResetReload maybeCheckForUpdate probeBuilds refuseState registerServiceWorker showUpdateButton updateForNewerState on:visibilitychange
--- @models web/sw.js: hex sha256 digest fetchManifest fetchFresh verified assetCaches heldCopy manifestResponse collect commit liveName setLive collectDev install dropCaches dropLater reinstall cached lazyFrom on:activate on:fetch on:install on:message
+-- @models web/index.js: applyUpdate beginUpdating checkForUpdate endUpdating failUpdating forceUpdate fullResetReload maybeCheckForUpdate probeBuilds refuseState registerServiceWorker reloadAfterUpdate showUpdateButton startForceUpdate updateForNewerState on:visibilitychange
+-- @models web/sw.js: hex sha256 digest fetchManifest fetchFresh verified assetCaches heldCopy tell tracker assetBytes countInto manifestResponse collect commit liveName setLive collectDev install dropCaches dropLater reinstall cached lazyFrom on:activate on:fetch on:install on:message
 
 /-
 # Service worker, update check and update flow (web/sw.js, web/index.js)
 
-Brought to the sw-limits design (branch sw-limits, on 0b7f1b57): sw.js is
-named by function below, index.js's line numbers are at 0b7f1b57 (sw-limits
-leaves it alone). The update flow is the one 5901c517 fixed (the `regress_*`
-theorems below), with the update a too-new save state asks for (df47a452)
-and e3dbc604's registration timing.
+Brought to the sw-limits design (branch sw-limits, on 0b7f1b57), then to
+the page side of branch update-ui (febce5a0, b22ed55c, on 42a555d5): sw.js
+is named by function below, index.js's line numbers are at b22ed55c. The
+update flow is the one 5901c517 fixed (the `regress_*` theorems below), with
+the update a too-new save state asks for (df47a452), e3dbc604's registration
+timing, and update-ui's card, wingbeat and Force update failure (below).
+
+## The page side of an update (update-ui)
+
+* **The shield** (`shield`: #updating not hidden, from beginUpdating to
+  endUpdating or the reload) holds every tap: the Update button, the
+  confirm modal and the Force update row are disabled under it. A game
+  cannot be started while `appUpdating` (launchRom, handleRomFile,
+  handleDroppedFile return at once): `gameOn` is disabled then
+  (`no_game_start_while_updating`). The guard sits in GameLifecycle's
+  functions, which that model anchors.
+* **Every update reload goes through reloadAfterUpdate**, which may wait up
+  to one wingbeat of the logo's flap (667 ms) first: whenever the home
+  brand is on screen, under any update. The model makes every such reload a
+  pending one (`pend`), landed by its own later step (`landReload`), with
+  any other step allowed between; the immediate reload is that step with
+  nothing between. The five triggers: controllerchange for this tab's own
+  update (with `refreshing` set, so a second controllerchange in the wait
+  adds nothing), applyUpdate's `updateActivated` path, Force update's
+  ok:true, and the end of fullResetReload (`resetFire`, which leaves the
+  tab waiting). controllerchange in a tab with no game and no update of its
+  own still reloads at once.
+* **Force update** (startForceUpdate, `startForce`): appUpdating, the
+  shield, then forceUpdate: no controller takes fullResetReload; a
+  controller's reply ok:false (`rFail`, or the reinstall's own check failing
+  in `rNet`) throws to startForceUpdate's catch: the tab's first failure in a
+  row, or any while offline (`online`, navigator.onLine), shows the failed
+  card (`failed`) with appUpdating back to false and nothing touched; a
+  second in a row while online takes fullResetReload (`failTab`). No reply
+  and no progress for FORCE_SILENCE_MS (`rStop`: the worker stopped at any
+  point) takes fullResetReload as before. The menu's Force update (and the
+  core's own) resets `fails`; the card's Try Again (`forceRetry`) keeps it;
+  Close (`failClose`) takes the shield down.
+* **Progress messages** (sw.js `tell`, `tracker`, `assetBytes`,
+  `countInto`; the manifest's `sizes`) add no state: they read a clone of
+  each download's body and post to pages; no cache is read or written by
+  them and no control flow depends on them. On the page they fill the card's
+  bar and re-arm forceUpdate's silence timer, which the model does not time
+  (`rStop` may fire whenever a Force update is in flight): one more message
+  only makes a timeout later, which is a run the model already has.
+* Not modelled: the card's half-second delay for Update and the bat's
+  animation (no state a property reads); a key or pad press reaching
+  something other than launchRom under the shield; a slow worker that
+  outlives the silence timer and commits after the page's full reset (as
+  before, `rStop` ends the run).
 
 ## Three designs side by side
 
@@ -60,7 +105,7 @@ cold); the old cache goes after a grace (`dropLater`).
 
 The registration (index.js `registerServiceWorker` 96): a controlled page
 registers at load, an uncontrolled one (a first visit) only once its core is
-in (19389), so its HTTP cache holds em.wasm by the time the install looks.
+in (19553), so its HTTP cache holds em.wasm by the time the install looks.
 
 ## What is modelled
 
@@ -109,10 +154,10 @@ in (19389), so its HTTP cache holds em.wasm by the time the install looks.
 * This design's Force update: its downloads (`rMan`, `rNet`, `rNetLz`), the
   check (`rVerify`), the puts into its own cache (`rPutJs`, `rPutWasm`: they
   change nothing a fetch reads), then the pointer (`rCommit`: `cache w`,
-  `cman w` and `lazy w` become the new cache's at once). `rFail`, enabled at
-  every point, is a download or check failing and also the worker stopped
-  anywhere in the run: no reply comes, and the page's 20 s timeout takes the
-  same full reset. A cache it left part-way is an orphan no fetch reads
+  `cman w` and `lazy w` become the new cache's at once). `rFail` is a
+  download or check failing (the reply ok:false) and `rStop` the worker
+  stopped anywhere in the run (no reply, no progress: the page's silence
+  timer); both are enabled at every point. A cache it left part-way is an orphan no fetch reads
   (dropped by the next Force update or activation), not modelled as a
   lookup source: one source fewer, never a wrong copy.
 * A DS core fetch in a worker of this design: a hit (`lzHit`), or a miss that
@@ -139,8 +184,9 @@ in (19389), so its HTTP cache holds em.wasm by the time the install looks.
   unregister makes the installing worker redundant, which another tab's
   applyUpdate watching it sees (`onRedundant`).
 * `update()` rejecting goes to `fullResetReload`. A reinstall that fails
-  replies ok:false (or nothing) and the asking tab takes `fullResetReload`
-  (`rFail`, `rFailed`). Two tabs' Force updates share one download (`rProbe`,
+  replies ok:false to every tab waiting on it (`rFail`, `rFailed`: each
+  tab's startForceUpdate catch, `failTab`); one that says nothing leaves
+  them to fullResetReload (`rStop`, `rSilent`). Two tabs' Force updates share one download (`rProbe`,
   `rMan`, `rsJs`, ...; this design's `reinstalling`), run by the worker that
   was active when the last one started (`rW`).
 * A page's boot is one event. sw.js keeps that true across this design's
@@ -163,19 +209,29 @@ in (19389), so its HTTP cache holds em.wasm by the time the install looks.
 
 ## Results
 
-Proved, for every interleaving and all three designs side by side: no tab is
-reloaded mid-game unless its own user asked (`no_forced_midgame`); with
-nothing asked, no tab is reloaded at all (`no_reload_without_a_click`); the
-button shows at most once per page (`shows_at_most_once`); an applyUpdate
-watching an install always has that install to wait on
-(`watching_has_install`).
+Proved, for every interleaving and all three designs side by side, the
+wingbeat's wait before every update reload included: with nothing asked, no
+tab is reloaded at all (`no_reload_without_a_click`); the button shows at
+most once per page (`shows_at_most_once`); an applyUpdate watching an
+install always has that install to wait on (`watching_has_install`); no game
+starts while an update is under way (`no_game_start_while_updating`); a
+Force update's first failure (or any offline) changes no cache, worker or
+page and leaves nothing to reload (`first_force_failure_changes_nothing`,
+`first_force_failure_no_reload`). No tab is reloaded mid-game unless its
+own user asked (`no_forced_midgame`), and every pending reload is its own
+update's (`pending_is_asked`), on every run but one where a Force update's
+failure reaches a tab whose own Update or reload is under way too: that
+failure sets appUpdating back to false and the Update's reload still comes
+(`bug_force_failure_mid_update_reloads_midgame`, below).
 
 With H injective, and with this design's Force update in, stopped wherever:
 every cache of this design holds exactly one build, its kept manifest's, DS
 core files included (`cache_is_one_build`); every DS core file it serves is
 that build's (`lazy_served_is_its_build`); and no page boots two builds
 (`no_mixed_boot`), the only steps left out being an older worker's Force
-update and its answer to a query navigation. A load with any query string is
+update and its answer to a query navigation; a reload that waits for the
+wingbeat boots one build whatever lands in the wait
+(`pending_reload_one_build`, `wingbeat_wait_spans_activation`). A load with any query string is
 a bare load under this design (`navigation_query_is_the_shell`) and never
 goes to the network while a cache is live (`navigation_never_net_while_live`).
 This design's Force update leaves every cache as it was until the pointer
@@ -198,6 +254,17 @@ Was refuted, now regressions: Force update's commit into the live cache
 mixed boot (`regress_query_navigation_after_deploy`), an unchecked DS core
 file (`regress_tampered_lazy_refused`). The older designs keep doing all
 three until their worker updates (`legacy_*`).
+
+Refuted (update-ui, open): `bug_force_failure_mid_update_reloads_midgame`.
+A Force update tapped while updateForNewerState awaits its writes runs
+beside the Update that applyUpdate then starts (applyUpdate does not check
+appUpdating, and the shield is not up yet). The Force update's first
+failure shows "Nothing has changed" and sets appUpdating back to false;
+the Update's path still ends in a reload (here its install fails too, and
+fullResetReload deletes every cache). A game started after Close is then
+reloaded away. Traces of the new behaviour: `force_failure_close_then_play`,
+`force_second_failure_resets`, `force_failure_offline_keeps_app`,
+`no_game_behind_force_update`, `wingbeat_wait_spans_activation`.
 -/
 namespace WebState.ServiceWorker
 
@@ -260,10 +327,10 @@ structure Tab where
   controlled  : Bool := true         -- navigator.serviceWorker.controller
   ctrlV       : Nat := 0             -- the controller's CACHE_VERSION
   hadController : Bool := true       -- (index.js 130)
-  appUpdating : Bool := false        -- (238)
+  appUpdating : Bool := false        -- (361)
   refreshing  : Bool := false        -- (131)
-  ready       : Bool := false        -- updateActivated (241)
-  updAvail    : Bool := false        -- updateAvailable / button shown (162)
+  ready       : Bool := false        -- updateActivated (364)
+  updAvail    : Bool := false        -- updateAvailable / button shown (161)
   shows       : Nat := 0             -- ghost: hidden -> shown transitions this page
   promptV     : Option Nat := none   -- ghost: build the button was last shown for
   game        : Bool := false        -- currentRomName || linkMode (|| rollbackMode || netMode)
@@ -276,6 +343,10 @@ structure Tab where
   force       : Bool := false        -- Force update in flight (waiting for "reinstalled")
   newer       : Bool := false        -- updateForNewerState between its probe and applyUpdate
   coreIn      : Bool := false        -- the core is in (onRuntimeInitialized, 19389)
+  pend        : Bool := false        -- reloadAfterUpdate's wingbeat timer set: location.reload() to come
+  shield      : Bool := false        -- #updating not hidden (beginUpdating .. endUpdating): holds every tap
+  failed      : Bool := false        -- its .failed card (failUpdating): Close and Try Again
+  fails       : Nat := 0             -- forceFailures
   deriving DecidableEq, Repr
 
 /-- A new install's asset: not looked up yet, to download, or in hand. -/
@@ -330,6 +401,7 @@ structure State where
   dl         : Nat                    -- ghost: downloads by new installs
   lzBad      : Bool                   -- ghost: a worker of this design served a DS core file
                                       --   that is not its cache's build
+  online     : Bool                   -- navigator.onLine (startForceUpdate's second failure)
 
 /-- Steady state: build 0 deployed, installed, both tabs booted from it. -/
 def init (E : Env) : State where
@@ -367,6 +439,7 @@ def init (E : Env) : State where
   mixedBoot := false
   dl := 0
   lzBad := false
+  online := true
 
 /-- A first visit: build d deployed, no worker, no cache, both tabs booted
     off the network (index.js in the HTTP cache, the core still coming). -/
@@ -385,7 +458,7 @@ def setSlot (f : Asset → Slot) (a : Asset) (y : Slot) : Asset → Slot :=
 def setHttp (f : Asset → Option Nat) (a : Asset) (x : Option Nat) : Asset → Option Nat :=
   fun b => if b = a then x else f b
 
-/-- showUpdateButton (161). -/
+/-- showUpdateButton (163). -/
 def showBtn (t : Bool) (v : Nat) (s : State) : State :=
   updT t (fun x => { x with updAvail := true, promptV := some v,
                              shows := if x.updAvail then x.shows else x.shows + 1 }) s
@@ -439,13 +512,13 @@ def reload (E : Env) (t : Bool) (auto : Bool) (s : State) : State := bootFrom E 
 def claim (v : Nat) (x : Tab) : Tab := { x with controlled := true, ctrlV := v, ccQ := true }
 
 /-- The `installed` statechange reaches a page that attached the listener; an
-    applyUpdate watching worker v then posts skipWaiting (268). -/
+    applyUpdate watching worker v then posts skipWaiting (392). -/
 def onInstalled (v : Nat) (x : Tab) : Tab :=
   let x := if x.regd then { x with instQ := some v } else x
   if x.applyK == .watch v then { x with applyK := .done } else x
 
 /-- The `redundant` statechange: an applyUpdate watching worker v falls back to
-    fullResetReload (272). -/
+    fullResetReload (396). -/
 def onRedundant (v : Nat) (x : Tab) : Tab :=
   if x.applyK == .watch v then { x with applyK := .resetting } else x
 
@@ -537,10 +610,32 @@ def rClear (s : State) : State :=
   { s with rProbe := none, rMan := none, rsJs := none, rsWasm := none,
            rOk := false, rJs := false, rWasm := false, rsLz := fun _ => none, rFlip := false }
 
-/-- A reinstall fails: the "reinstalled" ok:false reply sends every tab
-    waiting on it into fullResetReload (index.js 324-329). -/
-def rFailed (s : State) : State :=
+/-- A reinstall fails: the worker's "reinstalled" ok:false reply (forceUpdate
+    throws; startForceUpdate's catch). A tab's first failure in a row, or any
+    while offline, shows the failed card and leaves everything as it was:
+    appUpdating back to false, no cache touched, nothing to reload
+    (failUpdating). A second in a row while online takes fullResetReload. -/
+def failTab (online : Bool) (x : Tab) : Tab :=
+  if x.force then
+    if decide (1 ≤ x.fails) && online then { x with force := false, fails := x.fails + 1, applyK := .resetting }
+    else { x with force := false, fails := x.fails + 1, appUpdating := false, failed := true }
+  else x
+
+def rFailed (s : State) : State := mapTabs (failTab s.online) (rClear s)
+
+/-- No reply and no progress message for FORCE_SILENCE_MS (the worker stopped
+    at any point of the run): every tab waiting on it takes fullResetReload. -/
+def rSilent (s : State) : State :=
   mapTabs (fun x => if x.force then { x with force := false, applyK := .resetting } else x) (rClear s)
+
+/-- startForceUpdate: appUpdating, the card (beginUpdating("force")), then
+    forceUpdate: a controller re-downloads (the reply and the silence timer
+    are later events); none takes fullResetReload. -/
+def startForce (t : Bool) (s : State) : State :=
+  let s := updT t (fun x => { x with appUpdating := true, shield := true, failed := false })
+    { s with intents := s.intents + 1 }
+  if (s.tabs t).controlled then updT t (fun x => { x with force := true }) { rClear s with rW := s.active }
+  else updT t (fun x => { x with applyK := .resetting }) s
 
 inductive Event where
   | deploy
@@ -556,7 +651,7 @@ inductive Event where
   | nCommit                      -- new install: commit's puts
   | nCheck                       -- new install: commit's presence check
   | regResolve (t : Bool)        -- register().then (99)
-  | coreLoaded (t : Bool)        -- the core is in (19389): an uncontrolled page registers now
+  | coreLoaded (t : Bool)        -- the core is in (19553): an uncontrolled page registers now
   | httpFill (a : Asset) (b : Nat) -- the HTTP cache gets build b's copy of a
   | httpEvict (a : Asset)
   | instFire (t : Bool)          -- the queued `installed` statechange (104)
@@ -564,12 +659,12 @@ inductive Event where
   | ccFire (t : Bool)            -- controllerchange handler (132)
   | userReload (t : Bool)        -- the user reloads / reopens the tab
   | gameOn (t : Bool) | gameOff (t : Bool)
-  | updClick (t : Bool)          -- #update-btn (288)
-  | confirm (t : Bool)           -- #update-confirm (297)
+  | updClick (t : Bool)          -- #update-btn (412)
+  | confirm (t : Bool)           -- #update-confirm (421)
   | notNow (t : Bool)
-  | applyResume (t : Bool)       -- applyUpdate after `await update()` (257)
-  | resetFire (t : Bool)         -- fullResetReload (224)
-  | checkStart (t : Bool)        -- maybeCheckForUpdate at load / visibilitychange (203)
+  | applyResume (t : Bool)       -- applyUpdate after `await update()` (381)
+  | resetFire (t : Bool)         -- fullResetReload's awaits (226)
+  | checkStart (t : Bool)        -- maybeCheckForUpdate at load / visibilitychange (205)
   | chkCur (t : Bool) | chkLatest (t : Bool) | chkSw (t : Bool)  -- the three fetches land
   | chkEval (t : Bool)           -- the rest of checkForUpdate
   | forceStart (t : Bool)        -- Force update, confirmed (forceUpdate 308)
@@ -579,9 +674,14 @@ inductive Event where
   | rNet (a : Asset) (b : Nat)   -- new reinstall: a's download answers build b's bytes
   | rVerify                      -- reinstall: the download passed its check
   | rPutJs | rPutWasm            -- reinstall: one put into its cache (older designs: the live one)
-  | rFail                        -- reinstall: a download or check failed, or the worker was
-                                 --   stopped at any point (the page's 20 s timeout): ok:false
-  | forceDone (t : Bool)         -- "reinstalled" ok: location.reload()
+  | rFail                        -- reinstall: a download or check failed: the reply ok:false
+  | rStop                        -- reinstall: the worker stopped at any point; no reply, no
+                                 --   progress: the page's FORCE_SILENCE_MS
+  | forceDone (t : Bool)         -- "reinstalled" ok: reloadAfterUpdate
+  | forceRetry (t : Bool)        -- the failed card's Try Again: startForceUpdate
+  | failClose (t : Bool)         -- the failed card's Close: endUpdating
+  | landReload (t : Bool)        -- reloadAfterUpdate's wingbeat lands: location.reload()
+  | goOnline (b : Bool)          -- navigator.onLine becomes b
   | newerStart (t : Bool)        -- a too-new state refused; updateForNewerState passes its checks
   | newerApply (t : Bool)        -- ...its awaits done: applyUpdate()
   | navQ (t : Bool)              -- the user loads the app with a query string (?2p, ?gpu3d=1)
@@ -621,11 +721,11 @@ def en (E : Env) (s : State) : Event → Bool
   | .skipDeliver => s.skipQ.isSome
   | .ccFire t => (s.tabs t).ccQ
   | .userReload _ => true
-  | .gameOn t => !(s.tabs t).game
+  | .gameOn t => !(s.tabs t).game && !(s.tabs t).appUpdating
   | .gameOff t => (s.tabs t).game
-  | .updClick t => (s.tabs t).updAvail && !(s.tabs t).appUpdating && !(s.tabs t).modal
-  | .confirm t => (s.tabs t).modal
-  | .notNow t => (s.tabs t).modal
+  | .updClick t => (s.tabs t).updAvail && !(s.tabs t).appUpdating && !(s.tabs t).modal && !(s.tabs t).shield
+  | .confirm t => (s.tabs t).modal && !(s.tabs t).shield
+  | .notNow t => (s.tabs t).modal && !(s.tabs t).shield
   | .applyResume t => (s.tabs t).applyK == .awaitUpdate
   | .resetFire t => (s.tabs t).applyK == .resetting
   | .checkStart t => !(s.tabs t).updAvail && (s.tabs t).chk.isNone
@@ -634,7 +734,7 @@ def en (E : Env) (s : State) : Event → Bool
   | .chkSw t => match (s.tabs t).chk with | some c => c.sw.isNone | none => false
   | .chkEval t => match (s.tabs t).chk with
       | some c => c.cur.isSome && c.latest.isSome && c.sw.isSome | none => false
-  | .forceStart t => (s.tabs t).controlled && !(s.tabs t).force && !(s.tabs t).appUpdating
+  | .forceStart t => !(s.tabs t).force && !(s.tabs t).appUpdating && !(s.tabs t).shield && !(s.tabs t).modal
   | .rProbe0 => anyForce s && oldR E s && s.rProbe.isNone
   | .rFetchJs => anyForce s && oldR E s && s.rProbe.isSome && s.rsJs.isNone
   | .rFetchWasm => anyForce s && oldR E s && s.rProbe.isSome && s.rsWasm.isNone
@@ -649,7 +749,12 @@ def en (E : Env) (s : State) : Event → Bool
   | .rPutJs => anyForce s && s.rOk && !s.rJs
   | .rPutWasm => anyForce s && s.rOk && !s.rWasm
   | .rFail => anyForce s
+  | .rStop => anyForce s
   | .forceDone t => (s.tabs t).force && rDone E s
+  | .forceRetry t => (s.tabs t).failed
+  | .failClose t => (s.tabs t).failed
+  | .landReload t => (s.tabs t).pend
+  | .goOnline _ => true
   | .newerStart t => (s.tabs t).game && !(s.tabs t).appUpdating && !(s.tabs t).newer
   | .newerApply t => (s.tabs t).newer
   | .navQ _ => true
@@ -664,13 +769,14 @@ def en (E : Env) (s : State) : Event → Bool
       (match s.rW with | some w => (s.lazy w l).isSome | none => false) && decide (b ≤ s.dep)
   | .rCommit => anyForce s && curR E s && s.rOk && s.rJs && s.rWasm && !s.rFlip
 
-/-- applyUpdate (243), first segment: flags, close the modal; then either the
-    reload another tab's update left waiting (251), or `update()`. -/
-def applyStart (E : Env) (t : Bool) (s : State) : State :=
+/-- applyUpdate (366), first segment: flags, close the modal, the shield up
+    (beginUpdating("update")); then either the reload another tab's update
+    left waiting (reloadAfterUpdate, 371), or `update()`. -/
+def applyStart (_E : Env) (t : Bool) (s : State) : State :=
   let x := s.tabs t
   let s := { s with intents := s.intents + 1 }
-  let s := updT t (fun x => { x with appUpdating := true, modal := false }) s
-  if x.ready then reload E t true s
+  let s := updT t (fun x => { x with appUpdating := true, modal := false, shield := true }) s
+  if x.ready then updT t (fun x => { x with pend := true }) s
   else if x.regd then updT t (fun x => { x with applyK := .awaitUpdate }) (updCheck s)
   else updT t (fun x => { x with applyK := .resetting }) s
 
@@ -679,6 +785,12 @@ def redund (s : State) : State :=
   match s.installing with
   | some v => mapTabs (onRedundant v) s
   | none => s
+
+/-- fullResetReload's awaits (226): every cache deleted, the registration
+    gone (`redund`); then its reloadAfterUpdate. -/
+def wipe (s : State) : State :=
+  { clearInst (redund s) with cache := fun _ => none, active := none, waiting := none, skipQ := none,
+                              cman := fun _ => none, lazy := fun _ _ => none }
 
 def step (E : Env) (s : State) : Event → State
   | .deploy => { s with dep := s.dep + 1 }
@@ -763,37 +875,38 @@ def step (E : Env) (s : State) : Event → State
     | some v => let s := { s with skipQ := none }
                 if s.waiting == some v then activate v s else s
     | none => s
-  -- controllerchange (132): reload only this tab's own update, or a tab with no
-  -- game in progress; else updateActivated + the button
+  -- controllerchange (132): this tab's own update reloads after the wingbeat
+  -- (refreshing, reloadAfterUpdate), a tab with no game in progress at once;
+  -- else updateActivated + the button
   | .ccFire t =>
     let x := s.tabs t
     let s := updT t (fun x => { x with ccQ := false }) s
     if (x.hadController || x.appUpdating) && !x.refreshing then
-      if x.appUpdating || !x.game then reload E t true s
+      if x.appUpdating then updT t (fun x => { x with refreshing := true, pend := true }) s
+      else if !x.game then reload E t true s
       else
         match s.active with
         | some v => showBtn t v (updT t (fun x => { x with ready := true, hadController := true }) s)
         | none => updT t (fun x => { x with ready := true, hadController := true }) s
     else updT t (fun x => { x with hadController := true }) s
   | .userReload t => reload E t false s
+  -- launchRom (7543) / handleRomFile / handleDroppedFile: refused while
+  -- appUpdating (`en`)
   | .gameOn t => updT t (fun x => { x with game := true }) s
   | .gameOff t => updT t (fun x => { x with game := false }) s
-  -- #update-btn (288): a game loaded -> confirm modal, else applyUpdate
+  -- #update-btn (412): a game loaded -> confirm modal, else applyUpdate
   | .updClick t =>
     if (s.tabs t).game then updT t (fun x => { x with modal := true }) s else applyStart E t s
   | .confirm t => applyStart E t s
   | .notNow t => updT t (fun x => { x with modal := false }) s
-  -- after `await swRegistration.update()` (257-276)
+  -- after `await swRegistration.update()` (381-401)
   | .applyResume t =>
     match s.waiting, s.installing with
     | some v, _ => updT t (fun x => { x with applyK := .done }) { s with skipQ := some v }
     | none, some v => updT t (fun x => { x with applyK := .watch v }) s
     | none, none => updT t (fun x => { x with applyK := .resetting }) s
-  -- fullResetReload (224): delete every cache, unregister, reload
-  | .resetFire t =>
-    reload E t true { clearInst (redund s) with cache := fun _ => none, active := none,
-                                                 waiting := none, skipQ := none,
-                                                 cman := fun _ => none, lazy := fun _ _ => none }
+  -- fullResetReload (226): delete every cache, unregister; then reloadAfterUpdate
+  | .resetFire t => updT t (fun x => { x with applyK := .idle, pend := true }) (wipe s)
   | .checkStart t => updT t (fun x => { x with chk := some {} }) s
   -- fetch("version.txt"): the controller's own cache (sw.js fetch handler), else network
   | .chkCur t =>
@@ -802,17 +915,25 @@ def step (E : Env) (s : State) : Event → State
     updT t (fun x => { x with chk := x.chk.map (fun c => { c with cur := some v }) }) s
   | .chkLatest t => updT t (fun x => { x with chk := x.chk.map (fun c => { c with latest := some s.dep }) }) s
   | .chkSw t => updT t (fun x => { x with chk := x.chk.map (fun c => { c with sw := some s.dep }) }) s
-  -- checkForUpdate 188-200: current && latest && latest !== current && deployed === latest -> button
+  -- checkForUpdate 190-202: current && latest && latest !== current && deployed === latest -> button
   | .chkEval t =>
     match (s.tabs t).chk with
     | some { cur := some c, latest := some l, sw := some d } =>
       let s := updT t (fun x => { x with chk := none }) s
       if c != l && d == l then showBtn t l s else s
     | _ => s
-  -- Force update (308): appUpdating; the live worker re-downloads
-  | .forceStart t =>
-    updT t (fun x => { x with force := true, appUpdating := true })
-      { rClear s with intents := s.intents + 1, rW := s.active }
+  -- the Force update row (493; and the core's own, showCoreFailed): confirmed,
+  -- forceFailures = 0, then startForceUpdate (477)
+  | .forceStart t => startForce t (updT t (fun x => { x with fails := 0 }) s)
+  -- the failed card's Try Again (357): startForceUpdate, forceFailures kept
+  | .forceRetry t => startForce t s
+  -- the failed card's Close (356): endUpdating, the shield down
+  | .failClose t => updT t (fun x => { x with shield := false, failed := false }) s
+  -- reloadAfterUpdate (342): its timer's location.reload() (every update
+  -- reload may wait for the logo's wingbeat; the one that does not is this
+  -- step with nothing between)
+  | .landReload t => reload E t true s
+  | .goOnline b => { s with online := b }
   | .rProbe0 => { s with rProbe := some s.dep }
   -- old reinstall's download: `?v=<nonce>` reaches the origin
   | .rFetchJs => { s with rsJs := some s.dep }
@@ -844,8 +965,11 @@ def step (E : Env) (s : State) : Event → State
       { s with rWasm := true, cache := c }
     | none => s
   | .rFail => rFailed s
-  | .forceDone t => reload E t true (updT t (fun x => { x with force := false }) s)
-  -- refuseState (8958) / updateForNewerState (8970): the player's own load is the intent
+  -- forceUpdate (438): no reply and no progress message for FORCE_SILENCE_MS
+  | .rStop => rSilent s
+  -- forceUpdate: "reinstalled" ok:true -> reloadAfterUpdate
+  | .forceDone t => updT t (fun x => { x with force := false, pend := true }) s
+  -- refuseState (9120) / updateForNewerState (9132): the player's own load is the intent
   | .newerStart t =>
     updT t (fun x => { x with newer := true }) { s with intents := s.intents + 1 }
   | .newerApply t => applyStart E t (updT t (fun x => { x with newer := false }) s)
@@ -1013,7 +1137,7 @@ theorem regress_update_in_one_tab_then_reload_when_ready :
     witnesses E0 [.gameOn true, .regResolve false, .regResolve true, .deploy, .browserCheck,
                .nManifest 1, .nLook .js, .nLook .wasm, .nNet .js 1, .nCommit, .nCheck,
                .instFire false, .updClick false, .applyResume false, .skipDeliver, .ccFire true,
-               .updClick true, .confirm true]
+               .updClick true, .confirm true, .landReload true]
       (fun s => !s.forcedMidGame && (s.tabs true).running == E0.bytes 1 &&
                 (s.tabs true).ctrlV == 1) = true := by decide
 
@@ -1023,7 +1147,7 @@ theorem regress_update_in_one_tab_then_reload_when_ready :
 theorem old_to_new_update_downloads_only_what_changed :
     witnesses E0 [.regResolve false, .deploy, .browserCheck, .nManifest 1, .nLook .js,
                .nLook .wasm, .nNet .js 1, .nCommit, .nCheck, .instFire false, .updClick false,
-               .applyResume false, .skipDeliver, .ccFire false]
+               .applyResume false, .skipDeliver, .ccFire false, .landReload false]
       (fun s => !s.forcedMidGame && !s.mixedBoot && s.dl == 1 &&
                 (s.tabs false).running == E0.bytes 1 && (s.tabs false).ctrlV == 1 &&
                 s.cache 1 == some (E0.bytes 1) && s.cache 0 == none) = true := by decide
@@ -1110,16 +1234,17 @@ theorem regress_force_update_serves_half_written_cache :
     build 2's manifest. -/
 theorem force_commit_switches_whole :
     witnesses E3 [.deploy, .deploy, .forceStart false, .rMan 2, .rNet .js 2, .rNet .wasm 2, .rVerify,
-               .rPutJs, .userReload true, .rPutWasm, .rCommit, .userReload true, .forceDone false]
+               .rPutJs, .userReload true, .rPutWasm, .rCommit, .userReload true, .forceDone false,
+               .landReload false]
       (fun s => (s.tabs true).running == E3.bytes 2 && (s.tabs false).running == E3.bytes 2 &&
                 (s.tabs true).ctrlV == 0 && !s.mixedBoot && s.cman 0 == some 2) = true := by decide
 
 /-- The worker stopped mid-commit (after one put, before the pointer moves):
-    no reply comes, the asking tab's 20 s timeout takes its full reset, and a
-    tab loading meanwhile boots the old cache whole. -/
+    no reply and no progress come, the asking tab's FORCE_SILENCE_MS takes its
+    full reset, and a tab loading meanwhile boots the old cache whole. -/
 theorem force_kill_mid_commit_old_cache_serves :
     witnesses E3 [.deploy, .deploy, .forceStart false, .rMan 2, .rNet .js 2, .rNet .wasm 2, .rVerify,
-               .rPutJs, .rPutWasm, .rFail, .userReload true]
+               .rPutJs, .rPutWasm, .rStop, .userReload true]
       (fun s => (s.tabs true).running == E3.bytes 0 && !s.mixedBoot && !anyForce s &&
                 (s.tabs false).applyK == .resetting && s.cache 0 == some (E3.bytes 0)) = true := by decide
 
@@ -1178,7 +1303,7 @@ theorem old_worker_ds_core_carried_over :
     witnesses E5 [.regResolve false, .lzOld .js 0, .lzOld .wasm 0, .deploy, .browserCheck,
                .nManifest 1, .nLook .js, .nLook .wasm, .nNet .js 1, .nLookLz .js, .nLookLz .wasm,
                .nCommit, .nCheck, .instFire false, .updClick false, .applyResume false, .skipDeliver,
-               .ccFire false]
+               .ccFire false, .landReload false]
       (fun s => s.dl == 1 && s.active == some 1 && s.cache 1 == some (E5.bytes 1) &&
                 s.lazy 1 .js == some (E5.L .js 1) && s.lazy 1 .wasm == some (E5.L .wasm 1) &&
                 s.cache 0 == none && (s.tabs false).running == E5.bytes 1 && !s.mixedBoot) = true := by
@@ -1190,7 +1315,7 @@ theorem old_worker_ds_core_carried_over :
     installs with nothing to download. -/
 theorem v1_worker_force_then_cur_worker_reuses :
     witnesses E5 [.regResolve false, .deploy, .forceStart false, .rMan 1, .rNet .js 1, .rNet .wasm 1,
-               .rVerify, .rPutJs, .rPutWasm, .forceDone false, .browserCheck, .nManifest 1,
+               .rVerify, .rPutJs, .rPutWasm, .forceDone false, .landReload false, .browserCheck, .nManifest 1,
                .nLook .js, .nLook .wasm, .nCommit, .nCheck]
       (fun s => (s.tabs false).running == E5.bytes 1 && (s.tabs false).ctrlV == 0 &&
                 s.dl == 0 && s.waiting == some 1 && s.cache 1 == some (E5.bytes 1)) = true := by decide
@@ -1204,7 +1329,7 @@ theorem old_page_force_under_cur_worker :
                .nManifest 1, .nLook .js, .nLook .wasm, .nNet .js 1, .nCommit, .nCheck,
                .instFire false, .updClick false, .applyResume false, .skipDeliver, .ccFire true,
                .deploy, .gameOff true, .forceStart true, .rMan 2, .rNet .js 2, .rNet .wasm 2,
-               .rVerify, .rPutJs, .rPutWasm, .rCommit, .forceDone true]
+               .rVerify, .rPutJs, .rPutWasm, .rCommit, .forceDone true, .landReload true]
       (fun s => !s.forcedMidGame && !s.mixedBoot && (s.tabs true).running == E5.bytes 2 &&
                 (s.tabs true).ctrlV == 1 && s.cman 1 == some 2) = true := by decide
 
@@ -1224,7 +1349,7 @@ theorem force_update_brings_held_ds_core_again :
     asset is in build 0's cache, with build 1's digest. -/
 theorem old_worker_force_then_new_worker_reuses :
     witnesses E0 [.regResolve false, .deploy, .forceStart false, .rProbe0, .rFetchJs, .rFetchWasm,
-               .rVerify, .rPutJs, .rPutWasm, .forceDone false, .browserCheck, .nManifest 1,
+               .rVerify, .rPutJs, .rPutWasm, .forceDone false, .landReload false, .browserCheck, .nManifest 1,
                .nLook .js, .nLook .wasm, .nCommit, .nCheck]
       (fun s => (s.tabs false).running == E0.bytes 1 && (s.tabs false).ctrlV == 0 &&
                 s.dl == 0 && s.waiting == some 1 && s.cache 1 == some (E0.bytes 1)) = true := by decide
@@ -1238,7 +1363,7 @@ theorem old_page_force_under_new_worker :
                .nManifest 1, .nLook .js, .nLook .wasm, .nNet .js 1, .nCommit, .nCheck,
                .instFire false, .updClick false, .applyResume false, .skipDeliver, .ccFire true,
                .deploy, .gameOff true, .forceStart true, .rMan 2, .rNet .js 2, .rNet .wasm 2,
-               .rVerify, .rPutJs, .rPutWasm, .forceDone true]
+               .rVerify, .rPutJs, .rPutWasm, .forceDone true, .landReload true]
       (fun s => !s.forcedMidGame && (s.tabs true).running == E0.bytes 2 &&
                 (s.tabs true).ctrlV == 1) = true := by decide
 
@@ -1249,7 +1374,7 @@ theorem newer_state_update_reloads_only_its_tab :
     witnesses E0 [.gameOn true, .gameOn false, .regResolve true, .regResolve false, .deploy,
                .browserCheck, .nManifest 1, .nLook .js, .nLook .wasm, .nNet .js 1, .nCommit,
                .nCheck, .newerStart true, .newerApply true, .applyResume true, .skipDeliver,
-               .ccFire true, .ccFire false]
+               .ccFire true, .ccFire false, .landReload true]
       (fun s => !s.forcedMidGame && (s.tabs true).running == E0.bytes 1 &&
                 (s.tabs false).ready && (s.tabs false).running == E0.bytes 0) = true := by decide
 
@@ -1261,14 +1386,76 @@ theorem regress_force_update_straddle_not_verified :
 
 /-- The new design: the new worker's Force update reads build 2's manifest,
     then a deploy changes em.wasm and the download is build 4's: it fails
-    the check, the reply is ok:false, and the tab takes its full reset. -/
+    the check and the reply is ok:false. The tab's first failure: the failed
+    card, nothing changed (its cache, no reload coming, appUpdating off). -/
 theorem regress_new_force_update_straddle_fails :
     witnesses E0 [.deploy, .browserCheck, .nManifest 1, .nLook .js, .nLook .wasm, .nNet .js 1,
                .nCommit, .nCheck, .regResolve false, .updClick false, .applyResume false,
-               .skipDeliver, .ccFire false, .deploy, .forceStart false, .rMan 2, .rNet .js 2,
-               .deploy, .deploy, .rNet .wasm 4]
-      (fun s => !anyForce s && (s.tabs false).applyK == .resetting && !s.rOk &&
+               .skipDeliver, .ccFire false, .landReload false, .deploy, .forceStart false, .rMan 2,
+               .rNet .js 2, .deploy, .deploy, .rNet .wasm 4]
+      (fun s => !anyForce s && (s.tabs false).applyK == .idle && !(s.tabs false).pend &&
+                (s.tabs false).failed && !(s.tabs false).appUpdating && !s.rOk &&
                 s.cache 1 == some (E0.bytes 1)) = true := by decide
+
+/-- A Force update's first failure (`E3`): the failed card, nothing changed.
+    The person closes it and plays: the game starts, the cache is the one it
+    was, no reload comes. -/
+theorem force_failure_close_then_play :
+    witnesses E3 [.deploy, .forceStart false, .rMan 1, .rNet .js 1, .rFail, .failClose false, .gameOn false]
+      (fun s => (s.tabs false).game && !(s.tabs false).shield && !(s.tabs false).pend &&
+                (s.tabs false).applyK == .idle && s.autoReloads == 0 &&
+                s.cache 0 == some (E3.bytes 0) && s.cman 0 == some 0) = true := by decide
+
+/-- Try Again after a first failure, failing again while online: the full
+    reset, as before, then the reload the wingbeat waited for. -/
+theorem force_second_failure_resets :
+    witnesses E3 [.forceStart false, .rFail, .forceRetry false, .rFail, .resetFire false, .landReload false]
+      (fun s => !s.forcedMidGame && s.active == none && s.cache 0 == none &&
+                !(s.tabs false).controlled) = true := by decide
+
+/-- ...and offline the second failure keeps the app: the failed card again,
+    its cache as it was. -/
+theorem force_failure_offline_keeps_app :
+    witnesses E3 [.goOnline false, .forceStart false, .rFail, .forceRetry false, .rFail]
+      (fun s => (s.tabs false).failed && !(s.tabs false).appUpdating && (s.tabs false).applyK == .idle &&
+                (s.tabs false).fails == 2 && s.active == some 0 &&
+                s.cache 0 == some (E3.bytes 0)) = true := by decide
+
+/-- A game cannot be started behind an update: launchRom refuses while
+    appUpdating. -/
+theorem no_game_behind_force_update :
+    run E3 (init E3) [.forceStart false, .gameOn false] = none := by decide
+
+/-- The wait before an update's reload is open to everything else (`E3`).
+    Tab A's Force update to build 1 is done and its reload waits for the
+    wingbeat; meanwhile build 2 deploys and installs, and tab B's Update
+    activates it, deleting the cache A's Force update had just made live. A's
+    reload lands on build 2, whole, under the new worker. -/
+theorem wingbeat_wait_spans_activation :
+    witnesses E3 [.deploy, .forceStart false, .rMan 1, .rNet .js 1, .rNet .wasm 1, .rVerify, .rPutJs,
+               .rPutWasm, .rCommit, .forceDone false, .deploy, .browserCheck, .nManifest 2, .nLook .js,
+               .nLook .wasm, .nNet .js 2, .nNet .wasm 2, .nCommit, .nCheck, .regResolve true,
+               .updClick true, .applyResume true, .skipDeliver, .landReload false]
+      (fun s => (s.tabs false).running == E3.bytes 2 && (s.tabs false).ctrlV == 2 && !s.mixedBoot &&
+                !s.forcedMidGame && s.cache 0 == none && s.cache 2 == some (E3.bytes 2)) = true := by decide
+
+/-- **Refuted: a Force update's failure clears `appUpdating` while the same
+    tab's own Update is still on its way to a reload.** Tab A has a game; a
+    save state from the new build is loaded, and updateForNewerState passes
+    its checks and awaits its writes (persistSave, dbPut). Force update is
+    tapped from the menu meanwhile (nothing holds taps yet). The writes land
+    and applyUpdate runs (it does not look at appUpdating): its update()
+    finds the new worker installing and watches it. The Force update's
+    download fails: the failed card ("Nothing has changed"), appUpdating
+    false. The person closes it, leaves the game and starts another
+    (launchRom no longer refuses). The install fails too (the same poor
+    connection): applyUpdate's fullResetReload deletes every cache,
+    unregisters, and reloads the tab with the new game in it. -/
+theorem bug_force_failure_mid_update_reloads_midgame :
+    witnesses E0 [.gameOn false, .regResolve false, .deploy, .newerStart false, .forceStart false,
+               .newerApply false, .rFail, .failClose false, .gameOff false, .gameOn false,
+               .applyResume false, .installFail, .resetFire false, .landReload false]
+      (fun s => s.forcedMidGame && s.active == none && s.cache 0 == none) = true := by decide
 
 /-! ## Invariants that hold -/
 
@@ -1360,6 +1547,13 @@ variable (E : Env) (s : State) (t u : Bool) (f g : Tab → Tab) (v : Nat) (auto 
 @[simp] theorem installed_intents : (installed v s).intents = s.intents := by
   unfold installed; simp only []; (repeat' split) <;> rfl
 @[simp] theorem rFailed_intents : (rFailed s).intents = s.intents := rfl
+@[simp] theorem wipe_intents : (wipe s).intents = s.intents := by unfold wipe redund; split <;> rfl
+@[simp] theorem rSilent_intents : (rSilent s).intents = s.intents := rfl
+@[simp] theorem rSilent_tabs : (rSilent s).tabs u =
+    if (s.tabs u).force then { s.tabs u with force := false, applyK := .resetting } else s.tabs u := rfl
+@[simp] theorem rFailed_tabs : (rFailed s).tabs u = failTab s.online (s.tabs u) := rfl
+@[simp] theorem startForce_intents : (startForce t s).intents = s.intents + 1 := by
+  unfold startForce; simp only []; split <;> rfl
 @[simp] theorem redund_intents : (redund s).intents = s.intents := by unfold redund; split <;> rfl
 @[simp] theorem setStaged_intents (a : Asset) (b : Nat) : (setStaged s a b).intents = s.intents := by
   cases a <;> rfl
@@ -1380,7 +1574,8 @@ theorem step_intents_mono (E : Env) (s : State) (e : Event) : s.intents ≤ (ste
     queued only in a page that never had a controller (a first install's
     claim, which reloads nothing). -/
 def QT (x : Tab) : Prop :=
-  x.applyK = .idle ∧ x.appUpdating = false ∧ x.force = false ∧ (x.ccQ = true → x.hadController = false)
+  x.applyK = .idle ∧ x.appUpdating = false ∧ x.force = false ∧ (x.ccQ = true → x.hadController = false) ∧
+  x.pend = false
 
 /-- Per tab, with what it needs of the registration. -/
 def QS (s : State) (t : Bool) : Prop :=
@@ -1397,12 +1592,12 @@ theorem q_frame {s s' : State} (h : Q s) (e1 : s'.skipQ = s.skipQ) (e2 : s'.auto
     (e3 : s'.forcedMidGame = s.forcedMidGame) (e4 : s'.active = s.active)
     (et : ∀ u, (s'.tabs u).applyK = (s.tabs u).applyK ∧ (s'.tabs u).appUpdating = (s.tabs u).appUpdating ∧
       (s'.tabs u).force = (s.tabs u).force ∧ (s'.tabs u).ccQ = (s.tabs u).ccQ ∧
-      (s'.tabs u).hadController = (s.tabs u).hadController) : Q s' := by
+      (s'.tabs u).hadController = (s.tabs u).hadController ∧ (s'.tabs u).pend = (s.tabs u).pend) : Q s' := by
   obtain ⟨a1, a2, a3, a4⟩ := h
   refine ⟨e1 ▸ a1, e2 ▸ a2, e3 ▸ a3, fun u => ?_⟩
-  obtain ⟨⟨b1, b2, b3, b4⟩, b5, b6⟩ := a4 u
-  obtain ⟨c1, c2, c3, c4, c5⟩ := et u
-  refine ⟨⟨c1 ▸ b1, c2 ▸ b2, c3 ▸ b3, fun hc => c5 ▸ b4 (c4 ▸ hc)⟩, fun ha => c5 ▸ b5 (e4 ▸ ha),
+  obtain ⟨⟨b1, b2, b3, b4, b7⟩, b5, b6⟩ := a4 u
+  obtain ⟨c1, c2, c3, c4, c5, c6⟩ := et u
+  refine ⟨⟨c1 ▸ b1, c2 ▸ b2, c3 ▸ b3, fun hc => c5 ▸ b4 (c4 ▸ hc), c6 ▸ b7⟩, fun ha => c5 ▸ b5 (e4 ▸ ha),
     fun hc => e4 ▸ b6 (c4 ▸ hc)⟩
 
 macro "q_fr" h:term : tactic => `(tactic| ((refine q_frame $h ?_ ?_ ?_ ?_ ?_) <;> (try rfl) <;> (intro u; first | (simp [claim]; done) | (simp only [updT_tabs, mapTabs_tabs, startInst_tabs, clearInst_tabs]; split <;> simp))))
@@ -1421,6 +1616,26 @@ variable (v : Nat) (x : Tab)
   unfold onInstalled; simp only []; split <;> split <;> rfl
 @[simp] theorem onInstalled_updAvail : (onInstalled v x).updAvail = x.updAvail := by
   unfold onInstalled; simp only []; split <;> split <;> rfl
+@[simp] theorem onInstalled_pend : (onInstalled v x).pend = x.pend := by
+  unfold onInstalled; simp only []; split <;> split <;> rfl
+@[simp] theorem onRedundant_pend : (onRedundant v x).pend = x.pend := by
+  unfold onRedundant; split <;> rfl
+@[simp] theorem onInstalled_game : (onInstalled v x).game = x.game := by
+  unfold onInstalled; simp only []; split <;> split <;> rfl
+@[simp] theorem onRedundant_game : (onRedundant v x).game = x.game := by
+  unfold onRedundant; split <;> rfl
+@[simp] theorem onInstalled_failed : (onInstalled v x).failed = x.failed := by
+  unfold onInstalled; simp only []; split <;> split <;> rfl
+@[simp] theorem onRedundant_failed : (onRedundant v x).failed = x.failed := by
+  unfold onRedundant; split <;> rfl
+@[simp] theorem onInstalled_shield : (onInstalled v x).shield = x.shield := by
+  unfold onInstalled; simp only []; split <;> split <;> rfl
+@[simp] theorem onRedundant_shield : (onRedundant v x).shield = x.shield := by
+  unfold onRedundant; split <;> rfl
+@[simp] theorem onInstalled_running : (onInstalled v x).running = x.running := by
+  unfold onInstalled; simp only []; split <;> split <;> rfl
+@[simp] theorem onRedundant_running : (onRedundant v x).running = x.running := by
+  unfold onRedundant; split <;> rfl
 theorem onInstalled_applyK : (onInstalled v x).applyK =
     if x.applyK = .watch v then .done else x.applyK := by
   unfold onInstalled; simp only []; split <;> split <;> simp_all
@@ -1441,6 +1656,32 @@ theorem onRedundant_applyK : (onRedundant v x).applyK =
   unfold onRedundant; split <;> simp_all
 end tabfields
 
+section failfields
+variable (o : Bool) (x : Tab)
+@[simp] theorem failTab_shows : (failTab o x).shows = x.shows := by
+  unfold failTab; split <;> (try split) <;> rfl
+@[simp] theorem failTab_updAvail : (failTab o x).updAvail = x.updAvail := by
+  unfold failTab; split <;> (try split) <;> rfl
+@[simp] theorem failTab_running : (failTab o x).running = x.running := by
+  unfold failTab; split <;> (try split) <;> rfl
+@[simp] theorem failTab_pend : (failTab o x).pend = x.pend := by
+  unfold failTab; split <;> (try split) <;> rfl
+@[simp] theorem failTab_game : (failTab o x).game = x.game := by
+  unfold failTab; split <;> (try split) <;> rfl
+@[simp] theorem failTab_ccQ : (failTab o x).ccQ = x.ccQ := by
+  unfold failTab; split <;> (try split) <;> rfl
+@[simp] theorem failTab_hadController : (failTab o x).hadController = x.hadController := by
+  unfold failTab; split <;> (try split) <;> rfl
+@[simp] theorem failTab_controlled : (failTab o x).controlled = x.controlled := by
+  unfold failTab; split <;> (try split) <;> rfl
+@[simp] theorem failTab_ready : (failTab o x).ready = x.ready := by
+  unfold failTab; split <;> (try split) <;> rfl
+@[simp] theorem failTab_refreshing : (failTab o x).refreshing = x.refreshing := by
+  unfold failTab; split <;> (try split) <;> rfl
+@[simp] theorem failTab_ctrlV : (failTab o x).ctrlV = x.ctrlV := by
+  unfold failTab; split <;> (try split) <;> rfl
+end failfields
+
 theorem q_installFailed {s : State} (h : Q s) (v : Nat) : Q (installFailed v s) := by
   refine q_frame (s' := installFailed v s) h rfl rfl rfl rfl ?_
   intro u; have := (h.2.2.2 u).1.1
@@ -1456,14 +1697,14 @@ theorem q_installed {s : State} (h : Q s) (v : Nat) : Q (installed v s) := by
   | none =>
     simp only [mapTabs, clearInst, ha, activate]
     refine ⟨a1, a2, a3, fun u => ?_⟩
-    obtain ⟨⟨b1, b2, b3, _⟩, b5, _⟩ := a4 u
+    obtain ⟨⟨b1, b2, b3, _, b7⟩, b5, _⟩ := a4 u
     have hh := b5 ha
-    refine ⟨⟨?_, ?_, ?_, ?_⟩, ?_, ?_⟩ <;> simp [claim, onInstalled_applyK, b1, b2, b3, hh]
+    refine ⟨⟨?_, ?_, ?_, ?_, ?_⟩, ?_, ?_⟩ <;> simp [claim, onInstalled_applyK, b1, b2, b3, hh, b7]
   | some w =>
     simp only [mapTabs, clearInst, ha]
     refine ⟨a1, a2, a3, fun u => ?_⟩
-    obtain ⟨⟨b1, b2, b3, b4⟩, b5, b6⟩ := a4 u
-    refine ⟨⟨?_, ?_, ?_, ?_⟩, ?_, ?_⟩ <;> simp_all [onInstalled_applyK]
+    obtain ⟨⟨b1, b2, b3, b4, b7⟩, b5, b6⟩ := a4 u
+    refine ⟨⟨?_, ?_, ?_, ?_, ?_⟩, ?_, ?_⟩ <;> simp_all [onInstalled_applyK]
 
 theorem q_showBtn {s : State} (h : Q s) (t : Bool) (v : Nat) : Q (showBtn t v s) := by
   unfold showBtn; q_fr h
@@ -1518,10 +1759,10 @@ theorem q_navQ {E : Env} {s : State} (h : Q s) (t : Bool) : Q (step E s (.navQ t
 def I0 (s : State) : Prop := s.intents = 0 → Q s
 
 theorem i0_init (E : Env) : I0 (init E) := fun _ => by
-  refine ⟨rfl, rfl, rfl, fun u => ⟨⟨rfl, rfl, rfl, ?_⟩, ?_, ?_⟩⟩ <;> intro h <;> cases h
+  refine ⟨rfl, rfl, rfl, fun u => ⟨⟨rfl, rfl, rfl, ?_, rfl⟩, ?_, ?_⟩⟩ <;> intro h <;> cases h
 
 theorem i0_fresh (E : Env) (d : Nat) : I0 (initFresh E d) := fun _ => by
-  refine ⟨rfl, rfl, rfl, fun u => ⟨⟨rfl, rfl, rfl, ?_⟩, fun _ => rfl, ?_⟩⟩ <;> intro h <;> cases h
+  refine ⟨rfl, rfl, rfl, fun u => ⟨⟨rfl, rfl, rfl, ?_, rfl⟩, fun _ => rfl, ?_⟩⟩ <;> intro h <;> cases h
 
 theorem i0_step {E : Env} {s : State} {e : Event} (h : I0 s) (he : en E s e = true) : I0 (step E s e) := by
   intro hz
@@ -1581,7 +1822,7 @@ theorem i0_step {E : Env} {s : State} {e : Event} (h : I0 s) (he : en E s e = tr
     · exact q1
   | skipDeliver => simp [en, qs.1] at he
   | ccFire t =>
-    obtain ⟨⟨b1, b2, b3, b4⟩, b5, b6⟩ := a4 t
+    obtain ⟨⟨b1, b2, b3, b4, b7⟩, b5, b6⟩ := a4 t
     have hc : (s.tabs t).ccQ = true := by simpa [en] using he
     have hh := b4 hc
     have hact := b6 hc
@@ -1617,9 +1858,13 @@ theorem i0_step {E : Env} {s : State} {e : Event} (h : I0 s) (he : en E s e = tr
       · exact q1
     · exact qs
   | forceStart t => simp [step] at hz
-  | rProbe0 | rFetchJs | rFetchWasm | rNet _ _ | rVerify | rPutJs | rPutWasm | rFail =>
+  | rProbe0 | rFetchJs | rFetchWasm | rNet _ _ | rVerify | rPutJs | rPutWasm | rFail | rStop =>
     have := (a4 true).1.2.2.1; have := (a4 false).1.2.2.1; simp_all [en, anyForce]
   | forceDone t => have := (a4 t).1.2.2.1; simp [en, this] at he
+  | forceRetry t => simp [step] at hz
+  | landReload t => have := (a4 t).1.2.2.2.2; simp [en, this] at he
+  | failClose t => simp only [step]; q_fr qs
+  | goOnline b => simp only [step]; q_fr qs
   | newerStart t => simp [step] at hz
   | newerApply t => simp only [step, applyStart_intents, updT_intents] at hz; omega
   | navQ t => exact q_navQ qs t
@@ -1680,16 +1925,26 @@ theorem p_installed {s : State} (h : P s) (v : Nat) : P (installed v s) := by
 theorem p_updCheck {s : State} (h : P s) : P (updCheck s) := p_frame h (fun u => by simp)
 
 theorem p_rFailed {s : State} (h : P s) : P (rFailed s) := by
-  refine p_frame h ?_; intro u; simp only [rFailed, mapTabs_tabs, rClear_tabs]
+  refine p_frame h ?_; intro u; simp
+
+theorem p_rSilent {s : State} (h : P s) : P (rSilent s) := by
+  refine p_frame h ?_; intro u; simp only [rSilent_tabs]
   by_cases hf : (s.tabs u).force <;> simp [hf]
+
+theorem p_startForce {s : State} (h : P s) (t : Bool) : P (startForce t s) := by
+  have h1 : P (updT t (fun x => { x with appUpdating := true, shield := true, failed := false })
+      { s with intents := s.intents + 1 }) := by p_fr h
+  unfold startForce; simp only []; split
+  · p_fr h1
+  · p_fr h1
 
 theorem p_applyStart {E : Env} {s : State} (h : P s) (t : Bool) : P (applyStart E t s) := by
   unfold applyStart
-  have h1 : P (updT t (fun x => { x with appUpdating := true, modal := false }) { s with intents := s.intents + 1 }) := by
+  have h1 : P (updT t (fun x => { x with appUpdating := true, modal := false, shield := true }) { s with intents := s.intents + 1 }) := by
     p_fr h
   simp only []
   split
-  · exact p_reload h1 t true
+  · p_fr h1
   · split
     · have := p_updCheck h1; p_fr this
     · p_fr h1
@@ -1725,23 +1980,26 @@ theorem p_step {E : Env} {s : State} (h : P s) (e : Event) : P (step E s e) := b
     have h1 : P (updT t (fun x => { x with ccQ := false }) s) := by p_fr h
     simp only [step]; split
     · split
-      · exact p_reload h1 t true
-      · have h2 : P (updT t (fun x => { x with ready := true, hadController := true })
-            (updT t (fun x => { x with ccQ := false }) s)) := by p_fr h1
-        split
-        · exact p_showBtn h2 t _
-        · exact h2
+      · p_fr h1
+      · split
+        · exact p_reload h1 t true
+        · have h2 : P (updT t (fun x => { x with ready := true, hadController := true })
+              (updT t (fun x => { x with ccQ := false }) s)) := by p_fr h1
+          split
+          · exact p_showBtn h2 t _
+          · exact h2
     · p_fr h1
   | userReload t => exact p_reload h t false
   | updClick t =>
     simp only [step]; split
     · p_fr h
     · exact p_applyStart h t
-  | confirm t => exact p_applyStart h t
+  | confirm t => exact p_applyStart (E := E) h t
   | resetFire t =>
-    simp only [step]; apply p_reload
+    simp only [step]
     have := p_redund h
-    p_fr this
+    have h1 : P (wipe s) := by unfold wipe; p_fr this
+    p_fr h1
   | chkEval t =>
     simp only [step]; split
     · have h1 : P (updT t (fun x => { x with chk := none }) s) := by p_fr h
@@ -1749,12 +2007,16 @@ theorem p_step {E : Env} {s : State} (h : P s) (e : Event) : P (step E s e) := b
       · exact p_showBtn h1 t _
       · exact h1
     · exact h
-  | forceDone t =>
-    have h1 : P (updT t (fun x => { x with force := false }) s) := by p_fr h
-    exact p_reload h1 t true
+  | forceDone t => simp only [step]; p_fr h
+  | landReload t => exact p_reload h t true
+  | forceStart t =>
+    have h1 : P (updT t (fun x => { x with fails := 0 }) s) := by p_fr h
+    exact p_startForce h1 t
+  | forceRetry t => exact p_startForce h t
+  | rStop => exact p_rSilent h
   | newerApply t =>
     have h1 : P (updT t (fun x => { x with newer := false }) s) := by p_fr h
-    exact p_applyStart h1 t
+    exact p_applyStart (E := E) h1 t
   | browserCheck => exact p_updCheck h
   | installEnd =>
     simp only [step]; split
@@ -1810,51 +2072,92 @@ theorem shows_at_most_once {E : Env} {s : State} (h : Reachable E s) (t : Bool) 
 
 /-! ### No tab reloaded mid-game unasked
 
-The app reloads a tab by itself in five places: controllerchange, the end of
-fullResetReload, Force update's "reinstalled", applyUpdate's
-`updateActivated` path, and (through fullResetReload) a failed reinstall.
-Each is this tab's own Update / Force update (`appUpdating`, set by the click
-before any of them can run) or a tab with no game in progress. -/
+The app reloads a tab by itself in five places, each now through a pending
+reload (`pend`, reloadAfterUpdate's wingbeat) but one: controllerchange (a
+tab with no game reloads at once), the end of fullResetReload, Force
+update's "reinstalled" ok:true, applyUpdate's `updateActivated` path, and
+(through fullResetReload) Force update's second failure in a row or its
+silence. Each is this tab's own Update / Force update (`appUpdating`, set by
+the click before any of them can run) or a tab with no game in progress, and
+no game starts while `appUpdating` (launchRom refuses).
+
+Force update's first failure sets `appUpdating` back to false. That is right
+when nothing else in the tab is on its way to a reload, and wrong when this
+tab's own Update is too (`bug_force_failure_mid_update_reloads_midgame`): the
+proof holds on every run where no failure reply lands on such a tab
+(`ReachF`). -/
 
 /-- Per tab: an update in flight in this tab is one its user asked for. -/
 def TI (x : Tab) : Prop :=
-  (x.applyK ≠ .idle → x.appUpdating = true) ∧ (x.force = true → x.appUpdating = true)
+  (x.applyK ≠ .idle → x.appUpdating = true) ∧ (x.force = true → x.appUpdating = true) ∧
+  (x.pend = true → x.appUpdating = true)
 
 def FI (s : State) : Prop := s.forcedMidGame = false ∧ ∀ t, TI (s.tabs t)
+
+/-- A tab a Force update failure may land on and leave as it was: with a
+    Force update in flight, nothing else of its own on the way to a reload. -/
+def ownOnly (x : Tab) : Bool := !x.force || (x.applyK == .idle && !x.pend)
+def failSafe (s : State) : Bool := ownOnly (s.tabs true) && ownOnly (s.tabs false)
+
+/-- The runs `no_forced_midgame` covers: every step but a Force update's
+    failure reply (`rFail`, or the reinstall's own check failing in `rNet`)
+    reaching a tab whose own Update or reload is also under way. -/
+def benignF (E : Env) (s : State) : Event → Bool
+  | .rFail => failSafe s
+  | .rNet a b => failSafe s || (match s.rMan with
+      | some m => E.H (E.C a b) == E.H (E.C a m) | none => true)
+  | _ => true
+
+inductive ReachF (E : Env) : State → Prop
+  | init : ReachF E (init E)
+  | fresh (d : Nat) : ReachF E (initFresh E d)
+  | step {s : State} (e : Event) : ReachF E s → en E s e = true → benignF E s e = true → ReachF E (step E s e)
+
+theorem reachF_reachable {E : Env} {s : State} (h : ReachF E s) : Reachable E s := by
+  induction h with
+  | init => exact .init
+  | fresh d => exact .fresh d
+  | step e _ he _ ih => exact .step e ih he
 
 theorem fi_frame {s s' : State} (h : FI s) (e1 : s'.forcedMidGame = s.forcedMidGame)
     (et : ∀ u, TI (s.tabs u) → TI (s'.tabs u)) : FI s' :=
   ⟨e1 ▸ h.1, fun u => et u (h.2 u)⟩
 
 theorem ti_onInstalled (v : Nat) (x : Tab) (h : TI x) : TI (onInstalled v x) := by
-  obtain ⟨a, b⟩ := h
-  refine ⟨fun hk => ?_, fun hf => ?_⟩
+  obtain ⟨a, b, c⟩ := h
+  refine ⟨fun hk => ?_, fun hf => ?_, fun hp => ?_⟩
   · simp only [onInstalled_appUpdating]; apply a
     intro h0; rw [onInstalled_applyK] at hk; split at hk
     · rename_i hw; rw [hw] at h0; cases h0
     · exact hk h0
   · simp only [onInstalled_appUpdating, onInstalled_force] at *; exact b hf
+  · simp only [onInstalled_appUpdating, onInstalled_pend] at *; exact c hp
 
 theorem ti_onRedundant (v : Nat) (x : Tab) (h : TI x) : TI (onRedundant v x) := by
-  obtain ⟨a, b⟩ := h
-  refine ⟨fun hk => ?_, fun hf => ?_⟩
+  obtain ⟨a, b, c⟩ := h
+  refine ⟨fun hk => ?_, fun hf => ?_, fun hp => ?_⟩
   · simp only [onRedundant_appUpdating]; apply a
     intro h0; rw [onRedundant_applyK] at hk; split at hk
     · rename_i hw; rw [hw] at h0; cases h0
     · exact hk h0
   · simp only [onRedundant_appUpdating, onRedundant_force] at *; exact b hf
+  · simp only [onRedundant_appUpdating, onRedundant_pend] at *; exact c hp
 
-/-- A tab function that keeps applyK, appUpdating and force keeps TI. -/
+/-- A tab function that keeps applyK, appUpdating, force and pend keeps TI. -/
 theorem ti_same {x y : Tab} (h : TI x) (e1 : y.applyK = x.applyK) (e2 : y.appUpdating = x.appUpdating)
-    (e3 : y.force = x.force) : TI y := by
-  obtain ⟨a, b⟩ := h; exact ⟨fun hk => e2 ▸ a (e1 ▸ hk), fun hf => e2 ▸ b (e3 ▸ hf)⟩
+    (e3 : y.force = x.force) (e4 : y.pend = x.pend) : TI y := by
+  obtain ⟨a, b, c⟩ := h
+  exact ⟨fun hk => e2 ▸ a (e1 ▸ hk), fun hf => e2 ▸ b (e3 ▸ hf), fun hp => e2 ▸ c (e4 ▸ hp)⟩
+
+/-- A tab updating: every part of TI holds. -/
+theorem ti_upd {x : Tab} (h : x.appUpdating = true) : TI x := ⟨fun _ => h, fun _ => h, fun _ => h⟩
 
 macro "fi_fr" h:term : tactic => `(tactic| ((refine fi_frame $h ?_ ?_) <;> (try rfl) <;>
   (intro u hu; first
-    | (refine ti_same hu ?_ ?_ ?_ <;> simp [claim] <;> done)
+    | (refine ti_same hu ?_ ?_ ?_ ?_ <;> simp [claim] <;> done)
     | (simp only [updT_tabs, mapTabs_tabs, startInst_tabs, clearInst_tabs, rClear_tabs];
        split <;>
-       refine ti_same hu ?_ ?_ ?_ <;> simp_all [claim] <;> done))))
+       refine ti_same hu ?_ ?_ ?_ ?_ <;> simp_all [claim] <;> done))))
 
 theorem fi_boot {E : Env} {s : State} (h : FI s) (t : Bool) (auto : Bool) (sv : Option Nat × Nat × (Nat × Nat))
     (hok : auto = false ∨ (s.tabs t).appUpdating = true ∨ (s.tabs t).game = false) :
@@ -1867,7 +2170,7 @@ theorem fi_boot {E : Env} {s : State} (h : FI s) (t : Bool) (auto : Bool) (sv : 
     rcases hok with hk | hk | hk <;> simp [hk]
   · simp only [updT_tabs]
     split
-    · cases c <;> exact ⟨fun hk => absurd rfl hk, fun hf => by cases hf⟩
+    · cases c <;> exact ⟨fun hk => absurd rfl hk, fun hf => (by cases hf), fun hp => (by cases hp)⟩
     · exact b u
 
 theorem fi_reload {E : Env} {s : State} (h : FI s) (t : Bool) (auto : Bool)
@@ -1891,15 +2194,45 @@ theorem fi_installed {s : State} (h : FI s) (v : Nat) : FI (installed v s) := by
     have := ti_onInstalled v _ hu
     first
     | exact this
-    | (refine ti_same this ?_ ?_ ?_ <;> simp [mapTabs, activate, clearInst, claim])
+    | (refine ti_same this ?_ ?_ ?_ ?_ <;> simp [mapTabs, activate, clearInst, claim])
 
-theorem fi_rFailed {s : State} (h : FI s) : FI (rFailed s) := by
+/-- A failure reply that lands only on tabs with nothing else of their own
+    under way: each one's first failure leaves it with nothing in flight,
+    a second one's full reset is still its own Force update. -/
+theorem fi_rFailed {s : State} (h : FI s) (hs : failSafe s = true) : FI (rFailed s) := by
   refine fi_frame h rfl ?_
   intro u hu
-  simp only [rFailed, mapTabs_tabs, rClear_tabs]
+  have hown : ownOnly (s.tabs u) = true := by
+    simp only [failSafe, Bool.and_eq_true] at hs; cases u
+    · exact hs.2
+    · exact hs.1
+  simp only [rFailed_tabs]
+  unfold failTab
   by_cases hf : (s.tabs u).force = true
-  · simp only [hf, ↓reduceIte]; exact ⟨fun _ => hu.2 hf, fun h => by cases h⟩
+  · simp only [ownOnly, hf, Bool.not_true, Bool.false_or, Bool.and_eq_true, beq_iff_eq,
+      Bool.not_eq_true'] at hown
+    simp only [hf, ↓reduceIte]
+    split
+    · exact ti_upd (hu.2.1 hf)
+    · exact ⟨fun hk => absurd hown.1 hk, fun h => (by cases h), fun hp => (by simp [hown.2] at hp)⟩
   · simp only [hf]; exact hu
+
+theorem fi_rSilent {s : State} (h : FI s) : FI (rSilent s) := by
+  refine fi_frame h rfl ?_
+  intro u hu
+  simp only [rSilent_tabs]
+  by_cases hf : (s.tabs u).force = true
+  · simp only [hf, ↓reduceIte]; exact ⟨fun _ => hu.2.1 hf, fun h => (by cases h), fun _ => hu.2.1 hf⟩
+  · simp only [hf]; exact hu
+
+theorem fi_startForce {s : State} (h : FI s) (t : Bool) : FI (startForce t s) := by
+  unfold startForce; simp only []
+  split <;>
+  · refine fi_frame h rfl ?_
+    intro u hu; simp only [updT_tabs, rClear_tabs]
+    by_cases hut : u = t
+    · subst hut; simp only [↓reduceIte]; exact ti_upd rfl
+    · simp only [hut, ↓reduceIte]; exact hu
 
 theorem fi_redund {s : State} (h : FI s) : FI (redund s) := by
   unfold redund; split
@@ -1908,30 +2241,35 @@ theorem fi_redund {s : State} (h : FI s) : FI (redund s) := by
 
 theorem fi_applyStart {E : Env} {s : State} (h : FI s) (t : Bool) : FI (applyStart E t s) := by
   unfold applyStart
-  have h1 : FI (updT t (fun x => { x with appUpdating := true, modal := false })
+  have h1 : FI (updT t (fun x => { x with appUpdating := true, modal := false, shield := true })
       { s with intents := s.intents + 1 }) := by
     refine fi_frame h rfl ?_
     intro u hu; simp only [updT_tabs]; split
-    · exact ⟨fun _ => rfl, fun _ => rfl⟩
+    · exact ti_upd rfl
     · exact hu
   simp only []
   split
-  · exact fi_reload h1 t true (Or.inr (Or.inl (by simp)))
+  · refine fi_frame h rfl ?_
+    intro u hu; simp only [updT_tabs]
+    by_cases hut : u = t
+    · subst hut; simp only [↓reduceIte]; exact ti_upd rfl
+    · simp only [hut, ↓reduceIte]; exact hu
   · have fm : ∀ X : State, (updCheck X).forcedMidGame = X.forcedMidGame := by
       intro X; unfold updCheck; split <;> rfl
     split
     · refine fi_frame h (by simp [fm]) ?_
       intro u hu; simp only [updT_tabs, updCheck_tabs]
       by_cases hut : u = t
-      · subst hut; simp only [↓reduceIte]; exact ⟨fun _ => rfl, fun _ => rfl⟩
+      · subst hut; simp only [↓reduceIte]; exact ti_upd rfl
       · simp only [hut, ↓reduceIte]; exact hu
     · refine fi_frame h (by simp) ?_
       intro u hu; simp only [updT_tabs]
       by_cases hut : u = t
-      · subst hut; simp only [↓reduceIte]; exact ⟨fun _ => rfl, fun _ => rfl⟩
+      · subst hut; simp only [↓reduceIte]; exact ti_upd rfl
       · simp only [hut, ↓reduceIte]; exact hu
 
-theorem fi_step {E : Env} {s : State} {e : Event} (h : FI s) (he : en E s e = true) : FI (step E s e) := by
+theorem fi_step {E : Env} {s : State} {e : Event} (h : FI s) (he : en E s e = true)
+    (hbf : benignF E s e = true) : FI (step E s e) := by
   have hs := h
   obtain ⟨a, b⟩ := h
   cases e with
@@ -1987,42 +2325,52 @@ theorem fi_step {E : Env} {s : State} {e : Event} (h : FI s) (he : en E s e = tr
     have h1 : FI (updT t (fun x => { x with ccQ := false }) s) := by fi_fr hs
     simp only [step]; split
     · split
-      · rename_i hc
-        apply fi_reload h1 t true
-        right
-        simp only [updT_tabs, ↓reduceIte]
-        cases hu : (s.tabs t).appUpdating
-        · simp_all
-        · simp
-      · have h2 : FI (updT t (fun x => { x with ready := true, hadController := true })
-            (updT t (fun x => { x with ccQ := false }) s)) := by fi_fr h1
-        split
-        · exact fi_showBtn h2 t _
-        · exact h2
+      · refine fi_frame hs rfl ?_
+        intro u hx; simp only [updT_tabs]
+        by_cases hut : u = t
+        · subst hut; simp only [↓reduceIte]; exact ti_upd (by simpa using ‹(s.tabs u).appUpdating = true›)
+        · simp only [hut, ↓reduceIte]; exact hx
+      · split
+        · rename_i hu hg
+          apply fi_reload h1 t true
+          right; right
+          simpa using hg
+        · have h2 : FI (updT t (fun x => { x with ready := true, hadController := true })
+              (updT t (fun x => { x with ccQ := false }) s)) := by fi_fr h1
+          split
+          · exact fi_showBtn h2 t _
+          · exact h2
     · fi_fr h1
   | userReload t => exact fi_reload hs t false (Or.inl rfl)
+  | landReload t =>
+    -- the pending reload is this tab's own update's
+    have hu : (s.tabs t).appUpdating = true := by
+      apply (b t).2.2; simpa [en] using he
+    exact fi_reload hs t true (Or.inr (Or.inl hu))
   | updClick t =>
     simp only [step]; split
     · fi_fr hs
     · exact fi_applyStart hs t
-  | confirm t => exact fi_applyStart hs t
+  | confirm t => exact fi_applyStart (E := E) hs t
   | applyResume t =>
     -- the tab is suspended in applyUpdate, which its click started
     have hu : (s.tabs t).appUpdating = true := by
       apply (b t).1; simp [en] at he; simp [he]
     simp only [step]; split <;>
       (refine fi_frame hs rfl ?_; intro u hu'; simp only [updT_tabs]; split
-       · rename_i e; subst e; exact ⟨fun _ => hu, fun hf => (b u).2 hf⟩
+       · rename_i e; subst e; exact ti_upd hu
        · exact hu')
   | resetFire t =>
     have hu : (s.tabs t).appUpdating = true := by
       apply (b t).1; simp [en] at he; simp [he]
     simp only [step]
-    have h1 := fi_redund hs
-    apply fi_reload ?_ t true (Or.inr (Or.inl ?_))
-    · exact fi_frame h1 rfl (fun u hu => hu)
-    · show ((redund s).tabs t).appUpdating = true
-      unfold redund; split <;> simp [hu]
+    have h1 : FI (wipe s) := by unfold wipe; have := fi_redund hs; fi_fr this
+    have hw : ((wipe s).tabs t).appUpdating = true := by
+      unfold wipe redund; split <;> simp [hu]
+    refine fi_frame h1 rfl ?_
+    intro u hx; simp only [updT_tabs]; split
+    · rename_i hut; subst hut; exact ti_upd (by simpa using hw)
+    · exact hx
   | chkEval t =>
     simp only [step]; split
     · have h1 : FI (updT t (fun x => { x with chk := none }) s) := by fi_fr hs
@@ -2032,46 +2380,60 @@ theorem fi_step {E : Env} {s : State} {e : Event} (h : FI s) (he : en E s e = tr
     · exact hs
   | forceStart t =>
     simp only [step]
-    refine fi_frame hs rfl ?_
-    intro u hu; simp only [updT_tabs, rClear_tabs]; split
-    · exact ⟨fun _ => rfl, fun _ => rfl⟩
-    · exact hu
+    exact fi_startForce (by fi_fr hs) t
+  | forceRetry t => exact fi_startForce hs t
   | rNet a b =>
     simp only [step]; split
-    · split
+    · rename_i m hm
+      split
       · cases a <;> fi_fr hs
-      · exact fi_rFailed hs
+      · rename_i hne
+        apply fi_rFailed hs
+        simp only [benignF, hm, Bool.or_eq_true] at hbf
+        rcases hbf with h | h
+        · exact h
+        · exact absurd h hne
     · exact hs
-  | rFail => exact fi_rFailed hs
+  | rFail => exact fi_rFailed hs (by simpa [benignF] using hbf)
+  | rStop => exact fi_rSilent hs
   | forceDone t =>
     have hu : (s.tabs t).appUpdating = true := by
-      apply (b t).2; simp only [en, Bool.and_eq_true] at he; exact he.1
+      apply (b t).2.1; simp only [en, Bool.and_eq_true] at he; exact he.1
     simp only [step]
-    apply fi_reload (fi_frame hs rfl (s' := updT t (fun x => { x with force := false }) s) ?_) t true
-    · right; left; simp [hu]
-    · intro u hx; simp only [updT_tabs]; split
-      · exact ⟨hx.1, fun h => by cases h⟩
-      · exact hx
+    refine fi_frame hs rfl ?_
+    intro u hx; simp only [updT_tabs]; split
+    · rename_i hut; subst hut; exact ti_upd hu
+    · exact hx
   | newerStart t => simp only [step]; fi_fr hs
   | newerApply t =>
     have h1 : FI (updT t (fun x => { x with newer := false }) s) := by fi_fr hs
-    exact fi_applyStart h1 t
+    exact fi_applyStart (E := E) h1 t
   | coreLoaded t => simp only [step]; split <;> fi_fr hs
   | navQ t => exact fi_boot hs t false _ (Or.inl rfl)
   | _ => (try simp only [step]); (repeat' split) <;> fi_fr hs
 
-theorem fi_reachable {E : Env} {s : State} (h : Reachable E s) : FI s := by
+theorem fi_reachF {E : Env} {s : State} (h : ReachF E s) : FI s := by
   induction h with
-  | init => exact ⟨rfl, fun _ => ⟨fun h => absurd rfl h, fun h => by cases h⟩⟩
-  | fresh d => exact ⟨rfl, fun _ => ⟨fun h => absurd rfl h, fun h => by cases h⟩⟩
-  | step e _ he ih => exact fi_step ih he
+  | init => exact ⟨rfl, fun _ => ⟨fun h => absurd rfl h, fun h => (by cases h), fun h => (by cases h)⟩⟩
+  | fresh d => exact ⟨rfl, fun _ => ⟨fun h => absurd rfl h, fun h => (by cases h), fun h => (by cases h)⟩⟩
+  | step e _ he hb ih => exact fi_step ih he hb
 
 /-- **No tab is reloaded mid-game unless its own user asked**, in every
-    interleaving of deploys, installs of both designs, both tabs' Update and
-    Force update clicks, failed reinstalls, and the controllerchange each
-    activation fires in every tab. -/
-theorem no_forced_midgame {E : Env} {s : State} (h : Reachable E s) : s.forcedMidGame = false :=
-  (fi_reachable h).1
+    interleaving of deploys, installs of all three designs, both tabs'
+    Update and Force update clicks, Try Again and Close, failed and silent
+    reinstalls, the wingbeat's wait before every update reload, and the
+    controllerchange each activation fires in every tab, leaving out only a
+    Force update's failure reply reaching a tab whose own Update or reload is
+    under way too (`bug_force_failure_mid_update_reloads_midgame`). -/
+theorem no_forced_midgame {E : Env} {s : State} (h : ReachF E s) : s.forcedMidGame = false :=
+  (fi_reachF h).1
+
+/-- And every reload a tab has pending (the wingbeat's wait) is its own
+    update's, on the same runs. -/
+theorem pending_is_asked {E : Env} {s : State} (h : ReachF E s) (t : Bool) (hp : (s.tabs t).pend = true) :
+    (s.tabs t).appUpdating = true :=
+  ((fi_reachF h).2 t).2.2 hp
+
 
 /-! ### An applyUpdate watching an install has it to wait on
 
@@ -2143,11 +2505,11 @@ theorem w_reload {E : Env} {s : State} (h : W s) (t : Bool) (auto : Bool) : W (r
 
 theorem w_applyStart {E : Env} {s : State} (h : W s) (t : Bool) : W (applyStart E t s) := by
   unfold applyStart
-  have h1 : W (updT t (fun x => { x with appUpdating := true, modal := false })
+  have h1 : W (updT t (fun x => { x with appUpdating := true, modal := false, shield := true })
       { s with intents := s.intents + 1 }) := by w_fr h
   simp only []
   split
-  · exact w_reload h1 t true
+  · w_fr h1
   · split
     · have h2 := w_updCheck h1
       intro u w hw; simp only [updT_tabs] at hw
@@ -2158,10 +2520,30 @@ theorem w_applyStart {E : Env} {s : State} (h : W s) (t : Bool) : W (applyStart 
 
 theorem w_rFailed {s : State} (h : W s) : W (rFailed s) := by
   intro u w hw
-  simp only [rFailed, mapTabs_tabs, rClear_tabs] at hw
+  simp only [rFailed_tabs] at hw
+  by_cases hf : (s.tabs u).force = true
+  · simp only [failTab, hf, ↓reduceIte] at hw
+    split at hw
+    · cases hw
+    · exact h u w hw
+  · simp only [failTab, hf] at hw; exact h u w (by simpa using hw)
+
+theorem w_rSilent {s : State} (h : W s) : W (rSilent s) := by
+  intro u w hw
+  simp only [rSilent_tabs] at hw
   by_cases hf : (s.tabs u).force = true
   · simp [hf] at hw
   · simp only [hf] at hw; exact h u w (by simpa using hw)
+
+theorem w_startForce {s : State} (h : W s) (t : Bool) : W (startForce t s) := by
+  unfold startForce; simp only []
+  split <;>
+  · intro u w hw
+    simp only [updT_tabs, rClear_tabs] at hw
+    by_cases hut : u = t
+    · subst hut; simp only [↓reduceIte] at hw
+      first | cases hw | exact h u w hw
+    · simp only [hut, ↓reduceIte] at hw; exact h u w hw
 
 theorem w_step {E : Env} {s : State} {e : Event} (h : W s) : W (step E s e) := by
   cases e with
@@ -2214,10 +2596,12 @@ theorem w_step {E : Env} {s : State} {e : Event} (h : W s) : W (step E s e) := b
     · w_fr h
   | resetFire t =>
     simp only [step]
-    apply w_reload
     intro u w hw
     exfalso
-    simp only [clearInst_tabs, redund] at hw
+    simp only [updT_tabs] at hw
+    split at hw
+    · cases hw
+    simp only [wipe, clearInst_tabs, redund] at hw
     split at hw
     · rename_i v hv
       simp only [mapTabs_tabs, onRedundant_applyK] at hw
@@ -2227,24 +2611,29 @@ theorem w_step {E : Env} {s : State} {e : Event} (h : W s) : W (step E s e) := b
     · rename_i hv
       exact w_none h (by cases hh : s.installing <;> simp_all) u w hw
   | userReload t => exact w_reload h t false
-  | forceDone t =>
-    simp only [step]; apply w_reload; w_fr h
+  | forceDone t => simp only [step]; w_fr h
+  | landReload t => exact w_reload h t true
+  | forceStart t => exact w_startForce (by w_fr h) t
+  | forceRetry t => exact w_startForce h t
+  | rStop => exact w_rSilent h
   | ccFire t =>
     simp only [step]; split
     · split
-      · apply w_reload; w_fr h
+      · w_fr h
       · split
-        · unfold showBtn; w_fr h
-        · w_fr h
+        · apply w_reload; w_fr h
+        · split
+          · unfold showBtn; w_fr h
+          · w_fr h
     · w_fr h
   | updClick t =>
     simp only [step]; split
     · w_fr h
     · exact w_applyStart h t
-  | confirm t => exact w_applyStart h t
+  | confirm t => exact w_applyStart (E := E) h t
   | newerApply t =>
     have h1 : W (updT t (fun x => { x with newer := false }) s) := by w_fr h
-    exact w_applyStart h1 t
+    exact w_applyStart (E := E) h1 t
   | instFire t =>
     have h1 : W (updT t (fun x => { x with instQ := none }) s) := by w_fr h
     simp only [step]; split
@@ -2335,10 +2724,10 @@ theorem ri_reload {E : Env} {s : State} (h : RI E s) (t : Bool) (auto : Bool) : 
   unfold reload; generalize serve E s = sv; obtain ⟨c, bb, p⟩ := sv; r_fr h
 
 theorem ri_applyStart {E : Env} {s : State} (h : RI E s) (t : Bool) : RI E (applyStart E t s) := by
-  have h1 : RI E (updT t (fun x => { x with appUpdating := true, modal := false })
+  have h1 : RI E (updT t (fun x => { x with appUpdating := true, modal := false, shield := true })
       { s with intents := s.intents + 1 }) := by r_fr h
   unfold applyStart; simp only []; split
-  · exact ri_reload h1 t true
+  · r_fr h1
   · split
     · have := ri_updCheck h1; r_fr this
     · r_fr h1
@@ -2351,6 +2740,23 @@ theorem ri_rFailed {E : Env} {s : State} (h : RI E s) : RI E (rFailed s) := by
   · intro _ a b hb; cases a <;> simp [rFailed, rClear, staged] at hb
   · intro ho; simp [rFailed, rClear] at ho
 
+theorem ri_rSilent {E : Env} {s : State} (h : RI E s) : RI E (rSilent s) := by
+  obtain ⟨a1, _, _, _⟩ := h
+  refine ⟨?_, ?_, ?_, ?_⟩
+  · intro p hp; simp [rSilent, rClear] at hp
+  · intro _; refine ⟨?_, ?_⟩ <;> intro _ hj <;> simp [rSilent, rClear] at hj
+  · intro _ a b hb; cases a <;> simp [rSilent, rClear, staged] at hb
+  · intro ho; simp [rSilent, rClear] at ho
+
+theorem ri_startForce {E : Env} {s : State} (h : RI E s) (t : Bool) : RI E (startForce t s) := by
+  unfold startForce; simp only []; split
+  · refine ⟨?_, ?_, ?_, ?_⟩
+    · intro p hp; simp [rClear] at hp
+    · intro _; refine ⟨?_, ?_⟩ <;> intro _ hj <;> simp [rClear] at hj
+    · intro _ a b hb; cases a <;> simp [rClear, staged] at hb
+    · intro ho; simp [rClear] at ho
+  · r_fr h
+
 theorem ri_step {E : Env} {s : State} {e : Event} (h : RI E s) (he : en E s e = true) : RI E (step E s e) := by
   have hs := h
   obtain ⟨a1, a2, a3, a4⟩ := h
@@ -2360,12 +2766,10 @@ theorem ri_step {E : Env} {s : State} {e : Event} (h : RI E s) (he : en E s e = 
     · have := a1 p hp; simp only [step]; omega
     · obtain ⟨p, q1, q2, q3⟩ := (a2 ho).1 j hj; exact ⟨p, q1, q2, by simp only [step]; omega⟩
     · obtain ⟨p, q1, q2, q3⟩ := (a2 ho).2 w hw; exact ⟨p, q1, q2, by simp only [step]; omega⟩
-  | forceStart t =>
-    refine ⟨?_, ?_, ?_, ?_⟩
-    · intro p hp; simp [step, rClear] at hp
-    · intro _; refine ⟨?_, ?_⟩ <;> intro _ hj <;> simp [step, rClear] at hj
-    · intro _ a b hb; cases a <;> simp [step, rClear, staged] at hb
-    · intro ho; simp [step, rClear] at ho
+  | forceStart t => exact ri_startForce (by r_fr hs) t
+  | forceRetry t => exact ri_startForce hs t
+  | rStop => exact ri_rSilent hs
+  | landReload t => exact ri_reload hs t true
   | rProbe0 =>
     have hn : s.rProbe = none := by
       simp only [en, Bool.and_eq_true, Option.isNone_iff_eq_none] at he; exact he.2
@@ -2490,8 +2894,10 @@ theorem ri_step {E : Env} {s : State} {e : Event} (h : RI E s) (he : en E s e = 
   | ccFire t =>
     simp only [step]; split
     · split
-      · exact ri_reload (s := updT t _ s) (by r_fr hs) t true
-      · split <;> r_fr hs
+      · r_fr hs
+      · split
+        · exact ri_reload (s := updT t _ s) (by r_fr hs) t true
+        · split <;> r_fr hs
     · r_fr hs
   | userReload t => exact ri_reload hs t false
   | updClick t => simp only [step]; split
@@ -2500,10 +2906,9 @@ theorem ri_step {E : Env} {s : State} {e : Event} (h : RI E s) (he : en E s e = 
   | confirm t => exact ri_applyStart hs t
   | newerApply t => exact ri_applyStart (s := updT t _ s) (by r_fr hs) t
   | resetFire t =>
-    simp only [step]
-    apply ri_reload
+    simp only [step, wipe]
     unfold redund; split <;> r_fr hs
-  | forceDone t => exact ri_reload (s := updT t _ s) (by r_fr hs) t true
+  | forceDone t => simp only [step]; r_fr hs
   | applyResume t => simp only [step]; split <;> r_fr hs
   | chkEval t => simp only [step]; split
                  · split <;> r_fr hs
@@ -2631,7 +3036,7 @@ theorem wf_activate {E : Env} {s : State} (h : Wf E s) (v : Nat) (hv : v ≤ s.d
     · cases hp
 
 theorem wf_installFailed {E : Env} {s : State} (h : Wf E s) (v : Nat) : Wf E (installFailed v s) :=
-  wf_frame (wf_clear h) rfl rfl rfl rfl rfl rfl rfl rfl (fun u => by simp [installFailed]; unfold onRedundant; split <;> rfl)
+  wf_frame (wf_clear h) rfl rfl rfl rfl rfl rfl rfl rfl (fun u => by simp [installFailed])
 
 theorem wf_installed {E : Env} {s : State} (h : Wf E s) (v : Nat) (hv : v ≤ s.dep) : Wf E (installed v s) := by
   have h1 : Wf E (mapTabs (onInstalled v) (clearInst s)) :=
@@ -2702,18 +3107,30 @@ theorem wf_showBtn {E : Env} {s : State} (h : Wf E s) (t : Bool) (v : Nat) : Wf 
   unfold showBtn; wf_fr h
 
 theorem wf_applyStart {E : Env} {s : State} (h : Wf E s) (t : Bool) : Wf E (applyStart E t s) := by
-  have h1 : Wf E (updT t (fun x => { x with appUpdating := true, modal := false })
+  have h1 : Wf E (updT t (fun x => { x with appUpdating := true, modal := false, shield := true })
       { s with intents := s.intents + 1 }) := by wf_fr h
   unfold applyStart; simp only []; split
-  · exact wf_reload h1 t true
+  · wf_fr h1
   · split
     · have := wf_updCheck h1; wf_fr this
     · wf_fr h1
 
-theorem wf_rFailed {E : Env} {s : State} (h : Wf E s) : Wf E (rFailed s) := by
+theorem wf_rFailed {E : Env} {s : State} (h : Wf E s) : Wf E (rFailed s) :=
+  wf_frame h rfl rfl rfl rfl rfl rfl rfl rfl (fun u => by simp)
+
+theorem wf_rSilent {E : Env} {s : State} (h : Wf E s) : Wf E (rSilent s) := by
   refine wf_frame h rfl rfl rfl rfl rfl rfl rfl rfl (fun u => ?_)
-  simp only [rFailed, mapTabs_tabs, rClear_tabs]
+  simp only [rSilent_tabs]
   by_cases hf : (s.tabs u).force = true <;> simp [hf]
+
+theorem wf_startForce {E : Env} {s : State} (h : Wf E s) (t : Bool) : Wf E (startForce t s) := by
+  obtain ⟨a1, a2, a3, a4, a5, a6, a7, a8⟩ := h
+  unfold startForce; simp only []; split
+  · refine ⟨a1, a2, a3, fun w hw => ?_, a5, a6, a7, fun u => ?_⟩
+    · simp only [updT_rW] at hw; exact a3 w hw
+    · by_cases hut : u = t <;> simp only [hut, ↓reduceIte, updT_tabs, rClear_tabs] <;> exact a8 _
+  · refine ⟨a1, a2, a3, a4, a5, a6, a7, fun u => ?_⟩
+    by_cases hut : u = t <;> simp only [hut, ↓reduceIte, updT_tabs] <;> exact a8 _
 
 theorem wf_step {E : Env} {s : State} {e : Event} (h : Wf E s) (he : en E s e = true) : Wf E (step E s e) := by
   have hs := h
@@ -2826,14 +3243,19 @@ theorem wf_step {E : Env} {s : State} {e : Event} (h : Wf E s) (he : en E s e = 
     have h1 : Wf E (updT t (fun x => { x with ccQ := false }) s) := by wf_fr hs
     simp only [step]; split
     · split
-      · exact wf_reload h1 t true
-      · have h2 : Wf E (updT t (fun x => { x with ready := true, hadController := true })
-            (updT t (fun x => { x with ccQ := false }) s)) := by wf_fr h1
-        split
-        · exact wf_showBtn h2 t _
-        · exact h2
+      · wf_fr h1
+      · split
+        · exact wf_reload h1 t true
+        · have h2 : Wf E (updT t (fun x => { x with ready := true, hadController := true })
+              (updT t (fun x => { x with ccQ := false }) s)) := by wf_fr h1
+          split
+          · exact wf_showBtn h2 t _
+          · exact h2
     · wf_fr h1
   | userReload t => exact wf_reload hs t false
+  | landReload t => exact wf_reload hs t true
+  | forceRetry t => exact wf_startForce hs t
+  | rStop => exact wf_rSilent hs
   | updClick t =>
     simp only [step]; split
     · wf_fr hs
@@ -2845,7 +3267,8 @@ theorem wf_step {E : Env} {s : State} {e : Event} (h : Wf E s) (he : en E s e = 
   | applyResume t => simp only [step]; split <;> wf_fr hs
   | resetFire t =>
     simp only [step]
-    apply wf_reload
+    suffices hw : Wf E (wipe s) by wf_fr hw
+    unfold wipe
     have hr : ∀ u, ((redund s).tabs u).running = (s.tabs u).running := by
       intro u; unfold redund; split
       · simp only [mapTabs_tabs]; unfold onRedundant; split <;> rfl
@@ -2873,13 +3296,7 @@ theorem wf_step {E : Env} {s : State} {e : Event} (h : Wf E s) (he : en E s e = 
       · exact wf_showBtn h1 t _
       · exact h1
     · exact h1
-  | forceStart t =>
-    simp only [step]
-    refine ⟨a1, a2, a3, fun w hw => ?_, a5, a6, a7, fun u => ?_⟩
-    · simp only [updT_rW] at hw; exact a3 w hw
-    · simp only [updT_tabs, rClear_tabs]; split
-      · exact a8 u
-      · exact a8 u
+  | forceStart t => exact wf_startForce (by wf_fr hs) t
   | rPutJs =>
     simp only [step]; split
     · rename_i w hw
@@ -2917,9 +3334,7 @@ theorem wf_step {E : Env} {s : State} {e : Event} (h : Wf E s) (he : en E s e = 
       · exact wf_rFailed hs
     · exact hs
   | rFail => exact wf_rFailed hs
-  | forceDone t =>
-    have h1 : Wf E (updT t (fun x => { x with force := false }) s) := by wf_fr hs
-    exact wf_reload h1 t true
+  | forceDone t => simp only [step]; wf_fr hs
   | navQ t =>
     simp only [step]
     generalize hsv : serveQ E s = sv
@@ -3057,14 +3472,24 @@ theorem ni_rFailed {E : Env} {s : State} (h : NI E s) : NI E (rFailed s) := by
 
 theorem ni_applyStart {E : Env} {s : State} (h : NI E s) (t : Bool) : NI E (applyStart E t s) := by
   unfold applyStart
-  have h1 : NI E (updT t (fun x => { x with appUpdating := true, modal := false })
+  have h1 : NI E (updT t (fun x => { x with appUpdating := true, modal := false, shield := true })
       { s with intents := s.intents + 1 }) := by n_fr h
   simp only []
   split
-  · exact ni_reload h1 t true
+  · n_fr h1
   · split
     · have := ni_updCheck h1; n_fr this
     · n_fr h1
+
+theorem ni_rSilent {E : Env} {s : State} (h : NI E s) : NI E (rSilent s) := by
+  obtain ⟨a1, a2, a3, a4, a5, a6, _, a8, a9, a10⟩ := h
+  exact ⟨a1, a2, a3, a4, a5, a6, fun l x hx => by simp [rSilent, rClear] at hx, a8, a9, a10⟩
+
+theorem ni_startForce {E : Env} {s : State} (h : NI E s) (t : Bool) : NI E (startForce t s) := by
+  obtain ⟨a1, a2, a3, a4, a5, a6, a7, a8, a9, a10⟩ := h
+  unfold startForce; simp only []; split
+  · exact ⟨a1, a2, a3, a4, a5, a6, fun l x hx => by simp [rClear] at hx, a8, a9, a10⟩
+  · exact ⟨a1, a2, a3, a4, a5, a6, a7, a8, a9, a10⟩
 
 theorem ni_step {E : Env} (hH : Injective E.H) {s : State} {e : Event} (h : NI E s) (hw : Wf E s)
     (hr : RI E s) (he : en E s e = true) : NI E (step E s e) := by
@@ -3197,12 +3622,18 @@ theorem ni_step {E : Env} (hH : Injective E.H) {s : State} {e : Event} (h : NI E
     have h1 : NI E (updT t (fun x => { x with ccQ := false }) s) := by n_fr hs
     simp only [step]; split
     · split
-      · exact ni_reload h1 t true
+      · n_fr h1
       · split
-        · unfold showBtn; n_fr h1
-        · n_fr h1
+        · exact ni_reload h1 t true
+        · split
+          · unfold showBtn; n_fr h1
+          · n_fr h1
     · n_fr h1
   | userReload t => exact ni_reload hs t false
+  | landReload t => exact ni_reload hs t true
+  | forceRetry t => exact ni_startForce hs t
+  | rStop => exact ni_rSilent hs
+  | failClose t | goOnline _ => simp only [step]; n_fr hs
   | updClick t =>
     simp only [step]; split
     · n_fr hs
@@ -3211,7 +3642,8 @@ theorem ni_step {E : Env} (hH : Injective E.H) {s : State} {e : Event} (h : NI E
   | applyResume t => simp only [step]; split <;> n_fr hs
   | resetFire t =>
     simp only [step]
-    apply ni_reload
+    suffices hw : NI E (wipe s) by n_fr hw
+    unfold wipe
     refine ⟨fun _ _ _ h => by simp at h, fun _ _ _ _ h => by simp at h, fun _ _ h => by simp at h,
       fun _ h => by simp [clearInst] at h, fun _ _ h => by simp [clearInst] at h,
       fun _ _ h => by simp [clearInst] at h, ?_, ?_, fun _ _ _ h => by simp at h, fun l w m hf => ?_⟩
@@ -3231,9 +3663,7 @@ theorem ni_step {E : Env} (hH : Injective E.H) {s : State} {e : Event} (h : NI E
       · unfold showBtn; n_fr h1
       · exact h1
     · exact hs
-  | forceStart t =>
-    simp only [step]
-    exact ⟨a1, a2, a3, a4, a5, a6, fun l x hx => by simp [rClear] at hx, a8, a9, a10⟩
+  | forceStart t => exact ni_startForce (by n_fr hs) t
   | rMan b =>
     have hn : s.rMan = none := by
       simp only [en, Bool.and_eq_true, Option.isNone_iff_eq_none] at he; exact he.1.2
@@ -3257,7 +3687,7 @@ theorem ni_step {E : Env} (hH : Injective E.H) {s : State} {e : Event} (h : NI E
         · rename_i hu; subst hu; simp [hg] at hgu
         · exact a1 u q hgu hq
     · exact hs
-  | forceDone t => exact ni_reload (s := updT t _ s) (by n_fr hs) t true
+  | forceDone t => simp only [step]; n_fr hs
   | newerApply t => exact ni_applyStart (s := updT t _ s) (by n_fr hs) t
   | navQ t => exact ni_boot hs t false _
   | lzOld l b =>
@@ -3424,16 +3854,16 @@ theorem lazy_served_is_its_build {E : Env} (hH : Injective E.H) {s : State} (h :
     but `rCommit` writes any cache, kept manifest or DS core file. -/
 theorem force_leaves_live_cache_until_pointer {E : Env} {s : State} (hc : curR E s = true) (e : Event)
     (he : e = .rProbe0 ∨ e = .rFetchJs ∨ e = .rFetchWasm ∨ (∃ b, e = .rMan b) ∨ (∃ a b, e = .rNet a b) ∨
-      (∃ l b, e = .rNetLz l b) ∨ e = .rVerify ∨ e = .rPutJs ∨ e = .rPutWasm ∨ e = .rFail) :
+      (∃ l b, e = .rNetLz l b) ∨ e = .rVerify ∨ e = .rPutJs ∨ e = .rPutWasm ∨ e = .rFail ∨ e = .rStop) :
     (step E s e).cache = s.cache ∧ (step E s e).cman = s.cman ∧ (step E s e).lazy = s.lazy := by
   have hw : ∃ w, s.rW = some w ∧ E.curGen w = true := by
     unfold curR at hc; split at hc
     · rename_i w hw; exact ⟨w, hw, hc⟩
     · cases hc
   obtain ⟨w, hrw, hg⟩ := hw
-  rcases he with rfl | rfl | rfl | ⟨b, rfl⟩ | ⟨a, b, rfl⟩ | ⟨l, b, rfl⟩ | rfl | rfl | rfl | rfl
+  rcases he with rfl | rfl | rfl | ⟨b, rfl⟩ | ⟨a, b, rfl⟩ | ⟨l, b, rfl⟩ | rfl | rfl | rfl | rfl | rfl
   all_goals simp only [step, hrw, hg, ↓reduceIte]
-  all_goals (try (repeat' split) <;> (try (cases ‹Asset›)) <;> simp [setStaged, rFailed, rClear])
+  all_goals (try (repeat' split) <;> (try (cases ‹Asset›)) <;> simp [setStaged, rFailed, rSilent, rClear])
   all_goals (try exact ⟨rfl, rfl, rfl⟩)
 
 /-! ### Loads of the app with a query string -/
@@ -3470,6 +3900,9 @@ variable (E : Env) (s : State) (v : Nat) (t : Bool) (auto : Bool)
 @[simp] theorem showBtn_lslot : (showBtn t v s).lslot = s.lslot := rfl
 @[simp] theorem activate_lslot : (activate v s).lslot = s.lslot := rfl
 @[simp] theorem rFailed_lslot : (rFailed s).lslot = s.lslot := rfl
+@[simp] theorem rSilent_lslot : (rSilent s).lslot = s.lslot := rfl
+@[simp] theorem startForce_lslot : (startForce t s).lslot = s.lslot := by
+  unfold startForce; simp only []; split <;> rfl
 @[simp] theorem rClear_lslot : (rClear s).lslot = s.lslot := rfl
 @[simp] theorem setStaged_lslot (a : Asset) (b : Nat) : (setStaged s a b).lslot = s.lslot := by
   cases a <;> rfl
@@ -3511,7 +3944,7 @@ theorem lazy_never_downloaded {E : Env} {s : State} {e : Event} {l : Lz} {x : Na
   | newerApply t =>
     simp only [step] at h
     have := app _ _ h; exact Or.inl (by simpa using this)
-  | resetFire t => simp [step] at h
+  | resetFire t => simp [step, wipe] at h
   | regResolve t =>
     simp only [step] at h; split at h
     · exact Or.inl (by simpa using h)
@@ -3560,6 +3993,7 @@ in code a browser runs only until its worker updates to this design. -/
 
 def benign4 (E : Env) (s : State) : Event → Bool
   | .forceStart _ => match s.active with | some v => E.curGen v | none => true
+  | .forceRetry _ => match s.active with | some v => E.curGen v | none => true
   | .navQ _ => match s.active with | some v => E.curGen v | none => true
   | _ => true
 
@@ -3674,17 +4108,26 @@ theorem cs_reload {E : Env} {s : State} (hn : NI E s) (h : CS E s) (t : Bool) (a
   obtain ⟨c, b, p⟩ := sv
   exact cs_boot h t auto (serve_build hn h hsv)
 
-theorem cs_applyStart {E : Env} {s : State} (hn : NI E s) (h : CS E s) (t : Bool) : CS E (applyStart E t s) := by
+theorem cs_applyStart {E : Env} {s : State} (_hn : NI E s) (h : CS E s) (t : Bool) : CS E (applyStart E t s) := by
   unfold applyStart
-  let s1 := updT t (fun x => { x with appUpdating := true, modal := false }) { s with intents := s.intents + 1 }
+  let s1 := updT t (fun x => { x with appUpdating := true, modal := false, shield := true })
+    { s with intents := s.intents + 1 }
   have h1 : CS E s1 := by c_fr h
-  have hn1 : NI E s1 := by n_fr hn
   simp only []
   split
-  · exact cs_reload hn1 h1 t true
+  · c_fr h1
   · split
     · have := cs_updCheck h1; c_fr this
     · c_fr h1
+
+/-- startForce: the worker running it is the active one (`benign4`: of this
+    design, or none), or nothing runs (no controller: the full reset). -/
+theorem cs_startForce {E : Env} {s : State} (h : CS E s) (t : Bool)
+    (hb : ∀ w, s.active = some w → E.curGen w = true) : CS E (startForce t s) := by
+  obtain ⟨a1, a2, a3, a4, a5, a6⟩ := h
+  unfold startForce; simp only []; split
+  · exact ⟨a1, a2, a3, a4, fun w hw => hb w (by simpa using hw), a6⟩
+  · exact ⟨a1, a2, a3, a4, a5, a6⟩
 
 theorem cs_step {E : Env} (hH : Injective E.H) {s : State} {e : Event} (h : CS E s) (hn : NI E s)
     (he : en E s e = true) (hb : benign4 E s e = true) : CS E (step E s e) := by
@@ -3805,10 +4248,12 @@ theorem cs_step {E : Env} (hH : Injective E.H) {s : State} {e : Event} (h : CS E
     have hn1 : NI E s1 := by n_fr hn
     simp only [step]; split
     · split
-      · exact cs_reload hn1 h1 t true
+      · c_fr h1
       · split
-        · unfold showBtn; c_fr h1
-        · c_fr h1
+        · exact cs_reload hn1 h1 t true
+        · split
+          · unfold showBtn; c_fr h1
+          · c_fr h1
     · c_fr h1
   | userReload t => exact cs_reload hn hs t false
   | updClick t =>
@@ -3819,27 +4264,18 @@ theorem cs_step {E : Env} (hH : Injective E.H) {s : State} {e : Event} (h : CS E
   | applyResume t => simp only [step]; split <;> c_fr hs
   | resetFire t =>
     simp only [step]
-    -- nothing cached: the page boots off the network, one build
-    apply cs_reload
-    · refine ⟨fun _ _ _ h => by simp at h, fun _ _ _ _ h => by simp at h, fun _ _ h => by simp at h,
-        fun _ h => by simp [clearInst] at h, fun _ _ h => by simp [clearInst] at h,
-        fun _ _ h => by simp [clearInst] at h, ?_, ?_, fun _ _ _ h => by simp at h, ?_⟩
-      · intro l x hx
-        have e1 : (redund s).rsLz = s.rsLz := by unfold redund; split <;> rfl
-        have e2 : (redund s).rMan = s.rMan := by unfold redund; split <;> rfl
-        simp only [clearInst, e1, e2] at hx ⊢; exact hn.2.2.2.2.2.2.1 l x hx
-      · show (redund s).lzBad = false
-        unfold redund; split <;> simpa using hn.2.2.2.2.2.2.2.1
-      · intro l w m hf
-        have e1 : (redund s).lzF = s.lzF := by unfold redund; split <;> rfl
-        have e2 : (redund s).dep = s.dep := by unfold redund; split <;> rfl
-        simp only [clearInst, e1, e2] at hf ⊢; exact hn.2.2.2.2.2.2.2.2.2 l w m hf
-    · have er : (redund s).rW = s.rW := by unfold redund; split <;> rfl
-      refine ⟨fun _ _ _ h => by simp at h, fun _ h => by simp [clearInst] at h,
-        fun _ h => by simp [clearInst] at h, fun _ h => by simp [clearInst] at h, ?_, ?_⟩
-      · intro w hw; simp only [clearInst, er] at hw; exact a5 w hw
-      · show (redund s).mixedBoot = false
-        unfold redund; split <;> simpa using a6
+    suffices hw : CS E (wipe s) by c_fr hw
+    unfold wipe
+    have er : (redund s).rW = s.rW := by unfold redund; split <;> rfl
+    refine ⟨fun _ _ _ h => by simp at h, fun _ h => by simp [clearInst] at h,
+      fun _ h => by simp [clearInst] at h, fun _ h => by simp [clearInst] at h, ?_, ?_⟩
+    · intro w hw; simp only [clearInst, er] at hw; exact a5 w hw
+    · show (redund s).mixedBoot = false
+      unfold redund; split <;> simpa using a6
+  | landReload t =>
+    -- the reload the wingbeat waited for boots whatever serves when it lands
+    exact cs_reload hn hs t true
+  | failClose t | goOnline _ => simp only [step]; c_fr hs
   | checkStart t | chkCur t | chkLatest t | chkSw t | gameOn t | gameOff t | notNow t | newerStart t =>
     simp only [step]; c_fr hs
   | chkEval t =>
@@ -3851,10 +4287,13 @@ theorem cs_step {E : Env} (hH : Injective E.H) {s : State} {e : Event} (h : CS E
     · exact hs
   | forceStart t =>
     -- benign4: the worker running it is of this design (or there is none)
-    refine ⟨a1, a2, a3, a4, fun w hw => ?_, a6⟩
-    simp only [step, updT_rW] at hw
-    simp only [benign4] at hb
-    rw [hw] at hb; exact hb
+    refine cs_startForce (by c_fr hs) t (fun w hw => ?_)
+    have hw' : s.active = some w := hw
+    simp only [benign4, hw'] at hb; exact hb
+  | forceRetry t =>
+    refine cs_startForce hs t (fun w hw => ?_)
+    simp only [benign4, hw] at hb; exact hb
+  | rStop => exact cs_frame hs rfl rfl rfl rfl rfl rfl rfl rfl
   | rProbe0 | rFetchJs | rFetchWasm | rMan _ | rVerify => simp only [step]; c_fr hs
   | rNet a b =>
     simp only [step]; split
@@ -3869,8 +4308,7 @@ theorem cs_step {E : Env} (hH : Injective E.H) {s : State} {e : Event} (h : CS E
       have := a5 w hw
       simp only [this, ↓reduceIte]; c_fr hs
     · exact hs
-  | forceDone t =>
-    exact cs_reload (s := updT t _ s) (by n_fr hn) (by c_fr hs) t true
+  | forceDone t => simp only [step]; c_fr hs
   | newerApply t =>
     exact cs_applyStart (s := updT t _ s) (by n_fr hn) (by c_fr hs) t
   | navQ t =>
@@ -3914,7 +4352,7 @@ theorem no_mixed_boot {E : Env} (hH : Injective E.H) {s : State} (h : Reach4 E s
 /-! ### Without any Force update, each cache is its own worker's build -/
 
 def benignC (E : Env) (s : State) (e : Event) : Bool :=
-  (match e with | .forceStart _ => false | _ => true) && benign4 E s e
+  (match e with | .forceStart _ | .forceRetry _ => false | _ => true) && benign4 E s e
 
 inductive Reach3 (E : Env) : State → Prop
   | init : Reach3 E (init E)
@@ -3973,11 +4411,11 @@ theorem k3_boot {E : Env} {s : State} (h : K3 s) (t : Bool) (auto : Bool) (sv : 
 
 theorem k3_applyStart {E : Env} {s : State} (h : K3 s) (t : Bool) : K3 (applyStart E t s) := by
   unfold applyStart
-  have h1 : K3 (updT t (fun x => { x with appUpdating := true, modal := false })
+  have h1 : K3 (updT t (fun x => { x with appUpdating := true, modal := false, shield := true })
       { s with intents := s.intents + 1 }) := by k_fr h
   simp only []
   split
-  · exact k3_boot h1 t true _
+  · k_fr h1
   · split
     · have := k3_updCheck h1; k_fr this
     · k_fr h1
@@ -3986,8 +4424,8 @@ theorem k3_step {E : Env} {s : State} {e : Event} (h : K3 s) (he : en E s e = tr
     (hb : benignC E s e = true) : K3 (step E s e) := by
   have hf := h.1
   cases e with
-  | forceStart t => simp [benignC] at hb
-  | rProbe0 | rFetchJs | rFetchWasm | rMan _ | rNet _ _ | rVerify | rPutJs | rPutWasm | rFail
+  | forceStart t | forceRetry t => simp [benignC] at hb
+  | rProbe0 | rFetchJs | rFetchWasm | rMan _ | rNet _ _ | rVerify | rPutJs | rPutWasm | rFail | rStop
   | rNetLz _ _ | rCommit =>
     simp [en, anyForce, hf] at he
   | forceDone t => simp [en, hf] at he
@@ -4052,24 +4490,28 @@ theorem k3_step {E : Env} {s : State} {e : Event} (h : K3 s) (he : en E s e = tr
     have h1 : K3 (updT t (fun x => { x with ccQ := false }) s) := by k_fr h
     simp only [step]; split
     · split
-      · exact k3_boot h1 t true _
+      · k_fr h1
       · split
-        · unfold showBtn; k_fr h1
-        · k_fr h1
+        · exact k3_boot h1 t true _
+        · split
+          · unfold showBtn; k_fr h1
+          · k_fr h1
     · k_fr h1
   | userReload t => exact k3_boot h t false _
+  | landReload t => exact k3_boot h t true _
   | navQ t => exact k3_boot h t false _
   | updClick t =>
     simp only [step]; split
     · k_fr h
     · exact k3_applyStart h t
-  | confirm t => exact k3_applyStart h t
+  | confirm t => exact k3_applyStart (E := E) h t
   | newerApply t =>
     have h1 : K3 (updT t (fun x => { x with newer := false }) s) := by k_fr h
-    exact k3_applyStart h1 t
+    exact k3_applyStart (E := E) h1 t
   | resetFire t =>
     simp only [step]
-    apply k3_boot
+    suffices hw : K3 (wipe s) by k_fr hw
+    unfold wipe
     refine ⟨fun u => ?_, fun _ _ hm => by simp at hm⟩
     simp only [clearInst_tabs]; unfold redund; split
     · simp [hf u]
@@ -4160,6 +4602,9 @@ variable (E : Env) (s : State) (v : Nat) (t : Bool) (auto : Bool)
 @[simp] theorem showBtn_slot : (showBtn t v s).slot = s.slot := rfl
 @[simp] theorem activate_slot : (activate v s).slot = s.slot := rfl
 @[simp] theorem rFailed_slot : (rFailed s).slot = s.slot := rfl
+@[simp] theorem rSilent_slot : (rSilent s).slot = s.slot := rfl
+@[simp] theorem startForce_slot : (startForce t s).slot = s.slot := by
+  unfold startForce; simp only []; split <;> rfl
 @[simp] theorem rClear_slot : (rClear s).slot = s.slot := rfl
 @[simp] theorem setStaged_slot (a : Asset) (b : Nat) : (setStaged s a b).slot = s.slot := by
   cases a <;> rfl
@@ -4215,7 +4660,7 @@ theorem net_only_after_a_miss {E : Env} {s : State} {e : Event} {a : Asset}
   | confirm t => exact Or.inl (applyStart_slot_net (by simpa [step] using h))
   | newerApply t =>
     exact Or.inl (by simpa using applyStart_slot_net (s := updT t _ s) (by simpa [step] using h))
-  | resetFire t => simp [step] at h
+  | resetFire t => simp [step, wipe] at h
   | regResolve t =>
     simp only [step] at h; split at h
     · exact Or.inl h
@@ -4248,6 +4693,119 @@ theorem downloaded_once {E : Env} {s : State} {a : Asset} {b : Nat} (he : en E s
   refine ⟨hne, ?_⟩
   simp only [en]
   cases hs : (step E s (.nNet a b)).slot a <;> simp_all
+
+/-! ### The page side of an update (update-ui)
+
+Force update's first failure leaves everything as it was; a reload that waits
+for the wingbeat still boots one build, whatever lands in the wait; no game
+starts while an update is under way. -/
+
+theorem rFail_is_rFailed {E : Env} {s : State} {e : Event}
+    (he : e = .rFail ∨ ∃ a b m, e = .rNet a b ∧ s.rMan = some m ∧ E.H (E.C a b) ≠ E.H (E.C a m)) :
+    step E s e = rFailed s := by
+  rcases he with rfl | ⟨a, b, m, rfl, hm, hne⟩
+  · rfl
+  · simp [step, hm, hne]
+
+/-- **A Force update's first failure changes nothing.** The failure reply
+    (ok:false: a download or the check failed), the tab's first in a row or
+    any while offline: no cache, kept manifest, DS core file, worker or
+    install moves, nothing reloads, the tab's page stays the one it was, and
+    it is left with the failed card, appUpdating off, and only what it had
+    in flight besides (`first_force_failure_no_reload`: nothing). -/
+theorem first_force_failure_changes_nothing {E : Env} {s : State} {t : Bool} {e : Event}
+    (he : e = .rFail ∨ ∃ a b m, e = .rNet a b ∧ s.rMan = some m ∧ E.H (E.C a b) ≠ E.H (E.C a m))
+    (hf : (s.tabs t).force = true) (hfirst : (s.tabs t).fails = 0 ∨ s.online = false) :
+    (step E s e).cache = s.cache ∧ (step E s e).cman = s.cman ∧ (step E s e).lazy = s.lazy ∧
+    (step E s e).active = s.active ∧ (step E s e).waiting = s.waiting ∧
+    (step E s e).installing = s.installing ∧ (step E s e).autoReloads = s.autoReloads ∧
+    ((step E s e).tabs t).running = (s.tabs t).running ∧
+    ((step E s e).tabs t).appUpdating = false ∧ ((step E s e).tabs t).force = false ∧
+    ((step E s e).tabs t).failed = true ∧ ((step E s e).tabs t).applyK = (s.tabs t).applyK ∧
+    ((step E s e).tabs t).pend = (s.tabs t).pend := by
+  rw [rFail_is_rFailed he]
+  rcases hfirst with h | h <;> simp [rFailed, rClear, mapTabs, failTab, hf, h]
+
+/-- ...and with nothing else of its own under way (`failSafe`), no reload
+    is coming in that tab: no wingbeat wait, no full reset, no reply to
+    wait for, no applyUpdate to resume. -/
+theorem first_force_failure_no_reload {E : Env} {s : State} {t : Bool} {e : Event}
+    (he : e = .rFail ∨ ∃ a b m, e = .rNet a b ∧ s.rMan = some m ∧ E.H (E.C a b) ≠ E.H (E.C a m))
+    (hf : (s.tabs t).force = true) (hfirst : (s.tabs t).fails = 0 ∨ s.online = false)
+    (hk : (s.tabs t).applyK = .idle) (hp : (s.tabs t).pend = false) :
+    en E (step E s e) (.landReload t) = false ∧ en E (step E s e) (.resetFire t) = false ∧
+    en E (step E s e) (.forceDone t) = false ∧ en E (step E s e) (.applyResume t) = false := by
+  obtain ⟨-, -, -, -, -, -, -, -, -, h1, -, h2, h3⟩ := first_force_failure_changes_nothing he hf hfirst
+  simp [en, h1, h2, h3, hk, hp]
+
+/-- **A reload that waits for the wingbeat still lands on one build.** On
+    the runs `no_mixed_boot` covers, whatever lands in the wait (a deploy,
+    an install, another tab's activation and claim, a full reset, the
+    worker stopped), the pending reload boots exactly one build's bytes:
+    it reads the cache when it lands, not when it was set
+    (`wingbeat_wait_spans_activation`). -/
+theorem pending_reload_one_build {E : Env} (hH : Injective E.H) {s : State} (h : Reach4 E s) (t : Bool)
+    (he : en E s (.landReload t) = true) :
+    (step E s (.landReload t)).mixedBoot = false ∧ ∃ b, ((step E s (.landReload t)).tabs t).running = E.bytes b := by
+  have hcs := cs_reach4 hH h
+  have hn := ni_reachable hH (reach4_reachable h)
+  refine ⟨no_mixed_boot hH (.step _ h he rfl), ?_⟩
+  simp only [step, reload]
+  generalize hsv : serve E s = sv
+  obtain ⟨c, b, p⟩ := sv
+  have hp := serve_build hn hcs hsv
+  refine ⟨b, ?_⟩
+  unfold bootFrom; cases c <;> simp [hp]
+
+section gamelemmas
+variable (E : Env) (X : State) (t u : Bool) (v : Nat)
+theorem bootFrom_game (auto : Bool) (sv : Option Nat × Nat × (Nat × Nat)) :
+    ((bootFrom E u auto sv X).tabs t).game = (if t = u then false else (X.tabs t).game) := by
+  obtain ⟨c, b, p⟩ := sv; unfold bootFrom
+  by_cases hut : t = u <;> cases c <;> simp [hut]
+theorem applyStart_game : ((applyStart E u X).tabs t).game = (X.tabs t).game := by
+  unfold applyStart; simp only []
+  split <;> (try split) <;> (by_cases hut : t = u <;> simp [hut])
+theorem startForce_game : ((startForce u X).tabs t).game = (X.tabs t).game := by
+  unfold startForce; simp only []
+  split <;> (by_cases hut : t = u <;> simp [hut])
+theorem installed_game : ((installed v X).tabs t).game = (X.tabs t).game := by
+  unfold installed; simp only []; split <;> split <;> simp [mapTabs, activate, clearInst, claim]
+theorem redund_game : ((redund X).tabs t).game = (X.tabs t).game := by
+  unfold redund; split <;> simp
+theorem installFailed_game : ((installFailed v X).tabs t).game = (X.tabs t).game := by
+  simp [installFailed]
+theorem showBtn_game : ((showBtn u v X).tabs t).game = (X.tabs t).game := by
+  unfold showBtn; by_cases hut : t = u <;> simp [hut]
+theorem updT_game_of (f : Tab → Tab) (hf : ∀ x, (f x).game = x.game) :
+    ((updT u f X).tabs t).game = (X.tabs t).game := by
+  by_cases hut : t = u <;> simp [hut, hf]
+end gamelemmas
+
+/-- **No game starts while an update is under way.** From a tab with an
+    update in flight (appUpdating) and no game, no step starts one: launchRom,
+    handleRomFile and handleDroppedFile refuse, and every reload boots a page
+    with none. -/
+theorem no_game_start_while_updating {E : Env} {s : State} {e : Event} {t : Bool} (he : en E s e = true)
+    (hu : (s.tabs t).appUpdating = true) (hg : (s.tabs t).game = false) :
+    ((step E s e).tabs t).game = false := by
+  cases e with
+  | gameOn u =>
+    by_cases hut : u = t
+    · subst hut; simp [en, hu] at he
+    · simp [step, Ne.symm hut, hg]
+  | resetFire u =>
+    simp only [step]
+    rw [updT_game_of (f := fun x => { x with applyK := .idle, pend := true }) (hf := fun _ => rfl)]
+    simp [wipe, redund_game, hg]
+  | _ =>
+    clear he
+    simp only [step, reload]
+    (repeat' split) <;>
+      simp [bootFrom_game, applyStart_game, startForce_game, installed_game,
+        installFailed_game, showBtn_game, rSilent_tabs, setStaged_tabs, activate_tabs, claim, hg] <;>
+      (try (cases ‹Asset› <;> simp [hg])) <;>
+      (try (split <;> simp [hg]))
 
 /-! ### Liveness: a stable deploy installs
 
