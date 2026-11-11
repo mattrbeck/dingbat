@@ -299,6 +299,7 @@ found in the ROM.
 | `freeze.py` / `freeze_all.py` | condition script -> frozen input timeline |
 | `audio.py` | audio features, comparison, WAV clips |
 | `report.py` | suite -> findings (who stands alone at each difference) |
+| `divergences.py` | suite -> every frame, load, save and harness difference with a triage tier (S1 act ... S4 noted, R reference-side) from who stands alone, how big, and whether it lasts; `--prev` marks what is new (`tests/test_divergences.py`) |
 | `train.py` | the test train: batched corpus runs with per-candidate attribution (`tests/test_train.py`) |
 | `hlecmp.py` | every script's `[new]` timeline in two dingbat configurations (`dingbat` and `dingbat-bios` by default), every frame's hash compared: where the HLE BIOS first draws what the official one does not |
 | `statecheck.py` | save-state round-trip check per emulator |
