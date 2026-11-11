@@ -4470,8 +4470,10 @@ body.game-menu-open #toast {
 #updating[hidden] {
   display: none;
 }
+/* Deep enough that the home screen's own bat, which the card often sits
+   over, reads as background to the one flapping on the card. */
 #updating.shown {
-  background: rgba(var(--stage-rgb), 0.55);
+  background: rgba(var(--stage-rgb), 0.7);
 }
 .updating-card {
   width: min(300px, 100%);
