@@ -396,6 +396,32 @@ jobs:
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('web/package-lock.json') }}
+      - name: Let a stalled package download fail over
+        id: apt
+        # As web-e2e does: Chromium's system packages (its fonts, mostly) are
+        # kept where actions/cache can restore them, so an install needs
+        # Ubuntu's mirrors only for what moved. On 2026-11-11 the runners
+        # could not resolve archive.ubuntu.com for hours, and this step,
+        # downloading them fresh each run, timed out three runs in a row while
+        # web-e2e, installing the same packages from its cache, passed.
+        if: runner.os == 'Linux'
+        run: |
+          mkdir -p ~/apt-archives/partial
+          printf 'Acquire::http::Timeout "20";\nAcquire::Retries "5";\nDir::Cache::Archives "%s";\n' \
+            "$HOME/apt-archives" | sudo tee /etc/apt/apt.conf.d/99dingbat-timeouts
+          echo "image=$ImageVersion" >> "$GITHUB_OUTPUT"
+      - name: Cache Chromium's system packages
+        # A new runner image restores the last set and fetches only what moved;
+        # with none of its own yet, web-e2e's set (Chromium's and WebKit's
+        # packages) has every one of these.
+        if: runner.os == 'Linux'
+        uses: actions/cache@v4
+        with:
+          path: ~/apt-archives/*.deb
+          key: apt-test-${{ runner.os }}-${{ steps.apt.outputs.image }}-${{ hashFiles('web/package-lock.json') }}
+          restore-keys: |
+            apt-test-${{ runner.os }}-
+            apt-e2e-${{ runner.os }}-
 
       - name: Web browser tests (headless Chromium)
         # render.test.mjs compiles the real present shaders and checks corner
