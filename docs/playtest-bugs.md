@@ -10180,3 +10180,65 @@ GX (ARJJ, EEPROM 64 Kbit), Super Mario Advance (AMZE) and Starsky & Hutch
 run (LotR's 30 Hz parity §98, Yggdra Union, Mario & Luigi §71, the animation
 phases of §103's reviewed items) rest on the mechanisms above; the 262
 reference-side items have dingbat agreeing with one reference.
+
+## §105. Save chips the ROM does not name: a census of 7,899 ROMs, Breath of Fire (J)'s SRAM and Excitebike (J)'s EEPROM, 2026-11-11
+
+dingbat chose a cart's backup chip from the library ID strings the ROM
+links (storage_chip.nim `find_storage_type`): one string names the chip,
+SRAM with every flash library is Top Gun's chipless board, SRAM with one
+flash library is flash (Rockman EXE 4.5, One Piece), and anything else went
+by a fixed order (EEPROM first) or, with no string at all, SRAM.
+
+**Census** (the 7,899 `.gba` files in the compatibility library): one save
+library 5,858; FRAM (`SRAM_F_V`, the SRAM interface) 323; **no library string
+at all 1,573**; **two or more libraries 102**, of them 31 distinct dumps where
+EEPROM sits beside SRAM, FRAM or flash.
+
+**Breath of Fire (J)** (ABFJ: EEPROM_V121, FLASH_V124, SRAM_V112; the US and
+European releases link SRAM_V112 alone) froze on its options screen when
+エンド was chosen, the settings save: the EEPROM guess answered nothing at
+0x0E, so the save never verified. mGBA played on with SRAM; the second
+reference froze as dingbat did. **Famicom Mini Vol. 04 Excitebike (J)**
+(FEBJ) names no library, yet saves to a 64 Kbit EEPROM with its own routine
+(the US Classic NES Series Excitebike links EEPROM_V124): on the SRAM
+guess it reported セーブできませんでした and wrote no battery file; mGBA
+reports ベストタイムとデザインデータをセーブしました.
+
+**What the 31 do with save memory** (dingbat, 12,000 frames of
+`inputsweep --pattern deep`, the first access of each kind logged): 20 open
+with an EEPROM command DMA to 0x0D (some send a flash ID command later); 7
+probe first and then use EEPROM (Rocky writes five bytes to 0E000000h and
+reads them back; Ueki no Housoku and Nintendo's library sample send the flash
+ID command; DiGi Communication reads 16 bytes and writes; Japan Pro Mahjong
+reads 8 KB and never writes; Super Monkey Ball Jr's first access is a DMA
+running into 0FFFFFFCh); Breath of Fire (J) reads 5,120 bytes of the SRAM
+region, then writes it, and never touches 0x0D; Advance GT2 only reads; two
+touch nothing. Both references save every probing game as EEPROM. So "the
+first access decides" would be wrong for seven of them: a probe on an EEPROM
+board finds nothing, and must find nothing here.
+
+**The rule** (storage/pending.nim): with no battery file, an EEPROM-plus-other
+cart starts undecided, the SRAM region answering as no chip (writes dropped,
+reads FFh: what the EEPROM guess gave); any access to the EEPROM window
+settles EEPROM, and a CPU write to 0x0E after 256 CPU reads of the region with
+no write among them settles SRAM, the write landing. A cart naming no library
+settles on its first access: the EEPROM window -> EEPROM, AAh to 0E005555h ->
+a 64 KB flash, any other CPU access to 0x0E/0x0F -> SRAM (which such a game
+got before). DMA accesses to 0x0E/0x0F never decide. A battery file of a chip's
+size decides first (512 / 8 KB EEPROM, 32 KB SRAM, 64 KB / 128 KB flash among
+the candidates); one of no chip's size keeps the old guess. A cart that never
+touches save memory writes no battery file. Save states carry the undecided
+chip (kind 4, with its read count); a state from either side of the choice
+loads, the chip following the state. The DS slot-2 cart keeps the string
+guess. The harness's `saves.rom_info` lists every candidate's size as a chip
+size for these carts.
+
+**Checked**: Breath of Fire (J) now saves 92 bytes of SRAM and plays on (4,226
+distinct frames in 12,000; mGBA 4,229); Rocky, Ueki no Housoku, DiGi
+Communication, Japan Pro Mahjong, Onimusha Tactics, Medabots AX, Kim
+Possible 2 and Yggdra Union (J) write the chip and the bytes they wrote
+before; Advance GT2, which never writes save memory, now leaves no battery
+file instead of a blank one; Excitebike (J)'s script
+(`ad9a633c`) passes in dingbat and dingbat-bios (8 KB EEPROM; the second
+reference writes 32 KB of SRAM); the 23 corpus games whose ROMs name no
+library or EEPROM-plus-other all PASS.

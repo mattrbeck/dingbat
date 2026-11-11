@@ -67,8 +67,44 @@ proc find_storage_type*(content: string): StorageType =
   for t in StorageType:
     if t != stNone and content.contains(match_str(t)):
       return t
-  echo "Backup type could not be identified."
-  stSRAM  # fallback
+  # No library string (FRAM's SRAM_F_V among them: the same interface as
+  # SRAM). The GBA core lets the game's accesses choose instead
+  # (storage_candidates); the DS slot-2 cart keeps this guess.
+  stSRAM
+
+proc names_no_save_library*(content: string): bool =
+  ## The ROM links none of the backup libraries: a game with its own save
+  ## routine, or with no save. Famicom Mini Vol. 04 Excitebike (J) saves to a
+  ## 64 Kbit EEPROM with no EEPROM_V string (the US Classic NES Series
+  ## Excitebike links EEPROM_V124); 1,573 of the 7,899 ROMs in the
+  ## compatibility library name no library (docs/playtest-bugs.md §105).
+  for s in ["EEPROM_V", "SRAM_V", "SRAM_F_V", "FLASH_V", "FLASH512_V", "FLASH1M_V"]:
+    if content.contains(s):
+      return false
+  true
+
+proc storage_candidates*(content: string): set[StorageType] =
+  ## The chips a ROM could carry when it links the EEPROM library beside
+  ## another backup library; empty when the strings leave no choice (one
+  ## library, or the SRAM + flash rules above, which name no EEPROM). Such a
+  ## ROM cannot say which chip its board has: Breath of Fire (J) links
+  ## EEPROM_V121, FLASH_V124 and SRAM_V112 and saves to SRAM (the US and
+  ## European releases link SRAM_V112 alone), Super Monkey Ball Jr (U) links
+  ## the same three and saves to EEPROM. So the battery file, or what the
+  ## game does with save memory, chooses (storage/pending.nim;
+  ## docs/playtest-bugs.md §105). FRAM (SRAM_F_V) answers as SRAM does.
+  if names_no_save_library(content):
+    return {stEEPROM, stSRAM, stFLASH512, stFLASH1M}
+  if not content.contains("EEPROM_V"):
+    return {}
+  result = {stEEPROM}
+  if content.contains("SRAM_V") or content.contains("SRAM_F_V"):
+    result.incl stSRAM
+  for t in [stFLASH512, stFLASH1M, stFLASH]:
+    if content.contains(match_str(t)):
+      result.incl t
+  if result.card < 2:
+    result = {}
 
 proc rom_has_rtc*(content: string): bool =
   ## Carts with the Seiko S-3511A RTC link Nintendo's RTC library, whose ID

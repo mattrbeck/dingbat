@@ -123,11 +123,31 @@ type
     # emulators write 8 KB files for it anyway, and write_save puts these
     # bytes back after the chip's so playing never shortens such a file.
     eeprom_file_tail*: seq[byte]
+    # The chips the ROM's library strings leave open (storage_chip.nim
+    # storage_candidates); empty when they name one. Kept by the chip the
+    # first access settles on, so a save state from either side of that
+    # access still loads (savestate.nim).
+    candidates*: set[StorageType]
+    # The ROM names no backup library at all (storage_chip.nim
+    # names_no_save_library): its first save access chooses outright.
+    no_save_library*: bool
   Storage* = ref StorageObj
 
   SRAM* = ref object of StorageObj
 
   NoBackup* = ref object of StorageObj   # empty memory, no .sav
+
+  # A cart whose chip the game's save-memory accesses choose
+  # (storage/pending.nim): no battery file yet, and the SRAM region answers
+  # as no chip until then. It replaces itself in `gba.storage`.
+  PendingStorage* = ref object of StorageObj
+    gba_ref* {.cursor.}: GBA
+    # CPU reads of the SRAM region so far with no write among them (capped
+    # at SRAM_LOAD_READS); -1 once a write came first. In the save state.
+    sram_reads*: int
+    # Where the EEPROM window starts: 0DFFFF00h on a ROM over 16 MB, whose
+    # lower 0x0D addresses are ROM (GBATEK "GBA Cart Backup EEPROM")
+    eeprom_floor*: uint32
 
   Flash* = ref object of StorageObj
     flash_type*: StorageType
@@ -1859,6 +1879,7 @@ include storage/sram
 include storage/flash
 include storage/eeprom
 include storage/none
+include storage/pending
 include rtc
 include gpio
 # Interrupt controller + keypad input
@@ -1962,17 +1983,37 @@ proc new_storage*(gba: GBA; rom_path: string): Storage =
     if gba.cartridge != nil and
        gba.cartridge.game_code() in ["KYGE", "KYGJ", "KYGP", "KHPJ"]:
       t = stEEPROM
-  result = case t
-    of stEEPROM:                        new_eeprom(gba)
-    of stSRAM:                          new_sram()
-    of stFLASH, stFLASH512, stFLASH1M:  new_flash(t)
-    of stNone:                          NoBackup()
+  # EEPROM beside another library: the battery file, when there is one, says
+  # which chip it came from; otherwise what the game does with save memory
+  # will (storage/pending.nim). A file of no chip's size keeps the scan's
+  # guess.
+  let candidates = storage_candidates(content)
+  let data = if fileExists(save_path): readFile(save_path) else: ""
+  var pending = false
+  if candidates.card > 1:
+    if data.len == 0:
+      pending = true
+    else:
+      let toff = trailer_offset(data.len)
+      let chip_len = if toff >= 0: toff else: data.len
+      let by_size =
+        if chip_len in [0x200, 0x2000]: stEEPROM
+        elif chip_len == 0x8000: stSRAM
+        elif chip_len == 0x10000: flash_candidate({stFLASH512, stFLASH} * candidates)
+        elif chip_len == 0x20000: (if stFLASH1M in candidates: stFLASH1M else: stNone)
+        else: stNone
+      if by_size != stNone and by_size in candidates:
+        t = by_size
+  result = if pending: new_pending_storage(gba) else: chip_of(t, gba)
+  result.candidates = candidates
+  result.no_save_library = names_no_save_library(content)
   result.rtc_cart = rom_has_rtc(content)
-  if t == stNone:
+  if t == stNone and not pending:
     return   # no chip: no battery file is read or written
   result.save_path = save_path
-  if fileExists(save_path):
-    let data = readFile(save_path)
+  if pending:
+    return   # no battery file to load
+  if data.len > 0:
     # A trailing RTC record (rtc_calendar.nim "Trailer location") is never
     # chip data, even when it does not decode as a clock: the chip bytes are
     # everything before it, read up to the chip's size as before.

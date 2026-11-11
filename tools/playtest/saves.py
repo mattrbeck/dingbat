@@ -36,6 +36,13 @@ def rom_info(rom_path):
     # FLASH_V is a substring match hazard only for FLASH512_V/FLASH1M_V, which
     # are listed first; keep the first hit
     chip, sizes = chips[0] if chips else (None, ())
+    # EEPROM beside another library, or no library at all: the game's own
+    # accesses choose the chip (dingbat's storage/pending.nim), so every
+    # candidate's size is a chip size
+    if not chips:
+        chip, sizes = 'unnamed', (512, 8192, 32768, 65536, 131072)
+    elif b'EEPROM_V' in data and len({c[0] for c in chips}) > 1:
+        sizes = tuple(sorted({s for _, ss in chips for s in ss}))
     return {
         'title': data[0xA0:0xAC].rstrip(b'\0').decode('latin-1'),
         'game_code': data[0xAC:0xB0].decode('latin-1'),

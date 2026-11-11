@@ -694,6 +694,7 @@ proc storage_kind_tag(st: Storage): uint8 =
   if st of EEPROM: 2'u8
   elif st of Flash: 1'u8
   elif st of NoBackup: 3'u8
+  elif st of PendingStorage: 4'u8   # chip not chosen yet (storage/pending.nim)
   else: 0'u8
 
 proc save_storage_state(st: Storage; w: var Writer) =
@@ -717,12 +718,29 @@ proc save_storage_state(st: Storage; w: var Writer) =
     w.write_i32(int32(ep.ignored_reads))
     w.write_i32(int32(ep.read_bits))
     w.write_i32(int32(ep.wrote_bits))
+  elif st of PendingStorage:
+    w.write_i32(int32(PendingStorage(st).sram_reads))
 
-proc load_storage_state(st: Storage; r: var Reader) =
+proc load_storage_state(gba: GBA; r: var Reader) =
   r.expect_tag(GBA_SEC_STORAGE)
   let kind = r.read_u8()
-  if kind != storage_kind_tag(st):
-    raise newException(StateError, "save state backup type mismatch")
+  if kind != storage_kind_tag(gba.storage):
+    # A cart whose chip its first save access chooses (storage/pending.nim):
+    # the state may come from before that access and this session from
+    # after, or the other way round. Any of the cart's candidates, or the
+    # undecided chip, is the same cart.
+    let c = gba.storage.candidates
+    let t = case kind
+      of 4'u8: stNone
+      of 2'u8: stEEPROM
+      of 1'u8: flash_candidate(c)
+      of 0'u8: stSRAM
+      else: stEEPROM   # refused below: c holds no such chip
+    let fits = c.card > 1 and (kind == 4'u8 or (kind <= 2'u8 and t in c))
+    if not fits:
+      raise newException(StateError, "save state backup type mismatch")
+    discard gba.settle_storage(t)
+  let st = gba.storage
   # Into the live buffer (a failed load rolls back from its backup), not a
   # fresh seq: a restore runs every frame under run-ahead.
   let n = r.read_seq_u8_len()
@@ -794,6 +812,10 @@ proc load_storage_state(st: Storage; r: var Reader) =
                         $ep.memory.len & "-byte EEPROM")
     # busy_until is not in the format: treat in-flight programming as settled
     ep.busy_until = 0
+  elif st of PendingStorage:
+    let p = PendingStorage(st)
+    p.sram_reads = int(r.read_i32())
+    check_range(p.sram_reads, -1, SRAM_LOAD_READS, "pending.sram_reads")
   if changed: st.dirty = true  # persist to the .sav on the next flush
 
 # ---- In-flight machine state (rev 9) ----
@@ -1357,7 +1379,7 @@ proc gba_apply_state(gba: GBA; payload: string; rev: uint32;
   load_ppu_state(gba.ppu, r, rev)
   load_apu_state(gba.apu, r)
   gba.apu_extract_state_events()
-  load_storage_state(gba.storage, r)
+  load_storage_state(gba, r)
   if rev >= 9: gba.load_inflight_state(r, rev)
   else: gba.default_inflight_state()
   if rev >= 10: gba.load_psg_state(r)

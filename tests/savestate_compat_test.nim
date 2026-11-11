@@ -677,6 +677,14 @@ proc run_whole_rom() =
         last_state_reject_kind == srkWrongRom,
         "a GB cart differing past 1 MB already refuses by the header")
 
+proc storage_shape(emu: GBA): string =
+  ## storage_kind_tag is private, so the tests read the object's shape.
+  if emu.storage of EEPROM: "eeprom"
+  elif emu.storage of Flash: "flash"
+  elif emu.storage of PendingStorage: "pending"
+  elif emu.storage of NoBackup: "none"
+  else: "sram"
+
 proc run_cart_shapes() =
   ## Every corpus state comes from a cart with no backup chip and, on the GB
   ## side, a plain 32 KB ROM with no mapper, so the Flash/EEPROM and mapper
@@ -697,7 +705,10 @@ proc run_cart_shapes() =
                          # SRAM + one flash library: the game wants flash
                          ("SRAM_V\0FLASH512_V", stFLASH512),
                          ("SRAM_V\0FLASH_V", stFLASH),
-                         ("EEPROM_V\0SRAM_V", stEEPROM)]:
+                         # EEPROM beside another library: the game's accesses
+                         # choose (storage/pending.nim); nothing here touches
+                         # save memory, so it stays undecided
+                         ("EEPROM_V\0SRAM_V", stNone)]:
     let path = tmp / ("dingbat_shape_" & marker.replace("\0", "_") & ".gba")
     writeFile(path, base & marker & "\0")
     defer: removeFile(path)
@@ -705,14 +716,12 @@ proc run_cart_shapes() =
     emu.post_init()
     # storage_kind_tag is private, so assert on the object shape it encodes:
     # EEPROM and Flash are distinct ref types, SRAM is the plain base.
-    let shape =
-      if emu.storage of EEPROM: "eeprom"
-      elif emu.storage of Flash: "flash"
-      else: "sram"
+    let shape = storage_shape(emu)
     let want_shape =
       case want
       of stEEPROM: "eeprom"
       of stFLASH, stFLASH512, stFLASH1M: "flash"
+      of stNone: "pending"
       else: "sram"
     check(shape == want_shape,
           "GBA " & marker & " is detected as " & want_shape,
@@ -721,6 +730,53 @@ proc run_cart_shapes() =
     let img = emu.state_bytes()
     check(emu.load_state_bytes(img),
           "GBA " & $want & " state round-trips")
+
+  # --- GBA: the chip an undecided cart settles on, and states across that --
+  # (storage/pending.nim). Each access goes through the storage object, as
+  # the bus would send it.
+  for (marker, act, want_shape) in [
+      ("EEPROM_V\0SRAM_V", "eeprom-window", "eeprom"),
+      ("EEPROM_V\0SRAM_V", "probe-write", "pending"),
+      ("EEPROM_V\0SRAM_V", "load-then-write", "sram"),
+      ("", "eeprom-window", "eeprom"),
+      ("", "sram-read", "sram"),
+      ("", "flash-command", "flash")]:
+    let tag = if marker.len == 0: "none" else: marker.replace("\0", "_")
+    let path = tmp / ("dingbat_pending_" & tag & "_" & act & ".gba")
+    writeFile(path, base & marker & "\0")
+    defer:
+      removeFile(path)
+      removeFile(path[0 ..< path.rfind('.')] & ".sav")
+    let emu = new_gba("", path, run_bios = false, use_hle = true)
+    emu.post_init()
+    if not (emu.storage of PendingStorage):
+      check(false, "GBA " & tag & " starts undecided", "got " & storage_shape(emu))
+      continue
+    for _ in 0 ..< 5: emu.step_frame()
+    let before = emu.state_bytes()
+    case act
+    of "eeprom-window": discard emu.storage[0x0D000000'u32]
+    of "probe-write": emu.storage[0x0E000000'u32] = 0x5A'u8
+    of "load-then-write":
+      for i in 0 ..< 300: discard emu.storage[0x0E000000'u32 + uint32(i)]
+      emu.storage[0x0E000010'u32] = 0x5A'u8
+    of "sram-read": discard emu.storage[0x0E000000'u32]
+    of "flash-command": emu.storage[0x0E005555'u32] = 0xAA'u8
+    check(storage_shape(emu) == want_shape,
+          "GBA " & tag & ": " & act & " settles " & want_shape,
+          "got " & storage_shape(emu))
+    if act == "load-then-write":
+      check(emu.storage[0x0E000010'u32] == 0x5A'u8,
+            "GBA " & tag & ": the write that settles SRAM lands")
+    # a state from before the choice puts the cart back undecided, and one
+    # from after it settles the chip again
+    let after = emu.state_bytes()
+    check(emu.load_state_bytes(before) and storage_shape(emu) == "pending",
+          "GBA " & tag & ": " & act & ": an undecided state loads after the choice",
+          "got " & storage_shape(emu))
+    check(emu.load_state_bytes(after) and storage_shape(emu) == want_shape,
+          "GBA " & tag & ": " & act & ": the settled state loads into an undecided cart",
+          "got " & storage_shape(emu))
 
   # GB: one minimal 32 KB image per mapper; the header's cart type picks the
   # mapper and the RAM size byte gives it cart RAM to serialize. Nothing

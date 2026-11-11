@@ -1,0 +1,42 @@
+@title Famicom Mini - Excitebike (Japan)
+@file Famicom Mini - Vol. 04 - Excitebike (J).gba
+@game FEBJ
+@chip EEPROM 64Kbit
+@frozen dingbat-bios,mgba,nba
+
+# This ROM links no backup library at all (no EEPROM_V/SRAM_V/FLASH_V string,
+# unlike the US Classic NES Series Excitebike's EEPROM_V124), yet it saves to
+# an EEPROM through its own routine. The route is the US script's: Selection
+# A, track 1 holding A for both laps, then the L+R menu's ベストタイムをセーブ
+# する on track 2. mgba answers ベストタイムとデザインデータをセーブしました
+# and writes an 8 KB EEPROM file. The ROM links no save library, so dingbat
+# fell back to SRAM and answered セーブできませんでした, writing no battery
+# file, as the second reference still does (a blank 32 KB SRAM file); since
+# §105 the game's first access chooses the chip and dingbat saves to the
+# EEPROM as mgba does.
+[new]
+wait 400
+checkpoint title window=0
+press START hold=8 after=60
+checkpoint track_select window=0
+press START hold=8 after=240
+checkpoint race_start window=0
+press A hold=3000
+checkpoint lap1 window=0
+press A hold=2700
+wait 120
+checkpoint track2 window=0
+press L+R hold=8 after=60
+checkpoint menu window=0
+press DOWN hold=8 after=20
+press DOWN hold=8 after=20
+press A hold=8 after=90
+checkpoint save_result window=0
+press B hold=8 after=120
+
+[load]
+wait 400
+press START hold=8 after=60
+checkpoint track_select_loaded window=0
+press START hold=8 after=240
+checkpoint race_start_loaded window=0

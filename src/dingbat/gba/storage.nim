@@ -55,5 +55,9 @@ proc read_word*(st: Storage; address: uint32): uint32 =
   0x01010101'u32 * uint32(st[address])
 
 proc eeprom_at*(st: Storage; address: uint32): bool =
+  # An undecided chip takes the window too: an access there is the game
+  # choosing EEPROM, always a candidate (storage/pending.nim)
+  if st of PendingStorage:
+    return address >= PendingStorage(st).eeprom_floor and address <= 0x0DFFFFFF'u32
   st of EEPROM and (address >= 0x0D000000'u32 and address <= 0x0DFFFFFF'u32)
 
