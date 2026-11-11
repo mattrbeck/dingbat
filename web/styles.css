@@ -2479,7 +2479,6 @@ body.running #home {
   flex-direction: column;
   align-items: center;
   gap: 26px;
-  animation: home-in 0.4s ease-out both;
 }
 
 /* A library the last visit had, not read yet (index.js, "The first
@@ -2495,15 +2494,11 @@ html.home-pending #home-inner {
   min-height: var(--home-pending-h, 0px);
 }
 
-/* A rise, not a fade: the home screen is there from its first frame. Faded
-   in from transparent, it was faint for its first 0.3-0.4 s on a phone, and
-   its content only counted as painted (Largest Contentful Paint) once the
-   fade had a frame to show - which waited for index.js to finish running. */
-@keyframes home-in {
-  from {
-    transform: translateY(10px);
-  }
-}
+/* No entrance: the home screen is where it stays from its first frame. It
+   once faded in from transparent (faint for 0.3-0.4 s on a phone, and not
+   painted, to Largest Contentful Paint, until index.js had run), then rose
+   10 px, which with no fade to hide it read as the page jumping down and
+   back up (Matt, on his phone). */
 
 /* The rungs under the hero. Resume is for the sessions the hero cannot draw
    (2P link, rollback, online - two cores, no single framebuffer), where it is
@@ -3071,13 +3066,8 @@ body.home-flying #canvas {
 }
 
 /* Arriving home: the page rises in under the landing picture, the words
-   first and the library after, a tile at a time. #home-inner's own entrance
-   stands down so the hero is where the picture is aimed - by running in no
-   time, not by going to none: a name that comes back when the class goes
-   is a new animation, and the page would rise in a second time. */
-#home.home-arriving #home-inner {
-  animation-duration: 0s;
-}
+   first and the library after, a tile at a time (#home-inner itself has no
+   entrance, so the hero is where the picture is aimed). */
 
 #home.home-arriving #hero-body,
 #home.home-arriving .home-recent-head,
@@ -9461,10 +9451,8 @@ body.running.sync-shown #status {
  * sub-0.1s press-feedback transforms are kept.
  */
 @media (prefers-reduced-motion: reduce) {
-  /* Entrance animations (slide/scale): show the settled state immediately.
-     home-in uses "both", so animation:none simply lands on the final frame. */
+  /* Entrance animations (slide/scale): show the settled state immediately. */
   #menu-dropdown,
-  #home-inner,
   .modal,
   #account-pop,
   #hero-led,
