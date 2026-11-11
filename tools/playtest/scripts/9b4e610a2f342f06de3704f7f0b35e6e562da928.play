@@ -1,0 +1,46 @@
+@title From TV Animation - One Piece - Mezase! King of Paris (Japan)
+@file From TV Animation - One Piece - Mezase! King of Paris (J).gba
+@game AUSJ
+@chip FLASH512
+@frozen dingbat-bios,mgba,nba
+# Intro, title, name entry (あ), the player ID screen and the game's own first save (セーブしました!), main menu.
+# [load]: each emulator boots its own save to the main menu, then the campaign.
+# Picked for its two save libraries (FLASH_V126 + SRAM_V112): the game asks for a flash ID before anything else
+# and falls back to SRAM only when no flash answers (storage_chip.nim); every emulator writes a 64 KB flash file.
+# The player ID is drawn from a timer at name entry, so each emulator deals its own (14244 / 45936 / 62858).
+
+[new]
+wait 600
+wait 300
+checkpoint intro window=30
+press START
+wait 240
+wait 120
+checkpoint title window=30
+press START
+wait 180
+checkpoint name_entry window=30
+press A
+wait 30
+press START
+wait 60
+press A
+wait 180
+checkpoint player_id window=30
+press A
+wait 180
+checkpoint saved window=30
+press A
+wait 300
+checkpoint main_menu window=30
+
+[load]
+wait 900
+press START
+wait 360
+press START
+wait 180
+checkpoint main_menu_loaded window=30
+press A
+wait 120
+checkpoint campaign_loaded window=30

@@ -1,0 +1,40 @@
+@title Classic NES Series - Excitebike (USA)
+@file Classic NES Series - Excitebike (U).gba
+@game FEBE
+@chip EEPROM 64Kbit
+@frozen dingbat-bios,mgba,nba
+
+# Selection A, track 1, holding A (normal throttle) for both laps: the rider
+# qualifies and the game moves on to track 2, where the Classic NES Series'
+# L+R menu SAVEs ("BEST TIME AND DESIGN DATA WAS SAVED."). The chip is a
+# 64 Kbit EEPROM (8 KB files in all three). The second reference's rider runs faster from the
+# same input (lap 1 at 0:39:42 against 0:41:15) and reaches track 2 about
+# 120 frames early; dingbat and mgba share every frame. The design mode's
+# track is saved too, but no screen of this release shows a saved design or
+# a time slower than track 1's default best on reload (an empty-cart boot
+# draws the same frames in all three), so [load] only replays the menus.
+[new]
+wait 400
+checkpoint title window=0
+press START hold=8 after=60
+checkpoint track_select window=0
+press START hold=8 after=240
+checkpoint race_start window=0
+press A hold=3000
+checkpoint lap1 window=0
+press A hold=2700
+wait 120
+checkpoint track2 window=0
+press L+R hold=8 after=60
+press DOWN hold=8 after=20
+press DOWN hold=8 after=20
+press A hold=8 after=90
+checkpoint saved window=0
+press B hold=8 after=120
+
+[load]
+wait 400
+press START hold=8 after=60
+checkpoint track_select_loaded window=0
+press START hold=8 after=240
+checkpoint race_start_loaded window=0

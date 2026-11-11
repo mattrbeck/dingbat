@@ -1,0 +1,36 @@
+@title Classic NES Series - Castlevania (USA)
+@file Classic NES Series - Castlevania (U).gba
+@game FADE
+@chip EEPROM 4Kbit
+@frozen dingbat-bios,mgba,nba
+
+# The Classic NES Series' L+R menu (CONTINUE / RESET / SAVE / SLEEP MODE)
+# saves the game's progress to the cart's EEPROM ("YOUR PROGRESS WAS
+# SAVED."). Start a game, open the menu once in the intro, walk into stage 1
+# whipping the candles (5 hearts), then SAVE from the menu.
+# [load]: with a save the title's cursor opens on CONTINUE, and continuing
+# resumes stage 1 with the 5 saved hearts (a new game starts with 0).
+[new]
+wait 400
+press START after=300
+press L+R after=60
+checkpoint menu_intro window=0
+press A after=200
+press RIGHT hold=240
+tap B times=4 every=30 hold=4
+press RIGHT hold=180
+checkpoint stage1 window=30
+press L+R after=60
+checkpoint menu window=30
+press DOWN after=10
+press DOWN after=10
+press A after=90
+checkpoint saved window=0
+press B after=120
+checkpoint resumed window=30
+
+[load]
+wait 400
+checkpoint continue_title window=0
+press START after=300
+checkpoint resumed_loaded window=30

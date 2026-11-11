@@ -1,0 +1,59 @@
+@title WarioWare - Twisted! (USA)
+@file WarioWare - Twisted! (U).gba
+@game RZWE
+@chip SRAM
+@frozen dingbat-bios,mgba,nba
+# Health screen, intro, title, How To Play, Modes, Story, Wario's stage: the opening scene waits for the player
+# to wind the watch by turning the console, and the harness holds every emulator's gyro at rest, so [new]
+# ends there. The game has already written its save by then (27 bytes); [load] boots it to Story.
+# Picked for the cart's Z-axis gyro (a serial ADC on the GPIO pins, read every frame) and rumble.
+
+[new]
+wait 600
+checkpoint health_safety window=30
+press A
+wait 300
+checkpoint intro window=30
+press START
+wait 240
+checkpoint title window=30
+press START
+wait 240
+checkpoint how_to_play window=30
+wait 600
+press A
+wait 120
+wait 400
+press A
+wait 200
+press START
+wait 200
+checkpoint modes window=30
+press A
+wait 300
+checkpoint story_select window=30
+press A
+wait 600
+wait 300
+checkpoint cutscene window=30
+press START
+wait 300
+tap A times=10 every=60 hold=4
+wait 600
+checkpoint wind_watch window=30
+
+[load]
+wait 600
+press A
+wait 300
+press START
+wait 240
+checkpoint continue_title window=30
+press START
+wait 240
+press START
+wait 200
+checkpoint modes_loaded window=30
+press A
+wait 300
+checkpoint story_loaded window=30
