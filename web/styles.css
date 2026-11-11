@@ -4487,17 +4487,23 @@ body.game-menu-open #toast {
    The shield is there from the tap, invisible; .shown fades in the dim and
    the card. Above everything, toasts included: nothing else can be used
    until the reload. What says it is working is the logo itself, flapping
-   (#home-logo.flapping): so the card sits low, clear of the brand, and the
-   dim is light enough to leave the bat in plain view. */
+   (#home-brand.flapping): so the card sits just under the brand when the
+   brand is on screen (.under-brand, --updating-top from index.js
+   showUpdatingCard), in the middle when it is not, and the dim is light
+   enough to leave the bat in plain view. */
 #updating {
   position: fixed;
   inset: 0;
   z-index: 900;
   display: grid;
-  place-items: end center;
-  padding: 16px 16px max(14vh, calc(24px + var(--safe-b, 0px)));
+  place-items: center;
+  padding: 16px;
   background: rgba(var(--stage-rgb), 0);
   transition: background 0.2s ease-out;
+}
+#updating.under-brand {
+  place-items: start center;
+  padding-top: var(--updating-top, 16px);
 }
 #updating[hidden] {
   display: none;
