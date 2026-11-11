@@ -407,7 +407,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           mkdir -p ~/apt-archives/partial
-          printf 'Acquire::http::Timeout "20";\nAcquire::Retries "5";\nDir::Cache::Archives "%s";\n' \
+          printf 'Acquire::http::Timeout "20";\nAcquire::https::Timeout "20";\nAcquire::Retries "5";\nDir::Cache::Archives "%s";\n' \
             "$HOME/apt-archives" | sudo tee /etc/apt/apt.conf.d/99dingbat-timeouts
           echo "image=$ImageVersion" >> "$GITHUB_OUTPUT"
       - name: Cache Chromium's system packages
@@ -621,10 +621,13 @@ jobs:
         # WebKit's dependencies are a hundred of them (28 min once). Their
         # .debs are kept where actions/cache can restore them (apt's own
         # directory is root's): five shards each installing them is five
-        # draws of a slow mirror (125 MB at 300 kB/s, 7 min, once).
+        # draws of a slow mirror (125 MB at 300 kB/s, 7 min, once). The
+        # timeout is set for https as well as http: the mirrors are fetched
+        # over https, and on 2026-11-11 apt-get update sat 29 minutes on one
+        # stalled index there, with every package it needed in the cache.
         run: |
           mkdir -p ~/apt-archives/partial
-          printf 'Acquire::http::Timeout "20";\nAcquire::Retries "5";\nDir::Cache::Archives "%s";\n' \
+          printf 'Acquire::http::Timeout "20";\nAcquire::https::Timeout "20";\nAcquire::Retries "5";\nDir::Cache::Archives "%s";\n' \
             "$HOME/apt-archives" | sudo tee /etc/apt/apt.conf.d/99dingbat-timeouts
           echo "image=$ImageVersion" >> "$GITHUB_OUTPUT"
       - name: Cache WebKit's system packages
