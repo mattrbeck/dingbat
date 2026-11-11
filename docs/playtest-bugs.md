@@ -10061,3 +10061,56 @@ CPU's data accesses go to EWRAM. At 4/2 waits the console sided with dingbat
 (slotexec, §63); this game runs 3/1, which no recorded cell covers. A
 cartridge-side measurement at 3/1 (the "one flashcart page for 3/1 wait
 states" step) settles it; until then it is `@known`.
+
+## §103. The whole corpus again at main, every difference qualified, and mGBA master as a second mGBA, 2026-11-11
+
+**The run.** All 233 scripts at main 42a555d5 in every default configuration,
+both references played live (no replay), the cross-load matrix and audio:
+223 PASS, 7 KNOWN, 0 FAIL; three new scripts (Sennen Kazoku, Hello Kitty
+Collection, Kim Possible 2) have no `[new]` yet and are skipped. 1,860
+checkpoints: all three agree on 1,436 (1,433 on 16 Oct), dingbat alone on 29
+(32), mGBA odd one out 161, the second reference 116, all differ 94.
+
+**What moved since 16 Oct.** Only the 4-5 Nov timing round reaches the GBA
+core, and the 5 Nov train baseline already shows every effect: today's run
+has no item at another tier. Circle of the Moon's `shaft_bottom` (§59) and
+Gradius Galaxies' two stage-1 checkpoints (§80) now agree with both
+references. Circle of the Moon, Iridion 3D, Swordcraft Story 2 and Rhythm
+Tengoku went KNOWN -> PASS: their `@known` lines (§59, §99, §57/§99, §85)
+matched nothing and are removed.
+
+**The qualifier.** `tools/playtest/divergences.py` lists every frame, load,
+save and harness difference with a tier (S1 act, S2 chase, S3 watch, S4
+noted, R reference-side) from who stands alone, how big the difference is,
+whether dingbat agrees again later, whether the save differs too, and
+`@known`. Today: no S1; three S2 (Earthworm Jim 2's waterfall, Starsky &
+Hutch's race, The Sims' language screen), each looked at: Earthworm Jim 2 is
+mGBA's run diverging (a missing enemy, other damage), the other two the
+blink and boot phases of §69 and §87. The S3s are phases (cursor, sprite,
+background animation, star fields) or carry an earlier reading. Saves: the
+same in all three in 95 of 180 games that save; dingbat alone in 2 (The
+Sims, §87; Yu-Gi-Oh! EDS, `@known` §33).
+
+**mGBA master.** mGBA has not released since 0.10.5, but master is 1,442
+commits ahead. 662dada8 (6 Nov) was built headless (the driver needs two
+changes for 0.11: the core writes interleaved stereo into an mAudioBuffer
+instead of two blip channels, and the pixel type is mColor; the library's
+own compile defines must be passed, or `struct mCore`'s layout differs and
+`core->init` reads as null) and played live on the 189 games with any
+difference, the second reference replayed. On r0-agb.json it matches 1,078
+of 6,295 console cells (0.10.5: 1,060; dingbat 5,743). In the games it moved
+its own picture at 84 of 1,556 checkpoints: 12 to all three agreeing, 4
+dingbat-alone checkpoints now on dingbat's side (Yggdra Union, The Lord of
+the Rings, The Urbz, Shin Onigashima), 7 now with the second reference
+against dingbat, 2 out of a three-way agreement. None of the load-pricing
+games (§29, §63, §78, §88) moves. Four games fail dingbat's verdict with it:
+Tony Hawk's Underground (an idle animation), Digidrive (an animated menu
+background fools the blank-cart control: the menu shows no save data) and
+Advance Wars 2 (the resumed map's cursor) are phases; **Derby Stallion
+Advance** is the one lead: both references pick the same advisor line at
+`stallion_fee` and write the same Flash 512 save (54 bytes from dingbat's
+in 5 ranges), where mGBA 0.10.5 had agreed with dingbat. Not traced yet;
+the first suspect is flash busy time (§90's class, flashprog).
+
+The second reference has one emulation change since our build (v1.8.3's PSG
+frequency writes); its 2.0 branch so far rewrites the frontend.
