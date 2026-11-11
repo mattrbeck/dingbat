@@ -26331,5 +26331,28 @@
     "want": "DEADBEE3"
    }
   ]
+ },
+ {
+  "payload": "sioclk",
+  "rom": "sioclk.gba",
+  "sha1": "0fbabe3f40c45a1d6b789459ab354a579758e318",
+  "frames": 84,
+  "cells": [
+   {
+    "id": "sioclk 0x0",
+    "kind": "hex",
+    "want": "01010810"
+   },
+   {
+    "id": "sioclk 0x1",
+    "kind": "hex",
+    "want": "01010811"
+   },
+   {
+    "id": "sioclk 0x2",
+    "kind": "hex",
+    "want": "01010812"
+   }
+  ]
  }
 ]

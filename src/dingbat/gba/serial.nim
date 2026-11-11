@@ -276,7 +276,16 @@ proc write_siocnt(serial: Serial; old_val: uint16) =
   let mode = serial.sio_mode()
 
   let start_rising = not bit(old_val, 7) and bit(serial.siocnt, 7)
-  if start_rising:
+  # A normal-mode transfer started on the external clock (Start set, nothing
+  # clocking it) begins shifting when SC is switched to the internal clock
+  # with Start still set: the AGB SP completes it one transfer's length after
+  # the switching write, as if Start had risen there (tests/roms/payloads/
+  # sioclk.s; Nintendo's link start-up in Coloris and Dial Hex does this,
+  # docs/playtest-bugs.md §101)
+  let clock_to_internal = mode in {smNormal8, smNormal32} and
+    bit(old_val, 7) and bit(serial.siocnt, 7) and
+    not bit(old_val, 0) and bit(serial.siocnt, 0)
+  if start_rising or clock_to_internal:
     serial.driver.sio_start(serial, mode)
 
 proc notify_mode_change(serial: Serial; old_mode: SioMode) =

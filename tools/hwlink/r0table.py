@@ -329,6 +329,12 @@ TABLE = {
     # running / running with line 101's H-blank / TM2's stop; then the V-count
     # controls 0x28 and 0x60, wakeirq's cells moved by 4 cycles (payloads/wakehb.s)
     'wakehb': [0x80, 0x90, 0xA0, 0xA8, 0xE0, 0xA2, 0x28, 0x60],
+    # an SIO transfer started on the external clock, then SC set with Start
+    # still set (Coloris / Dial Hex's link start-up, docs/playtest-bugs.md
+    # §101): the internal-clock control, the switch, the switch + the byte
+    # store of Start (payloads/sioclk.s; its external-only control, 3, is
+    # clocked by the host's next poll and is not recorded)
+    'sioclk': [0, 1, 2],
     # what a 16-bit DMA leaves in the two halves of the data bus, one NOP on:
     # the row's offset, IWRAM / EWRAM sources at h2, h1, h3, h2 alone, the
     # destination's lane swapped, DMA0 to the gamepak, and the 32-bit control
