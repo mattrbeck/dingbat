@@ -28,7 +28,7 @@ then `lake env lean AxiomAudit.lean`, which fails if any theorem rests on
 | `LinkPairing` | two players on one code: both clients, the signaling server (server.nim / server.js) and the network between them; suspension, unseen socket deaths, the pairing deadline |
 | `LinkResume` | a dropped link resuming: inputs, the input log and RESUME, pause and 2x across a resume, numbered pause presses agreeing, BYE and the goodbye note, the give-up clock, what each player sees |
 | `LinkRedial` | the redial on the retry code: both clients, the server (and its goodbye notes), sockets, the pairing/answer/re-rendezvous timers, suspension |
-| `ServiceWorker` | update check, web/sw.js install (the version-probed design, the manifest one and the pointer one, side by side) / activate / fetch (query loads, the DS core's checked lazy files) / Force update (into its own cache, then the pointer; its failed card, Try Again and the second failure's full reset), the updating shield, the wingbeat's wait before every update reload, reload on controllerchange, the update a too-new save state asks for |
+| `ServiceWorker` | update check, web/sw.js install (the version-probed design, the manifest one and the pointer one, side by side) / activate / fetch (query loads, the DS core's checked lazy files) / Force update (into its own cache, then the pointer; its failed card and Try Again; a failure under an update's coming reload), the updating shield, the wingbeat's wait before every update reload, reload on controllerchange, the update a too-new save state asks for |
 
 `FINDINGS.md` ranks every counterexample the web models found.
 

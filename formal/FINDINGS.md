@@ -981,18 +981,23 @@ as `Cache-Control: no-cache` (sw.js `asked`): the bytes and where they live
 are unchanged, so every theorem here stands as stated, and the e2e asserts
 the reloaded page runs the new build in every engine.
 
-## The updating card (2026-11-11, branch update-ui at b22ed55c, `WebState/ServiceWorker`)
+## The updating card (2026-11-11, branch update-ui at 2243d6d9, `WebState/ServiceWorker`)
 
-What changed on the page side (febce5a0, b22ed55c), and how the model follows:
+What changed on the page side (febce5a0, b22ed55c, 2243d6d9), and how the
+model follows:
 
-1. **Force update's failure.** A "reinstalled" ok:false no longer takes the
-   full reset at once. A tab's first failure in a row (or any while
-   offline) shows a failed card with nothing changed: appUpdating back to
-   false, no cache touched, no reload; Close or Try Again. A second in a row
-   while online takes the full reset, as before; so do no reply and no
-   progress for 20 s, and no controller at all. Modelled per tab
-   (`failTab`, `fails`, `online`, `forceRetry`, `failClose`), the worker's
-   silence apart from its ok:false (`rStop` beside `rFail`).
+1. **Force update's failure.** A "reinstalled" ok:false never takes the full
+   reset now, however often in a row and online or not (2243d6d9 dropped
+   the "second failure while online" reset: on Matt's phone, with the
+   server's manifest missing, it threw away a working offline copy). With
+   no update's reload coming in the tab it shows the failed card with
+   nothing changed: appUpdating back to false, no cache touched, no reload;
+   Close or Try Again. With one coming (updateReloadComing, set by
+   applyUpdate and reloadAfterUpdate, never cleared) the tab goes on
+   updating: shield up, appUpdating on, no card. No reply and no progress
+   for forceSilenceMs, and no controller, still take the full reset.
+   Modelled per tab (`failTab`, `coming`, `forceRetry`, `failClose`), the
+   worker's silence apart from its ok:false (`rStop` beside `rFail`).
 2. **The wingbeat's wait.** Every reload an update ends in goes through
    reloadAfterUpdate, which may wait up to 667 ms for the logo's flap to
    land. Modelled as a pending reload (`pend`) on every such reload, landed
@@ -1005,50 +1010,42 @@ What changed on the page side (febce5a0, b22ed55c), and how the model follows:
    silence timer, which the model leaves untimed (a timeout may come at
    any point of a run).
 
-**Re-proved** with all of it in: `no_reload_without_a_click`,
+**Found and fixed on the branch.** The first version (febce5a0) set
+appUpdating back to false on any first failure, even when the same tab's
+own Update was on its way to a reload
+(`bug_force_failure_mid_update_reloads_midgame`): Force update tapped while
+updateForNewerState awaited its writes, applyUpdate then running anyway,
+the Force update failing ("Nothing has changed"), the person closing the
+card and starting a game, and the Update's failed install ending in
+fullResetReload, which deleted every cache and reloaded the new game away.
+A milder form: another tab's Update claims a tab whose Force update then
+fails inside the wingbeat's wait, which showed the failed card and then
+reloaded anyway. 2243d6d9's updateReloadComing closes both: the traces are
+`regress_force_failure_mid_update_keeps_updating`,
+`regress_force_failure_mid_update_no_close` (no Close, no game start, and
+the reload takes only the game the update was agreed in),
+`regress_force_failure_in_wingbeat_wait` and `..._lands`.
+
+**Proved** with all of it in, for every reachable state (no restriction):
+`no_forced_midgame`, `pending_is_asked` (a pending reload is the tab's own
+update's, with updateReloadComing set), `no_reload_without_a_click`,
 `shows_at_most_once`, `watching_has_install`, `cache_is_one_build`,
 `lazy_served_is_its_build`, `no_mixed_boot`, `cache_is_its_build`,
 `no_mixed_boot_without_force`, `cache_holds_builds`,
-`force_stage_one_build`, `force_leaves_live_cache_until_pointer` (now with
-`rStop`), the navigation theorems, the no-double-download theorems,
-`stable_deploy_installs`, and every trace and pairing (each Force update or
-own-update reload now ends with its `landReload`). **New:**
-`first_force_failure_changes_nothing` (the failure step moves no cache,
-manifest, DS core file, worker or install, reloads nothing, and leaves the
-tab with the failed card and appUpdating off), `first_force_failure_no_reload`
-(with nothing else of its own under way, no reload is left coming in that
-tab), `pending_reload_one_build` (a reload that waited boots one build,
-whatever landed in the wait: `wingbeat_wait_spans_activation` has another
-tab's activation delete the cache the Force update had just made live, and
-the reload lands on the newer build whole), `no_game_start_while_updating`,
-`pending_is_asked`; traces `force_failure_close_then_play`,
-`force_second_failure_resets`, `force_failure_offline_keeps_app`,
-`no_game_behind_force_update`.
+`force_stage_one_build`, `force_leaves_live_cache_until_pointer` (with
+`rStop`), the navigation and no-double-download theorems,
+`stable_deploy_installs`, and every trace and pairing. **New:**
+`force_failure_changes_nothing` (any failure step moves no cache, manifest,
+DS core file, worker or install and reloads nothing; the failed card with
+no reload coming, updating on with one), `force_failure_no_reload` (a
+failure that shows the card leaves no reload coming in that tab),
+`pending_reload_one_build` (a reload that waited boots one build, whatever
+landed in the wait: `wingbeat_wait_spans_activation`),
+`no_game_start_while_updating`; traces `force_failure_close_then_play`,
+`force_failure_never_resets`, `no_game_behind_force_update`.
 
-**Refuted, open (Low): a Force update's failure clears appUpdating under
-the same tab's own Update** (`bug_force_failure_mid_update_reloads_midgame`).
-`no_forced_midgame` no longer holds for every run: it is proved on the runs
-where no failure reply reaches a tab whose own Update or reload is under way
-too (`ReachF`). The trace: a game in tab A; a save state from the new build
-loaded, so updateForNewerState passes its checks and awaits persistSave and
-dbPut (no shield yet); Force update tapped from the menu in that window;
-applyUpdate then runs anyway (it does not check appUpdating) and watches the
-new worker's install; the Force update's download fails: "Nothing has
-changed", appUpdating false; the person closes the card and starts another
-game (launchRom no longer refuses); the install fails on the same poor
-connection, and applyUpdate's fullResetReload deletes every cache,
-unregisters and reloads the tab, game and all. The same clearing happens
-when another tab's Update claims a tab whose Force update then fails inside
-the wingbeat's wait: the failed card shows, then the page reloads anyway
-(no game lost there, since the shield holds taps for those ≤ 667 ms). Both
-windows are narrow. Either fix closes both: startForceUpdate's catch could
-leave appUpdating set when a reload is already coming in the tab (an
-applyUpdate in flight, or reloadAfterUpdate's timer set), or
-updateForNewerState could check appUpdating again after its awaits and
-applyUpdate refuse while a Force update runs. Not fixed here (formal/ only).
-
-**Not modelled.** The card's half-second delay for Update and the flap
-itself (no property reads them); a key or pad press under the shield
-reaching anything but launchRom; a slow worker outliving the silence timer
-and committing after the page's full reset (`rStop` ends the run, as
+**Not modelled.** The card's half-second delay for Update, its placement
+and the flap itself (no property reads them); a key or pad press under the
+shield reaching anything but launchRom; a slow worker outliving the silence
+timer and committing after the page's full reset (`rStop` ends the run, as
 before); the manifest's `sizes` (only the bar reads them).
