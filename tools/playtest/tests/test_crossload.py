@@ -177,6 +177,51 @@ class BlankCart(unittest.TestCase):
         problems, _ = judge(report(self.COLUMNS, blank))
         self.assertEqual(problems, [])
 
+    # Digidrive (bit Generations): the menu after the load shows no save
+    # data over a background each reader animates at its own phase; one
+    # reference's phase differs from the blank cart's, so it "reads" the save
+    # there and dingbat, like the other reference, "shows a blank cart". The
+    # rankings that follow show the save, and dingbat shows it as the
+    # references do: the menu is no evidence of a lost save
+    BLANK2 = {'mgba': {'menu': 'blank', 'ranking': 'blank'}, 'nba': {'menu': 'blank', 'ranking': 'blank'}}
+
+    def digidrive(self, dingbat_ranking='loaded'):
+        cells = {}
+        for w in ('dingbat', 'mgba', 'nba'):
+            for r in ('dingbat', 'mgba', 'nba'):
+                cells[f'{w}-in-{r}'] = {'menu': 'phase' if r == 'mgba' else 'blank',
+                                        'ranking': dingbat_ranking if r == 'dingbat' else 'loaded'}
+        return cells
+
+    def test_a_screen_that_shows_no_save_data_is_no_evidence(self):
+        problems, notes = judge(report(self.digidrive(), self.BLANK2))
+        self.assertEqual(problems, [])
+        self.assertIn("mgba save in dingbat: shows a blank cart's screens at menu where mgba reads the save, "
+                      "but shows the save at ranking as the references do: those checkpoints do not show it: "
+                      "not diagnostic", notes)
+        self.assertIn("dingbat save in dingbat: shows a blank cart's screens at menu, but shows the save at "
+                      "ranking as the references do: those checkpoints do not show it: not diagnostic", notes)
+
+    def test_without_the_rankings_the_menu_still_fails(self):
+        cells = {k: {'menu': v['menu']} for k, v in self.digidrive().items()}
+        problems, _ = judge(report(cells, {x: {'menu': 'blank'} for x in REFS}))
+        self.assertTrue(any(p.startswith("mgba save in dingbat: shows a blank cart's screens") for p in problems))
+
+    def test_columns_crown_with_more_checkpoints_still_fails(self):
+        # losing the save loses it at every checkpoint: nothing elsewhere
+        # shows it, so the control still fails dingbat
+        cells = {k: {'menu': v, 'ranking': v} for k, v in
+                 ((k, c['cp']) for k, c in self.COLUMNS.items())}
+        problems, _ = judge(report(cells, self.BLANK2))
+        self.assertTrue(any(p.startswith("mgba save in dingbat: shows a blank cart's screens") for p in problems),
+                        problems)
+
+    def test_showing_something_else_elsewhere_is_not_reading_the_save(self):
+        # dingbat differs from the blank cart at the rankings, but not as the
+        # references show the save there: that is no proof it read it
+        problems, _ = judge(report(self.digidrive(dingbat_ranking='garbled'), self.BLANK2))
+        self.assertTrue(any("shows a blank cart's screens" in p for p in problems), problems)
+
     def test_blank_state(self):
         rep = report(self.COLUMNS, BLANK)
         self.assertTrue(pipeline.blank_state(rep, 'mgba-in-nba', 'cp'))

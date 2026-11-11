@@ -10261,3 +10261,40 @@ a DMA running into 0FFFFFFCh, the same stray access as Super Monkey Ball Jr,
 which dingbat no longer turns into a save. No other game loses a save in the
 time the pattern plays; Famicom Mini Excitebike (J) was found by scripting
 its design-mode save, which no blind pattern reaches.
+
+## §106. Two cross-load false alarms: a screen that shows no save, and a map whose units idle at each reader's phase, 2026-11-11
+
+Both came from playing mgba master (662dada8) on the games with a
+difference (§103); neither is in the full suite's verdicts.
+
+**Digidrive: §96's control counted a menu that shows no save data.** At
+`menu_loaded` every reader draws the same menu over a dot background it
+animates at its own phase. mgba master's phase there differs from its own
+blank-cart run whichever save it loads, dingbat's and the second
+reference's do not, so mgba "read" the save and dingbat failed twice ("shows
+a blank cart's screens where mgba reads the save"). At `play_menu_loaded`
+and `ranking_loaded` the same dingbat cells differ from every blank-cart run
+and agree with the references reading the same save: dingbat read it. The
+rule (`pipeline.py` `shows_save_elsewhere`): a [load] cell that shows the
+save at one checkpoint -- differing from every blank run and agreeing with a
+reference that also reads it there -- has read the save, and its blank
+cart's picture at another checkpoint is a screen that does not show it (a
+note, "not diagnostic"). A save lost for good looks blank at every
+checkpoint, so Columns Crown (§95) still fails (tests/test_crossload.py:
+the Digidrive shape, Columns Crown over two checkpoints, and a cell that
+differs from the blank cart elsewhere only by showing something else).
+
+**Advance Wars 2: the resumed map's units idle at each reader's own phase.**
+Every reader shows every writer's save the same way at `resumed_map` (one
+picture per reader), and the three saves are byte for byte the same, so no
+harness rule can tell a phase from a misread there: a dingbat that misread
+every save alike would look the same, and widening MINOR would let a changed
+digit through. No ±30-frame window shares a frame between two readers'
+pictures, so a wider window is no fix either (the units' and the cursor's
+animations are at different relative phases, not shifted in time). The
+script now judges the checkpoint by what the screen says (`compare=text`,
+the funds, day and HQ panel; a lost save draws the prologue, whose text is
+MAJOR against it, 0.04-0.08). The OCR of a busy map is near its threshold
+(dingbat against mgba 0.10.5: 0.77; against the second reference 0.97;
+against mgba master 0.88), so the checkpoint passes through the reader
+that agrees, as every load checkpoint does.

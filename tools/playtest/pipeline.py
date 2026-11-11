@@ -558,6 +558,27 @@ def cross_load_verdict(report, s, refs, problems):
         return bool(row) and all(c['reached'] and (not c['vs'] or any(cell_ok(vv) for vv in c['vs'].values()))
                                  for c in row.values())
 
+    def shows_save_elsewhere(key, w, skip):
+        """A checkpoint outside `skip` where [load] cell `key` (w's save in
+        some reader) shows the save: it differs from every blank-cart run
+        there and agrees with a reference that reads the same save there
+        too. A cell that shows a save's data at one checkpoint has read it;
+        a blank cart's picture at another is a screen that does not show
+        the save (Digidrive's menu, an animated background drawn at each
+        reader's own phase, before its rankings show the save: §96's
+        control must not count that as a lost save). A cell that lost the
+        save looks blank at every checkpoint (Columns Crown), so this finds
+        nothing there."""
+        reader = key.split('-in-')[1]
+        for cp, c in cps.get(key, {}).items():
+            if cp in skip or not c['reached'] or blank_state(report, key, cp) is not False:
+                continue
+            witnesses = [x for x in refs if x != reader
+                         and blank_state(report, f'{w}-in-{x}', cp) is False]
+            if any(agree(key, cp, x) for x in witnesses):
+                return cp
+        return None
+
     for key, cell in cells.items():
         w, r = key.split('-in-')
         if s not in (w, r):
@@ -616,7 +637,15 @@ def cross_load_verdict(report, s, refs, problems):
                 else:
                     detail = ', '.join(f"{x}={c['vs'][x]['verdict']}" for x in ref_readers if x in c['vs'])
                     problems.append(f'{w} save in {s}: checkpoint {cp} differs from the references reading the same save ({detail})')
+        blank_cps = {cp for hits in unread.values() for cp, _ in hits}
+        shown = shows_save_elsewhere(key, w, blank_cps) if blank_cps else None
         for (lost, read), hits in unread.items():
+            if shown:
+                notes.append(f'{w} save in {s}: shows a blank cart\'s screens at '
+                             + ', '.join(cp for cp, _ in hits)
+                             + f' where {"/".join(read)} reads the save, but shows the save at {shown} as the '
+                             f'references do: those checkpoints do not show it: not diagnostic')
+                continue
             problems.append(f'{w} save in {s}: shows a blank cart\'s screens'
                             + (f', as {"/".join(lost)} does,' if lost else '')
                             + f' where {"/".join(read)} reads the save: ' + ', '.join(f'{cp} ({d})' for cp, d in hits))
@@ -674,6 +703,13 @@ def cross_load_verdict(report, s, refs, problems):
                 unread.setdefault(tuple(read), []).append(cp)
             elif own and all(blank_state(report, f'{x}-in-{x}', cp) is False for x in own):
                 unloadable.setdefault((tuple(readers), tuple(own)), []).append(cp)
+        blank_cps = {cp for hits in list(unread.values()) + list(unloadable.values()) for cp in hits}
+        shown = shows_save_elsewhere(key, s, blank_cps) if blank_cps else None
+        if shown:
+            notes.append(f'{s} save in {s}: shows a blank cart\'s screens at {", ".join(sorted(blank_cps))}, '
+                         f'but shows the save at {shown} as the references do: those checkpoints do not show '
+                         f'it: not diagnostic')
+            unread, unloadable = {}, {}
         for read, hits in unread.items():
             problems.append(f'{s} save in {s}: shows a blank cart\'s screens where {"/".join(read)} '
                             f'{"reads" if len(read) == 1 else "read"} the same save: {", ".join(hits)}')

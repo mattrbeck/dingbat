@@ -73,4 +73,7 @@ wait 12
 # until notblank timeout=900 every=4  [reached dingbat-bios+56 mgba+56 nba+60]
 wait 64
 wait 240
-checkpoint resumed_map window=30
+# the map's units idle at each emulator's own phase after the load (no
+# 61-frame window shares a frame between readers that show the same funds,
+# day and units), so the save is judged by what the screen says
+checkpoint resumed_map window=30 compare=text
