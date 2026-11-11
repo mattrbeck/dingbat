@@ -350,7 +350,12 @@ const failUpdating = () => {
 // landed (the bat at rest, as the reloaded page draws it): a flap is never
 // cut off mid-wing. None in flight (reduced motion, or no logo on screen):
 // at once. A card not shown yet stays unshown.
+// Set once an update's reload is on its way - applyUpdate began (every path
+// out of it ends in one), or reloadAfterUpdate was called - and never unset:
+// a failed Force update must not take appUpdating back down then.
+let updateReloadComing = false;
 const reloadAfterUpdate = () => {
+  updateReloadComing = true;
   clearTimeout(updatingTimer);
   const left = flapLeftMs();
   if (left > 0) setTimeout(() => location.reload(), left);
@@ -376,6 +381,7 @@ var updateActivated = false;
 
 const applyUpdate = async () => {
   appUpdating = true;
+  updateReloadComing = true;
   // Busy until the reload lands (the install downloads every asset). Never
   // un-set: every path out of here ends in a reload.
   updateBtn.disabled = true;
@@ -440,12 +446,12 @@ updateModal.addEventListener("click", (e) => {
 // Force update: the live worker re-downloads every asset under a nonce
 // (skips stale CDN edges and the browser HTTP cache), which works while the
 // CDN still serves the previous sw.js. It gives up on a worker that says
-// nothing - no reply and no progress - for FORCE_SILENCE_MS (the page's full
+// nothing - no reply and no progress - for forceSilenceMs (the page's full
 // reset then: a worker that cannot answer is the thing to replace), and
 // throws when the worker answers that it could not finish, which leaves its
 // cache as it was: the caller says so (startForceUpdate). No worker at all:
 // the full reset.
-const FORCE_SILENCE_MS = 20000;
+let forceSilenceMs = 20000; // a let: the tests shorten it
 const forceUpdate = async () => {
   const ctrl = navigator.serviceWorker?.controller;
   if (ctrl) {
@@ -453,7 +459,7 @@ const forceUpdate = async () => {
       let timer = 0;
       const arm = () => {
         clearTimeout(timer);
-        timer = setTimeout(() => done(null), FORCE_SILENCE_MS);
+        timer = setTimeout(() => done(null), forceSilenceMs);
       };
       const done = (v) => {
         clearTimeout(timer);
@@ -479,21 +485,26 @@ const forceUpdate = async () => {
 
 // Every Force update: the menu's, and the core's own when its files do not
 // match. The card is up throughout; a worker that could not finish shows the
-// failed card (Close, or Try Again), with nothing changed - the full reset
-// used to follow at once, and offline it took the app's only copy with it.
-// A second failure in a row while online is past what a retry fixes (a
-// rollback to a deploy older than the worker's manifest, say): the full
-// reset then, as before.
-let forceFailures = 0;
+// failed card (Close, or Try Again), with nothing changed, however often it
+// fails. The full reset used to follow at once, and a second try's did on
+// the first version of this card: on Matt's phone, with the server's
+// manifest gone, that threw away a working offline copy for a worker that
+// then could not install either. A failure the worker reports is the
+// server's or the network's to fix, and the app's own copy is what keeps
+// it running meanwhile; only a worker that never answers takes the reset.
 const startForceUpdate = async () => {
   appUpdating = true; // see applyUpdate: no Drive popups once a reload is committed
   beginUpdating("force");
   try {
     await forceUpdate();
   } catch {
-    forceFailures++;
-    if (forceFailures >= 2 && navigator.onLine !== false) {
-      await fullResetReload();
+    // Another update's reload is on its way (this tab's Update began - a
+    // too-new save state's, say - or another tab's took this one over): this
+    // failure changes nothing about that, and taking the shield down would
+    // let a game start for that reload to take (ServiceWorker.lean,
+    // bug_force_failure_mid_update_reloads_midgame). It goes on updating.
+    if (updateReloadComing) {
+      beginUpdating("update");
       return;
     }
     appUpdating = false; // no reload after all; renewals may resume
@@ -504,7 +515,6 @@ const startForceUpdate = async () => {
 document.getElementById("force-update").addEventListener("click", () => {
   document.getElementById("menu-dropdown").hidden = true;
   if (!confirm("This will re-download the app and reload. Continue?")) return;
-  forceFailures = 0;
   startForceUpdate();
 });
 
@@ -20396,7 +20406,6 @@ const showCoreFailed = (broken) => {
   coreFailToast = broken
     ? showActionToast("The emulator's files don't match this version.", "Update", () => {
         coreFailToast = null;
-        forceFailures = 0;
         startForceUpdate(); // as the Force update row: its card, its failure
       }, 20000)
     : showActionToast("Couldn't download the emulator. Check the connection.", "Try Again", () => {
