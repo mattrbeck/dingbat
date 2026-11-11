@@ -10114,3 +10114,69 @@ the first suspect is flash busy time (§90's class, flashprog).
 
 The second reference has one emulation change since our build (v1.8.3's PSG
 frequency writes); its 2.0 branch so far rewrites the frontend.
+
+## §104. Every divergence against the console rig: what reproduces with the slot empty, what needs a cartridge, 2026-11-11
+
+Each dingbat-involving item of §103's triage, by the mechanism under it.
+
+**Reproduced and run on the AGB SP today.**
+- *Coloris, Dial Hex: an SIO start switched to the internal clock (§101).*
+  `payloads/sioclk.s`: a 32-bit normal transfer started on the external
+  clock, then SC set with Start still set. The console completes it 2,065
+  cycles after the start store (a start from idle: 2,064), with the serial
+  IRQ; dingbat never did (it started a transfer only on Start's rising
+  edge), mGBA completes in 12-14 cycles, the second reference 12 cycles
+  early. dingbat fixed (serial.nim `write_siocnt`); the row is recorded and
+  gated (cycle laws 5,086/5,086 under both BIOSes). Train: one neutral
+  change, Pokémon Emerald's audio (every checkpoint and the save identical,
+  as far from both references as before): Emerald runs the same link
+  start-up. The external-clock-only control is clocked by the monitor's host
+  poll (9.8k-11.8k cycles), so it is not in the recorded row, and SIOCNT's
+  SI bit is masked (the link adapter holds SI low; with no cable it is high).
+
+**Already on record from the console, re-checked against today's dingbat.**
+Every recorded cell the readings rest on still matches: slotexec (EWRAM from
+gamepak code at 4/2: Metal Slug Advance's class at 4/2), the contention and
+commit-wait cells behind Final Fight One, NFS Underground 2 and Starsky &
+Hutch (§29, §69, §86), TIMPHASE behind Dial Hex's board seed (§101), and
+c2code (56/56) and vramexec (26/26) for Shin Onigashima. dingbat's 552
+misses on r0-agb.json are all in rows marked open or racing (fifolog 268,
+psgrace's lottery 251, keyirq 18, the FIFO `_open` rows 8, c2ew 4, irqpoll
+1); none sits under a game divergence.
+
+**Traced today; needs a cartridge.**
+- *Banjo Pilot `select_cup`*: 9.9k cycles over the frame, ~8.8k of them
+  single EWRAM loads and stores from Thumb object-list code in ROM, WAITCNT
+  0x4314 (3/1, prefetch on). The same class as Buu's Fury (§78), Yu-Gi-Oh!
+  EDS (§33, §88), Rockman EXE 4.5 (§39, §70), The Pinball of the Dead (§102)
+  and Metal Slug Advance at the waits it runs: never measured at 3/1, and an
+  empty slot is only safe at 0 and 0x4000. `tests/roms/ewrombench.{s,py,gba}`
+  is the flashcart probe (nine subjects including Banjo's own run, four
+  waits, streamed over the link): dingbat and the second reference differ by
+  3-28 cycles a block at 3/1, mGBA prices the loads below their data cycles.
+- *Derby Stallion Advance*: the first split is the first-boot flash format
+  (six sector erases, 24,576 byte programs each followed by a status poll):
+  100 black frames in dingbat (no busy time), 123 in mGBA 0.10.5, 265 in
+  mGBA master, 244 in the second reference (which reports an SST chip, 0xD4BF,
+  and runs the game's SST routines). The frozen inputs then deal another mare,
+  and the advisor's line and 54 save bytes follow. §64/§90's class: flashprog
+  with the retail cart (`--cart=A8PJ`) gives the chip ID and its program time.
+- *Shin Onigashima `saved_title`*: not dingbat's. dingbat and mGBA master
+  match on every frame; mGBA 0.10.5 parts only at the black-to-title cut;
+  the second reference is a frame ahead from the boot title on (it holds one
+  screen 8 frames where the others hold 9). The game's NES interpreter is
+  paced by TM1 interrupts and races V-blank; the slot-free pieces are on
+  record and dingbat's. Only the game itself on the flashcart could settle
+  the second reference.
+
+**Needs each retail cart (probes written, predictions registered).**
+The Sims (ASIE, eesettle), Mario Party Advance (B8ME, eesettle), Custom Robo
+GX (ARJJ, EEPROM 64 Kbit), Super Mario Advance (AMZE) and Starsky & Hutch
+(AYHP) (eesettle4k), Hamtaro - Rainbow Rescue (A84P, sramloop), The Urbz
+(BOCE), Mario vs. Donkey Kong (BM5E), Advance Wars (AWRE) and Derby Stallion
+(A8PJ) (flashprog), Columns Crown (ACGE, eestray4k).
+
+**No single console cell.** Phases and RNG states that build up over a whole
+run (LotR's 30 Hz parity §98, Yggdra Union, Mario & Luigi §71, the animation
+phases of §103's reviewed items) rest on the mechanisms above; the 262
+reference-side items have dingbat agreeing with one reference.
