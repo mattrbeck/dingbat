@@ -55,9 +55,9 @@ else:
   template irq_m1_of(ppu: GbPpu; gb: GB): uint8 = ppu.mode_flag
   template irq_ly_of(ppu: GbPpu): uint8 = ppu.ly
 
-template lyc_cmp_of*(ppu: GbPpu; gb: GB): uint8 =
+template lyc_sampled_of*(ppu: GbPpu; gb: GB): uint8 =
   ## The LYC the STAT source's comparator holds (CGB_LYC_CMP_LATCH).
-  when CGB_LYC_CMP_LATCH: gb.lyc_cmp
+  when CGB_LYC_CMP_LATCH: gb.lyc_sampled
   else: ppu.lyc
 
 when not LCD_ON_TRIM_ANY:
@@ -115,7 +115,7 @@ proc skip_boot*(ppu: GbPpu; gb: GB) =
   ppu.stat_set_dot = -1
   when CGB_LYC_CMP_LATCH:
     gb.lyc_land_left = -1
-    gb.lyc_cmp = ppu.lyc
+    gb.lyc_sampled = ppu.lyc
   ppu.current_window_line = -1
   # Post-boot VRAM tiles: blank $00, the Nintendo logo $01-$18 decompressed
   # from the cart's own header, and the (R) tile $19.
@@ -1433,7 +1433,7 @@ when M0_HALT_BLIND_DOTS > 0 or CGB_M0_HALT_BLIND_DOTS > 0 or
     else:
       if (ppu.lcd_status and 3'u8) != 0'u8: return false
     # The comparator would be holding the line up on its own.
-    if ppu.coincidence_interrupt_enabled and ppu.irq_ly_of == ppu.lyc_cmp_of(gb):
+    if ppu.coincidence_interrupt_enabled and ppu.irq_ly_of == ppu.lyc_sampled_of(gb):
       return false
     # Ages 1..N, not 0..N-1: the halted M-cycle's dots run before this latch,
     # so cycle_counter is one past them (GBMicrotest int_hblank_halt_scx{3,7}
@@ -1485,7 +1485,7 @@ const LYC_DROP_LATENCY_CGB* {.intdefine.} = 6
   ## Dots after an LYC write's commit at which a broken match lets the STAT
   ## line fall (stat_drop_arm), per device. The two CGB figures are live only
   ## with CGB_LYC_CMP_LATCH off: with it on the CGB line falls, and rises, on
-  ## the comparator's sample (lyc_cmp_land). The STAT write's own latency is
+  ## the comparator's sample (lyc_sample_land). The STAT write's own latency is
   ## STAT_ENABLE_LATENCY / CGB_STAT_ENABLE_LATENCY; the CGB's LYC byte is
   ## itself deferred one M-cycle (CGB_LYC_WRITE_DEFER), hence 4 + 2. Brackets
   ## (gambatte, 2026-09-22): DMG 0 loses m0enable/lycdisable_ff45_scx3_3, 2
@@ -1555,14 +1555,14 @@ proc stat_drop_settle(ppu: GbPpu; gb: GB) {.noinline.} =
     if not ppu.stat_drop_level: ppu.old_stat_flag = false
   elif gb.memory.deferred_reg == 0xFF41'u16:
     let en = stat_write_drop_enables(ppu, gb.memory.deferred_val)
-    ppu.stat_drop_level = stat_level_with(ppu, gb, en, ppu.lyc_cmp_of(gb))
+    ppu.stat_drop_level = stat_level_with(ppu, gb, en, ppu.lyc_sampled_of(gb))
   elif gb.memory.deferred_reg == 0xFF45'u16 and
        not (CGB_LYC_CMP_LATCH and gb.cgb_enabled):
     ppu.stat_drop_level = stat_level_with(ppu, gb, ppu.lcd_status,
                                           gb.memory.deferred_val)
   else:
     ppu.stat_drop_level = stat_level_with(ppu, gb, ppu.lcd_status,
-                                          ppu.lyc_cmp_of(gb))
+                                          ppu.lyc_sampled_of(gb))
 
 proc ppu_handle_stat_interrupt*(ppu: GbPpu; gb: GB) =
   # With the PPU off the comparator is stopped: the coincidence bit freezes and
@@ -1596,7 +1596,7 @@ proc ppu_handle_stat_interrupt*(ppu: GbPpu; gb: GB) =
     else: not settling or ppu.cycle_counter >= lyc_src_relatch_dot(gb)
   let en = ppu.stat_enables_now(gb)
   let stat_flag =
-    (ppu.irq_ly_of == ppu.lyc_cmp_of(gb) and (en and 0x40'u8) != 0 and
+    (ppu.irq_ly_of == ppu.lyc_sampled_of(gb) and (en and 0x40'u8) != 0 and
      src_settled()) or
     # A CGB STAT write's landing still finds the 153 match (gb.nim).
     (CGB_LYC153_SRC_HOLD and settling and ppu.lyc == 153'u8 and
@@ -1617,7 +1617,7 @@ proc ppu_handle_stat_interrupt*(ppu: GbPpu; gb: GB) =
       # Diagnostic (tools only): which of the terms above took the line high.
       # Printed as a set, because a handover can raise two at once.
       echo "STATSRC ly=", ppu.ly, " cc=", ppu.cycle_counter,
-           " lyc=", (if ppu.irq_ly_of == ppu.lyc_cmp_of(gb) and
+           " lyc=", (if ppu.irq_ly_of == ppu.lyc_sampled_of(gb) and
                         ppu.coincidence_interrupt_enabled and src_settled(): 1
                      else: 0),
            " m2=", (if ppu.m2_source(gb) and ppu.oam_interrupt_enabled: 1
@@ -1646,36 +1646,38 @@ proc ppu_handle_stat_interrupt*(ppu: GbPpu; gb: GB) =
 # dot 454 at single speed; the boundary itself in double). The line therefore
 # moves on the first grid dot at or after the landing, whichever way it moves,
 # and a write whose grid dot is the LY step itself changes both comparator
-# inputs under one sample: a match on the old line that the write moves to
-# the new line is never seen low (GB.lyc_bridge keeps the boundary's window
-# shut for it, as DMG_LYC_BOUNDARY_OPEN does for the DMG's parked write).
+# inputs under one sample: when the write moves a match on the old line to
+# the new line the comparator's answer does not change and the line stays
+# high through the step (GB.lyc_bridge: the single-speed line end has no
+# match to let go of, fifo_cgb_line_end, and the boundary's window stays
+# shut, as DMG_LYC_BOUNDARY_OPEN does for the DMG's parked write).
 # The readable register and coincidence bit keep their own timing
 # (CGB_LYC_WRITE_DEFER, CGB_LYC_EDGE_DEFER). Rows and brackets:
 # docs/gb-derivations.md, "CGB LYC write: a sampled comparator".
 when CGB_LYC_CMP_LATCH:
-  proc lyc_cmp_step_dot(ppu: GbPpu; gb: GB): int32 {.inline.} =
+  proc lyc_sample_step_dot(ppu: GbPpu; gb: GB): int32 {.inline.} =
     ## The dot of this line the comparator's LY steps on.
     gb_line_end(ppu) - (if gb.memory.current_speed == 0'u8: int32(STAT_LYC_LY_LEAD_DOTS)
                         else: int32(STAT_LYC_LY_LEAD_DS))
 
-  proc lyc_cmp_land*(ppu: GbPpu; gb: GB) {.noinline.} =
+  proc lyc_sample_land*(ppu: GbPpu; gb: GB) {.noinline.} =
     ## The write in flight reaches the comparator's sample: `cycle_counter`
     ## is the grid dot, not yet processed. Nothing is evaluated here; the
-    ## dot's own events see the new value (lyc_cmp_settle follows the dot).
+    ## dot's own events see the new value (lyc_sample_settle follows the dot).
     gb.lyc_land_left = -1
-    let old = gb.lyc_cmp
-    gb.lyc_cmp = gb.lyc_land_val
+    let old = gb.lyc_sampled
+    gb.lyc_sampled = gb.lyc_land_val
     when defined(gb_stat_read_trace):
       echo "LYCLAND ly=", ppu.ly, " cc=", ppu.cycle_counter, " old=", old,
-           " new=", gb.lyc_cmp, " irq_ly=", ppu.irq_ly_of
+           " new=", gb.lyc_sampled, " irq_ly=", ppu.irq_ly_of
     # On the LY step's own sample a match on the line ending is carried
     # over the step (ly_advance_open). Line 153 after the snapback (LY 0 in
     # mode 1) has no step left to take.
-    gb.lyc_bridge = ppu.cycle_counter == lyc_cmp_step_dot(ppu, gb) and
+    gb.lyc_bridge = ppu.cycle_counter == lyc_sample_step_dot(ppu, gb) and
                     (CGB_LYC_BRIDGE == 2 or old == ppu.irq_ly_of) and
                     not (ppu.ly == 0'u8 and ppu.mode_flag == 1'u8)
 
-  proc lyc_cmp_settle*(ppu: GbPpu; gb: GB) {.noinline.} =
+  proc lyc_sample_settle*(ppu: GbPpu; gb: GB) {.noinline.} =
     ## The sample's dot has run: the line takes the comparator's answer if
     ## nothing on the dot already made it. The readable coincidence bit
     ## follows the register, not this.
@@ -1684,19 +1686,19 @@ when CGB_LYC_CMP_LATCH:
     ppu_handle_stat_interrupt(ppu, gb)
     ppu.lcd_status = (ppu.lcd_status and not 0x04'u8) or bit
 
-  proc lyc_cmp_write*(ppu: GbPpu; gb: GB; val: uint8) =
+  proc lyc_sample_write*(ppu: GbPpu; gb: GB; val: uint8) =
     ## A CGB LYC write at the top of its M-cycle (`cycle_counter` = its first
     ## dot): book the landing on the comparator's sample grid.
     if gb.lyc_land_left >= 0:                # a write still in flight
-      lyc_cmp_land(ppu, gb)
+      lyc_sample_land(ppu, gb)
       gb.lyc_bridge = false
-      lyc_cmp_settle(ppu, gb)
+      lyc_sample_settle(ppu, gb)
     if not ppu.lcd_enabled:
-      gb.lyc_cmp = val
+      gb.lyc_sampled = val
       return
     let at = ppu.cycle_counter +
              (int32(CGB_LYC_LAND_T) shr gb.memory.current_speed)
-    let grid = lyc_cmp_step_dot(ppu, gb) + int32(CGB_LYC_LATCH_PHASE)
+    let grid = lyc_sample_step_dot(ppu, gb) + int32(CGB_LYC_LATCH_PHASE)
     let wait = ((grid - at) mod 4 + 4) mod 4
     gb.lyc_land_val = val
     gb.lyc_land_left = int8(at + wait - ppu.cycle_counter)
@@ -1725,7 +1727,7 @@ when CGB_LYC_CMP_LATCH:
 proc ly_advance_open*(ppu: GbPpu; gb: GB): uint8 {.inline.} =
   ## The comparator lets go; returns what to put back. Zero if a CPU write to
   ## LYC/STAT/LCDC is parked for this M-cycle (see above), or if a CGB LYC
-  ## write has just carried the match across the LY step (lyc_cmp_land).
+  ## write has just carried the match across the LY step (lyc_sample_land).
   if ppu.stat_write_pending: return 0'u8
   when CGB_LYC_CMP_LATCH and CGB_LYC_BRIDGE != 0:
     if gb.lyc_bridge: return 0'u8
@@ -2911,10 +2913,10 @@ proc ppu_write*(ppu: GbPpu; gb: GB; idx: int; val: uint8) =
     var edge_here = true
     let old_lyc = ppu.lyc
     # The STAT source's side of a CGB write is the comparator's own
-    # (lyc_cmp_write); what follows is then only the readable register.
+    # (lyc_sample_write); what follows is then only the readable register.
     let latched = CGB_LYC_CMP_LATCH and gb.cgb_enabled
     when CGB_LYC_CMP_LATCH:
-      if latched: lyc_cmp_write(ppu, gb, val)
+      if latched: lyc_sample_write(ppu, gb, val)
     var parked = false
     when CGB_LYC_WRITE_DEFER:
       if gb.cgb_enabled and (CGB_LYC_WRITE_DEFER_DS or gb.memory.current_speed == 0):
@@ -2926,7 +2928,7 @@ proc ppu_write*(ppu: GbPpu; gb: GB; idx: int; val: uint8) =
     else:
       ppu.lyc = val
     when CGB_LYC_CMP_LATCH:
-      if not gb.cgb_enabled: gb.lyc_cmp = val
+      if not gb.cgb_enabled: gb.lyc_sampled = val
     when DMG_LYC_BOUNDARY_OPEN != 0:
       if not gb.cgb_enabled: gb.lyc_write_old = int16(old_lyc) + 1
     if latched and not parked:

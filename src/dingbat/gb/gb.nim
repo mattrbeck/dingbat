@@ -103,7 +103,7 @@ const CGB_LYC_EDGE_DEFER* {.booldefine.} = true
   ## `etGbLycEdge` scheduler event (so the pending edge rides the already
   ## serialized event array). Ships true: the six wilbertpol `ly_lyc*_write-C`
   ## arms and gambatte `lycEnable/lyc_ff45_trigger_delay_2`. With
-  ## CGB_LYC_CMP_LATCH the STAT line is the comparator's own (GB.lyc_cmp) and
+  ## CGB_LYC_CMP_LATCH the STAT line is the comparator's own (GB.lyc_sampled) and
   ## has already moved by then (the gambatte row passes with this off); what
   ## the event still times is the readable coincidence bit, which is what the
   ## wilbertpol arms read. Do not respell it
@@ -134,8 +134,8 @@ const CGB_LYC_WRITE_DEFER_DS* {.booldefine.} = false
 # PPU with a speed-switch round trip) shows the sources leaving and arriving
 # in a fixed order inside what the comparator's lead (STAT_LYC_LY_LEAD_DOTS)
 # models as one dot. The constants below are that order and the widths that go
-# with it. Clean-room: derived from test ROM sources/outputs and black-box
-# runs; no emulator source consulted. docs/gb-derivations.md has the tables.
+# with it. Clean-room: derived from test ROM sources/outputs and dingbat's own
+# trace runs; no emulator source consulted. docs/gb-derivations.md has the tables.
 const CGB_LINE_END_STEPS* {.booldefine.} = true
   ## Single speed: a rendered line's end is five steps on the comparator's
   ## lead dot (454), the edge detector run after each (fifo_cgb_line_end).
@@ -163,6 +163,11 @@ const CGB_LINE_END_STEPS* {.booldefine.} = true
   ##     m2enable_lycdisable_2` [cgb]: no interrupt), but not before the match
   ##     for line 144 is up (ended with step 3 it loses `lcdirq_precedence/
   ##     lcdirqprecedence_lycirq_ly90_lcdstat68` [cgb]).
+  ## Step 2 has an exception: an LYC write sampled on this dot that moves the
+  ## match from this line to the next leaves the comparator's answer as it
+  ## was, so nothing is let go of and steps 2 and 4 are one (GB.lyc_bridge,
+  ## CGB_LYC_CMP_LATCH; `lycEnable/ff45_enable_weirdpoint_2` [cgb], silent on
+  ## hardware, is the only row red without it).
   ## Step 1 runs only for a STAT write: an LYC write's edge is later still
   ## (`lycEnable/late_ff45_enable_2`, `lyc0_late_ff45_enable_2` [cgb] go red
   ## if it runs unconditionally). With the hand-over done here, entering
@@ -230,7 +235,7 @@ const
   STAT_M0_GONE*     = 16'u8  # the mode-0 source, ahead of the mode flag
 const CGB_LYC_CMP_LATCH* {.booldefine.} = true
   ## Whether the CGB's LY = LYC STAT source reads LYC through a sampled copy
-  ## (GB.lyc_cmp) rather than the register: see "The CGB comparator samples
+  ## (GB.lyc_sampled) rather than the register: see "The CGB comparator samples
   ## LYC" in ppu.nim and docs/gb-derivations.md. false = the source reads the
   ## readable register (CGB_LYC_WRITE_DEFER) and takes the old drop/edge path.
 const CGB_LYC_LAND_T* {.intdefine.} = 2
@@ -2869,10 +2874,15 @@ type
     # write in flight (dots left until it lands, -1 = none; its value), and
     # whether the last landing carried a match across the LY step. In flight
     # for at most five dots; not serialized (load_ppu_state re-derives).
-    lyc_cmp*:          uint8
+    lyc_sampled*:      uint8
     lyc_land_val*:     uint8
     lyc_land_left*:    int8
     lyc_bridge*:       bool
+    # LYC_STOP_FOLDED (fifo_ppu.nim): while that write is in flight the
+    # window check's dot slot (ppu.win_check_dot) is on loan as a stop for
+    # the idle skip; its own value waits here.
+    lyc_stop_lent*:    bool
+    lyc_stop_saved*:   int32
     when defined(test_harness):
       test_output*:  TestOutput
 
@@ -3989,7 +3999,7 @@ proc step_frame*(gb: GB) =
   # to the end of mode 3; the machine runs the same instructions either way,
   # only the host's frame edge moves (by under a line). A CPU in STOP mode
   # freezes the PPU (mem_tick_stopped), so it is left where it is.
-  # Likewise a CGB LYC write still in flight to the comparator (GB.lyc_cmp,
+  # Likewise a CGB LYC write still in flight to the comparator (GB.lyc_sampled,
   # at most two dots past its instruction), which is not in the format
   # either; `settle` bounds it, so a run of back-to-back LYC writes cannot
   # hold the frame.

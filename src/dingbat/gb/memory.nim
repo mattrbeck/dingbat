@@ -710,7 +710,16 @@ proc write_byte*(mem: GbMemory; gb: GB; idx: int; val: uint8) =
   of 0xFF46:
     mem_dma_restart_bus(mem, gb, val)
     mem_dma_transfer(mem, val)
-  of 0xFF40..0xFF45, 0xFF47..0xFF4B: ppu_write(gb.ppu, gb, idx, val)
+  of 0xFF40..0xFF45, 0xFF47..0xFF4B:
+    when CGB_LYC_CMP_LATCH:
+      # A CGB LYC write in flight borrows two of the PPU's stops between
+      # ticks (LYC_STOP_FOLDED, fifo_ppu.nim): this write meets them as
+      # their owners left them, and the loan is renewed, or begun, after it.
+      if gb.lyc_land_left >= 0: lyc_stop_release(gb.fifo_ppu, gb)
+      ppu_write(gb.ppu, gb, idx, val)
+      if gb.lyc_land_left >= 0: lyc_stop_arm(gb.fifo_ppu, gb)
+    else:
+      ppu_write(gb.ppu, gb, idx, val)
   of 0xFF4D:
     if gb.cgb_native: mem.requested_speed_switch = (val and 0x1) != 0
   of 0xFF4F:         ppu_write(gb.ppu, gb, idx, val)

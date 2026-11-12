@@ -385,9 +385,14 @@ proc load_ppu_state(ppu: GbPpu; gb: GB; r: var Reader; rev: uint32) =
   # Derived: the comparator's copy differs from the register for at most
   # five dots after a CGB write (CGB_LYC_CMP_LATCH).
   when CGB_LYC_CMP_LATCH:
-    gb.lyc_cmp = ppu.lyc
+    gb.lyc_sampled = ppu.lyc
     gb.lyc_land_left = -1
     gb.lyc_bridge = false
+    if gb.lyc_stop_lent:
+      # The window check's slot back (LYC_STOP_FOLDED); the deferred-span
+      # one goes with the renderer scratch below.
+      gb.lyc_stop_lent = false
+      ppu.win_check_dot = gb.lyc_stop_saved
   r.read_bytes(ppu.bgp)
   r.read_bytes(ppu.obp0)
   r.read_bytes(ppu.obp1)

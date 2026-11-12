@@ -2353,8 +2353,14 @@ when STAT_IRQ_SPLIT:
       gb.stat_hold = STAT_HOLD_M0 or STAT_HOLD_M2_144
       if gb.memory.deferred_reg == 0xFF41'u16:
         ppu_handle_stat_interrupt(ppu, gb)
-      # 2. The comparator lets go of this line's match (any LY but LYC).
-      ppu.irq_ly = ppu.lyc + 1
+      # 2. The comparator lets go of this line's match (any LY but the LYC
+      #    it holds). Not when an LYC write sampled on this dot has carried
+      #    the match to the next line (lyc_sample_land): the comparator's
+      #    answer is the same before and after, so there is nothing to let
+      #    go of and it goes straight to the next line's LY.
+      ppu.irq_ly = (when CGB_LYC_CMP_LATCH and CGB_LYC_BRIDGE != 0:
+                      (if gb.lyc_bridge: ppu.ly + 1 else: ppu.lyc_sampled_of(gb) + 1)
+                    else: ppu.lyc + 1)
       if int(ppu.ly) + 1 == GB_HEIGHT:
         # ...and entering vblank the mode-1 source and the vblank request come
         # up behind it (STAT_M1_LEAD, VBLANK_IRQ_LEAD), as on a DMG.
@@ -2754,6 +2760,8 @@ when defined(gb_lazypoison):
 proc fifo_lazy_sync*(ppu: GbFifoPpu; gb: GB) {.noinline.} =
   ## Run the dots deferred since `lazy_dot`, leaving the pipeline where the
   ## general path would have it on this dot.
+  # LYC_LAZY_HOLD (below) is no deferred span.
+  if ppu.lazy_end < 0: return
   let now = ppu.cycle_counter
   when defined(gb_lazypoison):
     ppu.lx = lazy_held.lx
@@ -2812,31 +2820,85 @@ proc fifo_lazy_enter(ppu: GbFifoPpu; gb: GB; remaining: int; h: int32) =
 proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int)
 
 when CGB_LYC_CMP_LATCH:
+  # A CGB LYC write in flight to the comparator has to turn every tick into
+  # fifo_tick_lyc_land until it has landed, for at most three ticks. Asked
+  # as a compare of its own in fifo_tick that is +0.30..0.53% of retired
+  # instructions on five GBC games (one load and branch per M-cycle), so it
+  # is folded into two compares the fast paths already make: the idle skip
+  # stops at the window check's pending dot (fifo_skip_target), so that slot
+  # is lent out, set to the current dot, and no idle span is skipped; and a
+  # deferred mode 3 runs while the counter is short of `lazy_end`, which is
+  # held below every dot, where fifo_tick_slow's existing "is a span
+  # deferred" test finds it. Both are put back for the dots themselves
+  # (the loan never meets a window check or a real deferred span) and
+  # around every PPU register write (mem_write_open).
+  const LYC_STOP_FOLD {.booldefine.} = true
+  const LYC_STOP_FOLDED* = LYC_STOP_FOLD and WIN_CHECK_DEFER_ANY and PLAIN_LAZY_ON
+    ## false (-d:LYC_STOP_FOLD=false, the A/B control, or either host
+    ## mechanism compiled out) = the explicit compare. The two are the same
+    ## machine: frame for frame on the five games, row for row on gambatte.
+  const LYC_LAZY_HOLD = -1'i32   # no span ends there: every dot is past it
+
+  proc lyc_stop_release*(ppu: GbFifoPpu; gb: GB) {.noinline.} =
+    ## The loan back: the slots are their owners' again.
+    when LYC_STOP_FOLDED:
+      if gb.lyc_stop_lent:
+        gb.lyc_stop_lent = false
+        ppu.win_check_dot = gb.lyc_stop_saved
+        if ppu.lazy_end == LYC_LAZY_HOLD: ppu.lazy_end = 0
+
+  proc lyc_stop_arm*(ppu: GbFifoPpu; gb: GB) {.noinline.} =
+    ## Hold the next tick out of the fast paths, if a write is in flight.
+    ## With the LCD off no dot runs to land it; it lands here.
+    if gb.lyc_land_left < 0: return
+    if not lcd_enabled(ppu):
+      lyc_sample_land(ppu, gb)
+      gb.lyc_bridge = false
+      return
+    when LYC_STOP_FOLDED:
+      if ppu.lazy_end != 0 and ppu.lazy_end != LYC_LAZY_HOLD:
+        fifo_lazy_sync(ppu, gb)
+      if not gb.lyc_stop_lent:
+        gb.lyc_stop_lent = true
+        gb.lyc_stop_saved = ppu.win_check_dot
+      ppu.win_check_dot = ppu.cycle_counter
+      ppu.lazy_end = LYC_LAZY_HOLD
+
   proc fifo_tick_lyc_land(ppu: GbFifoPpu; gb: GB; cycles: int) {.noinline.} =
     ## A span with a CGB LYC write in flight to the comparator: the dots up
-    ## to its sample, the landing (lyc_cmp_land), the rest. Cold: at most
-    ## two ticks per LYC write.
+    ## to its sample, the landing (lyc_sample_land), the rest. Cold: at most
+    ## three ticks per LYC write.
+    lyc_stop_release(ppu, gb)
     var left = cycles
     while left > 0 and gb.lyc_land_left >= 0:
       let n = gb.lyc_land_left
       gb.lyc_land_left = -1
-      if n == 0: lyc_cmp_land(ppu, gb)
+      if n == 0: lyc_sample_land(ppu, gb)
       fifo_tick_slow(ppu, gb, 1)
       dec left
-      if n == 0: lyc_cmp_settle(ppu, gb)
+      if n == 0: lyc_sample_settle(ppu, gb)
       else: gb.lyc_land_left = n - 1
     if left > 0: fifo_tick_slow(ppu, gb, left)
+    lyc_stop_arm(ppu, gb)
 
 proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
   ## Everything the PPU can do in a span that is not a pure idle skip; the
   ## idle case inlines into fifo_tick.
   when CGB_LYC_CMP_LATCH:
-    if gb.lyc_land_left >= 0:
-      fifo_tick_lyc_land(ppu, gb, cycles)
-      return
+    when not LYC_STOP_FOLDED:
+      if gb.lyc_land_left >= 0:
+        fifo_tick_lyc_land(ppu, gb, cycles)
+        return
   gb.wl_mark = gb.scheduler.cycles
   when PLAIN_LAZY_ON:
-    if ppu.lazy_end != 0: fifo_lazy_sync(ppu, gb)
+    if ppu.lazy_end != 0:
+      when CGB_LYC_CMP_LATCH:
+        when LYC_STOP_FOLDED:
+          # Not a deferred span: an LYC write in flight (LYC_STOP_FOLDED).
+          if ppu.lazy_end == LYC_LAZY_HOLD:
+            fifo_tick_lyc_land(ppu, gb, cycles)
+            return
+      fifo_lazy_sync(ppu, gb)
   if lcd_enabled(ppu):
     var remaining = cycles
     when STAT_IRQ_SPLIT and (STAT_M0_LEAD_DOMAIN or M0_LOOKAHEAD_REACHABLE):
@@ -3175,7 +3237,7 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
           else:
             when LY_BLIND_SCOPE >= 0: ly_advance_line(ppu, gb)
             else:                     ppu.`mode_flag=`(2'u8, gb)
-          # A carried match is this boundary's alone (lyc_cmp_land).
+          # A carried match is this boundary's alone (lyc_sample_land).
           when CGB_LYC_CMP_LATCH: gb.lyc_bridge = false
       of 1:  # V-Blank
         # The line-144 OAM pulse's falling edge (M2_144_PULSE, ppu.nim): run
@@ -3273,6 +3335,13 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
          ppu.hdma_seen_mode != 0'u8: -1
       else: mem.write_count
 
+template lyc_none_in_flight(gb: GB): bool =
+  ## The fast paths' own question about a CGB LYC write in flight; folds to
+  ## `true` where the stops they already test carry it (LYC_STOP_FOLDED).
+  when CGB_LYC_CMP_LATCH:
+    (when LYC_STOP_FOLDED: true else: gb.lyc_land_left < 0)
+  else: true
+
 proc fifo_tick*(ppu: GbFifoPpu; gb: GB; cycles: int) {.inline.} =
   # The mode a CPU read in this M-cycle observes (GbPpu.read_mode). Written
   # on the idle path too: a preceding slow tick may have changed it.
@@ -3292,7 +3361,7 @@ proc fifo_tick*(ppu: GbFifoPpu; gb: GB; cycles: int) {.inline.} =
     # entry, as the loop does.
     if next <= target and
        (m != 1 or ppu.cycle_counter > LYC_RELATCH_DOT) and
-       (not CGB_LYC_CMP_LATCH or gb.lyc_land_left < 0):
+       lyc_none_in_flight(gb):
       ppu.cycle_counter = next
       return
   elif (ppu.lcd_control and 0x80'u8) == 0:
@@ -3305,8 +3374,7 @@ proc fifo_tick*(ppu: GbFifoPpu; gb: GB; cycles: int) {.inline.} =
   elif PLAIN_LAZY_ON:
     # A deferred mode 3 costs one compare a tick, as an idle span does.
     let next = ppu.cycle_counter + int32(cycles)
-    if next <= ppu.lazy_end and
-       (not CGB_LYC_CMP_LATCH or gb.lyc_land_left < 0):
+    if next <= ppu.lazy_end and lyc_none_in_flight(gb):
       ppu.cycle_counter = next
       return
   fifo_tick_slow(ppu, gb, cycles)

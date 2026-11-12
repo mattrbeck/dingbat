@@ -520,8 +520,8 @@ grid's constants are a coupled set and move together or not at all.
 
 ### CGB LYC write: a sampled comparator
 - Ships: `CGB_LYC_CMP_LATCH = true`, `CGB_LYC_LAND_T = 2`,
-  `CGB_LYC_LATCH_PHASE = 0`, `CGB_LYC_BRIDGE = 1` (`gb.nim`); `GB.lyc_cmp`,
-  `lyc_cmp_write` / `lyc_cmp_land` / `lyc_cmp_settle` (`ppu.nim`),
+  `CGB_LYC_LATCH_PHASE = 0`, `CGB_LYC_BRIDGE = 1` (`gb.nim`); `GB.lyc_sampled`,
+  `lyc_sample_write` / `lyc_sample_land` / `lyc_sample_settle` (`ppu.nim`),
   `fifo_tick_lyc_land` (`fifo_ppu.nim`).
 - Claim: on a CGB the LY = LYC STAT source does not read the LYC register
   the CPU reads back. (1) A write reaches the comparator's input half a CPU
@@ -537,9 +537,12 @@ grid's constants are a coupled set and move together or not at all.
   falling there, or the comparator's own LY changing (the step before the
   boundary, line 153's snap to 0), meets the new LYC, and the line sees one
   change, not two. (4) A write whose sample is the LY step itself, moving a
-  match on the line ending onto the line starting, is therefore never seen
-  low, and the line boundary's comparator window (`ly_advance_open`) stays
-  shut for it; if the old LYC did not match the line ending, the window
+  match on the line ending onto the line starting, changes nothing in the
+  comparator's answer, so the line stays high through the step: at single
+  speed the line end's second step (the comparator letting go of the old
+  line's match, `fifo_cgb_line_end`, the STAT-write entries below) has
+  nothing to let go of, and at either speed the line boundary's comparator
+  window (`ly_advance_open`) stays shut for it; if the old LYC did not match the line ending, the window
   opens as on any line and a mode-0 source hands the line to the new match
   with an edge. The readable register and STAT bit 2 keep their own timing
   (`CGB_LYC_WRITE_DEFER`, `CGB_LYC_EDGE_DEFER`).
@@ -589,7 +592,9 @@ grid's constants are a coupled set and move together or not at all.
   and 455 land on the boundary's sample with the mode-1 source's fall: one
   event, quiet; 456 and dot 1 request); `miscmstatirq/
   lycwirq_trigger_m0_late_ly44_lyc45_ds_{1..4}`.
-- Brackets (gambatte hex rows, 4,302 scored; this model is 4,285):
+- Brackets (gambatte hex rows, 4,302 scored, all green with the STAT-write
+  half below; the same counts and the same rows before and after the two
+  were combined):
   `CGB_LYC_LAND_T` 0 or 1 loses 22 (the single-speed `_2` arms of nearly
   every family above and the `ds_lcdoffset1` arms), 3 loses 5 (the
   single-speed `lcdoffset1` arms: `ff45_enable_weirdpoint_lcdoffset1_{1,2}`,
@@ -601,8 +606,14 @@ grid's constants are a coupled set and move together or not at all.
   sample) loses `lycwirq_trigger_m0_late_ly44_lyc45_{3,ds_2,ds_3}`.
   Sampling ahead of the dot's own events loses `m0enable/lycdisable_ff45_2`;
   sampling after them, with the line evaluated in between, loses
-  `lyc0_ff45_disable_{1,ds_1}`. `CGB_LYC_CMP_LATCH = false` is the tree
-  before this entry, row for row.
+  `lyc0_ff45_disable_{1,ds_1}`. `CGB_LYC_CMP_LATCH = false` loses the
+  twelve rows below and nothing else.
+- With the STAT-write half's ordered line end (below), the carried match
+  is one more row's worth of evidence: without the exception in step 2 the
+  match is dropped and re-raised inside dot 454 and
+  `lycEnable/ff45_enable_weirdpoint_2` [cgb] (W = 449) requests, the only
+  row red in the two halves' combination. (`_lcdoffset1_2`, W = 452, is
+  the same case and the same exception.)
 - Rows taken (12, nothing lost anywhere in `tests/results*.md`):
   `lycEnable/ff45_enable_weirdpoint_{2, ds_2, ds_lcdoffset1_2,
   ds_lcdoffset1_3, ds_lcdoffset1_4, lcdoffset1_2}`,
@@ -616,6 +627,15 @@ grid's constants are a coupled set and move together or not at all.
   bit for wilbertpol `ly_lyc*_write-C`).
 - Not serialized: the write is in flight for at most five dots, and
   `step_frame` runs an instruction past a frame edge that would cut one.
+- Cost: the landing is dot-exact, so every tick has to know a write is in
+  flight. As a compare of its own on the PPU's fast paths that was
+  +0.30..0.53% of retired instructions on five GBC games (1800 frames, min
+  of 4, against `CGB_LYC_CMP_LATCH = false`); folded into two stops those
+  paths already test (`LYC_STOP_FOLDED`, fifo_ppu.nim: the window check's
+  dot slot for the idle skip, `lazy_end` for a deferred mode 3) it is
+  -0.07..+0.16%, run-to-run noise being about 0.1%.
+  `-d:LYC_STOP_FOLD=false` is the explicit compare, the same machine frame
+  for frame.
 - Open: why the double-speed grid sits on the boundary's phase rather than
   two dots ahead of it is the existing `STAT_LYC_LY_LEAD_DS = 0` question,
   not a new one; the grid is anchored to whatever dot the comparator's LY
@@ -623,19 +643,22 @@ grid's constants are a coupled set and move together or not at all.
   (`LYC_DROP_LATENCY_DMG`, `LYC_DROP_BOUNDARY_SKIP`, `DMG_LYC_BOUNDARY_OPEN`);
   its quiet arm (`ff45_enable_weirdpoint_3`, W = 453) is consistent with
   the same grid and a later landing, but nothing was moved there.
-- Clean-room: derived from test ROM sources/outputs and black-box runs; no
-  emulator source consulted. (Black-box runs: none were needed; every
-  figure above is a gambatte test ROM's own filename verdict against
-  dingbat's trace of the write's dot.)
+- Clean-room: derived from test ROM sources/outputs and dingbat's own trace
+  runs; no emulator source consulted. (Every figure above is a gambatte
+  test ROM's own filename verdict against dingbat's trace of the write's
+  dot; no other emulator was run.)
 
 ### CGB STAT/LYC write timing
-- The LYC-write (FF45) half: removed 2026-11-12 pending a clean-room
-  re-derivation. Rows red meanwhile: gambatte `lycEnable` (11),
-  `miscmstatirq` (1). The STAT-write (FF41) half is the five entries below.
+- The rules that stood here were removed on 2026-11-12 (070a5637) and
+  re-derived clean-room the same day, in two halves: the LYC-write (FF45)
+  half is "CGB LYC write: a sampled comparator" above, the STAT-write
+  (FF41) half the five entries below. Where the halves meet (an LYC write
+  sampled on the dot the line end's five steps run on) is the carried
+  match, item (4) of the entry above. gambatte is 5213/5213 with both.
 
 ### A CGB STAT write across a line's end: what its enables find (single speed)
-- Clean-room: derived from test ROM sources/outputs and black-box runs; no
-  emulator source consulted. (No black-box emulator was run: every figure
+- Clean-room: derived from test ROM sources/outputs and dingbat's own trace
+  runs; no emulator source consulted. (No other emulator was run: every figure
   below is a gambatte hwtests row's expected value, read off the ROM's name
   and its `.asm`, against dingbat's own `-d:gb_stat_read_trace` output.)
 - Method: each family is one STAT write stepped a CPU M-cycle at a time
@@ -678,8 +701,8 @@ grid's constants are a coupled set and move together or not at all.
   `m0_source`, `m2_line144` (ppu.nim).
 
 ### The CGB's OAM pulse is narrower for a landing enable
-- Clean-room: derived from test ROM sources/outputs and black-box runs; no
-  emulator source consulted.
+- Clean-room: derived from test ROM sources/outputs and dingbat's own trace
+  runs; no emulator source consulted.
 - Claim: a CGB STAT write that sets the mode-2 enable is looked at again when
   its M-cycle ends, and finds the OAM source still high through dot 2 of the
   line at single speed (the DMG's `STAT_M2_PULSE` is 3, and double speed
@@ -697,8 +720,8 @@ grid's constants are a coupled set and move together or not at all.
   `m2_144_within_pulse` (ppu.nim).
 
 ### Line 153 -> 0: the mode-1 source falls ahead of a landing enable
-- Clean-room: derived from test ROM sources/outputs and black-box runs; no
-  emulator source consulted.
+- Clean-room: derived from test ROM sources/outputs and dingbat's own trace
+  runs; no emulator source consulted.
 - Claim: at single speed the mode-1 source's fall where line 0 starts comes
   before STAT enables landing on that same dot (a write from dot 454); at
   double speed the landing is first.
@@ -711,8 +734,8 @@ grid's constants are a coupled set and move together or not at all.
   `stat_enables_leading` / `stat_drop_settle` (ppu.nim).
 
 ### Double speed: mode 0 falls, the enables land, the comparator lets go
-- Clean-room: derived from test ROM sources/outputs and black-box runs; no
-  emulator source consulted.
+- Clean-room: derived from test ROM sources/outputs and dingbat's own trace
+  runs; no emulator source consulted.
 - Claim: at double speed the three share the boundary dot (456) of a rendered
   line in that order, for a STAT write from dot 455 (latency 1). Line 143 is
   the exception: there mode 0 outlasts the landing.
@@ -729,8 +752,8 @@ grid's constants are a coupled set and move together or not at all.
   `fifo_tick_slow` (fifo_ppu.nim).
 
 ### The 153 match outlasts the snapback for a landing STAT enable
-- Clean-room: derived from test ROM sources/outputs and black-box runs; no
-  emulator source consulted.
+- Clean-room: derived from test ROM sources/outputs and dingbat's own trace
+  runs; no emulator source consulted.
 - Claim: LY reads 0 from dot 5 of line 153 and nothing else sees the
   LYC = 153 match past it, but a CGB STAT write that sets the LYC enable
   still finds it until the dot the source relatches for LY = 0 (6 at single

@@ -159,7 +159,8 @@ edge. Sub-shapes, each a separate rule:
 
 * `m0enable/lycdisable_ff45_scx1_ds_1` (1; the rest closed above): the
   LYC-write drop at double speed, where the 6-dot CGB latency is spent as
-  3.
+  3. (The CGB's drop is the comparator's sample since 2026-11-12:
+  docs/gb-derivations.md, "CGB LYC write: a sampled comparator".)
 * `m2enable/late_enable_*_2`, `lyc1_m2irq_late_lyc255_*`,
   `late_{enable_,}m1disable_ly0_2`, `lyc0_late_m2enable_lycdisable_2` (9):
   the OAM source enabled one M-cycle across the line boundary it rises on.
@@ -190,7 +191,11 @@ edge. Sub-shapes, each a separate rule:
   `late_ff41_enable_*` (14, all CGB but two): a CGB takes an LYC write one
   M-cycle later than a DMG (`CGB_LYC_WRITE_DEFER`, wilbertpol
   `ly_lyc*_write-C` vs `-GS`); the `lcdoffset1` members ask whether that is
-  4 dots or 2, which a boundary spelling cannot answer.
+  4 dots or 2, which a boundary spelling cannot answer. **Closed
+  2026-11-12:** neither; the write lands 2 dots in and is sampled on a
+  4-dot grid of the PPU's (docs/gb-derivations.md, "CGB LYC write: a
+  sampled comparator"), and the `ff41` members are the CGB line end's
+  (ibid., "A CGB STAT write across a line's end").
 * `miscmstatirq/*wirq_trigger*` (7): a STAT write's enable bits reaching the
   line (`STAT_ENABLE_LATENCY = 0`, `CGB_STAT_ENABLE_LATENCY = 2`, bracketed by
   `m0enable/disable*_2 [cgb]` against `m0enable/disable_scx*_1`).
@@ -226,8 +231,9 @@ the full 5157-row list:
   dot. The six it loses (`m1/lyc143_late_m{0,2}enable_lycdisable_2`,
   `offset2_lyc8fint_m1irq_2`, `m2enable/late_enable_lcdoffset2_2`, `vram_m3/
   pre{read,write}_lcdoffset1_2`) are rows where the ending line's match must
-  NOT dip before a same-M-cycle enable lands (CGB STAT/LYC write timing:
-  removed 2026-11-12 pending a clean-room re-derivation).
+  NOT dip before a same-M-cycle enable lands (closed 2026-11-12 by the
+  clean-room CGB line end, `CGB_LINE_END_STEPS`: docs/gb-derivations.md,
+  "A CGB STAT write across a line's end").
   Double speed is left at 0 (`STAT_LYC_LY_LEAD_DS`): every `_ds_` sibling
   moves the other way, and the double-speed constants are a coupled set
   (see below).
@@ -237,8 +243,9 @@ the full 5157-row list:
   handler with LYC == LY; the line had fallen at dot 4 and nothing ran the
   detector, so the enable found `old_stat_flag` still high.
 * *The CGB's last-M-cycle mode-2 enable* (`m2enable/late_enable_m0disable_2
-  [cgb]`): CGB STAT/LYC write timing: removed 2026-11-12 pending a
-  clean-room re-derivation.
+  [cgb]`): closed 2026-11-12, step 4 of the CGB line end
+  (`CGB_LINE_END_STEPS`; docs/gb-derivations.md, "A CGB STAT write across a
+  line's end").
 
 Measured and refused the same day (all on top of the three): the STAT
 drop sampled with `old and new` enables (`STAT_DROP_OLD_LEVEL`, -33: the
@@ -1983,8 +1990,9 @@ One line each; the knob's own comment carries the derivation.
   (window arming); `OAMDMA_HALT_GRACE`/`_WAKE_EXTRA`/`_HALT_RELEASE` (OAM
   DMA across HALT and the speed-switch stall); `LYC_DROP_LATENCY_CGB_DS`
   and two CGB STAT/LYC write-timing knobs (lycEnable 225/225, m0enable
-  167/167; the latter removed 2026-11-12 pending a clean-room
-  re-derivation); `CRAM_LOCK_OFF_LAT_DS`, `CRAM_LOCK_LINE0_EXTRA_DS`
+  167/167; the latter removed 2026-11-12 and re-derived clean-room the
+  same day as `CGB_LYC_CMP_LATCH` and `CGB_LINE_END_STEPS`,
+  docs/gb-derivations.md section 7); `CRAM_LOCK_OFF_LAT_DS`, `CRAM_LOCK_LINE0_EXTRA_DS`
   (cgbpal_m3 44/44); `TIMER_ACK_LOOKAHEAD` (the dispatch acks a timer
   request due within an M-cycle); `HDMA_LCD_OFF_BLOCK`,
   `HDMA_START_GRANT_FETCH`, `GDMA_AFTER_FETCH` (DMA hand-over at the next

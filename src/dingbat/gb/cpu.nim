@@ -983,7 +983,7 @@ proc wl_head_check(cpu: GbCpu; gb: GB) {.noinline.} =
   cpu.wl_writes = gb.memory.write_count
 
 template wl_m3_undeferred(gb: GB): bool =
-  (gb.fifo_ppu.lcd_status and 3'u8) == 3'u8 and gb.fifo_ppu.lazy_end == 0
+  (gb.fifo_ppu.lcd_status and 3'u8) == 3'u8 and gb.fifo_ppu.lazy_end <= 0
 
 proc wl_halt_skip(cpu: GbCpu; gb: GB): bool {.noinline.} =
   ## A halted CPU with nothing to wake it before the horizon spends those
