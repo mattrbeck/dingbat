@@ -1,16 +1,15 @@
 // A deleted game loaded again, and the save it used to have.
 //
-// Delete a game, then load it again from its file, and a device that had not
-// pulled the delete could hand the new copy its old save: its next sync
-// uploaded the save, the library let it through (a newer entry drops the
-// tombstone), and the deleting device pulled it into the new game. The delete
-// is respected now. Every library entry has a generation, a new one when a
-// game is loaded again after a delete; the tombstone keeps the generation it
-// deleted and when. A save from an older generation is never applied to the
-// newer game. It is kept aside, as "a save from before you deleted this
-// game", in the game's menu and its Manage Saves, with a Restore that swaps
-// it with the current save (so the Restore undoes itself), for 30 days from
-// the delete, here and on Drive.
+// Delete a game, then load it again from its file: a device that had not
+// pulled the delete must not hand the new copy its old save (its next sync
+// uploads the save, a newer library entry drops the tombstone, and the
+// deleting device pulls it into the new game). Every library entry has a
+// generation, a new one when a game is loaded again after a delete; the
+// tombstone keeps the generation it deleted and when. A save from an older
+// generation is never applied to the newer game. It is kept aside, as "a
+// save from before you deleted this game", in the game's menu and its Manage
+// Saves, with a Restore that swaps it with the current save (so the Restore
+// undoes itself), for 30 days from the delete, here and on Drive.
 //
 // formal/WebState/DriveLibrary.lean: bug_reimport_gets_deleted_save,
 // regress_reimport_keeps_deleted_save_aside.
@@ -104,9 +103,9 @@ const twoDevices = async () => {
   return { clock, drive, d0, d1 };
 };
 
-// The design question left open by the web audit (formal/FINDINGS.md): device
-// 0 deletes the game and loads it again; device 1, which has not pulled the
-// delete, syncs its save. Device 0 got that save back in the new game.
+// formal/FINDINGS.md: device 0 deletes the game and loads it again; device 1,
+// which has not pulled the delete, syncs its save. Device 0 must not get
+// that save back in the new game.
 test("a device that missed the delete does not hand its old save to the game loaded again", async () => {
   const { drive, d0, d1 } = await twoDevices();
   await play(d1, "G.gba", u8(12));          // progress on device 1, not yet sent
@@ -184,8 +183,8 @@ test("a save uploaded for the deleted game is kept aside, not applied, after the
 });
 
 // The same device, no second one: delete, load again, then sync. The flush
-// used to read the newer entry as "the delete was not meant" and cancel the
-// queued file deletes, so the old save stayed on Drive for every other device.
+// must not read the newer entry as "the delete was not meant" and cancel the
+// queued file deletes (the old save would stay on Drive for every other device).
 test("deleting and loading a game again before a sync still takes its old files off Drive", async () => {
   const clock = makeClock();
   const drive = makeDrive({ clock });
@@ -270,7 +269,7 @@ test("restoring a kept save keeps the save it replaced, so a second restore undo
 });
 
 // mergeLibrary with generations. An entry or tombstone written before them
-// has none, and is generation 0: those merge exactly as they always have.
+// has none, and is generation 0: those merge as before.
 test("mergeLibrary: a newer generation stands beside the tombstone of the one it replaced", () => {
   return (async () => {
     const app = await loadApp();
@@ -306,7 +305,7 @@ test("mergeLibrary: a newer generation stands beside the tombstone of the one it
 
 // Without Drive there is no second copy to come back from: a delete wipes
 // every record of the game here, so loading it again starts clean. (A guard,
-// not a regression: this held before the change too.)
+// not a regression.)
 test("without Drive, a game deleted and loaded again starts without its old save", async () => {
   const app = await loadApp();
   app.idb.set("recent", []);

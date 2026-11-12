@@ -46,7 +46,7 @@ const setup = async () => {
   app.sandbox.Module = core;
   app.api.currentOriginalName = "game.gba";
   const el = (id) => app.document.getElementById(id);
-  // The real markup ships `<p id="cheat-error" hidden>`; the fake DOM
+  // The real markup has `<p id="cheat-error" hidden>`; the fake DOM
   // defaults to hidden=false.
   el("cheat-error").hidden = true;
   const add = async (name, codes) => {

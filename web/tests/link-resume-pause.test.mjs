@@ -1,6 +1,6 @@
 // Pause and 2x across a resumed link. Both sides decide from the same two
 // RESUMEs (rbResumeState) and send nothing more: answering with each one's
-// own state, as before, let the two answers cross and swap the sides
+// own state would let the two answers cross and swap the sides
 // (formal/WebState/LinkResume.lean bug_resume_pause_swap_web/_ios; the fix
 // is proved by resume_agrees there). sdputil.js + netplay.js are evaluated
 // in the helpers.mjs vm context, in index.html's script order.
@@ -159,8 +159,8 @@ test("both paused stay paused; 2x only if both were at 2x", async () => {
 
 // Our own Disconnect puts the session back (`net = s`) while rbTeardown
 // awaits, with the channel still open. The friend's side closing it in that
-// window (or its BYE) used to start a redial: a rendezvous socket on the
-// retry code that nothing closed, and "Reconnecting…" over a game that had
+// window (or its BYE) must not start a redial: a rendezvous socket on the
+// retry code that nothing closes, and "Reconnecting…" over a game that has
 // just left the link.
 test("the friend's close during our own Disconnect's teardown doesn't redial", async () => {
   const { app } = await setup();

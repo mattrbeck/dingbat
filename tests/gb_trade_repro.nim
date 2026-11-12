@@ -106,7 +106,6 @@ proc stability(rom: string; frames: int; shotdir: string): int =
   # Mash A identically on both cores so game logic runs past the title.
   var press = false
   for f in 0 ..< frames:
-    # toggle A every 20 frames on BOTH cores
     if f mod 20 == 0:
       press = not press
       for c in 0 ..< 2: link.cores[c].handle_input(A, press)

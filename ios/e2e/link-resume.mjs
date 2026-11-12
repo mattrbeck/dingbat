@@ -251,11 +251,11 @@ const cases = {
     await s.sameGames();
     await s.end();
   },
-  // formal/WebState/LinkResume.lean bug_resume_pause_swap_ios: each side
-  // used to answer a resume with its own pause state, and the answers
-  // crossed. Here the app's background pause never reaches the browser (as
-  // when the connection dies under it) and the link drops while the app is
-  // still in the background, where it won't unpause.
+  // formal/WebState/LinkResume.lean bug_resume_pause_swap_ios (each side
+  // answering a resume with its own pause state, the answers crossing).
+  // Here the app's background pause never reaches the browser (as when the
+  // connection dies under it) and the link drops while the app is still in
+  // the background, where it won't unpause.
   async "the app paused in the background across a drop: both stay paused, then both run"() {
     const s = await link("bg-pause");
     await until(() => s.page.evaluate(() => Module._rollback_head() > 200), "some play first", 30000);

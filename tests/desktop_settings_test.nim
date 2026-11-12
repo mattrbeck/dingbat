@@ -1,10 +1,10 @@
 ## Unit tests for the desktop app's settings (src/dingbat/common/config.nim).
 ## Whatever the Settings window can store must come back from the file
-## unchanged (a keypad key bound to an input used to be dropped on the next
-## start); a save must keep what a second dingbat window saved, never
-## overwrite a file it could not read, and never raise; the command line's
-## BIOS options must hold for one run only, and a BIOS mode that needs a
-## file must fall back to HLE when there is none.
+## unchanged (guards a keypad key binding dropped on the next start); a save
+## must keep what a second dingbat window saved, never overwrite a file it
+## could not read, and never raise; the command line's BIOS options must
+## hold for one run only, and a BIOS mode that needs a file must fall back
+## to HLE when there is none.
 
 import std/[os, osproc, strutils, tables, tempfiles, options]
 import dingbat/common/[config, input]
@@ -92,8 +92,8 @@ block:
 
 echo "Two windows: each save keeps the other window's changes"
 block:
-  # Two dingbat processes read the file at start; each save used to write
-  # its whole, stale copy over the other's changes.
+  # Two dingbat processes read the file at start; a save must not write its
+  # whole, stale copy over the other's changes.
   let path = dir / "two.yml"
   save_config_file(new_config(), path)
   let a = load_config_file(path)

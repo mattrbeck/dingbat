@@ -97,7 +97,7 @@ const BOOT_STACK_RESIDUE_DMG = [0x39'u8, 0x01, 0x2E]
 proc skip_boot_hram(mem: GbMemory; gb: GB) =
   ## What the boot ROM leaves in HRAM, which is otherwise random at power-up
   ## (Pan Docs, "Power Up Sequence"; dingbat: zero). Measured by running each
-  ## boot ROM; DocBoy's `boot_hram` rows (dmg, cgb, cgb_dmg_mode) read the
+  ## boot ROM; DocBoy's `boot_hram` tests (dmg, cgb, cgb_dmg_mode) read the
   ## same bytes. They also want one fixed value at $FFFE, which no boot ROM
   ## writes: that is power-up HRAM, random per Pan Docs, and left at zero.
   ## * The CGB boot ROM checks the logo from an HRAM buffer (Pan Docs, same
@@ -802,7 +802,7 @@ const IF_WRITE_LAND_DOTS* {.intdefine.} = 1
   ## request raised in those dots is overwritten by the write rather than
   ## surviving it. gambatte `m2int_m0irq/m2int_m0irq_scx3_ifw_{2,4}`
   ## (both devices: the mode-0 request rises on the write's first dot);
-  ## needs LYC_SRC_RELATCH_ADJ. 2 loses 20 `*_ifw_1`/`*_early_*` rows.
+  ## needs LYC_SRC_RELATCH_ADJ. 2 loses 20 `*_ifw_1`/`*_early_*` tests.
 const IF_WRITE_LAND_DOTS_DS* {.intdefine.} = 1
   ## The same in double speed, one of STAT_M0_LEAD_DS's joint move (0 and 2
   ## lose there; alone, 1 lost `m2int_m0irq_scx4_ifw_ds_1`).

@@ -1,7 +1,7 @@
 // A linked friend's hidden tab. rAF stops in a hidden document, so that
 // side's game pauses and ours stalls at the prediction limit: the hiding side
 // says so over the DataChannel ([11][on]) and the other shows a card over the
-// frozen screen instead of a silent freeze (which used to run out the 20 s
+// frozen screen instead of a silent freeze (which would run out the 20 s
 // idle window and end the session mid-trade). sdputil.js + netplay.js are
 // evaluated in the helpers.mjs vm context, in index.html's script order.
 

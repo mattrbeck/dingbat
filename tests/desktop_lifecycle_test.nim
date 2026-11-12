@@ -1,12 +1,11 @@
 ## The desktop's game lifecycle (src/dingbat/frontend/game_load.nim, called by
 ## load_rom in src/dingbat.nim; formal/DesktopState/GameLifecycle.lean):
 ## a file that is not a ROM is refused before anything of the running game is
-## touched, instead of an IndexDefect out of main(), and a .gb shorter than a
-## cartridge plays, padded with $FF, in the core the web shares; a GBA game's
-## battery is written when its core is dropped or the app quits, including one
-## a state load restored while paused, and a write that fails is reported, not
-## raised;
-## a zip extracts to one cache folder however its path is spelled; a ROM path
+## touched, and a .gb shorter than a cartridge plays, padded with $FF, in the
+## core the web shares; a GBA game's battery is written when its core is
+## dropped or the app quits, including one a state load restored while
+## paused, and a write that fails is reported, not raised;
+## a zip extracts to one cache folder however its path is written; a ROM path
 ## with no extension keeps its battery file beside it, not `<parent>.sav`.
 
 import std/[os, hashes, strformat, strutils, tables, tempfiles]
@@ -41,9 +40,9 @@ proc short_gb(n: int; cart_type = 0x00): string =
 
 block short_gb_files_run:
   # The GB core as the web builds it (no size check in front): a file shorter
-  # than a cart, or not a whole number of 16 KiB banks, ran off the end of
-  # `rom` (IndexDefect in the constructor or at the first frame). It is now
-  # padded with $FF to a power of two, at least 32 KiB, and plays.
+  # than a cart, or not a whole number of 16 KiB banks, is padded with $FF to
+  # a power of two, at least 32 KiB, and plays (guards an IndexDefect in the
+  # constructor or at the first frame).
   for (n, kind) in [(0, 0x00), (0x100, 0x00), (0x150, 0x00), (0x2000, 0x00),
                     (0x4000, 0x00), (0x4001, 0x00), (0x4001, 0x01),
                     (0x8001, 0x01), (0xC000, 0x01)]:
@@ -64,7 +63,7 @@ block short_gb_files_run:
       g.cartridge.mbc_write(0x2000, uint8(bank))
       discard g.cartridge.mbc_read(0x4000)
       discard g.cartridge.mbc_read(0x7FFF)
-    # Save states name the file as it is on disk, as they always did.
+    # Save states name the file as it is on disk.
     let st = g.state_bytes()
     doAssert g.state_is_for(st)
     doAssert g.state_rom_identity() == fnv1a(file), &"{n:#x}"
@@ -120,8 +119,8 @@ block good_roms_build:
   doAssert a.error == "" and a.gba != nil and a.gb == nil
 
 block gb_extensions_pick_the_gb_core:
-  # `.cgb` and `.sgb` are Game Boy carts too: they went to the GBA core (a
-  # screen of noise), the file dialog hid them and a drop ignored them.
+  # `.cgb` and `.sgb` are Game Boy carts too (guards: sent to the GBA core,
+  # hidden by the file dialog, ignored on a drop).
   # `.dmg` stays out: on macOS it is a disk image.
   for name in ["color.cgb", "super.sgb", "LOUD.CGB", "plain.gbc"]:
     let p = dir / name
@@ -194,8 +193,8 @@ block gb_battery_flushed:
   doAssert readFile(dir / "gbflush.sav")[0] == char(9)
 
 block zip_one_identity:
-  # `dingbat z.zip` from a terminal and dragging the same zip in used to
-  # extract to two folders, each with its own .sav.
+  # `dingbat z.zip` from a terminal and dragging the same zip in must extract
+  # to one folder, not two each with its own .sav.
   let zdir = dir / "zips"
   createDir(zdir)
   var entries = initTable[string, string]()

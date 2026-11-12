@@ -992,10 +992,10 @@ proc spec_link_test(rom, bios_path: string; contract: LinkContract;
 proc spec_link_bench(rom, bios_path: string; contract: LinkContract;
                      delay, timeout_frames: int): int =
   ## Speculation benchmark on the long symmetric speclinkbench handshake:
-  ## OFF, then ON with the old "same as last" predictor and with the shipped
+  ## OFF, then ON with the old "same as last" predictor and with the default
   ## echo-aware one, at 0 and `delay` latency. Reports `replay_cyc` (cycles
   ## re-emulated by rollbacks), `overrun` (rollbacks that outran the log) and
-  ## CPU ms; asserts the shipped predictor is bit-identical to the blocking
+  ## CPU ms; asserts the default predictor is bit-identical to the blocking
   ## path and cuts the old predictor's re-emulation.
   var verdict = 0
   template require(cond: bool; msg: string) =
@@ -1025,13 +1025,13 @@ proc spec_link_bench(rom, bios_path: string; contract: LinkContract;
                               timeout_frames, echo_predict = false,
                               check_contract = false)
     report("ON old-pred (delay " & $d & ")", old_p, base)
-    # Shipped predictor: MUST be exactly the blocking path, with no lossy overrun.
+    # Default predictor: MUST be exactly the blocking path, with no lossy overrun.
     require(new_p.hash0 == base.hash0 and new_p.hash1 == base.hash1,
       "NEW predictor (delay " & $d & ") diverged from blocking path")
     require(new_p.replay_overrun == 0,
       "NEW predictor (delay " & $d & ") hit the lossy replay-overrun path")
-    # The whole point: at real latency the echo predictor eliminates the rollback
-    # re-emulation the old one wastes on the symmetric handshake.
+    # At real latency the echo predictor eliminates the rollback re-emulation
+    # the old one wastes on the symmetric handshake.
     if d > 0:
       require(new_p.misses < old_p.misses,
         "NEW predictor did not cut mispredictions vs OLD (delay " & $d & ")")
@@ -2320,10 +2320,8 @@ proc main() =
     if no_save:
       # new_gba loads <rom>.sav when one exists, so a ROM sitting in a shared
       # library boots from whatever save is beside it and a run leaves one
-      # behind. --nosave used to cover only the GB path, which made a GBA run
-      # here silently disagree with any harness that symlinks the ROM into a
-      # scratch directory: identical through the logos, then divergent from
-      # the frame the game first reads its save.
+      # behind; a GBA run would then diverge from the frame the game first reads
+      # its save.
       # Blank means a fresh chip, as new_storage builds one with no .sav: every
       # backup type starts erased at $FF (jsmolka/alyosha save/* read 0 as
       # written data and fail their first check).
@@ -2373,13 +2371,13 @@ proc main() =
       # Always colour on GBA: greyscale is a Game Boy notion (the DMG
       # screenshot suites compare against grey references), and a
       # greyscaled GBA frame differs from any colour reference in every
-      # lit pixel -- which reads as a state divergence that grows as a
-      # scene fades in, and cost another session a night's bisecting.
+      # lit pixel, which reads as a state divergence that grows as a
+      # scene fades in.
       write_ppm(screenshot_path, emu.ppu.framebuffer, 240, 160, true)
       echo screenshot_path
       quit(0)
   else:
-    # External screenshot suites name the DEVICE per row, so in
+    # External screenshot suites name the DEVICE per test, so in
     # --mode=screenshot the absence of --cgb means "run on a DMG", or a cart
     # with $0143 = $80 is silently scored on the wrong hardware (the same
     # contract as --mode=gambatte). Other modes let the header pick.
@@ -2499,7 +2497,6 @@ proc main() =
       echo "MICROTEST: FAIL"
       quit(1)
 
-  # Determine result
   var passed = false
   var output = ""
 

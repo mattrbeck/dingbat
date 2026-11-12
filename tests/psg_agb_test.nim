@@ -12,7 +12,7 @@
 ##   channel 3 plays never returns the byte being played (the CGB's rule); in
 ##   64-sample mode bit 6 reads back as written. Which physical bank playback
 ##   uses (GBATEK: the selected one, the CPU the other) is not visible from
-##   the CPU, so nothing here pins it. These rows would sit in dbsuite, but
+##   the CPU, so nothing here pins it. These tests would sit in dbsuite, but
 ##   its multiboot image is full.
 ## * NR22 rewrites of a period-0 note (nrx2table.s, the SP's speaker, three
 ##   rounds): 0x88 over 0x80 leaves 6, 0x68 over 0x60 leaves 8, 0x68 over

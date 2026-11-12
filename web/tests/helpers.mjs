@@ -71,10 +71,9 @@ class FakeElement {
     ev.stopPropagation ??= () => {};
     for (const f of this._listeners[type] || []) await f(ev);
   }
-  // Reparenting is real: a node appended somewhere else leaves where it was,
-  // and knows where it is. index.js moves the brand between two slots and
-  // checks parentElement to decide whether there is anything to do, so a
-  // fake that let a node sit in two parents at once would hide that entirely.
+  // Reparenting is real: a node appended elsewhere leaves where it was, and
+  // knows where it is. index.js moves the brand between two slots and checks
+  // parentElement, so a fake letting a node sit in two parents would hide that.
   _adopt(c) {
     if (c && c._parent && c._parent !== this) c._parent.removeChild(c);
     if (c && typeof c === "object") c._parent = this;
@@ -419,21 +418,18 @@ export const loadApp = async ({ localStorageSeed = {}, confirmResult = true,
       el.value = String(value);
       return el;
     },
-    // The page's timers are unref'd so that the ones no test ever clears - a
-    // toast fade, a sync debounce, a recorder's five-minute stop - cannot hold
-    // the whole suite open at the end of a file. The cost is that an unref'd
-    // timer cannot keep Node's loop alive either, so a test that genuinely
-    // waits on one (the boot offer giving up on the first pull; the yield
-    // between two games in the picture batch) is at the mercy of whatever else
-    // happens to be pending: on this machine something always is and the timer
-    // fires, on CI the loop drains and the runner reports the await as a
-    // promise that never resolved, cancelling the rest of the file.
+    // The page's timers are unref'd so the ones no test clears (a toast
+    // fade, a sync debounce, a recorder's five-minute stop) cannot hold the
+    // suite open at the end of a file. But an unref'd timer cannot keep
+    // Node's loop alive, so a test that waits on one (the boot offer giving
+    // up on the first pull; the yield between two games in the picture
+    // batch) can see the loop drain: on CI the runner reports the await as a
+    // promise that never resolved and cancels the rest of the file.
     //
-    // So short one-shots stay ref'd. Every timer the page arms for its own
-    // purposes is 220 ms or more; only the deliberate yields and the waits a
-    // test shortens itself land under the line, and a one-shot can delay the
-    // exit by its own delay and no more. An interval never gets the reprieve -
-    // that is the one that could hold the loop open forever.
+    // So short one-shots stay ref'd. Every timer the page arms for itself is
+    // 220 ms or more; only deliberate yields and waits a test shortens land
+    // under the line, and a one-shot delays the exit by at most its own
+    // delay. Intervals are never ref'd: one could hold the loop open forever.
     setTimeout: (fn, ms) => {
       const t = setTimeout(fn, ms);
       if (!((ms || 0) <= PIN_TIMER_MS)) t.unref?.();
@@ -753,10 +749,9 @@ export const bytesRes = (bytes, status = 200) => ({
     bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
 });
 
-// The grid's children are not all games: its first cell is the "Load a game"
-// add tile, which carries no .home-tile class precisely so that the count,
-// the filter and the "No games match" note can tell the difference. Every
-// test that walks the grid wants this, not .children.
+// The grid's first cell is the "Load a game" add tile, which has no
+// .home-tile class so the count, the filter and the "No games match" note
+// can skip it. Tests that walk the grid want this, not .children.
 export const gameTiles = (app) =>
   app.document.getElementById("home-recent").children
      .filter((t) => t.classList.contains("home-tile"));

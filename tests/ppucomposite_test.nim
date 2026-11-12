@@ -55,13 +55,11 @@ proc test_pack_domain() =
         if bgr16_pack(v) != bgr16_pack_sat(v): inc mismatches
   check(mismatches == 0, "no lane leaves [0, 0x1F] and pack == pack_sat",
         "mismatches=" & $mismatches)
-  # The bound must be TIGHT, or the test is not actually pinning anything down:
-  # brighten must be able to reach exactly 31 and darken exactly 0.
+  # The bound must be tight: brighten must reach exactly 31 and darken exactly 0.
   check(max_lane == 0x1F and min_lane == 0,
         "the bound is tight (max lane 31, min lane 0)",
         "max=" & $max_lane & " min=" & $min_lane)
-  # And EVY = 17 must break it, otherwise the clamp is not load-bearing and
-  # this whole test proves nothing about the clamp.
+  # EVY = 17 must break it, or the clamp is not load-bearing.
   var overflow_at_17 = false
   for c in 0'u32 .. 0xFFFF'u32:
     let s = bgr16_spread(uint16(c))
@@ -215,8 +213,7 @@ proc test_fast_slow_agree(emu: GBA) =
 # 4. Disabled BGs' line buffers are never read (the invariant behind
 # skipping their per-scanline clear). Poison them each scanline: the output
 # must not change, AND the poison must still be intact afterwards, otherwise
-# "unchanged" only means the buffer was overwritten before compositing (an
-# earlier version poisoned ENABLED BGs and saw no change for that reason).
+# "unchanged" only means the buffer was overwritten before compositing.
 proc test_disabled_bg_buffers_unread(emu: GBA) =
   echo "disabled BGs' line buffers are never read"
   let ppu = emu.ppu
@@ -315,8 +312,7 @@ proc test_loops_agree_on_identities(emu: GBA) =
     ppu.render(mask = 0x7FFF)
 
   for bg_mode in [0'u8, 1'u8, 3'u8, 4'u8]:
-    # every layer a 1st and 2nd target, so the effect applies as widely as
-    # possible and any per-layer bookkeeping error has room to show
+    # every layer a 1st and 2nd target, so the effect applies as widely as possible
     let plain    = hash_blend(0x00, 0x00, 0, 0, 0, bg_mode)        # opaque loop
     let brighten = hash_blend(0x9F, 0x3F, 0, 0, 0, bg_mode)        # shade, EVY=0
     let darken   = hash_blend(0xDF, 0x3F, 0, 0, 0, bg_mode)        # shade, EVY=0
@@ -353,8 +349,8 @@ proc test_blend_bottom_selection(emu: GBA) =
     ppu[0x051] = if second_target_obj: 0x10 else: 0x00   # OBJ only, or nothing
     ppu[0x052] = 0                          # EVA = 0
     ppu[0x053] = 16                         # EVB = 16 -> result is the bottom
-    # Big opaque sprites at priority 2, tiled across the screen so plenty of
-    # columns have an OBJ pixel competing with BG1.
+    # Big opaque sprites at priority 2, tiled so many columns have an OBJ pixel
+    # competing with BG1.
     let spr = ppu.sprites_ptr()
     for i in 0 ..< 128:
       if i < 16:
@@ -502,8 +498,8 @@ proc test_window_cover_exhaustive(emu: GBA) =
           first_bad = "x1=" & $x1 & " x2=" & $x2 & ": window_cover=" & $cov &
                       " but " & $covered & " columns written"
   check(bad == 0, "all 65536 (x1, x2) classified correctly", first_bad)
-  # The classification must be non-degenerate: if window_cover returned wcPartial
-  # for everything the fast path would simply never fire and this test would pass.
+  # All three classes must occur: if window_cover always returned wcPartial the
+  # fast path would never fire and this test would pass.
   check(n_full > 0 and n_empty > 0 and n_partial > 0,
         "all three classes are actually reachable",
         "full=" & $n_full & " empty=" & $n_empty & " partial=" & $n_partial)
@@ -640,7 +636,7 @@ proc test_uniform_window_fuzz(emu: GBA) =
   var truly_uniform = 0
   var total = 0
   var first_bad = ""
-  # Coverage counters, so the run can prove it exercised what it claims to.
+  # Coverage counters: the run must exercise what it claims to.
   var seen_objwin_partial = 0
   var seen_both_windows = 0
   var seen_wrapped_h = 0
@@ -735,8 +731,7 @@ proc test_uniform_window_fuzz(emu: GBA) =
   check(unsound == 0,
         "no windowed line was composited as uniform when it is not (" &
         $total & " windowed cases, " & $fired & " took the fast path)", first_bad)
-  # Both kinds of line must be present in quantity, or the check above is
-  # vacuous in one direction.
+  # Both kinds of line must be present in quantity, or the check above is vacuous.
   check(fired > total div 20 and seen_nonuniform > total div 20,
         "the fuzz produced both kinds of line in quantity",
         "fast=" & $fired & " truly_uniform=" & $truly_uniform &
@@ -755,9 +750,8 @@ proc test_uniform_window_fuzz(emu: GBA) =
 
 # 9d. Frame-level A/B with the fast path on and off, over real renders with
 # real sprites (including OBJ-window sprites), real blending and every BG
-# mode. The second half rewrites window registers at scanline granularity,
-# which is the only way to check the decision is made per line with live
-# values rather than latched once per frame.
+# mode. The second half rewrites window registers per scanline, to check the
+# decision is made per line with live values, not latched once per frame.
 proc test_uniform_window_frames(emu: GBA) =
   echo "framebuffers are byte-identical with the fast path on and off"
   let ppu = emu.ppu
@@ -776,8 +770,8 @@ proc test_uniform_window_frames(emu: GBA) =
     ppu[0x054] = uint8(nxt() and 0x1F)      # EVY
     let spr = ppu.sprites_ptr()
     for i in 0 ..< 128:
-      # Keep the sprites on-screen so they actually contribute, and give a
-      # slice of them OBJ-window mode so line_obj_window is genuinely driven.
+      # Keep the sprites on-screen, and give some of them OBJ-window mode so
+      # line_obj_window is driven.
       spr[i].attr0 = (spr[i].attr0 and not 0x0300'u16) and 0xFCFF'u16
       spr[i].attr0 = spr[i].attr0 or uint16((nxt() mod 160) and 0xFF)
       if objwin and (i and 3) == 0:
@@ -869,16 +863,16 @@ proc test_uniform_window_frames(emu: GBA) =
 
 # 10. A per-pixel reference model. Every test above compares the span
 # compositor with itself under two configurations that must agree, so a rule
-# encoded wrongly in both passes them all: a semi-transparent OBJ pixel under
-# a window whose colour-effect bit is clear was drawn opaque by every path
-# and every test here stayed green (docs/playtest-bugs.md, "Semi-transparent
-# OBJ under an effects-off window"). This model recomputes each pixel from
-# the line's layer buffers with none of the span machinery: window by
-# priority (WIN0, WIN1, OBJ window, outside), layers sorted by priority with
-# OBJ in front of an equal-priority BG, then GBATEK's colour effects plus the
-# rule the references and tests/roms/semiobjwin.gba pin down: a
-# semi-transparent OBJ top over a 2nd-target bottom alpha-blends whatever the
-# window's effect bit and BLDCNT's mode; everything else needs the bit.
+# encoded wrongly in both passes them all; this guards against that, e.g. a
+# semi-transparent OBJ pixel drawn opaque under a window whose colour-effect
+# bit is clear (docs/playtest-bugs.md, "Semi-transparent OBJ under an
+# effects-off window"). The model recomputes each pixel from the line's layer
+# buffers with none of the span machinery: window by priority (WIN0, WIN1,
+# OBJ window, outside), layers sorted by priority with OBJ in front of an
+# equal-priority BG, then GBATEK's colour effects plus the rule the
+# references and tests/roms/semiobjwin.gba pin down: a semi-transparent OBJ
+# top over a 2nd-target bottom alpha-blends whatever the window's effect bit
+# and BLDCNT's mode; everything else needs the bit.
 proc in_winh(h: WINH; col: int): bool =
   let x1 = int(h.x1)
   let x2 = int(h.x2)

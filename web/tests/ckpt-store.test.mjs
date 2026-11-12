@@ -4,10 +4,7 @@
 //
 // Checkpoints: the session taken every minute of play, so a browser that
 // crashes with the game on screen resumes about where it stopped, and the
-// earlier moments kept for when the newest one is what crashes. The
-// reported case: FireRed on an Android phone, a long session with no
-// in-game save, the browser crashed, and the relaunch did not pick up where
-// it left off - the session was only ever taken when the page was hidden.
+// earlier moments kept for when the newest one is what crashes.
 
 import test from "node:test";
 import assert from "node:assert/strict";

@@ -591,11 +591,10 @@ test("one menu per game: Play while its card is paused, then Game, then Delete",
   app.api.currentRomName = null;
 });
 
-// The bug this pins: the library keys a game by the name it was added under
+// The library keys a game by the name it was added under
 // (currentOriginalName), while currentRomName is the emulator filesystem's
-// sanitised one. Open the menu under the wrong key and every flag reads
-// false - the menu decides the file is missing and offers to go and find a
-// file the player is, demonstrably, playing.
+// sanitised one. Opened under the wrong key every flag reads false: the menu
+// decides the file is missing and offers to find a file the player is playing.
 test("the card's ⋯ finds the loaded game under the library's own key", async () => {
   const app = await loadApp();
   seed(app, ["Zelda (U) [!].gbc"]);
@@ -645,7 +644,7 @@ test("body.lib-has-games follows the library, and is unset before the first rend
 
 
 // ── The brand, twice ────────────────────────────────────────────────────────
-// The hero's brand and the bar's are two elements now; what ties them is one
+// The hero's brand and the bar's are two elements; what ties them is one
 // number, --brand-p, which index.js drives off the scroll. The harness has no
 // layout, so the crossover itself is checked in a browser; what is pinned here
 // is the contract the stylesheet reads.
@@ -663,9 +662,8 @@ test("a loaded game pins the bar's brand on, whatever the scroll says", async ()
   assert.equal(app.api.brandP, 1, "a game means the hero is not on screen at all");
   assert.equal(slot.classList.contains("on"), true);
 
-  // And with no game and nothing measurable - which is this harness, and is
-  // also a real browser mid-layout - it keeps what it had rather than snapping
-  // the brand off the bar.
+  // With no game and nothing measurable (this harness, or a real browser
+  // mid-layout) it keeps what it had rather than snapping the brand off the bar.
   app.document.body.classList.remove("has-game");
   app.api.syncBrand();
   assert.equal(app.api.brandP, 1, "no measurement, no change");
@@ -721,12 +719,10 @@ test("the bar's brand goes home from a game and to the top on the home screen",
 
 
 // ── The brand's flight ──────────────────────────────────────────────────────
-// The bug these guard against: the flight used to fill FORWARDS, so a finished
-// animation went on describing its element, and it was tracked in a variable
-// that the flight cleared when it settled — which made those leftovers
-// invisible to the next flight. Play the sequence load → menu → close a few
-// times and one of them would be left holding opacity 0 with nothing able to
-// clear it, and the brand was simply gone for the rest of the session.
+// The flight must not fill FORWARDS, nor be tracked in a variable cleared
+// when it settles: a finished animation would go on describing its element,
+// invisible to the next flight. After a few rounds of load → menu → close one
+// is left holding opacity 0 and the brand is gone for the rest of the session.
 
 const givenBoxes = (app) => {
   // Two logos in the two places, so a flight has something to measure.
@@ -764,8 +760,7 @@ test("a second flight cancels the first, even after the first has settled",
   const first = [...flightOn(app, "bar-logo"), ...flightOn(app, "home-brand")];
   assert.ok(first.length >= 2);
 
-  // Let it land. This is the state the old code lost track of: finished, and
-  // still attached.
+  // Let it land: finished, and still attached.
   first.forEach((a) => a.finish());
   await settle();
 
@@ -776,10 +771,8 @@ test("a second flight cancels the first, even after the first has settled",
 });
 
 // What flies is the logo, alone. The bar's word sits to the RIGHT of its logo
-// where the hero's sits UNDER it, so any transform that aims the logo properly
-// carries the word off to one side - fading it on the way down did not fix
-// that, it only made a fainter thing sail past the mark. It stays put and
-// dissolves where it is.
+// where the hero's sits UNDER it, so any transform that aims the logo carries
+// the word off to one side. It stays put and dissolves where it is.
 test("only the logo is given a transform; the word never moves", async () => {
   const app = await loadApp();
   givenBoxes(app);

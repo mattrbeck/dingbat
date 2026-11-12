@@ -499,8 +499,8 @@ const modalButton = (app, label) =>
   walk(overlay(app)).find((n) => n.tagName === "BUTTON" && n.textContent === label);
 const modalInput = (app) => walk(overlay(app)).find((n) => n.tagName === "INPUT");
 
-// The library tile's menu is the only way in now (tile-menu covers the
-// item itself); these test the box it opens.
+// The library tile's menu is the only way in (tile-menu covers the item
+// itself); these test the box it opens.
 const openRename = async (app, name) => {
   await app.api.openRenameModal(name);
   await settle();

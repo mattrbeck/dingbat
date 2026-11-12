@@ -118,7 +118,7 @@ test("an unclassified refusal still says something useful", async () => {
 
 test("a session snapshot a newer dingbat wrote says so when Resume is refused", async () => {
   // The Resume offer re-applies a local snapshot; a refusal names its cause
-  // like every other state load (it once said only "Couldn't restore").
+  // like every other state load.
   const app = await loadApp();
   app.api.gdriveToken = null;
   app.runIn("currentRomName = 'A.gba'; currentOriginalName = 'A.gba'");

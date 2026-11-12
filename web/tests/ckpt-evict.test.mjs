@@ -2,17 +2,10 @@
 // whether the save was superseded, as it does after a ROM gave way
 // (formal/WebState/SavePersistence.lean, bug_ckpt_evict_retry_*).
 //
-// Loading, switching and closing games, against a stand-in core that does
-// what the real one does with the emulator filesystem: it reads its ROM and
-// its battery file when it is built, and it writes its battery file whenever
-// the game saves. Every solo game is the FS file "rom.<ext>", so every solo
-// game's battery file is the one "rom.sav"; what these tests guard is that a
-// game only ever boots on, and only ever persists, its own save.
-//
-// Each trace is a counterexample found by the Lean models in formal/WebState/
-// (named at each section), replayed through the real web/index.js. `hold`
-// parks a flow at one of its awaits, so each interleaving is the one the
-// model found, not whatever the fake IndexedDB's microtask order happens to be.
+// Against game-switch.test.mjs's stand-in core: every solo game's battery
+// file is the one "rom.sav". `hold` parks a flow at one of its awaits, so
+// the interleaving is the one the Lean model found, not whatever the fake
+// IndexedDB's microtask order happens to be.
 
 import test from "node:test";
 import assert from "node:assert/strict";

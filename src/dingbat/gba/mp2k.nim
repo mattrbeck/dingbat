@@ -202,10 +202,7 @@ const
   # from 5.7 to 21 kHz against 3 and 4 (the eleven 26.8 kHz titles prefer 4
   # by 0.01). Above 35 kHz (Castlevania's 42 kHz configuration and two
   # 40 kHz titles) 2 wins: the two differ by 1.6 output samples there, which
-  # content reaching 16 kHz still resolves. History: 10 was fitted while the
-  # level control parked titles up to 24 samples early, and 4 while its
-  # 6-sample band still parked them wherever they settled (render_frame's
-  # settle window, 2026-09-14).
+  # content reaching 16 kHz still resolves.
   MP2K_FIFO_PIPELINE      = 3.5'f32
   MP2K_FIFO_PIPELINE_FAST = 2.0'f32
   MP2K_FIFO_FAST_RATE     = 35000.0'f32

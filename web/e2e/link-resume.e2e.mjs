@@ -372,8 +372,8 @@ test("a page killed mid-session leaves its goodbye at the tab's next load",
 });
 
 // While redialing the game is held: Pause and 2x are off and the game's
-// buttons go nowhere (a press there used to be undone by the reconnect,
-// LinkResume.lean pause_in_drop_undone); both come back once resumed.
+// buttons go nowhere (the reconnect would undo a press there, LinkResume.lean
+// pause_in_drop_undone); both come back once resumed.
 test("while reconnecting the game holds: Pause and 2x are off, then back", { skip, timeout: 120000 }, async () => {
   const { a, b, done } = await pair();
   // A's server is out of reach for a few seconds, so the redial is visible.

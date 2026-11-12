@@ -168,7 +168,7 @@ const DMG_HALT_MIN_MCYCLES* {.intdefine.} = 2
   ## Halted M-cycles a DMG spends before a pending interrupt can end the HALT:
   ## an interrupt raised during the HALT's first M-cycle is answered at the
   ## end of the second. gambatte `halt/late_m0{int,irq}_halt_m0stat_scx3_2b`
-  ## [dmg] want 2; 3 loses six `_1b`/`_2a` rows. The CGB's side of this is
+  ## [dmg] want 2; 3 loses six `_1b`/`_2a` tests. The CGB's side of this is
   ## CGB_HALT_PPU_LEAD.
 const HALT_PENDING_RUN_VIEW* {.booldefine.} = true
   ## Whether the HALT opcode asks "IF & IE != 0?" (the halt bug with IME
@@ -262,7 +262,7 @@ const IRQ_SAMPLE_T_DS* {.intdefine.} = 18
   ## IRQ_SAMPLE_T for a dispatch taken in double speed, in CPU T-cycles: 18,
   ## as single speed, since STAT_M0_LEAD_DS's joint move (16 and 20 lose there;
   ## it was 16 with the one-dot lead). An odd value is off the dot grid
-  ## (17/17 loses 150 `_ds_` rows), and 20 flips every `_ds_1`
+  ## (17/17 loses 150 `_ds_` tests), and 20 flips every `_ds_1`
   ## *_late_retrigger arm the other way.
 const IRQ_SAMPLE_T* {.intdefine.} = 18
   ## T-cycles into the 5 M-cycle interrupt dispatch at which the taken line's
@@ -464,14 +464,14 @@ proc handle_interrupts*(cpu: GbCpu; gb: GB) =
 # the halted latch sits at the M-cycle's midpoint; the int_lyc, int_vblank1
 # and int_timer pairs (head sources) are level and int_oam (tail) differs by
 # one. A uniform "halt costs one M-cycle" cannot produce four-and-four.
-# Ships at 4 anyway: mooneye acceptance/ppu/hblank_ly_scx_timing-GS goes red
+# Default 4 anyway: mooneye acceptance/ppu/hblank_ly_scx_timing-GS goes red
 # at 2 (it times the dispatch against LY rather than TIMA and the two disagree
 # by this M-cycle; an LY read-side lag does not fix it and costs seven
 # GBMicrotest LY rows). At 2 the split also doubles the PPU tick calls of
 # every halted M-cycle (+4.8% retired instructions on a HALT-idling title).
 const HALT_IF_SAMPLE_T* {.intdefine.} = 4
   ## T-cycles into a halted M-cycle at which the interrupt line is latched.
-  ## 4 is the M-cycle's end (ships; compiles the split out); 2 is the
+  ## 4 is the M-cycle's end (default; compiles the split out); 2 is the
   ## GBMicrotest measurement above.
 
 # STAT_M2_LEAD (ppu.nim) moves the mode 2 STAT source one M-cycle ahead of
@@ -486,7 +486,7 @@ const HALT_IF_SAMPLE_T* {.intdefine.} = 4
 # m0stat_1 [cgb]; DMG-only passes all six (M2_LEAD_HALT_BLIND_DMG_ONLY).
 const M2_LEAD_HALT_BLIND* {.booldefine.} = true
   ## Whether a HALTED CPU is blind to the mode 2 STAT source for the
-  ## STAT_M2_LEAD M-cycles it leads the line boundary by. Ships on with
+  ## STAT_M2_LEAD M-cycles it leads the line boundary by. On by default with
   ## STAT_M2_LEAD; false is the control build.
 const M2_LEAD_HALT_BLIND_DMG_ONLY* {.intdefine.} = 1
   ## The blindness on DMG-family machines only (see above). 0 = both.
@@ -562,7 +562,7 @@ proc cpu_halt_tick(gb: GB): bool {.inline.} =
     when M0_HALT_BLIND_DOTS > 0 or CGB_M0_HALT_BLIND_DOTS > 0 or
          CGB_M0_HALT_BLIND_DS_DOTS > 0:
       # The mode-0 source's half of the same question (M0_HALT_BLIND_DOTS in
-      # ppu.nim; ships at 0).
+      # ppu.nim; defaults to 0).
       if result and halt_m0_tail_blind(gb): result = false
   else:
     # Bus half whole, PPU half split: the timer IRQ is a head source
@@ -585,7 +585,7 @@ const STOP_WAKE_PPU_DOTS* {.intdefine.} = 0
   ## next M-cycle, with the CPU clock's domain (CPU, divider, timer, OAM DMA)
   ## still waiting: an oscillator restart on the way out of STOP, the same
   ## wait the speed switch's HALT spends (2^17, Pan Docs' STOP chart: "HALT
-  ## mode will exit automatically after about 0x20000 T-cycles"). Ships 0:
+  ## mode will exit automatically after about 0x20000 T-cycles"). Default 0:
   ## Pan Docs says nothing of a STOP-mode exit delay or of the PPU across
   ## STOP, SameBoy (DMG B) agrees with 0, and hardware has not been asked.
   ## DocBoy's 15 DMG STOP-and-wake rows (`ppu/interactive/stop_*`,
@@ -679,7 +679,7 @@ proc cpu_halt_wake(cpu: GbCpu; gb: GB) {.noinline.} =
          " mode=", (gb.ppu.lcd_status and 3'u8),
          " if=", toHex(irq_read(gb.interrupts, 0xFF0F), 2),
          " ime=", (if cpu.ime: 1 else: 0)
-  # CGB halt-exit charge (CGB_HALT_EXIT_MCYCLES in gb.nim; ships at 0).
+  # CGB halt-exit charge (CGB_HALT_EXIT_MCYCLES in gb.nim; defaults to 0).
   # Here rather than at the dispatch because the IME-clear wakes want it
   # too (gambatte halt/*_irq_*), and ahead of the HBlank DMA block.
   when CGB_HALT_EXIT_MCYCLES != 0:

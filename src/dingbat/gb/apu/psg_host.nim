@@ -61,7 +61,7 @@ const APU_TRIGGER_EDGE_BEFORE* {.intdefine.} = 0
   ## claims contradict on CPU CGB C: gambatte sound/ch1_duty0_pos6_to_pos7_
   ## timing_ds_{5,6} want 1 (a first trigger one NOP later lands on the same
   ## edge), SameSuite channel_{1,2}_align{,_cpu} and channel_1_freq_change_
-  ## timing-* (7 rows) want 0 and lose with 1. Ships 0; the two gambatte rows
+  ## timing-* (7 rows) want 0 and lose with 1. Default 0; the two gambatte rows
   ## are the residual (docs/gb-failure-triage.md H1).
 
 proc gb_apu_edge_before*(gb: GB): CycleCount =

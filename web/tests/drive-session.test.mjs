@@ -146,9 +146,9 @@ test("a flush running across Sign out and Sign in as another account stays in th
     "it waits, parked, for account 1");
 });
 
-// Found while modelling the fix: a sign-in whose account cannot be confirmed
-// (tokeninfo failed) left the previous account's queues loaded under the new
-// account's token, with no race needed.
+// A sign-in whose account cannot be confirmed (tokeninfo failed) must not
+// leave the previous account's queues loaded under the new account's token;
+// no race needed.
 test("a sign-in that cannot confirm the account does not sync the previous one's work into it", async () => {
   const clock = makeClock();
   const accounts = makeAccounts(clock);
@@ -169,12 +169,12 @@ test("a sign-in that cannot confirm the account does not sync the previous one's
   eq(accounts.drives.a2.log, [], "and account 2's Drive untouched");
 });
 
-// A UI QA run (d3, phase 2b): the grid and the pictures a pull brings down
-// are device-wide, so after syncing as one account, a game that is only on
-// that account's Drive (a tile with its picture and nothing else here) was
-// listed, and its picture uploaded, into the next account's Drive. Games
-// with files here still go to whoever signs in; the other account's
-// Drive-only ones leave with it, and come back when it does.
+// The grid and the pictures a pull brings down are device-wide, so after
+// syncing as one account, a game that is only on that account's Drive (a
+// tile with its picture and nothing else here) must not be listed, nor its
+// picture uploaded, into the next account's Drive. Games with files here
+// still go to whoever signs in; the other account's Drive-only ones leave
+// with it, and come back when it does.
 test("signing in as another account does not publish the last one's Drive-only games", async () => {
   const clock = makeClock();
   const accounts = makeAccounts(clock);
@@ -220,7 +220,7 @@ test("signing in as another account does not publish the last one's Drive-only g
 });
 
 // --- Grants no sign-in asked for (DriveSession re-audit, 2026-10-05) --------
-// The token broker added two: a consent screen opened as a re-grant
+// The token broker has two: a consent screen opened as a re-grant
 // (driveRegrantPopup -> driveCodeGrant) and a broker refresh. Neither starts a
 // session of its own, so each must be the linked account's.
 
@@ -387,8 +387,8 @@ const refusedSignInWithRefresh = async ({ secondTok }) => {
 };
 
 // The second sign-in was account 2: nothing of it is adopted, nothing
-// reaches its Drive (since 3bbe0d7f its refresh token, account 2's, is not
-// even sent while account 1 is loaded).
+// reaches its Drive (its refresh token, account 2's, is not even sent while
+// account 1 is loaded).
 test("a broker refresh started during a sign-in that is then refused does not adopt that account", async () => {
   const { app, accounts } = await refusedSignInWithRefresh({ secondTok: "tok2" });
   assert.notEqual(app.api.gdriveToken, "tok2", "the refused sign-in's token is not adopted");

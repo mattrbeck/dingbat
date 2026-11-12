@@ -3,21 +3,17 @@
 ##
 ## The web build is -d:danger, so a core bug that only surfaces as a Defect
 ## (RangeDefect, OverflowDefect, IndexDefect) is silent there and fatal on
-## desktop. fc686286c was one: a GB noise-channel deadline wrapped at the
-## frame rebase, the next NR43 write turned it into a far-future LFSR
-## deadline, and every state payload after that raised RangeDefect in
-## apu_arm_state_events (the desktop rewind ring died; the web froze the
-## noise). No committed ROM kept the noise running across a frame boundary
-## and then rewrote NR43, so nothing caught it for six weeks.
+## desktop. Guards against bugs like fc686286c: a GB noise-channel deadline
+## wrapped at the frame rebase, and after the next NR43 write every state
+## payload raised RangeDefect in apu_arm_state_events.
 ##
-## Built with -d:gba_quirky=false: the optimised GBA core is quirky (gba.nim),
-## which goes on past a failed check and reports it later, if at all (a wild
-## index is a SIGSEGV); this test wants the Defect where it is raised.
+## Built with -d:gba_quirky=false: the optimised GBA core is quirky (gba.nim)
+## and goes on past a failed check; this test wants the Defect where it is
+## raised.
 ##
-## This drives each core the way the rewind ring does, but every frame: a
-## payload built and pushed into a real Rewind ring (interval 1) after each
-## frame, and now and then a rewind (pop, apply) followed by a replay of the
-## frames it undid. Checked:
+## Drives each core as the rewind ring does, but every frame: a payload is
+## pushed into a real Rewind ring (interval 1) after each frame, with an
+## occasional rewind (pop, apply) and replay of the undone frames. Checked:
 ##   - no Defect or exception from step_frame / state_payload / apply, and a
 ##     payload the core wrote loads again;
 ##   - apply(p) then state_payload() gives back p;
@@ -37,24 +33,12 @@
 ## Everything is a pure function of the seed: a failure prints the case and
 ## seed, and `./dingbat_state_soak_test <case>` reruns just that case.
 ##
-## Known core issues this soak found, reported as [KNOWN] rather than failed
-## until they are fixed (DINGBAT_SOAK_STRICT=1 fails on every one):
-##   - Replays diverged: state the payloads did not carry. GB payload
-##     revision 6 carries GB's (and loads the LCD-on frame's state), GBA
-##     payload revision 9 GBA's (bus.sync_bits, dma.video_active,
-##     cpu.irq_line, the interrupt synchroniser, the DMA stamps, the fetch
-##     page, memory control); every case must replay bit for bit.
-##   - GBA: a repeating H-blank DMA whose bursts need more bus time than the
-##     visible lines have (0xA903 at frame 142: ~2.3 lines a burst) never
-##     let the CPU run again: each line's request was granted a whole burst
-##     on the lagging scheduler clock, so the backlog outgrew V-blank and one
-##     CPU step never ended. The console drops a request that finds its own
-##     channel's burst still running (dma.nim HDMA_DROP_BUSY, measured with
-##     tests/roms/payloads/hdmalag.s), so the random programs' H-blank bursts
-##     are as long as any other channel's again and 0xA903 runs. (Those
-##     bursts also used to book an interrupt check each until the event queue
-##     overflowed, which is what the soak saw first; see the "gba hblank dma
-##     over a line" case.)
+## Known core issues are reported as [KNOWN] rather than failed until they are
+## fixed (DINGBAT_SOAK_STRICT=1 fails on every one). None are open: every case
+## must replay bit for bit (GB payload revision 6, GBA payload revision 9),
+## and a repeating H-blank DMA with bursts longer than a line no longer hangs
+## the CPU (dma.nim HDMA_DROP_BUSY, measured with
+## tests/roms/payloads/hdmalag.s; see the "gba hblank dma over a line" case).
 
 import std/[os, strutils, strformat, times]
 import dingbat/gb/gb
@@ -70,9 +54,7 @@ const
 
   KnownReplay: array[0, (string, string)] = []
     ## Committed ROMs whose replay is known to diverge, and why. Every other
-    ## committed ROM must replay bit for bit. (gbaedge-auto.gba was here:
-    ## DMA3 video capture ran across the frame boundary and dma.video_active
-    ## was not in the payload until GBA rev 9.)
+    ## committed ROM must replay bit for bit.
 
 var failures = 0
 var only = ""             # case-name filter from the command line
@@ -430,14 +412,10 @@ proc gba_long_hblank_program(units: int): string =
   ## ARM from 0x08000000: DMA1 on H-blank, repeating, interrupt at the end,
   ## `units` halfwords EWRAM -> VRAM (4 cycles a halfword; the destination
   ## reloads), then a counting loop (a waitloop would be skipped rather than
-  ## stalled). At 440 a burst is ~1.4 lines. Under the rule the core had
-  ## until HDMA_DROP_BUSY they ran back to back through the visible lines,
-  ## each one's interrupt check pushed past the next burst's end
-  ## (DMA_STALLS_IRQ_SYNC); on the console, as now, the request on the line
-  ## a burst is still running is lost, so they run every other line and the
-  ## CPU runs between them. The case replays long bursts; the check pile-up
-  ## it was written for is out of one channel's reach now (two and three
-  ## channels of the same do not reach it either).
+  ## stalled). At 440 a burst is ~1.4 lines. As on the console, the request on
+  ## a line where a burst is still running is lost (HDMA_DROP_BUSY), so bursts
+  ## run every other line and the CPU runs between them. Guards against
+  ## back-to-back bursts piling up interrupt checks (DMA_STALLS_IRQ_SYNC).
   var code: seq[uint32]
   proc load(rd: int; v: uint32) =
     code.add(0xE3A00000'u32 or (uint32(rd) shl 12) or (v and 0xFF))
@@ -509,8 +487,7 @@ proc soak[T](label: string; make: proc(): T; frames: int; seed: uint64;
       var snap = ""
       for _ in 0 .. depth: snap = ring.pop()
       stage = "apply_state_payload"
-      # A payload this core wrote a moment ago must load (a StateError is a
-      # failure, caught below).
+      # A StateError here is a failure, caught below.
       emu.apply_state_payload(snap)
       stage = "state_payload after apply"
       let again = emu.state_payload()
@@ -637,10 +614,9 @@ when not defined(soak_lib):
          replay_known = "")
 
   block:
-    # H-blank bursts longer than a line, each raising its interrupt: back to
-    # back they booked a check per burst, each pushed past the next burst,
-    # until the event queue overflowed (schedule_raise_check). They run every
-    # other line now (gba_long_hblank_program).
+    # H-blank bursts longer than a line, each raising its interrupt: guards
+    # against the event queue overflowing (schedule_raise_check); see
+    # gba_long_hblank_program.
     let label = "gba hblank dma over a line"
     if wanted(label):
       let path = tmp / "long_hblank.gba"

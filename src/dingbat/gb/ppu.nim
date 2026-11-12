@@ -25,7 +25,7 @@ const CGB_COMPAT_BOOT_PHASE* {.intdefine.} = 2177
 const DMG_BOOT_PHASE* {.intdefine.} = 397
 
 # STAT_IRQ_LEAD (gb.nim) lets the STAT interrupt line's copy of the mode and LY
-# run D CPU M-cycles ahead of what the CPU reads back. It ships at 0 and
+# run D CPU M-cycles ahead of what the CPU reads back. It defaults to 0 and
 # compiles out; the per-source leads (STAT_M2_LEAD here, STAT_M0_LEAD_T in
 # gb.nim) are what ship.
 
@@ -132,9 +132,9 @@ proc skip_boot*(ppu: GbPpu; gb: GB) =
       ppu.vram[0][0x1924 + i] = uint8(0x0D + i)
   if gb.cgb_enabled:
     # The CGB boot ROM hands off mid-VBlank. 165 is pinned by gambatte
-    # display_startstate/stat_*: the `_1` rows read STAT mode 3 and the `_2`
+    # display_startstate/stat_*: the `_1` tests read STAT mode 3 and the `_2`
     # rows, one NOP later, mode 0, which only 165 satisfies (162..164 take
-    # the SCX 0/2/3 `_2` rows one by one, 166 loses stat_1) -- and by
+    # the SCX 0/2/3 `_2` tests one by one, 166 loses stat_1) -- and by
     # phase == 1 (mod 4), the same PPU-dot-to-M-cycle offset the DMG's
     # LCD_ON_HEAD_START gives. 157/161/165 are otherwise indistinguishable:
     # every other gambatte row resyncs on LY.
@@ -338,7 +338,7 @@ proc bg_display*(ppu: GbPpu): bool {.inline.} = (ppu.lcd_control and 0x01) != 0
 # first line after LCD-on every edge rounds to the STAT M-cycle (`first_line`).
 const VRAM_READ_LIVE_LOCK* {.intdefine.} = 2
   ## Whether a CPU VRAM read also asks the LIVE mode: 1 everywhere, 0 never,
-  ## 2 (ships) on a DMG only. See cpu_vram_open.
+  ## 2 (default) on a DMG only. See cpu_vram_open.
 
 const LCD_ON_LINE0_LOCK_LEAD* {.intdefine.} = 2'i32
   ## Dots by which every mode edge on the LCD-enable line sits LATER, as the
@@ -869,7 +869,7 @@ proc hblank_interrupt_enabled*(ppu: GbPpu): bool {.inline.} = (ppu.lcd_status an
 
 # A STAT write's source-enable bits reach the interrupt line at the top of the
 # write's M-cycle on DMG and two dots into it on CGB (STAT_ENABLE_LATENCY,
-# gb.nim), while the rest of the store waits for the boundary. Spelled as a
+# gb.nim), while the rest of the store waits for the boundary. Written as a
 # preview of the parked byte (deferred_reg/deferred_val) rather than an early
 # store, so the readback, the DMG write glitch and FF55's slot are untouched.
 when STAT_ENABLE_EARLY:
@@ -904,7 +904,7 @@ proc mode_flag*(ppu: GbPpu): uint8 {.inline.} = ppu.lcd_status and 0x03
 
 const STAT_M0_LEAD_DS_D {.intdefine: "STAT_M0_LEAD_DS".} = 0
 const STAT_M0_LEAD_DS* = int32(STAT_M0_LEAD_DS_D)
-  ## The mode-0 source's lead in double speed, in dots. Ships 0 (was the
+  ## The mode-0 source's lead in double speed, in dots. Default 0 (was the
   ## identity `STAT_M0_LEAD_T shr 1` = 1), one of a joint double-speed move
   ## with IF_WRITE_LAND_DOTS_DS 1, IRQ_SAMPLE_T_DS 18 and
   ## CGB_M0_HALT_BLIND_DS_DOTS 0: +6 on the hunt list with none lost
@@ -913,7 +913,7 @@ const STAT_M0_LEAD_DS* = int32(STAT_M0_LEAD_DS_D)
   ## ds_1`, `m2int_m0irq_scx5_ds_1`, `serial/start_wait_trigger_int8_read_if_
   ## ds_2`), and every one-constant neighbour of that point loses 1..9. 0 turns
   ## AGE stat-interrupt/stat-int's double-speed odd-SCX cells green but moves
-  ## the mode 3 -> 0 edge two gambatte `_ds_` rows measure; the defect is the
+  ## the mode 3 -> 0 edge two gambatte `_ds_` tests measure; the defect is the
   ## double-speed dispatch grid sitting one dot late (CGB_LATENCY_CAP, gb.nim).
 
 proc stat_irq_lead*(gb: GB): int32 {.inline.} =
@@ -934,7 +934,7 @@ static:
 #
 # mem_read ticks the M-cycle's dots and THEN reads, so the dot counter `cc` is
 # where the read's M-cycle left it. With `m0` the first mode-0 dot, the read
-# returns mode 0 iff `cc - m0 >= T`. T is bracketed two-sided at both speeds
+# returns mode 0 iff `cc - m0 >= T`. T is bracketed on both sides at both speeds
 # by ROMs that take no interrupt:
 #
 #   1x  GBMicrotest ppu_sprite0_scx0_a (T >= 2),
@@ -968,7 +968,7 @@ proc stat_m0_tail(ppu: GbPpu; gb: GB): int32 {.noinline.} =
              else: int32(STAT_M0_FIELD_TAIL)
   when STAT_M0_TAIL_SPEED_SCALED:
     # A CPU-clock quantity when it pays back a mode-3 end that moved with it
-    # (gambatte sprites/*_m3stat_ds_1). Off by default; the shipping tail is 0.
+    # (gambatte sprites/*_m3stat_ds_1). Off by default; the default tail is 0.
     tail = tail shr gb.memory.current_speed
   when STAT_M0_TAIL_ANY and STAT_M0_FIELD_TAIL_ABSORB:
     tail = max(0'i32, tail - gb.fifo_ppu.obj_dots_line)
@@ -1085,11 +1085,11 @@ const STAT_M2_PULSE* {.intdefine.} = 3
 # oam_int_inc_sled, lcdon_to_oam_int_l0/l1/l2) each read one M-cycle over while
 # the LYC, vblank and hblank sleds are exact, and oam_int_if_edge_{a,b,c,d}
 # bracket the rising edge two-sided. STAT_LYC_LEAD (gb.nim), the same question
-# for the LYC source, is refused by the same instrument: int_lyc_nops,
+# for the LYC source, fails the same instrument: int_lyc_nops,
 # int_lyc_incs, int_lyc_halt and lcdon_to_lyc*_int are exact at 0.
 const STAT_M2_LEAD* {.intdefine.} = 1
   ## CPU M-cycles the OAM STAT source comes up before the line boundary; 0
-  ## compiles the mechanism out. One quantity spelled with M3_PIPE_AHEAD and
+  ## compiles the mechanism out. One quantity written with M3_PIPE_AHEAD and
   ## LY0_PIPE_MCYCLES (fifo_ppu.nim), STAT_M0_FIELD_TAIL (gb.nim),
   ## M2_LEAD_HALT_BLIND (cpu.nim) and LYC_SETTLE_HALT_SKIP (gb.nim); none of
   ## them scores alone. M-cycles, not dots: a fixed dot 452 is two M-cycles
@@ -1359,7 +1359,7 @@ const LYC_SRC_RELATCH_ADJ* {.intdefine.} = 1
   ## Found with IF_WRITE_LAND_DOTS: gambatte `ly0/lycint152_lyc0irq_ifw_1`
   ## clears IF on dot 5 and must still see the request, and on its own it
   ## takes `lycEnable/lyc0_ff41_disable_ds_1`, `lyc0_m1disable_ds_1`. 2 loses
-  ## ten `lyc0*` rows.
+  ## ten `lyc0*` tests.
   ## CPU M-cycles by which the LY = LYC STAT source leaves the snapback's blind
   ## window before the readable bit does; 0 compiles the split out.
 
@@ -1589,7 +1589,7 @@ proc ppu_handle_stat_interrupt*(ppu: GbPpu; gb: GB) =
       (LYC153_HOLD_DS != 0 and gb.memory.current_speed != 0'u8 and gb.cgb_enabled)):
     ppu.coincidence_flag = true
   # The SOURCE leaves the blind window LYC_SRC_RELATCH_LEAD M-cycles early.
-  # Spelled as `not settling or <dot>` so nothing extra is live across the
+  # Written as `not settling or <dot>` so nothing extra is live across the
   # source terms: this is inlined into `mode_flag=`, inside the mode-3 dot loop.
   template src_settled(): bool =
     when LYC_SRC_RELATCH_LEAD == 0: not settling
@@ -1720,7 +1720,7 @@ when CGB_LYC_CMP_LATCH:
 # instant at the boundary (mem_flush_deferred); running the glitch as well
 # counts one input change twice (gambatte lycEnable/ff45_enable_weirdpoint).
 #
-# Spelled as the LYC enable bit rather than a `ly_changing` flag: the flag's
+# Written as the LYC enable bit rather than a `ly_changing` flag: the flag's
 # extra field read reaches the mode-3 dot loop through `mode_flag=` and costs
 # +1.19% of retired instructions on Pokemon Crystal; the enable bit is already
 # loaded. The readable coincidence bit does not dip (that is LY_JUST_CHANGED).
@@ -2165,7 +2165,7 @@ proc `mode_flag=`*(ppu: GbPpu; mode: uint8; gb: GB) =
         # A halted CPU has no opcode fetch to hand the bus over on: the debt is
         # paid at the wake (cpu.nim), so park the deadline out of reach.
         # `high(int32)` is also the flag hdma_grant reads as "waiting for a wake
-        # that already happened". A dot deadline here is refused by gambatte
+        # that already happened". A dot deadline here fails gambatte
         # dma/hdma_*_m0unhalt and hdma_transition_*_late_unhalt.
         ppu.hdma_due_deadline = high(int32)
       when HDMA_STEAL_LEAD_DOTS >= 0:
@@ -2209,7 +2209,7 @@ proc `mode_flag=`*(ppu: GbPpu; mode: uint8; gb: GB) =
 proc ly_advance_line*(ppu: GbPpu; gb: GB) {.noinline.} =
   ## A rendered line starting, with the comparator's blind window around it
   ## (ly_advance_open); the mode change is INSIDE the window. One `noinline`
-  ## call rather than open/`mode_flag=`/close at the call site: spelled inline
+  ## call rather than open/`mode_flag=`/close at the call site: written inline
   ## in fifo_tick_slow's dot loop it costs +1.19% of retired instructions on
   ## Pokemon Crystal.
   var lyc_en = ly_advance_open(ppu, gb)
@@ -2239,7 +2239,7 @@ proc ly_advance_vblank*(ppu: GbPpu; gb: GB) {.noinline.} =
 
 const VBLANK_ENTRY_MODE_AFTER* {.intdefine.} = 1
   ## Whether entering vblank moves the mode (0 -> 1) after the comparator's
-  ## blind window closes (1, ships) rather than inside it (0), as the call
+  ## blind window closes (1, default) rather than inside it (0), as the call
   ## site in fifo_tick_slow says it should ("a rendered line's mode change
   ## goes inside that window, entering vblank is outside it"). The difference
   ## is a hand-over: with the mode-0 source enabled and LYC = 144, inside the
@@ -2291,7 +2291,7 @@ proc ppu_run_gdma*(ppu: GbPpu; gb: GB) =
     if not ppu_copy_hdma_block(ppu, gb, charge_overhead = false): break
   when VDMA_M3_PORT != 0: gb.fifo_ppu.vdma_lost_dot = -1
   when HDMA_OVERHEAD_LEADS == 0: ppu_charge_hdma_overhead(ppu, gb)
-  # GDMA is short of the hardware by some amount and ships at zero; see
+  # GDMA is short of the hardware by some amount and defaults to zero; see
   # GDMA_SETUP_MCYCLES in gb.nim.
   when GDMA_SETUP_MCYCLES != 0:
     mem_tick_components(gb.memory, gb, 4 * GDMA_SETUP_MCYCLES, from_cpu = false)
@@ -2779,7 +2779,7 @@ proc ppu_write*(ppu: GbPpu; gb: GB; idx: int; val: uint8) =
       # retires, and because every line is a multiple of 4 dots this seed is
       # also the PPU's dot phase against the CPU's M-cycle grid for the run.
       # mooneye acceptance/ppu/lcdon_timing-GS fixes it to 5..8; gambatte
-      # enable_display and scx_during_m3 refuse 7 (GBMicrotest hblank_int_scx*
+      # enable_display and scx_during_m3 fail at 7 (GBMicrotest hblank_int_scx*
       # ask for 7; see LCD_ON_LINE0_TRIM in gb.nim). The M-cycle is backed out
       # because the counter has to read 5 once this M-cycle's dots have run
       # (mem_write applies the byte before the dots); seeding flat restarts the

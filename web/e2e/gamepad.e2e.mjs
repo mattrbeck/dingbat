@@ -223,7 +223,7 @@ test("a controller finds a game, starts it, plays it and goes home", { skip, tim
   await snap("resumed");
 
   // The keyboard on the home screen: Enter on a focused tile starts that
-  // game (it used to go to the core paused behind the page).
+  // game (not sent to the core paused behind the page).
   await tap(P.R3);
   for (let i = 0; i < 4 && (await focused()) !== "main-menu"; i++) await tap(P.DOWN);
   await tap(P.A);

@@ -222,11 +222,9 @@ proc main() =
       var hr = newSeq[uint8](half)
       for i in 0 ..< min(half, dbgHookRing.len): hr[i] = dbgHookRing[i]
       discard ring_hook.writeBuffer(addr hr[0], half)
-    # The slot the pass filled, from pcmDmaCounter AT THE HOOK (the HLE's
-    # own derivation, mp2k.nim apply_pending): slot = period - (cnt - 1)
-    # for cnt >= 2, else 0. Read at the hook it holds on every vintage
-    # whether the V-blank handler decrements before the mixer (Minish Cap)
-    # or after it (Emerald); `chslot` cross-checks it.
+    # The slot the pass filled, from pcmDmaCounter AT THE HOOK (see the
+    # header; mp2k.nim apply_pending): slot = period - (cnt - 1) for
+    # cnt >= 2, else 0; `chslot` cross-checks it.
     var slot = (if hle_fires_prev == (if emu.mp2k != nil: emu.mp2k.dbg_hook_fires else: 0): -1
                 elif cnt_hook <= 1: 0
                 else: period - (cnt_hook - 1))

@@ -39,8 +39,7 @@ const FIFO_LEVEL_AT_OVERFLOW {.booldefine.} = true
   ## words in at +8, +15, +22 and +29 from the grant): the second overflow
   ## at +28 (k = 32) asks for another refill, at +29 (k = 33) it does not;
   ## from the gamepak slot (32 cycles, words in at +10 .. +31) the edge is
-  ## between k = 34 and 35. dingbat used to see all four words at every
-  ## overflow inside the burst and never asked.
+  ## between k = 34 and 35.
 const FIFO_DROP_BUSY {.booldefine.} = true
   ## A refill request that arrives while the channel's own burst still holds
   ## the bus is lost, as an H-blank one is (dma.nim HDMA_DROP_BUSY); the
@@ -267,8 +266,7 @@ proc timer_overflow*(dc: DMAChannels; timer: int): bool =
         log("Timer overflow but empty; channel:" & $channel & ", timer:" & $timer)
         dc.latches[channel] = 0
         dc.push_fifo_sample(channel, 0)
-      # Only the FIFO this timer drives asks for a refill (it used to be any
-      # FIFO below the mark, on either sound timer)
+      # Only the FIFO this timer drives asks for a refill.
       if (if FIFO_REQ_BEFORE_POP: want else: dc.sizes[channel] < 16):
         when FIFO_DMA_REQUEST_DELAY > 0:
           dc.gba.scheduler.schedule(FIFO_DMA_REQUEST_DELAY,

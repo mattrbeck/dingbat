@@ -261,13 +261,13 @@ test("a rename made while a pull is downloading keeps its marker and its tile", 
   assert.ok(drive.get("rom:Siete.gba") && !drive.get("rom:Seven.gba"));
 });
 
-// Found by the model of the fixed code (DriveLibrary.regress_revived_chain):
-// the renameGame claim alone is not enough when the game arriving at a
-// retired name arrives by another device's rename marker. Device 0 renames
-// A to B. Device 1 renames X into the freed name A and deletes it; device 0,
-// not having pulled, plays X afterwards (so the delete is overruled and X
-// lives on as A). The next merge then applied the stale A->B marker to it:
-// X's save went under B, beside B's ROM, and X left the library.
+// DriveLibrary.regress_revived_chain: the renameGame claim alone is not
+// enough when the game arriving at a retired name arrives by another
+// device's rename marker. Device 0 renames A to B. Device 1 renames X into
+// the freed name A and deletes it; device 0, not having pulled, plays X
+// afterwards (so the delete is overruled and X lives on as A). The next
+// merge must not apply the stale A->B marker to it (X's save under B, beside
+// B's ROM, and X gone from the library).
 test("a game renamed into a retired name by another device is not folded on by the old marker", async () => {
   const clock = makeClock();
   const drive = makeDrive({ clock });
@@ -301,9 +301,8 @@ test("a game renamed into a retired name by another device is not folded on by t
 
 // SavePersistence.open_pull_resurrects_reset_save (FINDINGS #7 family): a pull
 // that downloaded a save before the person reset it (the game not loaded)
-// wrote the old bytes back afterwards; the flush then deleted Drive's copy as
-// the reset asked, and the next pull's reconcile uploaded the resurrected
-// local copy again. The reset has to win over the in-flight download.
+// must not write the old bytes back, for the next pull's reconcile to upload
+// again: the reset wins over the in-flight download.
 test("a save reset while a pull is downloading it stays reset, here and on Drive", async () => {
   const clock = makeClock();
   const drive = makeDrive({ clock });
@@ -335,10 +334,8 @@ test("a save reset while a pull is downloading it stays reset, here and on Drive
   assert.equal(drive.get("save:G.gba"), null, "and gone from Drive, not re-uploaded");
 });
 
-// Found while fixing the stale commits: renameGame (and applyRemoteRename)
-// built the renamed sync state before its transaction and installed that
-// copy after it, so a key queued in between (another game's save tick) was
-// dropped.
+// renameGame (and applyRemoteRename) must not drop a key queued while the
+// rename's transaction is in flight (another game's save tick).
 test("a save queued while a rename's transaction is in flight stays queued", async () => {
   const clock = makeClock();
   const drive = makeDrive({ clock });
@@ -370,9 +367,8 @@ const save = async (app, key, bytes) => {
 const holdUpload = (drive) =>
   drive.hold((e) => e.url.includes("/upload/drive/v3/files"));
 
-// Found by reading (index.js 2773-2779 at dd7ba741f): the outrank rule,
-// meant for another device's newer write, read this device's own in-flight
-// upload as one.
+// The outrank rule is for another device's newer write: this device's own
+// in-flight upload must not count as one.
 test("a delete asked for while the key's upload is in flight is not outranked by it", async () => {
   const clock = makeClock();
   const drive = makeDrive({ clock });
@@ -466,11 +462,10 @@ const syncTap = async (app, answer = "Continue") => {
   await settle();
 };
 
-// DriveLibrary.regress_sync_tap_after_remote_delete (a UI QA run, d2/d2r):
-// the flush uploaded any queued key Drive lacked without asking the library
-// it had just merged, so a device that had not pulled a delete put the
-// deleted game's files back on Drive, where nothing ever removed them; and a
-// later re-import of the game on the deleting device pulled its OLD save back.
+// DriveLibrary.regress_sync_tap_after_remote_delete: the flush must ask the
+// library it has just merged before uploading a queued key Drive lacks, or a
+// device that had not pulled a delete puts the deleted game's files back on
+// Drive, and a later re-import on the deleting device pulls its OLD save back.
 test("a Sync tap on a device that missed a delete does not put the game back on Drive", async () => {
   const clock = makeClock();
   const drive = makeDrive({ clock });
@@ -511,8 +506,8 @@ test("a pull removes Drive files of a game the library has deleted", async () =>
   eq(drive.names(), [], "the orphans are gone");
 });
 
-// The same cause (d1 in the QA run): a device that had not pulled a rename
-// uploaded the game once more under its old name.
+// The same cause: a device that had not pulled a rename must not upload the
+// game once more under its old name.
 test("a Sync tap on a device that missed a rename does not upload the old name", async () => {
   const clock = makeClock();
   const drive = makeDrive({ clock });
@@ -540,8 +535,8 @@ test("a Sync tap on a device that missed a rename does not upload the old name",
   eq(drive.names(), ["rom:B.gba", "save:B.gba"]);
 });
 
-// Noticed in the same run (D5): an upload did not record the modifiedTime
-// Drive gave it, so the next pull downloaded the file it had just sent.
+// An upload records the modifiedTime Drive gave it, or the next pull
+// downloads the file it has just sent.
 test("a pull does not download what this device has just uploaded", async () => {
   const clock = makeClock();
   const drive = makeDrive({ clock });

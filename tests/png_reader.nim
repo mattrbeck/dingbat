@@ -73,7 +73,6 @@ proc read_png*(path: string): PngImage =
 
     discard s.read_u32_be()  # CRC
 
-  # Decompress IDAT
   let raw = uncompress(idat_data, dfZlib)
 
   let pixels_per_byte = 8 div int(bit_depth)

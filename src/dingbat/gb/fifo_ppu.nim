@@ -13,25 +13,25 @@ const TAIL_DOT0_OFF = -(1'i32 shl 20)
 
 const M3_AHEAD_HOLD* {.booldefine.} = true
   ## Hold the mode 3 -> 0 flag for the pipeline's advance so it lands on the
-  ## dot it would with no advance (true, ships). `false` moves the flag with
+  ## dot it would with no advance (true, default). `false` moves the flag with
   ## the pixels and shortens mode 3; refused by gambatte sprites, window and
   ## speedchange, which pin the flag edge.
 
 const M3_GRID_EARLY* {.intdefine.} = 0
   ## CPU M-cycles the whole mode 2 -> 3 -> 0 dot grid (flags, STAT sources,
   ## OAM scan and pipeline together) runs ahead of LY, with mode 3's length
-  ## untouched. 0 ships; 1 is refused by gambatte sprites, window and vram_m3,
+  ## untouched. Default 0; 1 fails gambatte sprites, window and vram_m3,
   ## which pin both flag edges to the dot.
 
 const M3_PIPE_AHEAD* {.intdefine.} = 1
   ## CPU M-cycles the mode 3 pipeline runs ahead of machine time on every
-  ## device (CGB_PIPE_MCYCLES is added). 1 ships, pinned together with
+  ## device (CGB_PIPE_MCYCLES is added). Default 1, pinned together with
   ## STAT_M2_LEAD (ppu.nim) by the gambatte scy, bgtiledata, bgtilemap and
   ## scx_during_m3 families; see the note above LY0_PIPE_ANY. Declared up here
   ## because obj_oam_dma_read sums it into the OAM DMA bus lead.
 
 const CGB_PIPE_MCYCLES* {.intdefine.} = 0
-  ## CGB-only extra M-cycles of the same advance. 0 ships: what looked like a
+  ## CGB-only extra M-cycles of the same advance. Default 0: what looked like a
   ## device split was the DMG's mode-2 STAT source (STAT_M2_LEAD) and snapback
   ## halt wake (LYC_SETTLE_HALT_SKIP, gb.nim) each cancelling part of a
   ## device-independent advance. OBJ_DMA_BUS_LEAD and LY0_PIPE_MCYCLES are
@@ -121,7 +121,7 @@ proc fifo_arm_window*(ppu: GbFifoPpu) =
       # takes, yet hardware fires it. mealybug m3_wx_6_change brackets it on
       # adjacent lines of one frame (WX - 7 = -2: no window; -1: whole-line
       # window), and its window line counter is one ahead of ours without
-      # this. Spelled as a clamp here rather than a `>=` in the dot loop (one
+      # this. Written as a clamp here rather than a `>=` in the dot loop (one
       # extra branch there measured +1.7% of retired instructions; a `>=` would
       # also fire at WX = 4 and 5, which that ROM refuses). win_start_reset
       # reads the clamp back to put the tile at its true pixel. Not applied to
@@ -204,13 +204,13 @@ proc reset_render_scratch*(ppu: GbFifoPpu) =
 const OAM_SCAN_DMA_HOLD* {.intdefine.} = 1
   ## A running OAM DMA's span is a bus HOLD on the mode-2 comparator: the scan
   ## keeps stepping and comparing but gets no new Y/X, so every entry inside
-  ## the span is compared against the last Y/X the bus latched. 1 ships; 0 is
+  ## the span is compared against the last Y/X the bus latched. Default 1; 0 is
   ## the drop-the-entry control. Needs OAM_SCAN_DMA_LOCK. Pinned by gambatte
   ## oamdma/late_sp* together with strikethrough staying pixel-exact (a lock
   ## that drops entries loses that ROM's object 39 on LY 68).
 const OAM_SCAN_DMA_LOCK* {.intdefine.} = 1
   ## An OAM DMA owns the OAM bus for its whole transfer and the mode-2 scan
-  ## (one entry per two dots) reads nothing off it meanwhile. 1 ships; 0 is
+  ## (one entry per two dots) reads nothing off it meanwhile. Default 1; 0 is
   ## the one-burst scan with the transfer ignored. The transfer moves one
   ## entry per 16 dots (8 in double speed) against the scan's one per 2, which
   ## is why no constant start latency (CGB_OAM_DMA_START_T) could fix these
@@ -230,7 +230,7 @@ const OAM_SCAN_DOTS = 80'i32
   ## is one of this line's mode-2 writes, one at or above it belongs to the
   ## previous line and is already folded into lcd_control.
 const OBJ_SCAN_DOT_ADJ* {.intdefine.} = 0'i32
-  ## Dots to shift every object's scan sample by. 0 ships (object N on dot 2N);
+  ## Dots to shift every object's scan sample by. Default 0 (object N on dot 2N);
   ## -1 is the other cell that gambatte sprites/late_sizechange* and
   ## oamdma/late_sp* both cannot separate from it.
 
@@ -369,14 +369,14 @@ proc fifo_get_sprites*(ppu: GbFifoPpu; gb: GB): seq[GbSprite] =
 # y 42..47 are tile $38 at Y=$38/X=$5A with flags $5A, and the unmasked Y=$3A
 # draws something else.
 const OAMDMA_FREEZE_BUS* {.intdefine.} = 1
-  ## Model the frozen transfer's held write as a driven OAM bus (1 ships; 0:
+  ## Model the frozen transfer's held write as a driven OAM bus (default 1; 0:
   ## a frozen transfer holds the bus like a running one). DMG family only: the
   ## ROM's own header says the CGB answer is a checkerboard with no object.
 const OAMDMA_FREEZE_DEST_LEAD {.intdefine.} = 1
   ## M-cycles the frozen write's destination leads `dma_position` by. The
   ## freeze returns before that M-cycle's write, so the naive reading is 0;
   ## hardware is one further on (mooneye-test-suite issue #1 puts the
-  ## in-flight write at $FE02 where dma_position is 1). 1 ships.
+  ## in-flight write at $FE02 where dma_position is 1). Default 1.
 
 proc oam_dma_frozen*(gb: GB): bool {.inline.} =
   ## Is an OAM DMA frozen mid-write with its address and data on OAM? That is
@@ -414,7 +414,7 @@ proc oam_scan_advance*(ppu: GbFifoPpu; gb: GB; upto: int32; blocked = false) =
   ## `upto`, against OAM as it stands now; `blocked` means an OAM DMA owns the
   ## bus. Called on the dot a transfer takes OAM, the dot it gives it back and
   ## at the mode 2 -> 3 edge; between those dots neither input moves. Compiled
-  ## in only with OAM_SCAN_DMA_LOCK; the shipping scan is fifo_get_sprites.
+  ## in only with OAM_SCAN_DMA_LOCK; the default scan is fifo_get_sprites.
   if ppu.scan_line != int32(ppu.ly):
     # A fresh line: the partial result belongs to some earlier one.
     ppu.sprites.setLen(0)
@@ -503,7 +503,7 @@ const SCX_FINE_BORROW* {.intdefine.} = 1
   ## SCX & 7 below the fine scroll the line latched. The fetcher is addressed
   ## by screen position plus the live SCX, `column = ((SCX + 8k - F) shr 3)
   ## and 31`, so lowering the low bits mid-line borrows one tile for the rest
-  ## of the line while the emitted residue stays the old one. 1 ships; 0 is
+  ## of the line while the emitted residue stays the old one. Default 1; 0 is
   ## the control. Derived from gambatte scx_during_m3 read as a displacement
   ## ruler (tools/gbscx): every failing span follows a write that lowers
   ## SCX & 7 and is displaced by exactly 8, never 1..7. Not applied to the
@@ -530,7 +530,7 @@ const SCX_FINE_BORROW_DMG_LEAD* {.intdefine.} = 1
 
 # SCX_FINE_LATCH_LIVE (gb.nim): a store to SCX joins the fine-scroll discard
 # for as long as the discard has pixels left, moving the line's fine scroll
-# and its length with it (true ships). The window is the discard's own
+# and its length with it (true, default). The window is the discard's own
 # length, not a fixed number of dots: gambatte scx_during_m3's dot-89 store
 # is refused at F = 0 (scx_0063c0) and taken at F = 3 and 7 (scx_0367c0,
 # scx_0360c0, scx_0761c0); a capped `min(N, F)` saturates only at N = 7.
@@ -587,7 +587,7 @@ proc fifo_arm_scx*(ppu: GbFifoPpu) =
   ppu.scx_tile = (int(ppu.scx) shr 3) -
                  SCX_FINE_BORROW * ord((int(ppu.scx) and 7) < ppu.scx_fine)
 
-# SCX_STORE_STALL_DOTS (gb.nim, ships 0): a mid-line SCX store that lowers
+# SCX_STORE_STALL_DOTS (gb.nim; default 0): a mid-line SCX store that lowers
 # SCX & 7 stalls fetcher and shifter for one BG fetch. Content-identical to
 # SCX_FINE_BORROW's displacement (the same tile, charged as dots rather than
 # as a column), so the two must not both be on. gambatte scx_m3_extend's _ds
@@ -793,7 +793,7 @@ proc try_push_bg_pixels(ppu: GbFifoPpu; gb: GB): bool =
 #    86; 82 on LY 0), after that ROM's dot-85 write and before
 #    m3_wx_6_change's dot-93 one.
 #  * WIN_HEAD_ABSORB: the window's own `7 - WX` discard costs no dots -- the
-#    head is the same six-dot startup fetch at every WX in 0..6, spelled as
+#    head is the same six-dot startup fetch at every WX in 0..6, written as
 #    `WX - 1` idle dots (FETCHER_ORDER's negative steps). Seeding lx at a flat
 #    -6 instead collapses m3_wx_4/5_change and m3_window_timing_wx_0. Length
 #    cross-checks: GBMicrotest win<WX>_a/_b and gambatte window/m2int_wx03_*.
@@ -1140,7 +1140,7 @@ const OBJ_PLANE_GAP {.intdefine.} = 2'i32
   ## Dots between an object fetch's two bitplane reads (one VRAM access each).
 const OBJ_PLANE1_LAG {.intdefine.} = 2'i32
   ## Dots after the merge dot at which the high plane samples LCDC.2 on the
-  ## `idx >= 0` arm; the low plane's is OBJ_PLANE_GAP earlier. 2 ships
+  ## `idx >= 0` arm; the low plane's is OBJ_PLANE_GAP earlier. Default 2
   ## (mealybug m3_lcdc_obj_size_change, strict optimum).
 const OBJ_PLANE1_HEAD {.intdefine.} = 4'i32
   ## The same read on the `idx < 0` arm, in dots after the trigger (the fetch
@@ -1150,7 +1150,7 @@ const OBJ_PLANE1_HEAD {.intdefine.} = 4'i32
   ## steps end on T + 2 and T + 4, which is where DocBoy's VRAM DMA conflict
   ## rows find them (`..._sprite_y16_x01`..`x06`: bus held on T + 2 and T + 4,
   ## free on T + 6; VDMA_M3_PORT, gb.nim). Those rows see even dots only, so
-  ## 5 scores the same there; 6 is refused by them.
+  ## 5 scores the same there; 6 fails them.
 
 # Hardware re-reads an object's tile and attributes from OAM at its mode-3
 # fetch; while an OAM DMA owns OAM that read gets the byte the unit has on its
@@ -1358,10 +1358,10 @@ proc win_react_last_park(ppu: GbFifoPpu): bool {.inline.} =
 # M3_PIPE_MCYCLES: CPU M-cycles the mode 3 pipeline lags the CPU's register
 # view, injected as idle dots at the head of mode 3 and paid back by retiring
 # the fetcher early (no mode boundary moves; 4 dots at normal speed, 2 in
-# double, so it is latched per line). 0 ships: the M-cycle gambatte
+# double, so it is latched per line). Default 0: the M-cycle gambatte
 # bgtiledata/bgtilemap measure (two disjoint dot windows at the two speeds)
 # was the CPU write committing an M-cycle late, which mem_write now fixes.
-# M3_PIPE_DELAY: the additional speed-independent lead in dots. 2 ships,
+# M3_PIPE_DELAY: the additional speed-independent lead in dots. Default 2,
 # pinned by mealybug m3_bgp_change (BGP applied at the shifter, no objects)
 # and GBMicrotest ppu_spritex_vs_scx 153/153 once the fetcher's idle steps
 # sit at the tail of its cycle. The tail burst's accounting is approximate in
@@ -1375,7 +1375,7 @@ const M3_PIPE_MCYCLES {.intdefine.} = 0
 const M3_PIPE_DELAY {.intdefine.} = 2
 
 # Dots the mode 3 -> 0 edge comes early with the pipeline left alone: mode 3
-# gets shorter, no pixel moves. 0 ships. GBMicrotest hblank_int_scx0..7 solve
+# gets shorter, no pixel moves. Default 0. GBMicrotest hblank_int_scx0..7 solve
 # to a uniform 2 (not the per-residue split they look like), but a uniform
 # -2 costs mooneye hblank_ly_scx_timing-GS, wilbertpol
 # intr_2_mode0_scx*_timing_nops and ~150 gambatte rows that pin the same edge
@@ -1391,7 +1391,7 @@ const M3_END_EARLY {.intdefine.} = 0
 # gambatte m2enable/late_enable_ly0_*) and not a short mode 2 (gambatte
 # m0enable, vramw_m3end, ly0/lycint152_m2stat_1).
 const LY0_PIPE_MCYCLES {.intdefine.} = 0
-  ## 0 ships: this is a DIFFERENCE between line 0 and its neighbours, and
+  ## Default 0: this is a DIFFERENCE between line 0 and its neighbours, and
   ## M3_PIPE_AHEAD now carries the same M-cycle on every line; adding both
   ## puts line 0 two M-cycles out.
 
@@ -1694,7 +1694,7 @@ proc fifo_obj_size_write*(ppu: GbFifoPpu; gb: GB) {.noinline.} =
   ## transparent), a colour-0 slot is taken if the new colour is not 0, and any
   ## other slot stays with the object that won it. The oam_idx of a covered
   ## transparent entry is lost; only the CGB merge rule reads it, and this
-  ## path cannot reach it at the shipping CGB_OBJ_SIZE_LATENCY.
+  ## path cannot reach it at the default CGB_OBJ_SIZE_LATENCY.
   if ppu.cycle_counter > ppu.obj_hi_dot: return
   let h = sprite_height(ppu)
   if uint8(h) == ppu.obj_fix_h: return
@@ -2903,7 +2903,7 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
     when STAT_IRQ_SPLIT and (STAT_M0_LEAD_DOMAIN or M0_LOOKAHEAD_REACHABLE):
       # Dots the STAT interrupt line runs ahead of the mode flag, read once per
       # tick (a speed switch cannot land inside one). Hoisted only where the
-      # loop reads it every tick; the shipping STAT_M0_LEAD_T reads it once a
+      # loop reads it every tick; the default STAT_M0_LEAD_T reads it once a
       # line. `mode_flag=` catches irq_mode up at every boundary the domain
       # hooks are compiled out of.
       let lead = stat_irq_lead(gb)
@@ -3301,7 +3301,7 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
         when STAT_IRQ_SPLIT:
           # The LYC=0 source sees the snapback a lead ahead of the readable LY
           # (gambatte lyc0int_* / lyc153int_*). Not re-derived against the
-          # settling window below; the shipping LEAD = 0 compiles this out.
+          # settling window below; the default LEAD = 0 compiles this out.
           when STAT_M0_LEAD_DOMAIN:
             if ppu.ly == 153 and ppu.irq_ly == 153 and
                ppu.cycle_counter >= LY153_SNAP_DOT - lead:

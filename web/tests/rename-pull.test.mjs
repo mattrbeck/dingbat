@@ -3,8 +3,8 @@
 // bug_pull_after_rename_orphans_frame / regress_pull_after_rename_orphans_frame).
 //
 // The rename moves the game's records to the new name; a picture (or save)
-// written afterwards under the old one was an orphan, and a later rename of
-// any game to that name failed: "already exists in your library".
+// written afterwards under the old one is an orphan, and a later rename of
+// any game to that name fails: "already exists in your library".
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -61,10 +61,9 @@ for (const kind of ["frame", "save"]) {
 // A name renamed away from is released once a game holds it again here, and
 // the pull writes that game's files under it once more
 // (formal/WebState/DriveLibrary.lean: regress_remote_rename_into_away_name_skips_saves,
-// regress_download_into_away_name_skips_saves). Before be44ad4c only a rename
-// into the name here or a fresh import released it; every pull of the session
-// then skipped the game's save, and this device's next save went up over the
-// other device's progress.
+// regress_download_into_away_name_skips_saves). Otherwise every pull of the
+// session skips the game's save, and this device's next save goes up over
+// the other device's progress.
 
 const flush = async (app) => { await app.api.flushSync(); await drain(); };
 const pull = async (app) => { await app.api.pullSync(); await drain(); };

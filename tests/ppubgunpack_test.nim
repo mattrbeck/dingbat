@@ -17,16 +17,13 @@
 ## `render_reg_bg` (tile_base >= 0x10000, 8bpp, mosaic, wraparound,
 ## screen_size) and part 2 covers it by rendering scanlines three ways.
 ##
-## EXHAUSTIVE: 1.1 shapes x flip x bank; 1.2 single-nibble sweep; 1.3
-## adjacent-pair sweep (carry propagation); 1.4 each 16-bit half x bank x
-## flip; 2.1 screen_size x depth x character_base_block x all 512 BGHOFS;
-## 3 the full 2^32 x 16 x 2 sweep (DINGBAT_BG4_EXHAUSTIVE=1, ~20 min
-## single-threaded; DINGBAT_BG4_SHARDS/SHARD split it). SAMPLED: 1.5
-## whole-word fuzz; the tile maps and character data behind 2.x, plus
-## vcount/BGVOFS/screen_base_block.
+## Part 3 is the full 2^32 x 16 x 2 sweep (DINGBAT_BG4_EXHAUSTIVE=1, ~20 min
+## single-threaded; DINGBAT_BG4_SHARDS/SHARD split it). SAMPLED, not
+## exhaustive: 1.5 whole-word fuzz; the tile maps and character data behind
+## 2.x, plus vcount/BGVOFS/screen_base_block.
 ##
-## Part 1's oracle is the shipping scalar fallback; part 2 adds an
-## independent model written from the register layout.
+## Part 1's oracle is the scalar fallback; part 2 adds an independent model
+## written from the register layout.
 ## Run with: nimble test_ppubgunpack
 
 import std/[os, strutils]
@@ -256,8 +253,7 @@ proc make_emu(): GBA =
   result = new_gba("", rom_path, run_bios = false, use_hle = true)
   result.post_init()
 
-# Coverage counters, so the claim about what part 2 exercised is measured
-# rather than asserted.
+# Coverage counters: what part 2 exercised is measured, not assumed.
 type Coverage = object
   spans_whole, spans_partial: int
   flipped_tiles, transparent_tiles: int
@@ -429,8 +425,8 @@ proc test_renderer(emu: GBA) =
   check(bad_fast.len == 0, "SWAR renderer == scalar renderer, every line", bad_fast)
   check(bad_model.len == 0, "renderer == independent per-pixel model", bad_model)
 
-  # The coverage claim, measured. A sweep that never hit a flipped tile or never
-  # took the transparent path would pass vacuously, so assert it did not.
+  # A sweep that never hit a flipped tile or never took the transparent path
+  # would pass vacuously, so assert it did not.
   echo "  coverage: whole spans=", cov.spans_whole, " partial spans=",
        cov.spans_partial, " flipped tiles=", cov.flipped_tiles,
        " transparent tiles=", cov.transparent_tiles,

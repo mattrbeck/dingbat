@@ -1,17 +1,13 @@
 ## Differential fuzz for the GBA per-line OBJ candidate list
 ## (`ppu.obj_line_mask`, rebuilt only when OAM changes) against the full
-## 128-entry scan (`render_sprites(force_scan = true)`, still the
-## rebuild-storm fallback). Thousands of randomized OAM tables biased onto
-## the boundaries: double-size affine sprites whose base box misses the line,
-## sprites wrapping through Y=256 to the top (a 128-tall one at Y>128 on
-## both the bottom and the top lines), OBJ-window sprites, sprites
-## dropped by the per-line OBJ cycle budget. Per table: (1) all 240
-## `sprite_pixels` plus the two per-line flags must match on all 160 lines;
-## (2) the candidate bitmap must match an independent predicate written
-## from the register layout (the scan re-tests y/x rejects, so an
-## over-inclusive mask is invisible to (1)). Plus mid-frame OAM writes via
-## the real bus paths, the rebuild-storm fallback, coverage counters that
-## FAIL if a hazard class never fired, and a negative control.
+## 128-entry scan (`render_sprites(force_scan = true)`, the rebuild-storm
+## fallback). Randomized OAM tables are biased onto the boundaries:
+## double-size affine sprites, Y wrap through 256, OBJ-window sprites, the
+## per-line OBJ cycle budget. Per table: (1) all 240 `sprite_pixels` plus
+## the two per-line flags must match on all 160 lines; (2) the candidate
+## bitmap must match an independent predicate written from the register
+## layout (the scan re-tests y/x rejects, so an over-inclusive mask is
+## invisible to (1)). Coverage counters FAIL if a hazard class never fired.
 ## Run with: nimble test_ppuobjlist
 
 import std/[os, strutils]
@@ -601,7 +597,7 @@ proc test_negative_control(emu: GBA) =
     ppu.obj_list_rebuilds = 0
     ppu.rebuild_obj_lines()
     for line in 0 .. 159:
-      # Find a set bit and clear it: that is exactly "a sprite the list forgot"
+      # Clear a set bit: "a sprite the list forgot"
       var victim = -1
       for s in 0 ..< 128:
         if (ppu.obj_line_mask[line][s shr 6] and (1'u64 shl uint(s and 63))) != 0:

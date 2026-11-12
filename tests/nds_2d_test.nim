@@ -348,9 +348,8 @@ proc scene_windows_blend() =
   g.oam[0] = 40 or (2 shl 10)                     # OBJ window
   g.oam[1] = 160 or (2 shl 14)                    # 32x32
   g.oam[2] = 0
-  # semi-transparent OBJ at (20,150) 8x8, priority 0, over BG0 (not 2nd target)
-  # and at (200,150) blending with BG1 when BG0 is off there: use window? keep
-  # simple: a semi OBJ is forced alpha only when the layer below is 2nd target
+  # semi-transparent OBJ at (20,150) 8x8, priority 0, over BG0 (not 2nd
+  # target): a semi OBJ is forced alpha only when the layer below is 2nd target
   g.oam[4] = 150 or (1 shl 10)
   g.oam[5] = 20
   g.oam[6] = 0

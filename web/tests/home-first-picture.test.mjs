@@ -56,8 +56,8 @@ test("no hint: nothing is held", async () => {
 });
 
 // The sync UI refreshes at boot, before the library is read. It must not
-// decide the library either way: it once marked an empty one as having
-// games, and the empty state blinked out.
+// decide the library either way: marking an empty one as having games makes
+// the empty state blink out.
 test("before the library is read, a sync refresh decides nothing", async () => {
   const app = await loadApp();
   app.runIn("refreshSyncUI()");

@@ -448,8 +448,7 @@ test("a Drive-only game whose download finishes after another tap does not repla
 });
 
 // The SIO link path (`?rollback=0`): launchNetRom boots the host's ROM the way
-// loadRom boots a tile, and named it before its save was read the way loadRom
-// used to.
+// loadRom boots a tile; it too must not name the game before its save is read.
 const withNetplay = (app) => {
   const { sandbox } = app;
   sandbox.WebSocket = class { constructor() { this.readyState = 0; } send() {} close() {} };
@@ -614,10 +613,10 @@ test("Resume is refused once the game has saved in game, before any autosave", a
 });
 
 // ── Import (SavePersistence, found by the model of the flush) ───────────────
-// An imported save replaces the loaded game's. The reboot used to persist
-// "the outgoing game" first - with the core's own RAM flushed over the
-// imported file - and to snapshot the replaced session under the imported
-// save's signature, so Resume would put the old battery back.
+// An imported save replaces the loaded game's. The reboot must not persist
+// "the outgoing game" first (the core's own RAM flushed over the imported
+// file), nor snapshot the replaced session under the imported save's
+// signature (Resume would put the old battery back).
 
 test("an imported save survives the reboot, and no Resume offers the replaced one", async () => {
   const app = await boot();
@@ -808,9 +807,9 @@ test("a tab switch during a load files no picture under the incoming name", asyn
 });
 
 // ── Resume beats a load another tile started ────────────────────────────────
-// Found driving the UI: tap another tile, then (before its load boots) the
-// paused game's own tile or the card's Resume. The resume is the later
-// choice, so it takes the load token and the earlier tap's load stands down.
+// Tap another tile, then (before its load boots) the paused game's own tile
+// or the card's Resume. The resume is the later choice, so it takes the load
+// token and the earlier tap's load stands down.
 
 test("tapping back to the paused game while another tile loads keeps the paused game", async () => {
   const app = await boot();

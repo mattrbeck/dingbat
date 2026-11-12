@@ -1592,8 +1592,8 @@ proc run_gb_rev6() =
           twin.quirks == emu.quirks,
           "the silicon revision (and its quirks) travel with the state")
 
-  # Line-relative state must not outlive its line. Both were found live at
-  # frame boundaries by the state soak, long past the line that set them.
+  # Line-relative state must not outlive its line; the state soak found both
+  # of these live at frame boundaries.
   let idle = gb_test_rom("idle", cgb = true, [0x18, 0xFE])        # jr -2
   # Copy an OAM-DMA routine to HRAM, then run it every frame as LY hits 50
   # (early in that line's mode 2).

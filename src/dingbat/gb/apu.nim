@@ -6,7 +6,7 @@ const APU_POWERON_TAP_LEAD* {.intdefine.} = 4
   ## sound/ch2_init_reset_env_counter_timing_{5 [dmg], 7 [cgb]}: each family
   ## powers the APU on at a different divider phase, and 0 ticks their
   ## envelope one clock early on exactly those two; 4 lands all 32
-  ## `init_reset_env_counter_timing` rows and every SameSuite
+  ## `init_reset_env_counter_timing` tests and every SameSuite
   ## div_write_trigger row.
 
 const APU_SPSW_TAP_LAG_T* {.intdefine.} = 4
@@ -188,7 +188,7 @@ const APU_SPSW_REPHASE_GRID_T* {.intdefine.} = 1
   ## whose channel runs across a switch, one switch or five, triggered before
   ## the first switch or after a power-on that followed one (the `_ds_`
   ## members): 2 and 4 lose; tying it to the boot rather than the power-on
-  ## loses the five `_ds_2` rows. A trigger after a power-on with no switch
+  ## loses the five `_ds_2` tests. A trigger after a power-on with no switch
   ## since sees no re-phase: SameSuite channel_1_freq_change_timing-cgb0BC
   ## and the no-switch sound/ rows. Measured on channel 1; channel 2 is the
   ## same hardware (assumed); channel 3 below; channel 4 is untested and left
@@ -200,7 +200,7 @@ const APU_SPSW_REPHASE_LEAD3_T* {.intdefine.} = 1
   ## 1 MHz grid's 4 - GRID_T). DocBoy cgb/double_speed/apu/ch3 speed_switch_
   ## to_single_apu_ch3_period_1 (period 1, a power-on, then the first switch:
   ## the sample after the stall is one later than without it): over the 171
-  ## double-speed CH3 rows 0 loses that row, 3 loses the three `_b` rows (the
+  ## double-speed CH3 rows 0 loses that row, 3 loses the three `_b` tests (the
   ## same switch one double-speed M-cycle later), 2 also passes; SameBoy, CGB
   ## C and E, passes all four.
 

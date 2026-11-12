@@ -634,9 +634,8 @@ test("a save state taken in the app resumes the same frames and sound", { skip }
 
 // A slot and a checkpoint (the moments a crash leaves, and the session) are
 // packed by the checkpoint worker, off the frame's thread; the undo a load
-// keeps stays plain. And a checkpoint taken while a DS game runs is that
-// game's: the GB/GBA core still holds the game played before it, whose
-// state once went in as the DS game's checkpoint and session.
+// keeps stays plain. A checkpoint taken while a DS game runs must be that
+// game's, not the GB/GBA game the other core still holds.
 test("a DS game's slot, undo and checkpoint are its own states, packed off the page", { skip }, async () => {
   const ctx = await browser.newContext({ viewport: { width: 900, height: 900 }, serviceWorkers: "block" });
   const { page, errors } = await newPage(ctx);

@@ -20,7 +20,7 @@ const setup = async (opts = {}) => {
   const app = await loadApp();
   const { sandbox } = app;
 
-  // Share ships hidden in index.html; fake-DOM elements default to hidden=false.
+  // Share is hidden in index.html; fake-DOM elements default to hidden=false.
   app.document.getElementById("net-manual-share").hidden = true;
   const shares = []; // every payload handed to navigator.share
   if (opts.mobileShare) {
@@ -369,7 +369,7 @@ test("Share stays hidden without the Web Share API", async () => {
 });
 
 // The traces of formal/WebState/LinkPairing.lean, replayed against the real
-// netplay.js. Each failed on the first try before the fix.
+// netplay.js.
 
 // A guest paired and holding the host's offer (it has answered).
 const pairedGuestWithOffer = async (t, code) => {

@@ -21,9 +21,8 @@ const device = async (drive, clock, recent = []) => {
 };
 const names = (lib) => lib.recents.map((r) => r.name).sort();
 
-// Found by reading: driveListAll asked for one page and ignored
-// nextPageToken, so past a page of files the library could be missed and a
-// second one created.
+// driveListAll must follow nextPageToken: past a page of files the library
+// could be missed and a second one created.
 test("a library past the first page of the listing is found, not duplicated", async () => {
   const clock = makeClock();
   const seed = {};
@@ -39,9 +38,9 @@ test("a library past the first page of the listing is found, not duplicated", as
   assert.ok(drive.log.some((e) => e.url.includes("pageToken=")), "the listing was paged");
 });
 
-// Found by reading: two devices syncing for the first time can each create
-// a "library" file; each then reads and writes whichever one its listing
-// happened to name last, and neither sees the other's games.
+// Two devices syncing for the first time can each create a "library" file;
+// each would then read and write whichever one its listing happened to name
+// last, neither seeing the other's games.
 test("two devices that each created a library end up with one holding both", async () => {
   const clock = makeClock();
   const drive = makeDrive({ clock });

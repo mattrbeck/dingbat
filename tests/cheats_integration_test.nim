@@ -1,5 +1,5 @@
-## Integration test: prove that an enabled cheat, once parsed, is written into
-## live emulator memory by the per-frame apply_cheats hook on both cores.
+## Integration test: an enabled cheat is written into live emulator memory
+## by the per-frame apply_cheats hook on both cores.
 ##   nim c -r -d:release --path:src -o:/tmp/cheat_int tests/cheats_integration_test.nim
 
 import dingbat/gb/gb
