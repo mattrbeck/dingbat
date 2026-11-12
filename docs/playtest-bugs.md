@@ -10298,3 +10298,49 @@ MAJOR against it, 0.04-0.08). The OCR of a busy map is near its threshold
 (dingbat against mgba 0.10.5: 0.77; against the second reference 0.97;
 against mgba master 0.88), so the checkpoint passes through the reader
 that agrees, as every load checkpoint does.
+
+## §107. The library outside the corpus: 1,181 games under random input in three emulators, 2026-11-12
+
+`inputsweep.py sweep --pattern deep --frames 12000` on every title in the
+library that no script or games.json covers (one dump per title, no hacks or
+demos; tag `lib-2026-11-11`), dingbat against mgba 0.10.5 and the second
+reference, with the save-chip rule of §105 in the core. 27 of 1,181 flagged;
+every one read against its screenshots, none is a dingbat bug:
+
+- **sleep (11):** Ghost Rider, Santa Clause 3, Powerpuff Girls Him and Seek,
+  Cabbage Patch Kids, Catwoman, Bomberman Jetters Game Collection, Dr. Mario
+  & Panel de Pon, Greatest Nine, Mario Tennis Advance (J), Puyo Pop Fever (E),
+  Puyo Puyo Fever (J). The random input picked the game's own sleep option
+  (Ghost Rider's "Sleep Mode: press L, R and SELECT"; Greatest Nine's pause
+  menu スリープ, whose message the second reference draws before waking):
+  dingbat stays in Stop until the wake keys, as the console does; the
+  references take the next interrupt.
+- **a fork the other emulators share (9):** dingbat agrees with one reference
+  where the other's path left it -- Pitfall: The Lost Expedition, Total
+  Soccer Manager and CROSS CHANGE with the second reference; WinX Club: Quest
+  for the Codex, Ms. Pac-Man: Maze Madness (the second reference stays black
+  throughout), Backyard Basketball and Backyard Sports Basketball 2007 with
+  mgba; Code Breaker (mgba never leaves the licence screen) and Yu-Gi-Oh!
+  Expert 2006 with the second reference.
+- **all three apart (6):** Choh Makaimura R, Yu-Gi-Oh! Expert 3 and Day of
+  the Duelist, Naruto Saikyou Ninja Daikesshuu 2 ("save-unwritten": mgba
+  reached a results screen dingbat's route had not), Battle X Battle
+  ("garbage" on its busy art), Steven Gerrard's Total Soccer 2002 (the same
+  237 screens as mgba in order, a frame apart from frame 16; a key lands on
+  another frame at 786 and the match chosen differs).
+- **Pro Mahjong Tsuwamono Advance (J)**, the one dingbat alone: after
+  フリー対局 every dingbat configuration returns to the publisher logo while
+  both references go on to 対局者選択, with every key from 5,160 shifted ±6
+  frames. Traced: the scene number at 0x02015854 (previous at 0x02015858,
+  written by 0x080077D8) leaves the rules screen (scene 7) on the B+DOWN at
+  f5145 in dingbat (to scene 2, the title's) and on the A+DOWN at f5149 in
+  mgba (to 0xCE); with every key from f5100 shifted, mgba also ends on the
+  logo at +1 frame or later and dingbat reaches 対局者選択 at -6. A held
+  DOWN's auto-repeat put the two about five frames apart; the paths had
+  already split in the rules menu (30,000 against 27,000 points by f4500).
+  The game never jumps to 0x08000000, its EEPROM traffic is the first-boot
+  format alone (f950-f1590), and the final saves are byte-identical.
+
+Nothing here needs the console. The harness gained gyro and tilt input
+alongside (`gyro RATE`, `tilt X Y`; WarioWare: Twisted! now plays its first
+stage, every dingbat configuration identical to mgba at every checkpoint).
