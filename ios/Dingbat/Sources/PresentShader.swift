@@ -166,9 +166,9 @@ static float3 shade(constant PresentUniforms &u, float3 c) {
     if (u.panelGbc != 0) {
       float3 lin = pow(c, float3(2.2)) * 0.94;
       return pow(clamp(float3(
-        0.82 * lin.r + 0.125 * lin.g + 0.195 * lin.b,
-        0.24 * lin.r + 0.665 * lin.g + 0.075 * lin.b,
-       -0.06 * lin.r + 0.210 * lin.g + 0.730 * lin.b), 0.0, 1.0),
+        0.82 * lin.r + 0.240 * lin.g - 0.060 * lin.b,
+        0.125 * lin.r + 0.665 * lin.g + 0.210 * lin.b,
+        0.195 * lin.r + 0.075 * lin.g + 0.730 * lin.b), 0.0, 1.0),
         float3(1.0 / 2.2));
     }
     float3 lin = pow(c, float3(4.0));

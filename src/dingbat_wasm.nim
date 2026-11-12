@@ -93,9 +93,9 @@ proc build_color_luts(correct: bool) =
         let g = pow(g5, 2.2) * lum
         let b = pow(b5, 2.2) * lum
         let mixed = [
-          0.82 * r + 0.125 * g + 0.195 * b,
-          0.24 * r + 0.665 * g + 0.075 * b,
-         -0.06 * r + 0.210 * g + 0.730 * b,
+          0.82 * r + 0.240 * g - 0.060 * b,
+          0.125 * r + 0.665 * g + 0.210 * b,
+          0.195 * r + 0.075 * g + 0.730 * b,
         ]
         for c in 0 .. 2:
           gbc[c] = uint32(min(255.0, round(pow(max(0.0, min(1.0, mixed[c])), 1.0 / 2.2) * 255.0)))

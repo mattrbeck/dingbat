@@ -184,9 +184,9 @@ vec3 correct(vec3 c) {
   if (panel_gbc) {
     vec3 lin = pow(c, vec3(2.2)) * 0.94;
     return pow(clamp(vec3(
-      0.82 * lin.r + 0.125 * lin.g + 0.195 * lin.b,
-      0.24 * lin.r + 0.665 * lin.g + 0.075 * lin.b,
-     -0.06 * lin.r + 0.210 * lin.g + 0.730 * lin.b), 0.0, 1.0),
+      0.82 * lin.r + 0.240 * lin.g - 0.060 * lin.b,
+      0.125 * lin.r + 0.665 * lin.g + 0.210 * lin.b,
+      0.195 * lin.r + 0.075 * lin.g + 0.730 * lin.b), 0.0, 1.0),
       vec3(1.0 / outGamma));
   }
   float lcdGamma = 4.0;
@@ -1256,9 +1256,9 @@ proc bgr555_to_rgb(px: uint16; correct, gbc: bool): array[3, byte] =
     let r = pow(r5, 2.2) * lum
     let g = pow(g5, 2.2) * lum
     let b = pow(b5, 2.2) * lum
-    let mixed = [0.82 * r + 0.125 * g + 0.195 * b,
-                 0.24 * r + 0.665 * g + 0.075 * b,
-                -0.06 * r + 0.210 * g + 0.730 * b]
+    let mixed = [0.82 * r + 0.240 * g - 0.060 * b,
+                 0.125 * r + 0.665 * g + 0.210 * b,
+                 0.195 * r + 0.075 * g + 0.730 * b]
     for i in 0 .. 2:
       result[i] = byte(min(255.0, round(pow(max(0.0, min(1.0, mixed[i])), 1.0 / 2.2) * 255.0)))
   elif correct:
