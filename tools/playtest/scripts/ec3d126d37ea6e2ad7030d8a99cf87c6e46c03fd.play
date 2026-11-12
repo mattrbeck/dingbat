@@ -8,7 +8,7 @@
 # English, logos, title, New Game, Aragorn, A through the Orthanc story,
 # into the first level: Gandalf's lines, walk down-right past the barrels
 # towards the ledge, sword swings on the way.
-# Findings: nba does not read back its own 8 KB battery file (on a reload
+# Findings: the second reference does not read back its own 8 KB battery file (on a reload
 # it shows the language menu again, the other two do not). Menu tab and
 # logo fades land on different frames per emulator (EA logo f1532: all
 # three differ; backpack tabs f3506..f3598 mid-transition).

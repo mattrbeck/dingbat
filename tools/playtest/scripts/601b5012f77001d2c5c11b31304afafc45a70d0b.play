@@ -8,7 +8,7 @@
 # > Save at 00:00 play time. [load]: the title ignores input until about f840
 # (the first DOWN is not taken), CONTINUE, then the PET menu over the room.
 # Seen while authoring: the title's animated background is on a different
-# phase in mgba (f600, f790); dingbat-bios's save differs from mgba/nba in
+# phase in mgba (f600, f790); dingbat-bios's save differs from mgba/the second reference in
 # 2 bytes (0x112B, 0x114C).
 
 [new]

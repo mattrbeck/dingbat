@@ -10,7 +10,7 @@
 # stage 1 to show the saved record.
 # Seen while authoring: title sparkles and menu highlight phases differ per
 # emulator; at the stage start (f2700) mgba's propeller is at a different
-# angle from dingbat-bios and nba, and nba's stage timer reads 0.02 s less
+# angle from dingbat-bios and the second reference, and the second reference's stage timer reads 0.02 s less
 # throughout (f2822, f3035) although its final time is the same 3"48.
 # All three saves byte-identical.
 

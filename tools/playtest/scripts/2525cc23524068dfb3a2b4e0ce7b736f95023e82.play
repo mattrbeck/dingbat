@@ -11,7 +11,7 @@
 # Hamha / Tack-Q on the sunflower seed.
 # Small differences: the title and intro animations are a frame apart
 # between the emulators (title f600/f720: dingbat-bios differs from mgba ==
-# nba at f720); menus and gameplay screens are identical.
+# the second reference at f720); menus and gameplay screens are identical.
 [new]
 wait 600
 wait 120

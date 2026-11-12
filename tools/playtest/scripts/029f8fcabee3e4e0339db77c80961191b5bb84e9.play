@@ -8,14 +8,14 @@
 # Run, then Save Career > Yes from the run menu ("SAVE SUCCESSFUL").
 # [load]: the career menu now opens on CONTINUE CAREER (proof the save was
 # read), continue into the Hangar.
-# Findings: nba's rotating skater model on skater select differs (MINOR). In
+# Findings: the second reference's rotating skater model on skater select differs (MINOR). In
 # the live session all three drifted apart in the Hangar (f2546) after a
 # rolled-back step; the frozen replay is IDENTICAL on all three for gameplay
 # and skating, so that came from the session's save states. Gameplay
 # checkpoints stay compare=none to be safe.
-# nba writes an 8192-byte file for this 4Kbit EEPROM (dingbat-bios, mgba:
-# 512 bytes, same 220 data bytes); booted with it, nba truncates game.sav to
-# 0 bytes and the career menu opens on NEW CAREER (no save seen), so nba's
+# The second reference writes an 8192-byte file for this 4Kbit EEPROM (dingbat-bios, mgba:
+# 512 bytes, same 220 data bytes); booted with it, the second reference truncates game.sav to
+# 0 bytes and the career menu opens on NEW CAREER (no save seen), so the second reference's
 # [load] checkpoints differ.
 
 [new]

@@ -14,9 +14,9 @@
 # dingbat truncates as the SP photographs do, one step under both references
 # on 4-9k pixels. OCR read those steps as other text ("new_data" MAJOR), so the
 # menus are judged by pixels again (playtest-bugs.md, "Gunstar Super Heroes,
-# Klonoa 2, Mario Party Advance"). In the stage nba draws shot sparks and enemy
+# Klonoa 2, Mario Party Advance"). In the stage the second reference draws shot sparks and enemy
 # positions slightly differently (f2706, f3546, f3706). In the ship hall
-# (f5122 onward) nba shows thin white horizontal lines across the
+# (f5122 onward) the second reference shows thin white horizontal lines across the
 # background at about scanlines 50 and 90 and draws the centre pillar
 # without its perspective taper (f6096), where dingbat-bios and mgba agree.
 

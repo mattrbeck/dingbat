@@ -8,10 +8,10 @@
 # Mountain, walk a few steps north, then pause > SAVE > slot 1 > Yes.
 # [load]: Continue shows slot 1 (2 notes, 00:03:42), load it, resumed in
 # Spiral Mountain, pause menu.
-# Findings: the title's animated background differs (nba MAJOR vs the
+# Findings: the title's animated background differs (the second reference MAJOR vs the
 # others, dingbat-bios~mgba MINOR) and so do menus over it. In the live
 # session the intro camera pan and dialogue ran at different speeds (f1818:
-# nba furthest on, then mgba, then dingbat-bios; nba a few dialogue lines
+# The second reference furthest on, then mgba, then dingbat-bios; the second reference a few dialogue lines
 # ahead until ~f14000); the session's per-step save states may play a part
 # (see Spider-Man/THPS2, where live drift vanished on replay). All three end
 # in the same place with byte-identical 8 KB saves and identical gameplay

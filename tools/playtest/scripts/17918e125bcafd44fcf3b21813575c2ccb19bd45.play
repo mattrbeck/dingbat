@@ -10,12 +10,12 @@
 # EEPROM. [load]: the BACK UP DATA prompt ("resume the game?") comes up
 # before the intro; YES resumes Round 1 with Guy.
 # Session notes: in the intro story (f600-f780, checkpoint intro_story)
-# dingbat-bios draws the caption box under the map black, mgba and nba
-# draw it solid blue. nba draws a few fight frames differently late in
+# dingbat-bios draws the caption box under the map black, mgba and the second reference
+# draw it solid blue. The second reference draws a few fight frames differently late in
 # the round (f3847 enemy pose, f7719 another enemy and a half-drawn name
 # plate), score and lives agree.
-# Save size: dingbat-bios and mgba write 512 bytes, nba 8 KB (same first
-# 512 bytes). Load: nba booted with its own 8 KB file shows no BACK UP
+# Save size: dingbat-bios and mgba write 512 bytes, the second reference 8 KB (same first
+# 512 bytes). Load: the second reference booted with its own 8 KB file shows no BACK UP
 # DATA prompt and plays the intro as on a blank cart (f660), so its
 # [load] presses go to the intro instead.
 

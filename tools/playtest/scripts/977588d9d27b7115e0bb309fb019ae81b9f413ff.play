@@ -11,8 +11,8 @@
 # menu, story select.
 # Findings in the race (f2976 on): the three emulators start the race on
 # different frames after the START skip (timer 0'00"86 / 88 / 85 at f3216
-# for dingbat-bios / mgba / nba) and mgba draws garbage tiles where the
-# course map sits (bottom left) on every race frame; dingbat-bios and nba
+# for dingbat-bios / mgba / the second reference) and mgba draws garbage tiles where the
+# course map sits (bottom left) on every race frame; dingbat-bios and the second reference
 # show a blank corner there. Race checkpoints are compare=none/text.
 [new]
 wait 600

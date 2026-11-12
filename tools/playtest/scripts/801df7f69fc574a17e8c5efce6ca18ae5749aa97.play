@@ -7,11 +7,11 @@
 # then ARCADE MODE, EASY, Ryu, and drop the first few gem pairs of stage 1.
 # [load] opens OPTION again and shows the 2-star difficulty.
 # Notes: the arcade opponent is random. At f4055 mgba draws Ryu (a mirror match) while
-# dingbat-bios and nba draw Chun-Li, and by f4841 the gem pairs differ on all three, so
+# dingbat-bios and the second reference draw Chun-Li, and by f4841 the gem pairs differ on all three, so
 # the stage-1 checkpoints are not expected to match. The title fade-in (f600, f2054) is at a
-# different step on each emulator. nba draws the OPTION screen brighter than the other two.
-# Saves: dingbat-bios and mgba keep a 512-byte EEPROM file, nba an 8192-byte one. In the
-# live [load] session nba booted its own save and showed the default 4-star difficulty
+# different step on each emulator. The second reference draws the OPTION screen brighter than the other two.
+# Saves: dingbat-bios and mgba keep a 512-byte EEPROM file, the second reference an 8192-byte one. In the
+# live [load] session the second reference booted its own save and showed the default 4-star difficulty
 # (dingbat-bios and mgba showed 2 stars).
 
 [new]

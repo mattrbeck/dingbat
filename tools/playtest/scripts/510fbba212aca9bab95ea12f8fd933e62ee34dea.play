@@ -16,7 +16,7 @@
 # references draw and replay a round, 40 frames (two taps), then deal another hand
 # (docs/playtest-bugs.md §88). That is why the duel itself is not played here.
 # At f1466 the fade-out after picking the deck is at a different step on each emulator.
-# Title screen (f854/f884, both [new] and [load]): mgba and nba are pixel-identical,
+# Title screen (f854/f884, both [new] and [load]): mgba and the second reference are pixel-identical,
 # but dingbat-bios differs on every row. The green grid background is offset by about
 # one pixel horizontally (shifting dingbat-bios by 1 px cuts the differing pixels from
 # 13370 to 10577, so it is not only a shift), and the logo and menu text look the same.

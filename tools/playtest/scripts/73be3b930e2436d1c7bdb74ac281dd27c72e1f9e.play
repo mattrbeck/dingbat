@@ -16,13 +16,13 @@
 # moves on to Training 2.
 # [load]: the file screen shows "ああ コンパクト"; ぼうけん opens the map with
 # Training 1 starred and ああ 00'02"10 in its records.
-# Seen while authoring: nba runs the stage one frame behind the others (its
+# Seen while authoring: the second reference runs the stage one frame behind the others (its
 # timer reads 1-2 hundredths lower all the way, the hit on an earlier try
 # landed a frame later) and the goal and result screens flash their palette
 # in a different phase there; it still finishes in 2"10. mgba's spiral
 # backgrounds on the menus are in a different phase from dingbat-bios and
-# nba (file_select / name_entry: mgba SLIP 2-3 frames from the other two);
-# mode_select and stage_map are DIFFERENT on nba against both others.
+# the second reference (file_select / name_entry: mgba SLIP 2-3 frames from the other two);
+# mode_select and stage_map are DIFFERENT on the second reference against both others.
 # All three SRAM files are byte-identical.
 [new]
 wait 300

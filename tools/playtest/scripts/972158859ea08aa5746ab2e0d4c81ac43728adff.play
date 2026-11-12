@@ -9,11 +9,11 @@
 # crystal over a gap, double jump over a Nitro) into the exit portal;
 # the game offers "Continue and save" > slot 1, then the map.
 # [load]: title > Load Game shows 1% / 1 crystal, slot 1, resumed on the map.
-# Findings: save files differ in size: dingbat-bios 512 bytes, mgba and nba
+# Findings: save files differ in size: dingbat-bios 512 bytes, mgba and the second reference
 # 8192 bytes (same 16 data bytes in the first 512). Booted with its own file,
-# nba shows 0% and every slot EMPTY and stays on the load screen, so nba's
+# the second reference shows 0% and every slot EMPTY and stays on the load screen, so the second reference's
 # [load] checkpoints differ (dingbat-bios and mgba resume on the map).
-# In play nba's Crash is often one animation frame off the others (e.g.
+# In play the second reference's Crash is often one animation frame off the others (e.g.
 # f2738, f5211), positions agree.
 
 [new]

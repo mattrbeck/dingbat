@@ -9,9 +9,9 @@
 # lava room (double jump A, A again in the air, holding RIGHT); ends on the
 # second lava platform (checkpoint lava_room).
 # Controls: A jump (twice for a double jump), B buster.
-# Seen while authoring: nba's frames differ from dingbat-bios/mgba through
+# Seen while authoring: the second reference's frames differ from dingbat-bios/mgba through
 # most of the stage (title menu slide f600 differs on all three; f2158 and
-# f2268 dingbat-bios and mgba draw no Bass on the frame where nba does, i.e.
+# f2268 dingbat-bios and mgba draw no Bass on the frame where the second reference does, i.e.
 # the hurt blink is on a different phase; f2634 the reverse).
 [new]
 wait 600

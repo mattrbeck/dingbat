@@ -8,7 +8,7 @@
 # new profile as soon as the name is confirmed: English, name "AA", END.
 # [load] skips both screens and shows the name under Options > Player Data.
 [new]
-# nba could not follow from here: 'until text "SELECT A LANGUAGE" timeout=900 every=5': timed out after 900 frames waiting for text 'SELECT A LANGUAGE'
+# The second reference could not follow from here: 'until text "SELECT A LANGUAGE" timeout=900 every=5': timed out after 900 frames waiting for text 'SELECT A LANGUAGE'
 # until text 'SELECT A LANGUAGE' timeout=900 every=5  [reached dingbat-bios+15 mgba+15]
 wait 19
 wait 30
@@ -34,7 +34,7 @@ wait 30
 checkpoint title window=0
 
 [load]
-# nba could not follow from here: 'until text "PRESS START" timeout=1800 every=10': timed out after 1800 frames waiting for text 'PRESS START'
+# The second reference could not follow from here: 'until text "PRESS START" timeout=1800 every=10': timed out after 1800 frames waiting for text 'PRESS START'
 # until text 'PRESS START' timeout=1800 every=10  [reached dingbat-bios+900 mgba+900]
 wait 904
 wait 30

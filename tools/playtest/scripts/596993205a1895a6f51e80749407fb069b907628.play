@@ -11,8 +11,8 @@
 # thrower from behind, ride onto the land battleship and walk into its engine
 # room (checkpoint boss: boss health bar filled, Zero in control).
 # Controls: A jump, B buster (hold to charge), L dash.
-# Seen while authoring: nba runs this game with different lag: Zero's hurt
-# flash and enemy animation phases differ on nba in most fights (f6166 nba
+# Seen while authoring: the second reference runs this game with different lag: Zero's hurt
+# flash and enemy animation phases differ on the second reference in most fights (f6166 the second reference
 # shows Zero hit and a standing Variant where dingbat-bios and mgba show a
 # flying one; f6514, f8048, f10028, f10270); dingbat-bios and mgba stay
 # frame-identical through the whole stage.

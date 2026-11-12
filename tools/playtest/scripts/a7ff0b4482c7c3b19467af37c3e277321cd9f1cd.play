@@ -11,7 +11,7 @@
 # bed and up to the Mana Goddess statue in the top right corner, pray, save
 # to slot 1.
 # The three emulators write different save files (same size, a couple of
-# bytes differ); nba draws the blue gradient behind the save/load file list
+# bytes differ); the second reference draws the blue gradient behind the save/load file list
 # differently from dingbat-bios and mgba.
 
 [new]

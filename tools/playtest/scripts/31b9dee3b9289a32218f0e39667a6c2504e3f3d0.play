@@ -19,12 +19,12 @@
 # falls one frame behind mgba (f2481; f2482-f2494 dingbat shows mgba's
 # previous frame), so the pause checkpoint (f2529) has the camera a few
 # pixels apart (MINOR). The port runs the game below 60 fps, presumably with
-# repeated frames set by the CPU time each takes. nba falls behind both from
+# repeated frames set by the CPU time each takes. The second reference falls behind both from
 # the act's title card (f2101) on and stays several frames off. Playing on
 # (dingbat and mgba only, not kept) dingbat had picked up 3 rings to mgba's
 # 2 by f2593 crossing the Chopper bridge, which is why the script stops here.
-# nba does not read back its own 8 KB battery file: it re-initialises the
-# header block on every boot (its nba-in-nba [load] cell rewrites the save).
+# The second reference does not read back its own 8 KB battery file: it re-initialises the
+# header block on every boot (its [load] cell where the second reference reads its own save rewrites the save).
 [new]
 wait 300
 wait 60

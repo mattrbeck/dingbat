@@ -20,20 +20,20 @@
 # LV.01, B4F); continuing replays Otenko's talk and resumes in the same room.
 # Seen while authoring:
 # - solar_notice (f400): mgba reaches the notice's sun animation 8 frames
-#   before dingbat and nba (f169 against f177), SLIP: the boot's soft-float
+#   before dingbat and the second reference (f169 against f177), SLIP: the boot's soft-float
 #   and EWRAM loading code from ROM is cheaper in mgba than the bus allows.
-#   nba used to look identical to mgba there only because it ran on the host
+#   The second reference used to look identical to mgba there only because it ran on the host
 #   clock, which shortens the boot's clock-dependent work; with its driver
 #   honouring --rtc it matches dingbat frame for frame (docs/playtest-bugs.md,
 #   "Shin Bokura no Taiyou: the sensor notice"). All converge on the
 #   sensor-setting screen.
-# - Saves: the dingbat configurations write identical files; against nba
+# - Saves: the dingbat configurations write identical files; against the second reference
 #   12 bytes differ (plus dingbat's 16-byte RTC trailer), against mgba 4511;
 #   every save loads in every emulator.
 # - The white flash before the prologue fight (~f10120) lasts a different
 #   time on each emulator and differs between sessions too (this route: mgba
-#   leaves it ~50 frames before dingbat-bios and nba; an earlier route: mgba,
-#   nba +15, dingbat-bios +60), so the fight plays out of phase on all three
+#   leaves it ~50 frames before dingbat-bios and the second reference; an earlier route: mgba,
+#   the second reference +15, dingbat-bios +60), so the fight plays out of phase on all three
 #   (boss and player positions differ) and the following dialogue boxes
 #   advance on different A taps; all three are back on the same screens by
 #   the title card (f21082). In an earlier route mgba lost this fight

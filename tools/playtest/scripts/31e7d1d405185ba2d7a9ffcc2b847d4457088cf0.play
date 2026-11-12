@@ -10,14 +10,14 @@
 # on, pause and unpause. Menu presses need hold=10 here (4-6 frame taps
 # are often dropped).
 # Session notes: the attract intro runs out of phase on dingbat-bios
-# (f900, f3015: dingbat-bios a frame or so off mgba/nba). In the stage
+# (f900, f3015: dingbat-bios a frame or so off mgba/the second reference). In the stage
 # the three run a frame apart: at f3715 a zombie rising on the right is
-# drawn on mgba/nba but not yet on dingbat-bios, and nba at f3940 shows
+# drawn on mgba/the second reference but not yet on dingbat-bios, and the second reference at f3940 shows
 # exactly the frame dingbat-bios showed at f3939. In a second session
 # (walk into the enemies until game over) mgba lost its first life well
 # before the others and reached GAME OVER about 240 frames later than
-# dingbat-bios and nba (f8199). No emulator wrote any data (mgba leaves a
-# blank 512-byte file, nba a blank 8 KB one, dingbat-bios none).
+# dingbat-bios and the second reference (f8199). No emulator wrote any data (mgba leaves a
+# blank 512-byte file, the second reference a blank 8 KB one, dingbat-bios none).
 
 [new]
 wait 600

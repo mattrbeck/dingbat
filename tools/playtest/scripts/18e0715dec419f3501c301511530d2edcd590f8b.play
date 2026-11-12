@@ -12,10 +12,10 @@
 # Pepper Town ruins (north edge, east into the plaza, north into the street,
 # west to the puddle) > Gohan's last stand > "Present day Earth..." > Goku's
 # Home: Gohan's room, down into the kitchen.
-# Finding: nba rolls different stats for Trunks (pause > Status at f9315 of
-# an earlier session: nba HP 148/148, EP 27/31, STR 11, POW 9, END 7;
+# Finding: the second reference rolls different stats for Trunks (pause > Status at f9315 of
+# an earlier session: the second reference HP 148/148, EP 27/31, STR 11, POW 9, END 7;
 # dingbat-bios and mgba HP 145/145, EP 34/34, STR 12, POW 8, END 8), and its
-# HUD energy bar is visibly shorter from the end of the training on; nba also
+# HUD energy bar is visibly shorter from the end of the training on; the second reference also
 # needed more A taps to leave the second story page (16 against 10) and runs
 # a few frames late in fades and text boxes. dingbat-bios matches mgba.
 

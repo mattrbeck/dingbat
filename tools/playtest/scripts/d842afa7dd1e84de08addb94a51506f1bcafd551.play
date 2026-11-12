@@ -13,7 +13,7 @@
 # both sit on a screen of empty grey bars from boot and never reach the
 # language screen, with or without a battery file.
 [new]
-# nba could not follow from here: 'until text "LANGUAGE" timeout=1200 every=10': timed out after 1200 frames waiting for text 'LANGUAGE'
+# The second reference could not follow from here: 'until text "LANGUAGE" timeout=1200 every=10': timed out after 1200 frames waiting for text 'LANGUAGE'
 # until text LANGUAGE timeout=1200 every=10  [reached dingbat-bios+10 mgba+10]
 wait 14
 # until stable 20 timeout=300 every=4  [reached dingbat-bios+60 mgba+60]
@@ -30,7 +30,7 @@ wait 24
 checkpoint main_menu window=30 compare=text
 
 [load]
-# nba could not follow from here: 'until text "PRESENTED" timeout=900 every=10': timed out after 900 frames waiting for text 'PRESENTED'
+# The second reference could not follow from here: 'until text "PRESENTED" timeout=900 every=10': timed out after 900 frames waiting for text 'PRESENTED'
 # until text PRESENTED timeout=900 every=10  [reached dingbat-bios+130 mgba+130]
 wait 134
 checkpoint presented window=30

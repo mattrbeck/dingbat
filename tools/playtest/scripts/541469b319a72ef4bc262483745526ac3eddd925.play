@@ -9,10 +9,10 @@
 # START ring menu > Window (down) > A explains suspend saves, Yes writes the
 # file and returns to the title. [load]: file 1 > Continue resumes asleep in
 # Eric's bed in the castle's west room; RIGHT wakes him.
-# Seen while recording: nba types dialogue and bobs the file-select cursor a
+# Seen while recording: the second reference types dialogue and bobs the file-select cursor a
 # frame behind dingbat-bios/mgba (the screens agree a frame later); the world
 # map's drifting clouds differ in all three. dingbat-bios and mgba write
-# byte-identical saves (380 non-blank bytes); nba's differs (399).
+# byte-identical saves (380 non-blank bytes); the second reference's differs (399).
 
 [new]
 wait 300

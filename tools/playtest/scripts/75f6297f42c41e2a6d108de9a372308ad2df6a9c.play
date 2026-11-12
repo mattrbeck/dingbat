@@ -14,9 +14,9 @@
 # corner.) [load]: File 1, A A, the stage card, the cave's start.
 # Seen while authoring: the cave's bubbles and pearl sparkles are in a
 # different phase or place on each emulator at most frames (the gameplay
-# checkpoints are rarely pixel-identical even between the references); nba's
+# checkpoints are rarely pixel-identical even between the references); the second reference's
 # fade out of the pause screen is a step behind at f7276. In attempts that
-# were rewound, nba also typed the hint text one character behind (f7588)
+# were rewound, the second reference also typed the hint text one character behind (f7588)
 # and, after jumps from the barrel, scrolled the camera a few pixels apart
 # and entered the water later than dingbat-bios and mgba (f7818, f7850); at
 # f5235 only dingbat-bios drew a sparkle at the top right. SRAM: the game

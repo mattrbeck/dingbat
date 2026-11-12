@@ -10,10 +10,10 @@
 # seconds, then pause > Quit, hub pause > Quit to the main menu and open
 # Adventure again: slot 1 now shows the team and 0%.
 # [load]: Adventure shows slot 1 filled, load it (Terra Hub welcome), hub.
-# Findings: nba writes an 8192-byte file for this 4Kbit EEPROM (dingbat-bios,
-# mgba: 512 bytes, same 134 data bytes); booted with it nba shows slot 1
-# EMPTY and starts a new file, so nba's [load] checkpoints differ.
-# In the race nba's on-screen race timer runs behind the others with the
+# Findings: the second reference writes an 8192-byte file for this 4Kbit EEPROM (dingbat-bios,
+# mgba: 512 bytes, same 134 data bytes); booted with it the second reference shows slot 1
+# EMPTY and starts a new file, so the second reference's [load] checkpoints differ.
+# In the race the second reference's on-screen race timer runs behind the others with the
 # same input (f4516: 0:03:30 vs 0:03:31; f4656: 0:05:63 vs 0:05:65 in a live
 # session); dingbat-bios agrees with mgba. Menus are animated, so most
 # checkpoints are compare=text.

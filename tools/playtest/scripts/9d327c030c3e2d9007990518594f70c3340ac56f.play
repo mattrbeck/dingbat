@@ -10,8 +10,8 @@
 # light (holding it through the countdown burns out), steering pulses through
 # the top hairpin, the S-bend (cutting the grass past a tree) and into the
 # U-turn.
-# nba's race timer runs one to two hundredths behind dingbat-bios and mgba
-# from the start (0'02"33 vs 0'02"35 at f2991), and around f3259 nba's kart
+# The second reference's race timer runs one to two hundredths behind dingbat-bios and mgba
+# from the start (0'02"33 vs 0'02"35 at f2991), and around f3259 the second reference's kart
 # brushes the tree at a different angle than the other two.
 
 [new]

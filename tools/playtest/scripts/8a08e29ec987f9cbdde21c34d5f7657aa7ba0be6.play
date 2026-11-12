@@ -8,7 +8,7 @@
 # Grand Prix / Pawn / Beginner with Hot Violet, drive the start of Bianca
 # City (brake through the countdown, then accelerate), pause, GIVE UP,
 # retire. [load]: the entry list shows "AA", select it, main menu, machine.
-# Finding: nba's frame hash differs from dingbat-bios/mgba on every screen
+# Finding: the second reference's frame hash differs from dingbat-bios/mgba on every screen
 # with the scrolling Earth / mode-7 track background (from f786 on): the
 # affine background sits a couple of lines off and the race timer reads
 # one hundredth lower (0'00"66 vs 0'00"68 at f2848). Text-only screens

@@ -10,9 +10,9 @@
 # three). [load]: ノーマルゲーム > つづきから, the データロード list showing
 # file 1 (にしアクア, three hearts), はい, ファイル1を ロードしました, A,
 # back in the village.
-# Seen while authoring: nba draws the dialogue text a letter behind and its
+# Seen while authoring: the second reference draws the dialogue text a letter behind and its
 # camera trails a few pixels on the walk into the village (f4366); the other
-# screens agree. In the replay nba shows the title 23 frames before the
+# screens agree. In the replay the second reference shows the title 23 frames before the
 # others (title SLIP -23 after the A-tapped opening) and the save screens a
 # frame late (+1); every dingbat configuration matches mgba throughout.
 

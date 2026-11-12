@@ -12,11 +12,11 @@
 # Controls: A jump, B buster, L dash.
 # Seen while authoring: the emulators run this game with different lag, so
 # frames differ through most of the stage: during the opening scroll mgba is
-# ahead (f4148 mgba shows the next cutscene panel, dingbat-bios and nba the
-# previous one); in fights nba often shows Zero's hurt flash on frames where
-# the other two do not (f5128, f7598, f8094 where nba also has an extra flying
+# ahead (f4148 mgba shows the next cutscene panel, dingbat-bios and the second reference the
+# previous one); in fights the second reference often shows Zero's hurt flash on frames where
+# the other two do not (f5128, f7598, f8094 where the second reference also has an extra flying
 # mechaniloid and a creature in the pit). The text "You got Lybe" is one
-# glyph behind on nba (f8546). Inputs still line up: all three reach the
+# glyph behind on the second reference (f8546). Inputs still line up: all three reach the
 # boss with similar health.
 [new]
 wait 600

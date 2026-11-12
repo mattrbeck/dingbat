@@ -10,15 +10,15 @@
 # offers NEW GAME / CONTINUE STAGE 1; Continue opens the Level Up screen
 # with the saved stats.
 # Session notes: the opening cutscene drifts apart (lightning flash white
-# on dingbat-bios+nba, not on mgba at f3542) and the first fight runs
+# on dingbat-bios+the second reference, not on mgba at f3542) and the first fight runs
 # differently on all three (f5262: mgba already past the "find your way
 # out" dialogue; f5742 three different fights), but all three reach the
 # same Level Up screen with the same 100 points, and the save data is
 # identical. Unit shadows are drawn every other frame, so whether a
 # frame shows them depends on each emulator's phase (dingbat-bios showed
-# none at f1680/f1740, mgba/nba none at f7784).
-# Save size: dingbat-bios and mgba write 512 bytes, nba 8 KB (same data).
-# Load: the 8 KB file nba writes is not read as a save anywhere (nba
+# none at f1680/f1740, mgba/the second reference none at f7784).
+# Save size: dingbat-bios and mgba write 512 bytes, the second reference 8 KB (same data).
+# Load: the 8 KB file the second reference writes is not read as a save anywhere (the second reference
 # itself, dingbat-bios, mgba): Story Mode skips the NEW GAME / CONTINUE
 # menu and goes straight to Character Select (f1434), as on a blank cart.
 # The 512-byte files from dingbat-bios and mgba load fine in all three.

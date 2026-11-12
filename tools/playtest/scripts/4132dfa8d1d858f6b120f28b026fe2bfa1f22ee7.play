@@ -7,11 +7,11 @@
 
 # 1 PLAYER > NEW GAME, then stage 1 on foot: shoot the car, run right
 # firing (one life lost on the way), pause and unpause. No [load].
-# Session notes: at the title nba saw PRESS START 4 frames before the
-# others (blink phase differs at f600). In stage 1 nba draws the rifle's
+# Session notes: at the title the second reference saw PRESS START 4 frames before the
+# others (blink phase differs at f600). In stage 1 the second reference draws the rifle's
 # muzzle flash and the flying pods' thruster flames on different frames
 # from dingbat-bios and mgba (f1608, f2068, f2464, f2904); positions,
-# enemies and lives agree. On stop, mgba leaves a 0-byte .sav, nba a
+# enemies and lives agree. On stop, mgba leaves a 0-byte .sav, the second reference a
 # blank 32 KB one, dingbat-bios none.
 
 [new]

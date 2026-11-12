@@ -10,12 +10,12 @@
 # Finding: blind A taps every 20 frames through the prologue make the
 # emulators drift apart (an earlier attempt: at f3968 mgba was one dialogue
 # line ahead in the first battle; by f6968 the battle state differed on all
-# three, Over Drive Lv 2 / Lv 1 / Lv 2 with nba already past the enemy, and
-# by f8768 dingbat-bios was in MOVE mode while mgba and nba were in LOOK
+# three, Over Drive Lv 2 / Lv 1 / Lv 2 with the second reference already past the enemy, and
+# by f8768 dingbat-bios was in MOVE mode while mgba and the second reference were in LOOK
 # mode), so this route waits for a still screen before every press.
 # On the Heaven's Gate map (~f2700) dingbat-bios and mgba go still while
-# nba keeps animating (an `until stable 15` held on two and timed out on
-# nba). The three saves differ (253/254/253 non-blank bytes).
+# the second reference keeps animating (an `until stable 15` held on two and timed out on
+# the second reference). The three saves differ (253/254/253 non-blank bytes).
 [new]
 wait 1000
 press START

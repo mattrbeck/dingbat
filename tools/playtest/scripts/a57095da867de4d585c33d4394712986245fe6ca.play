@@ -14,8 +14,8 @@
 # Seen while authoring: the menus' animated backgrounds and the map sprites'
 # idle animations are in a different phase on each emulator at most
 # checkpoints; as the 中断 text box fades in (f2762) dingbat-bios' box is a
-# step more opaque than mgba's and nba's. Saves: in the replay dingbat-bios
-# and mgba write byte-identical files and nba differs in 25 bytes (in the
+# step more opaque than mgba's and the second reference's. Saves: in the replay dingbat-bios
+# and mgba write byte-identical files and the second reference differs in 25 bytes (in the
 # live session, after rewinds, mgba had put the suspend into the other of the
 # game's two alternating blocks). Resuming rewrites part of the save in all
 # three.

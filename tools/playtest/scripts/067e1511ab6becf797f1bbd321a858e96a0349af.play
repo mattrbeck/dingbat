@@ -49,7 +49,7 @@ wait 34
 wait 30
 checkpoint file_select_saved window=0
 press A
-# nba could not follow from here: 'until text "CAMP" timeout=1200 every=10': timed out after 1200 frames waiting for text 'CAMP'
+# The second reference could not follow from here: 'until text "CAMP" timeout=1200 every=10': timed out after 1200 frames waiting for text 'CAMP'
 # until text CAMP timeout=1200 every=10  [reached dingbat-bios+70 mgba+70]
 wait 74
 wait 60

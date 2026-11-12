@@ -8,7 +8,7 @@
 # from Lan's desk, then PET > Save at 00:02 play time. [load] CONTINUE (cursor
 # starts on it) and the PET menu over Lan's room.
 # Seen while authoring: the game XORs its whole save with a random byte;
-# dingbat-bios wrote mask 0x91 while mgba and nba both wrote 0x62, so
+# dingbat-bios wrote mask 0x91 while mgba and the second reference both wrote 0x62, so
 # dingbat-bios's random state differed from the other two by the save (nothing
 # visible on screen before it). Title-screen frame differs in dingbat-bios at f774.
 

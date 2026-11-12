@@ -7,11 +7,11 @@
 # and the language), load it, then Arcade as Kenshi vs Kano and fight for a few seconds.
 # With the save, [load] skips the language screen and goes from the title straight to
 # the main menu with profile AA loaded.
-# Notes: dingbat-bios and mgba keep a 512-byte EEPROM file, nba an 8192-byte one. In the
-# live [load] session nba booted its own save and showed the language select again
-# (dingbat-bios and mgba skipped it), so with the same input nba stays on the language
+# Notes: dingbat-bios and mgba keep a 512-byte EEPROM file, the second reference an 8192-byte one. In the
+# live [load] session the second reference booted its own save and showed the language select again
+# (dingbat-bios and mgba skipped it), so with the same input the second reference stays on the language
 # screen for the whole [load]. At f1000 of [new] the language screen differs on mgba
-# (dingbat-bios == nba), and the arena torches/poses differ a little in the fight.
+# (dingbat-bios == the second reference), and the arena torches/poses differ a little in the fight.
 
 [new]
 wait 600

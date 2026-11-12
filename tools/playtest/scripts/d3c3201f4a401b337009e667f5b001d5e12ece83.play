@@ -8,11 +8,11 @@
 # (Far Far Away), and Shrek walks right past the rat to the "Beware Ogre" sign.
 # Dialogue is advanced one A press at a time with long gaps: mashing A every
 # 30 frames through the opening cutscene sent mgba onto a different dialogue
-# line than dingbat-bios and nba (its scene fade finished earlier), and from
+# line than dingbat-bios and the second reference (its scene fade finished earlier), and from
 # there the whole scene diverged.
-# 4 Kbit EEPROM: dingbat-bios and mgba write 512 bytes, nba 8192; when
-# authoring, nba did not list its own save in the slot screen ([load] showed
-# New Game and went to initials entry on nba).
+# 4 Kbit EEPROM: dingbat-bios and mgba write 512 bytes, the second reference 8192; when
+# authoring, the second reference did not list its own save in the slot screen ([load] showed
+# New Game and went to initials entry on the second reference).
 
 [new]
 wait 600

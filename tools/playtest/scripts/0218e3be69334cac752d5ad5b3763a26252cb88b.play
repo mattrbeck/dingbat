@@ -8,8 +8,8 @@
 # No), then walk to the floating save book by Hagrid, press B (Action),
 # "Save Game?" -> Yes (UP first: No is the default) -> "Save Complete!".
 # [load]: Main Menu -> Load Game -> back at the save book.
-# 4 Kbit EEPROM: dingbat-bios and mgba write 512 bytes, nba 8192; when
-# authoring, nba's main menu had no Load Game on its own save (its [load]
+# 4 Kbit EEPROM: dingbat-bios and mgba write 512 bytes, the second reference 8192; when
+# authoring, the second reference's main menu had no Load Game on its own save (its [load]
 # ends up in Options instead).
 # Leaving the pause menu also rewrites the 11-byte options block.
 

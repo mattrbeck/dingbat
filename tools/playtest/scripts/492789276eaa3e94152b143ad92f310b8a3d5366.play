@@ -7,9 +7,9 @@
 # New game, A through the Tycoon/meteor intro to Bartz on the world map,
 # walk a little, Save to file 1 from the field menu.
 # Finding: the intro cutscenes run at different speeds per emulator (mgba
-# ahead of dingbat-bios and nba from ~f4844, all three apart at f6044 and
+# ahead of dingbat-bios and the second reference from ~f4844, all three apart at f6044 and
 # f16644); they meet again on the world map (~f19100), and the save file
-# records play time 0:03 on dingbat-bios/nba but 0:04 on mgba.
+# records play time 0:03 on dingbat-bios/the second reference but 0:04 on mgba.
 [new]
 wait 600
 press A

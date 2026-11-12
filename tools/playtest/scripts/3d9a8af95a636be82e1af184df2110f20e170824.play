@@ -12,10 +12,10 @@
 # The stage scrolls a constantly moving 3D grid, so in-game checkpoints are
 # compare=none; the three emulators draw the same scene but their frame
 # hashes differ from the title on (logo fades and the menu backdrop are a
-# frame apart: title f1026 nba differs, main menu f1332 all three differ).
+# frame apart: title f1026 the second reference differs, main menu f1332 all three differ).
 # The game does write the SRAM window although it has no save: 269 bytes
 # from 0x3000 on (every third byte a falling sequence, the rest FF), the
-# same 32 KB file on dingbat-bios and nba; mgba keeps a 0-byte file. The
+# same 32 KB file on dingbat-bios and the second reference; mgba keeps a 0-byte file. The
 # run's verdict calls this "no battery save, but dingbat wrote data".
 [new]
 wait 600

@@ -9,14 +9,14 @@
 # [load]: language/name are skipped, the opening story too (goes straight
 # to the hub), which proves the flash was read.
 # Session notes: the emulators' game states drift apart after the
-# flash writes. f966 (name entry, right after the language write): nba's
+# flash writes. f966 (name entry, right after the language write): the second reference's
 # frame differs from dingbat-bios/mgba; f1252 (SEGA logo after the name
 # write) all three differ; menus and the intro attract run a few frames
-# out of phase on nba (until PRESS: nba +70 vs +60). At the hub (f6004)
+# out of phase on the second reference (until PRESS: the second reference +70 vs +60). At the hub (f6004)
 # Sonic/Tails positions differ on all three, and jumping on the
-# breakable block right of the start (f6264) breaks it on nba only, so a
+# breakable block right of the start (f6264) breaks it on the second reference only, so a
 # lockstep route into Act 1 is not reproducible; the route stays in the
-# hub. nba's flash differs from the others in a 32-bit value at 0x08
+# hub. The second reference's flash differs from the others in a 32-bit value at 0x08
 # (and its checksum), likely a timer-seeded ID.
 
 [new]

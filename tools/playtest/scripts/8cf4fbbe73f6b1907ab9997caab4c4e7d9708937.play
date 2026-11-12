@@ -10,13 +10,13 @@
 # skipped, Story Mode offers "Continue the Game" and resumes on that street.
 # Session notes: title and menus run with animated backgrounds whose phase
 # differs (mgba at the f600 title, all three at name entry/mode select),
-# story text types a frame later on nba (f2246); the field itself is
+# story text types a frame later on the second reference (f2246); the field itself is
 # identical on all three. The three flash files differ in 10 bytes (two
 # 5-byte runs at 0x1005 and 0x2005), likely a timer value.
 # name_entry/mode_select are compare=none: their scrolling 3D-block
 # background made the OCR text judge flag dingbat-bios MAJOR on a run
 # whose screenshots match. The title runs 4 frames out of phase on mgba
-# (SLIP +4 against dingbat-bios and nba).
+# (SLIP +4 against dingbat-bios and the second reference).
 
 [new]
 wait 600

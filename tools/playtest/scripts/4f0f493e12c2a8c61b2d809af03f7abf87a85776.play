@@ -10,8 +10,8 @@
 # walks past the pig pen to the south-east, where a frog (カエル) explains
 # saving; はい, slot 1, "セーブちゅうです".
 # Findings: the flash save takes a different time on each emulator (the
-# screen changes dingbat-bios+30, nba+35, mgba+65 frames after the slot is
-# picked), and the mgba save differs from dingbat-bios/nba (which are
+# screen changes dingbat-bios+30, the second reference+35, mgba+65 frames after the slot is
+# picked), and the mgba save differs from dingbat-bios/the second reference (which are
 # byte-identical). In the bedroom (~f12200) and during the circle-wipe after
 # changing clothes (~f13968) the three show different animation phases /
 # wipe radii.

@@ -12,7 +12,7 @@
 # Seen while recording: the wandering NPCs in the church and outside it
 # stand in different places on each emulator (mgba most often alone), and
 # portrait mouths, idle poses and text typing are a frame or a few
-# characters apart (mgba usually ahead, nba behind), so many screens differ
+# characters apart (mgba usually ahead, the second reference behind), so many screens differ
 # slightly. The three saves differ (6094/6109/6102 non-blank bytes).
 
 [new]

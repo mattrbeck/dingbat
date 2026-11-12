@@ -9,9 +9,9 @@
 # purple blocks and the gold blocks into the hideout, up the platforms,
 # through the purple column into the gear room; gear 2 and its shift-up
 # tutorial (R, then R again at SHIFT UP).
-# nba's camera trails by a few pixels in vertical scrolls (f4032, f4182,
+# The second reference's camera trails by a few pixels in vertical scrolls (f4032, f4182,
 # f15491) and its sprite animation frames differ; the drill-dust particles
-# land differently on mgba (f11467, f11731, f15926: dingbat-bios = nba).
+# land differently on mgba (f11467, f11731, f15926: dingbat-bios = the second reference).
 
 [new]
 wait 600

@@ -7,11 +7,11 @@
 
 # The cart has no battery save: progress is a password. New game on Normal,
 # skip the story, enter Downtown and punch the first street thugs. No [load].
-# Findings: nba's title/difficulty spider cursor is in a different animation
-# phase (MINOR at title, difficulty). In the live session nba also drifted in
+# Findings: the second reference's title/difficulty spider cursor is in a different animation
+# phase (MINOR at title, difficulty). In the live session the second reference also drifted in
 # the fight (f3021 thug a few pixels on, f3231 different outcome) right after
 # a `mark`; the frozen replay is IDENTICAL on all three for gameplay, thug
-# and street, so that drift came from the session's save states, not nba.
+# and street, so that drift came from the session's save states, not the second reference.
 
 [new]
 wait 600

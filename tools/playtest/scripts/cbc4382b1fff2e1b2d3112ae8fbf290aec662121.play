@@ -13,7 +13,7 @@
 # Findings: the battle's random numbers differ in all three emulators: the
 # three frames are identical at f13848 as it opens, yet by f13980 the rabbit
 # stands somewhere else in each (small animations already differ before:
-# mgba's sparkles at f4554, nba's dialogue text a few frames behind the
+# mgba's sparkles at f4554, the second reference's dialogue text a few frames behind the
 # other two from the character select on). The fight plays out differently
 # in each: per-frame hashes match nowhere between any two emulators from
 # f14401 to f26400, the rabbit falls at a different time in each and the
@@ -21,7 +21,7 @@
 # confirmed in every emulator however many presses land on it). They
 # re-converge in Master's house (f27000) and match again through the save,
 # except for what the fight left: Edgar's HP (117/120/123 of 126 in
-# dingbat/mgba/nba), so the three battery files differ in 6 bytes. dingbat's
+# dingbat/mgba/the second reference), so the three battery files differ in 6 bytes. dingbat's
 # four configurations write byte-identical saves, and every save loads in
 # every emulator. The audio check flags dingbat in 4% of windows: ten runs
 # inside that out-of-step stretch (f14565-f26220, where it compares

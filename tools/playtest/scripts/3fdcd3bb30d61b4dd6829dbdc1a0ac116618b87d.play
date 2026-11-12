@@ -7,9 +7,9 @@
 # Launch, flip, the ball drops into the cannon and flies to the Grassland
 # table; play a few flips there, then Start > SAVE & QUIT (back to the title).
 # [load]: title > LOAD GAME resumes on the Grassland table.
-# Seen while authoring: nba runs the ball physics a few frames behind from the
+# Seen while authoring: the second reference runs the ball physics a few frames behind from the
 # first table on (f1338 title ball, f2150 onwards) and lags fades (f3116);
-# dingbat-bios and mgba stay identical. nba writes an 8192-byte file for this
+# dingbat-bios and mgba stay identical. The second reference writes an 8192-byte file for this
 # 4 Kbit EEPROM (first bytes as dingbat-bios/mgba) and on [load] does not see
 # it: no LOAD GAME, it starts a new game (f1278).
 

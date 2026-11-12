@@ -8,7 +8,7 @@
 # Sabreman's butler, START skips the rest, the campsite: walk around, then
 # pause > Save Game > Yes > SAVE COMPLETE. [load]: the first slot reads 0.9%,
 # START resumes at the campsite, pause menu.
-# The EEPROM files of dingbat-bios and nba are byte-identical; mgba's
+# The EEPROM files of dingbat-bios and the second reference are byte-identical; mgba's
 # differs (same 1187 non-blank bytes, different content: the saved game
 # time). Pause-menu screens differ a frame between emulators (cursor blink).
 [new]

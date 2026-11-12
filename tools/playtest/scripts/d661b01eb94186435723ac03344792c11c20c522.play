@@ -8,11 +8,11 @@
 # in the Catacombs; walk to the left wall, then right and down the shaft of
 # wooden planks past the skeletons to the bottom ledge.
 # Findings from the authoring sessions (lockstep, same inputs):
-# - nba: Nathan's landing pose/camera differs at f6698 and f7078; by f8110
-#   nba's Nathan is in another part of the shaft (knocked elsewhere).
+# - The second reference: Nathan's landing pose/camera differs at f6698 and f7078; by f8110
+#   the second reference's Nathan is in another part of the shaft (knocked elsewhere).
 # - dingbat-bios vs mgba: identical to f7158; at f7178 the lower-left
-#   skeleton's throw pose differs (dingbat-bios is the odd one, mgba = nba),
-#   at f7188 mgba is the odd one (dingbat-bios = nba); bones in flight sit at
+#   skeleton's throw pose differs (dingbat-bios is the odd one, mgba = the second reference),
+#   at f7188 mgba is the odd one (dingbat-bios = the second reference); bones in flight sit at
 #   different places at f7790 in all three. After the hit at ~f8058 the
 #   knockback differs and by f8178 dingbat-bios and mgba show different
 #   camera positions.

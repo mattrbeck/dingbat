@@ -11,7 +11,7 @@
 # slot and returns to the language screen. [load]: game select, English,
 # sound, the slot shows AAA, A goes straight to the world map (no intro).
 # Seen while recording: the game-select portraits pulse on another step in
-# each emulator (game_select differs on all three); nba's Rayman is a frame
+# each emulator (game_select differs on all three); the second reference's Rayman is a frame
 # off on the tings jump. All three write byte-identical saves (13 non-blank
 # bytes) and all three read their own back.
 

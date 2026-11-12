@@ -9,9 +9,9 @@
 # LEFT to Yes on "Confirm action. OK?", which defaults to No) > the
 # snowball-fight tutorial > Ritz's first turn: Wait.
 # Finding: at Ritz's first turn (ritz_menu, f11221+) dingbat-bios shows Ritz
-# HP 19/19 while mgba and nba show 18/18. After Ritz waits, mgba stops on
+# HP 19/19 while mgba and the second reference show 18/18. After Ritz waits, mgba stops on
 # the "Ah, there's a trick to throwing a snowball, too." hint while
-# dingbat-bios and nba run an AI turn, and by f11941 dingbat-bios and nba
+# dingbat-bios and the second reference run an AI turn, and by f11941 dingbat-bios and the second reference
 # have moved different kids (after_ritz / diverged checkpoints, compare=none).
 # The battle's random numbers depend on something besides the input timeline
 # on every emulator, so no frozen route through it exists.

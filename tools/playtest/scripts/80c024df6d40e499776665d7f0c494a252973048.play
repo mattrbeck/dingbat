@@ -50,7 +50,7 @@ wait 24
 wait 30
 checkpoint title window=30
 press START
-# nba could not follow from here: 'until text "CONTINUE" timeout=600 every=10': timed out after 600 frames waiting for text 'CONTINUE'
+# The second reference could not follow from here: 'until text "CONTINUE" timeout=600 every=10': timed out after 600 frames waiting for text 'CONTINUE'
 # until text CONTINUE timeout=600 every=10  [reached dingbat-bios+10 mgba+10]
 wait 14
 wait 30

@@ -11,7 +11,7 @@
 # the vision map. [load]: the title adds CONTINUE, file 1 shows World 1
 # Western Jungle, YES resumes on the Vision 1-1 map.
 # Findings: dingbat used to run the game's loads fast -- the title's star
-# a frame ahead of mgba and nba, the world map two, then from f4454 (the
+# a frame ahead of mgba and the second reference, the world map two, then from f4454 (the
 # white mosaic fade-in to Vision 1-1) never matching either reference again
 # (the fade a step on, the HUD hearts at another phase, Klonoa ~3 px left at
 # gameplay), so level_start and gameplay failed in every dingbat
@@ -19,11 +19,11 @@
 # cartridge, and dingbat priced a lone byte load from the gamepak S when it
 # read the halfword after the previous one, under the prefetcher; GBATEK and
 # the ARM7TDMI make it N. Fixed (docs/playtest-bugs.md, "Klonoa 2"):
-# dingbat-bios now differs from mgba on no frame where mgba and nba agree
-# (f700-f5300). dingbat's own saves load in mgba and nba.
+# dingbat-bios now differs from mgba on no frame where mgba and the second reference agree
+# (f700-f5300). dingbat's own saves load in mgba and the second reference.
 # Elsewhere the references disagree with each other
 # (backgrounds scroll at different phases on the file select and vision map).
-# nba does not read back its own 8 KB battery file: on [load] its title has
+# The second reference does not read back its own 8 KB battery file: on [load] its title has
 # no CONTINUE (f1226) and its file 1 is NO DATA, so it starts a new game.
 # The pause menu is a still darken (EVY 9) that dingbat truncates as the SP
 # photographs do, one step under both references on ~9k pixels; OCR read the

@@ -16,18 +16,18 @@
 # checkpoints were turned into the 60-frame waits they took, to keep eight.)
 # Seen while authoring: in the throne room (from f4364, right after the first
 # talk ends) the wandering girl in pink goes another way in dingbat-bios than
-# in mgba and nba: she steps down at once in dingbat-bios and stays by the
+# in mgba and the second reference: she steps down at once in dingbat-bios and stays by the
 # right-hand throne in the references (throne_room, f4724). All four dingbat
 # configurations replay that alike, so neither the BIOS nor waitloop skipping
 # is the cause. Work RAM already differs between all three emulators from
 # the title's START press on (from f1600: some 650 bytes from 0x02000EBA in
-# EWRAM, IWRAM around 0x03000700 and 0x03001E20), mgba against nba as well,
+# EWRAM, IWRAM around 0x03000700 and 0x03001E20), mgba against the second reference as well,
 # so the references' agreement on the girl may be luck; the route avoids
 # her in all three. The EEPROM save takes a different time on each emulator:
-# its message changes nba+400, dingbat-bios+430, mgba+450 frames after はい.
+# its message changes the second reference+400, dingbat-bios+430, mgba+450 frames after はい.
 # Several fades and the arrow blink are a step apart on one emulator or
 # another (f2040 mgba darker; f3494 mgba; f6287 mgba a frame late). In the
-# replay nba reaches Kiefer's room and the save prompt 29 frames before the
+# replay the second reference reaches Kiefer's room and the save prompt 29 frames before the
 # others (kiefer_room, save_prompt SLIP -29); the three saves differ from
 # each other in some 700 bytes.
 

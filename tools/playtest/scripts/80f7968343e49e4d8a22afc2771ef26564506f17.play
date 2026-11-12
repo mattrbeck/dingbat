@@ -15,12 +15,12 @@
 # the slot then shows デミル / レベル 1 / コポレーむら / 00:02.
 # [load]: the title offers セーブから; ロード slot 1 resumes outside the house.
 # Seen while authoring: the scrolling tomato background on the title is in a
-# different phase on each emulator; nba types dialogue a character behind
+# different phase on each emulator; the second reference types dialogue a character behind
 # the others and its TV flicker and fades run in a different phase; the
 # orange-haired villager outside wanders to a different spot on mgba
 # (f9596-10026, before the menu opens; no checkpoint shows it). The title
 # checkpoint is MINOR between all three (the scroll phase). The dingbat
-# configurations and nba write byte-identical saves; mgba's differs in two
+# configurations and the second reference write byte-identical saves; mgba's differs in two
 # bytes (0x0F and 0x5CA, both 2 higher); every save loads everywhere.
 [new]
 wait 300

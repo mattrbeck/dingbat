@@ -16,15 +16,15 @@
 # ranch sign (終了), A, はい ("もうお帰り?"): "データをセーブ中です", then
 # "データをセーブしました 本体の電源を切ってください". [load]: the main menu
 # lists "ああ 牧場" first; A resumes the ranch, A on the mare shows 種付済.
-# Frozen on dingbat-bios + mgba only: nba rolls different random numbers.
+# Frozen on dingbat-bios + mgba only: the second reference rolls different random numbers.
 # The blank-flash boot (after GAME START) stays black for 96 frames on
-# dingbat-bios, 119 on mgba and 240 on nba (with a save present it is 25 on
-# both); on nba the same inputs then create the ranch with a different mare
+# dingbat-bios, 119 on mgba and 240 on the second reference (with a save present it is 25 on
+# both); on the second reference the same inputs then create the ranch with a different mare
 # (in the first session ハナノミヤコ where dingbat-bios and mgba both had
 # ナミノマニマニ, f3256), and the trainer's lines and the stallion list's
 # colours differ from there on. The mare's name depends on the frame the
 # inputs land on (a second session with other waits gave ステージママ in both
-# dingbat-bios and mgba). Replaying this script nba gets キラメクスタイル but
+# dingbat-bios and mgba). Replaying this script the second reference gets キラメクスタイル but
 # its menus follow the same route to the save, and every save loads
 # everywhere.
 # Seen while authoring: the title's scroll is a frame apart on mgba; the
@@ -34,7 +34,7 @@
 # earlier, smaller save without the breeding dingbat-bios was 25 frames
 # faster). dingbat-bios's and mgba's saves (the same files live and in the
 # replay) differ in 9 bytes, 0x04-0x07, 0x10-0x13 and 0x22F3 (the run
-# reports 17 bytes / 2 ranges); nba's (another mare) in 54.
+# reports 17 bytes / 2 ranges); the second reference's (another mare) in 54.
 [new]
 wait 300
 wait 300

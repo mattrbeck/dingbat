@@ -9,7 +9,7 @@
 # [load]: Continue > Continue from Save, resume in the church, walk out.
 # Seen while recording: the church candle flames flicker differently on all
 # three at the same frame (church_menu backdrop, resumed), mgba's chimney
-# smoke over the inn is on another step (field_menu), and nba types the
+# smoke over the inn is on another step (field_menu), and the second reference types the
 # prologue text and opens the Continue box a frame behind. The three saves
 # differ (304 non-blank bytes each).
 

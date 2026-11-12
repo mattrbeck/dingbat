@@ -5,10 +5,10 @@
 @frozen dingbat-bios,mgba,nba
 # Option mode > Setting: difficulty NORMAL -> EASY, exit (the game saves the setting), then
 # Training > Practice with Goku and land a few hits. [load] opens Setting again and shows EASY.
-# Notes: dingbat-bios and mgba keep a 512-byte EEPROM file, nba an 8192-byte one.
-# In the live [load] session nba booted its own save and showed difficulty NORMAL
-# (dingbat-bios and mgba showed EASY), so on nba the setting did not come back.
-# nba runs a few frames ahead of the other two through most menu transitions.
+# Notes: dingbat-bios and mgba keep a 512-byte EEPROM file, the second reference an 8192-byte one.
+# In the live [load] session the second reference booted its own save and showed difficulty NORMAL
+# (dingbat-bios and mgba showed EASY), so on the second reference the setting did not come back.
+# The second reference runs a few frames ahead of the other two through most menu transitions.
 
 [new]
 wait 600

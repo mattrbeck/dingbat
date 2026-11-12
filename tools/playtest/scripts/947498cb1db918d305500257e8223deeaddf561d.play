@@ -78,7 +78,7 @@ checkpoint title window=0 compare=text
 [load]
 wait 600
 press A
-# nba could not follow from here: 'until text "Choose the system" timeout=600 every=10': timed out after 600 frames waiting for text 'Choose the system'
+# The second reference could not follow from here: 'until text "Choose the system" timeout=600 every=10': timed out after 600 frames waiting for text 'Choose the system'
 # until text 'Choose the system' timeout=600 every=10  [reached dingbat-bios+40 mgba+40]
 wait 44
 wait 60

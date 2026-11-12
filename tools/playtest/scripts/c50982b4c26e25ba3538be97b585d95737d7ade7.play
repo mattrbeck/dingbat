@@ -8,11 +8,11 @@
 # and resumes on the map, then opens the pause menu.
 # Seen while authoring: from the intro on (f966) particles, bubbles and fish
 # differ between all three emulators every frame, and Dixie's overworld swim
-# position drifts by a few pixels (nba furthest right at f3136); menus agree.
-# Saves: dingbat-bios and nba wrote the same first 512 bytes, mgba differs at
-# bytes 1 and 11 (0x28 vs 0x26 and its checksum); nba writes an 8192-byte
+# position drifts by a few pixels (the second reference furthest right at f3136); menus agree.
+# Saves: dingbat-bios and the second reference wrote the same first 512 bytes, mgba differs at
+# bytes 1 and 11 (0x28 vs 0x26 and its checksum); the second reference writes an 8192-byte
 # file for this 4 Kbit EEPROM and on [load] shows all three slots empty
-# (f1632), so nba starts a new game instead of resuming.
+# (f1632), so the second reference starts a new game instead of resuming.
 
 [new]
 wait 600

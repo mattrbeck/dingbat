@@ -9,7 +9,7 @@
 # the diary on the nightstand and Save to Data 1. [load]: START opens the
 # diary, Load Data 1, the house on Spring 2 6:00.
 # Findings: in the live session the debris on the farm field was laid out
-# differently on nba (f6200: big boulder and stumps where dingbat-bios and
+# differently on the second reference (f6200: big boulder and stumps where dingbat-bios and
 # mgba had small rocks and branches); the frozen replay showed all three
 # identical there. The three SRAM files differ in a few bytes (3906 / 3905
 # / 3904 non-blank bytes; dingbat-bios~mgba 76 bytes): random state.

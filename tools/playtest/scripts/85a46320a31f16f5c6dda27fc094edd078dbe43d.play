@@ -9,7 +9,7 @@
 # and the prologue by A every 30 frames > BATTLE START.
 # Finding (first_turns, f21505, one A press after Rictor's "Don't worry about
 # them all. Just defeat the leader!"): mgba shows the blond ally done (END)
-# next to the green soldier, nba shows him far to the right, dingbat-bios is
+# next to the green soldier, the second reference shows him far to the right, dingbat-bios is
 # on another unit's turn; the rain particles already differ at battle_start
 # (f20939), and mgba's BATTLE START banner is on a different fade step.
 

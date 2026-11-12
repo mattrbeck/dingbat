@@ -11,8 +11,8 @@
 # [load]: Options shows Quickstart On (the saved setting), then start the
 # Foundry session again.
 # Findings: menus sit over an animated skater/background, so they differ
-# (MINOR; nba's pause and post-run menus MAJOR) and are compare=text. In the
-# live session nba's run drifted (f2250: timer 1:54 vs 1:53, skater
+# (MINOR; the second reference's pause and post-run menus MAJOR) and are compare=text. In the
+# live session the second reference's run drifted (f2250: timer 1:54 vs 1:53, skater
 # elsewhere) and an options fade ran at different rates (f3546); on the
 # frozen replay gameplay/skating are IDENTICAL on all three.
 

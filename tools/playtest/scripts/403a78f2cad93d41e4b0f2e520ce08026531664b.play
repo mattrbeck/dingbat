@@ -3,7 +3,7 @@
 @game BZ3E
 @chip SRAM
 @frozen dingbat-bios,mgba,nba
-@save skip: nothing is saved on NEW GAME; the first save is at the Resistance Base after the opening mission (the snowfield, the crashed ship and its boss); this session plays the start of the snowfield, where nba already drifts (extra ice debris at f15186, a different Zero pose at f15386) and the snowfall particles differ between all three
+@save skip: nothing is saved on NEW GAME; the first save is at the Resistance Base after the opening mission (the snowfield, the crashed ship and its boss); this session plays the start of the snowfield, where the second reference already drifts (extra ice debris at f15186, a different Zero pose at f15386) and the snowfall particles differ between all three
 # NEW GAME, hold A through the story crawl, A through the snowfield scene to
 # Zero in control; run right shooting, destroy the igloo turret.
 

@@ -16,9 +16,9 @@
 # LV 1, ミナクル の まち, 0:03). [load]: the title offers つづきから, which
 # resumes on the town map; B opens the menu.
 # Seen while authoring: the name-entry cursor and the text cursor blink in
-# a different phase on mgba; nba types dialogue a character behind the
+# a different phase on mgba; the second reference types dialogue a character behind the
 # others; the prologue's scroll is a frame apart here and there. The
-# dingbat-bios and nba saves are byte-identical; mgba's differs in two bytes
+# dingbat-bios and the second reference saves are byte-identical; mgba's differs in two bytes
 # (0x0B and 0x9DB, both 1 higher).
 [new]
 wait 300

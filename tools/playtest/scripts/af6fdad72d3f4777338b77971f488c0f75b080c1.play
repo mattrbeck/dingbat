@@ -9,8 +9,8 @@
 # Win/Loss shows VS. CPU 000:001, then the high-score page.
 # Seen while authoring: the first VS. CPU (and the first Classic) bottle on
 # mgba gets a different virus layout and capsule colours than on dingbat-bios
-# and nba, which agree (f2768); after a Classic retry all three agreed.
-# The pill throw animation on nba runs a few frames late. nba writes an
+# and the second reference, which agree (f2768); after a Classic retry all three agreed.
+# The pill throw animation on the second reference runs a few frames late. The second reference writes an
 # 8192-byte file for this 4 Kbit EEPROM and on [load] shows 000:000 (f1956):
 # it does not read its own save back.
 

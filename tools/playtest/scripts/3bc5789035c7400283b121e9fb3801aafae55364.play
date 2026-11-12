@@ -9,17 +9,17 @@
 # the gunmen, hop the crates, jump the locker, shuriken the gunman, enter
 # the ground-floor door, kill the knife man, grapple up to the upper floor
 # and cut down the green gunman (2000 pts).
-# Frozen on dingbat-bios + mgba only: nba runs the briefing text a frame
+# Frozen on dingbat-bios + mgba only: the second reference runs the briefing text a frame
 # behind (f1830, f2430: the TARGET/NINPO captions not yet drawn) and stays
 # one frame off for the rest of the mission. In the three-emulator session
 # that one frame changed the fight on a first try at the green gunman: at
-# f4078 the ninja was still in the air on nba but had landed on the
-# others, and at f4175 nba had killed the gunman (1000 pts) while on
+# f4078 the ninja was still in the air on the second reference but had landed on the
+# others, and at f4175 the second reference had killed the gunman (1000 pts) while on
 # dingbat-bios/mgba he shot the ninja. On this final route a replay keeps
-# nba on track (checkpoints SLIP by 1 frame). dingbat-bios and mgba stayed
+# the second reference on track (checkpoints SLIP by 1 frame). dingbat-bios and mgba stayed
 # identical throughout.
 # The ninja blinks while invulnerable, so some frames show no player.
-# EEPROM size: dingbat-bios and mgba write a 512-byte file, nba 8 KB.
+# EEPROM size: dingbat-bios and mgba write a 512-byte file, the second reference 8 KB.
 
 [new]
 wait 600

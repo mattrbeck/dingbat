@@ -8,9 +8,9 @@
 # a forest encounter, and swing at the moblin and deelers there. In-game
 # progress is only saved on game over, so [load] shows file "AA" on the select
 # screen, starts it again in the palace and walks out to the overworld.
-# Seen while authoring: nba is a frame or two apart in the forest fight
+# Seen while authoring: the second reference is a frame or two apart in the forest fight
 # (f2991 the moblin's spear, f3121 Link's damage flicker); dingbat-bios and
-# mgba stay identical. dingbat-bios and nba write byte-identical saves, mgba
+# mgba stay identical. dingbat-bios and the second reference write byte-identical saves, mgba
 # differs only in the never-written area (00 instead of FF).
 
 [new]

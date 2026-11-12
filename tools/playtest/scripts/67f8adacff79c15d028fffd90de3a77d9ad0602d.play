@@ -11,7 +11,7 @@
 # Seen while authoring: the timing graph after test 1 (f3870) plots slightly
 # different points on each emulator for the same inputs; the stage-select
 # background colour cycle is in a different phase on each emulator at the
-# same frame (f14898); nba scrolls the result paper a frame late (f13746).
+# same frame (f14898); the second reference scrolls the result paper a frame late (f13746).
 # All three saves byte-identical.
 
 [new]

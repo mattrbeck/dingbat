@@ -10,10 +10,10 @@
 # drop down, pause > QUIT > YES back to the main menu.
 # Findings: the three emulators are a frame or two apart from the intro on
 # (f600 Murfy's wing animation differs on all three; "PRESS START" shows
-# on dingbat-bios and nba at f844 but not on mgba). In the live session the
+# on dingbat-bios and the second reference at f844 but not on mgba). In the live session the
 # decorative butterflies in level 1 sat in different places on each (f1974);
 # the frozen replay shows level1 and first_lum identical on all three.
-# nba writes an 8 KB EEPROM file, the others 512 bytes.
+# The second reference writes an 8 KB EEPROM file, the others 512 bytes.
 [new]
 wait 600
 press START hold=10

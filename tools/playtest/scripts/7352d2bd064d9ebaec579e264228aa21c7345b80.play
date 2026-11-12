@@ -16,9 +16,9 @@
 # programming time (dingbat GBATEK's 108368 cycles, mgba ~115000, the second
 # reference ~101000) and 1-1 was seeded from it. The reset clears RAM and
 # reboots on a formatted chip: from it on dingbat runs the same frames at
-# any programming time (101000/108368/115005 built), and mgba's and nba's
+# any programming time (101000/108368/115005 built), and mgba's and the second reference's
 # frame counters are dingbat's.
-# Everything after the reset is the timeline frozen on mgba/nba before it
+# Everything after the reset is the timeline frozen on mgba/the second reference before it
 # existed, 72 frames later (the reset's reboot ends on f166, the first boot's
 # format on mgba's f94); the two START taps that fell in the format are gone.
 # From f1884 (the game proper) 0x03004BD8 is an RNG that adds the VCOUNT it
@@ -26,7 +26,7 @@
 # 6-13, ten calls a frame); 1-1's Shy Guys walk on its draws (0x08090070,
 # from f4326), and no two emulators share it (dingbat's HLE and official
 # BIOS neither: the HLE's SoftReset is 812 cycles short). shy_guys, column_top
-# and below_white_block compare those draws: on this route mgba and nba are
+# and below_white_block compare those draws: on this route mgba and the second reference are
 # hit by a Shy Guy before column_top and dingbat is not.
 
 [new]

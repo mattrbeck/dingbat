@@ -8,7 +8,7 @@
 # PET > Save at 00:01 play time. [load] CONTINUE (cursor starts on it) and the
 # PET menu over Lan's room.
 # Seen while authoring: the save is XOR-masked with a random value and all
-# three emulators wrote a different save (dingbat-bios, mgba and nba each have
+# three emulators wrote a different save (dingbat-bios, mgba and the second reference each have
 # their own sha1), so their random states had diverged by f4928 although every
 # screen up to there looked the same.
 

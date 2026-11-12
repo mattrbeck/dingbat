@@ -139,4 +139,6 @@ battery save at all (passwords) gets `@save none`.
   `--emus dingbat-bios,mgba` (the second reference has no motion input, so
   it cannot follow), and say so in the script's comment and `@frozen`.
 - Do not edit the harness code or rebuild `bin/` (it kills running sessions).
-- In script comments name emulators only by their keys (`mgba`, `nba`).
+- In script comments name `mgba` by its key and the other reference as "the second
+  reference"; its key belongs only where the tooling reads it (`@frozen`,
+  `--emus`, the generated `[reached ...]`/`[taps ...]` notes).

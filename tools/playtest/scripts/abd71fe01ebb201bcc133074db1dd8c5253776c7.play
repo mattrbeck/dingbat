@@ -12,9 +12,9 @@
 # room; UP at the statue, Yes. [load]: Select Data shows AA in Castle
 # Corridor; A resumes in the save room.
 # The three saves differ only at 0x1B8 (play-time frames: dingbat-bios 0x57,
-# mgba 0x67, nba 0x59). The wall skull's and the candles' flicker runs out of
+# mgba 0x67, the second reference 0x59). The wall skull's and the candles' flicker runs out of
 # phase on dingbat-bios (f6421, f6431, f6701, f8078: dark skull / no candle
-# halo where mgba and nba show it, and the reverse).
+# halo where mgba and the second reference show it, and the reverse).
 
 [new]
 wait 600

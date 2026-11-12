@@ -15,7 +15,7 @@
 # the battery save is written by then. [load]: START at the intro, Continue
 # resumes Bijou on the hill (the same frame as before quitting), START
 # opens the Menu.
-# Seen while authoring: nba runs the attract intro's sprites and the
+# Seen while authoring: the second reference runs the attract intro's sprites and the
 # opening's fades a few frames apart from the others (the title, the
 # rainbow's blend and the Menu fade-in); the rainbow's blend is in a
 # different phase on each emulator at f3308. All three write byte-identical

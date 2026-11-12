@@ -11,7 +11,7 @@
 # "active game: player"; START puts the skater back in CA College.
 # Findings: all three write byte-identical 8 KB saves (1198 data bytes).
 # The menus sit over an animated skater, so they are compare=text; in the
-# live session nba's camera in CA College drifted from the others by the
+# live session the second reference's camera in CA College drifted from the others by the
 # pause (f4200).
 
 [new]

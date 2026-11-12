@@ -11,11 +11,11 @@
 # 1P Driller > Endless > Hard shows 1 game, best result 180 ft.
 # Seen while recording: on the "IS THIS NAME OK?" dialog (name_confirm) the
 # dimmed name grid behind it is one 5-bit step darker in dingbat-bios than in
-# mgba and nba (which agree) on rows 16-143, e.g. the orange background
+# mgba and the second reference (which agree) on rows 16-143, e.g. the orange background
 # 31,20,16 vs 31,21,16 and the grid keys 23,24,28 vs 24,24,29 (9421 pixels);
-# the other screens match. nba draws the title logo shine and the results and
+# the other screens match. The second reference draws the title logo shine and the results and
 # records slide-ins a frame or so behind. dingbat-bios and mgba write
-# byte-identical saves (178 non-blank bytes); nba's differs.
+# byte-identical saves (178 non-blank bytes); the second reference's differs.
 
 [new]
 wait 300

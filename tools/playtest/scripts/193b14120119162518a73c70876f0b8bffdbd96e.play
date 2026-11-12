@@ -7,7 +7,7 @@
 # NEW GAME, A taps through Ciel's rescue of Zero and "Watch out!!!", Zero in
 # control in the ruins: over the rubble, through the gate, wall-kick up the
 # cliff and buster shots at the first Pantheons.
-# Findings (lockstep, same inputs): f10910 nba draws Ciel as a white
+# Findings (lockstep, same inputs): f10910 the second reference draws Ciel as a white
 # silhouette where the others show her normally; f11820 the arriving
 # Pantheon squad sits in a different formation in each emulator; f12200 a
 # flying enemy is on screen only in dingbat-bios.

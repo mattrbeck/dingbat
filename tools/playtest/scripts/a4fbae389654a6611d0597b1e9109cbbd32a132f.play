@@ -7,7 +7,7 @@
 # New game; in Lan's room pick up the PET from the bedside table (Mom calls),
 # then PET menu > Save at 00:01 play time. [load] picks CONTINUE (the 6-frame
 # DOWN on the title is not taken, the hold=10 one is) and opens the PET menu.
-# Seen while authoring: nba's frame hash differs from dingbat-bios/mgba on many
+# Seen while authoring: the second reference's frame hash differs from dingbat-bios/mgba on many
 # frames of the opening (text one glyph behind, fade step different at f1872);
 # mgba's save differs from the other two in 2 bytes (0x1001, 0x1009).
 

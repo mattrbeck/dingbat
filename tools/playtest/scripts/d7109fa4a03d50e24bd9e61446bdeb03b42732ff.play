@@ -9,8 +9,8 @@
 # New game, A through the cliff-top opening with Nall and Ramus, walk down
 # the path outside Burg, then START > System > Save > slot 1 > YES.
 # Findings: the "Saving!" message stays up for different times (the
-# recorded wait covers the slowest): nba +30, dingbat-bios +40, mgba +50
-# frames after f8429. The nba save differs from dingbat-bios/mgba (893 vs
+# recorded wait covers the slowest): the second reference +30, dingbat-bios +40, mgba +50
+# frames after f8429. The second reference save differs from dingbat-bios/mgba (893 vs
 # 890 non-blank bytes; dingbat-bios and mgba are byte-identical).
 # [load] load_file (compare=text, over the rotating globe) reads differently
 # on dingbat for every save, its own included: each emulator shows all

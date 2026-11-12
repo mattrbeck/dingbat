@@ -16,7 +16,7 @@
 # pixel-identical at f3320 and f3500. The cart's own time is unmeasured
 # (r0table row eesettle4k). In the level the three drift by a frame here and
 # there and re-converge
-# (identical at f4153). nba does not read back its own 8 KB battery file:
+# (identical at f4153). The second reference does not read back its own 8 KB battery file:
 # its title has no Continue on [load] (f1046).
 # new_game is compare=none: the title menu's clouds are darkened (BLDY 5)
 # and dingbat is one 5-bit step darker than mgba on ~30k px -- the darken

@@ -7,11 +7,11 @@
 # rolling under the rocks, through the breakable-block room and the Skree
 # corridor, morph into the Chozo statue's hand (map hint, energy refill), then
 # the shaft and the first Save Room; Yes, "Save Complete".
-# Recorded without nba: in the authoring session nba drew a Zoomer at a
+# Recorded without the second reference: in the authoring session the second reference drew a Zoomer at a
 # different place from f2715 (dingbat-bios and mgba agree), its kill drop gave
 # 99 energy instead of 84 around f3300, and by f4968 an extra Zoomer had
 # knocked Samus back, so the session went on without it. (The replay with
-# nba still reaches the save: morph_ball differs MAJOR on nba, energy 99.)
+# the second reference still reaches the save: morph_ball differs MAJOR on the second reference, energy 99.)
 
 [new]
 wait 600

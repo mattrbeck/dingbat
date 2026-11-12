@@ -12,10 +12,10 @@
 # LOAD stays empty) and the scene carries on. [load]: CONTINUE resumes in that
 # scene; one more line of dialogue.
 # Seen while authoring: in the opening movie (f900) mgba draws the moon's halo
-# much darker than dingbat-bios and nba, which agree; the story scene's
+# much darker than dingbat-bios and the second reference, which agree; the story scene's
 # gradient/text-box blend differs by a step in a few rows on all three, and
 # the menus' animated hex backgrounds are in different phases. Saves:
-# dingbat-bios and nba byte-identical, mgba differs in 10 bytes (a counter at
+# dingbat-bios and the second reference byte-identical, mgba differs in 10 bytes (a counter at
 # 0xC00C and the checksums).
 [new]
 wait 600

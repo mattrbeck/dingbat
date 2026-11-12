@@ -8,9 +8,9 @@
 # briefing; Quarantine Bay (kill the Hornoad, absorb the X); back up and to
 # the Navigation Room for the second briefing; then the ladder room's grate
 # column up to the first Save Room (Yes, "Save complete.").
-# nba draws Samus's run/spin animation a frame off and its camera scrolls a
+# The second reference draws Samus's run/spin animation a frame off and its camera scrolls a
 # few pixels differently in the press shaft and the grate column; mgba and
-# nba saves are identical, dingbat-bios's save differs in 3 bytes (0x214,
+# the second reference saves are identical, dingbat-bios's save differs in 3 bytes (0x214,
 # 0x218 checksum, 0x2E7 = 4 vs 7, the play-time frame counter).
 
 [new]

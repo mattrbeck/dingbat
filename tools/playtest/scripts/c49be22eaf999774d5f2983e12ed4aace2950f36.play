@@ -11,7 +11,7 @@
 # night scene, the prologue crawl (no input: A there skips to the title) and
 # the world map outside Baron with Kain. Save to slot 1 from the menu.
 # Cutscene walks run at slightly different speeds on the three emulators:
-# the "okay" mash is mgba's count (138 taps), dingbat-bios and nba had already
+# the "okay" mash is mgba's count (138 taps), dingbat-bios and the second reference had already
 # left that box; the screens converge at every later text box. mgba's
 # animated water / clouds / menu gradient often differ by a frame or two.
 

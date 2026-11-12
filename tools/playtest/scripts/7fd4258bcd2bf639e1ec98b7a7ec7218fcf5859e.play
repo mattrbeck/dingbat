@@ -10,7 +10,7 @@
 # Notes: the attract-mode CPU fight diverges: at f2500 the two fighters are in different
 # places and poses on each of the three emulators. Because of that the title's blinking
 # PRESS START is in a different phase on each one (at f2600 it is missing on dingbat-bios,
-# shown on mgba, and nba is still fading in). From the mode menu on all three agree.
+# shown on mgba, and the second reference is still fading in). From the mode menu on all three agree.
 # Taps on the difficulty row with hold=4 did nothing on any emulator; hold=10 works.
 
 [new]

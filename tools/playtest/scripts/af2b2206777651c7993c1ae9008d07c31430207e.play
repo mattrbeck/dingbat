@@ -8,11 +8,11 @@
 # turn on the computer-map cheat (pause, hold L+R, B A A A A A A A) and look at the
 # automap, walk east into the brown-floored room, fire once, pause.
 # Notes: at f600 the logo is drawn more slowly on dingbat-bios (shorter stroke
-# than on mgba/nba). In E1M1 the view after identical input differs from about
+# than on mgba/the second reference). In E1M1 the view after identical input differs from about
 # f1758 on: the player is a little further forward on mgba, and by f2949 all three
 # stand in clearly different places. In a second session (UP held 150 frames from the
-# start, then pause) dingbat-bios and nba stood in the same place and mgba did not;
-# after more walking along walls dingbat-bios and nba drifted apart too. The pause-menu cursor DOWN at f2624 (6-frame
+# start, then pause) dingbat-bios and the second reference stood in the same place and mgba did not;
+# after more walking along walls dingbat-bios and the second reference drifted apart too. The pause-menu cursor DOWN at f2624 (6-frame
 # hold) was missed by mgba once (it opened OPTIONS while the others opened LOAD GAME).
 
 [new]

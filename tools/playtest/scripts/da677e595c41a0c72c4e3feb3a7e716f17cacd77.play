@@ -8,8 +8,8 @@
 # Mini-Mario bubble). The game saves on level clear; [load] picks file A (MAIN 1-2)
 # and starts 1-2.
 # Seen while authoring: the title/menus and the clear tally differ in animation
-# phase between emulators on the same frame; nba lagged the 1-1 door fade-out
-# (f5510: still fading on nba, black on dingbat-bios and mgba) and its level
+# phase between emulators on the same frame; the second reference lagged the 1-1 door fade-out
+# (f5510: still fading on the second reference, black on dingbat-bios and mgba) and its level
 # timer read one second lower at f5814. All three wrote byte-identical saves.
 
 [new]

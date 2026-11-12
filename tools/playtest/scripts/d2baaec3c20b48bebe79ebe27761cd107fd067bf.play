@@ -8,7 +8,7 @@
 # level (side-scroller, Kim walks right; context "A" prompts along the way)
 # until the save icon appears / the slot shows progress in Load Game.
 # The game formats a 4Kbit EEPROM image ("1M2A" header) on first boot:
-# dingbat and mgba write 512 bytes, nba 8192; the first 512 bytes are
+# dingbat and mgba write 512 bytes, the second reference 8192; the first 512 bytes are
 # identical in all three.
 
 [new]

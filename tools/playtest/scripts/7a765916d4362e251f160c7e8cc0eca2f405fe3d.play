@@ -13,13 +13,13 @@
 # service at 50両; いいえ).
 # Goemon 1 (ゆきひめをあそぶ) was tried first and left: its overhead town has
 # enemies that walk differently on each emulator within the first half
-# minute of play (mgba's samurai at f3328, then nba's ghost from f5300 and
+# minute of play (mgba's samurai at f3328, then the second reference's ghost from f5300 and
 # all three apart by f5868), and its diary keeper is only met past stage 1.
 # Findings while authoring Goemon 2:
-# - nba runs the player's animations a frame or two behind the other two
+# - The second reference runs the player's animations a frame or two behind the other two
 #   (attack swings, f4240 on), and its camera trails vertically by a few
 #   pixels during jumps (f4314, f9330); the game outcome stays the same.
-# - f6544, riding the fish over the water: dingbat-bios and nba kill the
+# - f6544, riding the fish over the water: dingbat-bios and the second reference kill the
 #   bunny that jumps out at the right edge with the first shot, mgba's shot
 #   misses it and it lands (explosions differ from then until f6580). The
 #   route here waits for the bunny to land and shoots it point blank, which
@@ -31,13 +31,13 @@
 #   darker than both references where they agree (Goemon 1's kuchiire-ya
 #   box, 2683 pixels, stable for 130 frames), the 5-bit alpha rounding the
 #   SP photographs gave (docs/hwprobe-questions.md; Trick Star's script has
-#   the arithmetic). mgba and nba also differ from each other by a step in
+#   the arithmetic). mgba and the second reference also differ from each other by a step in
 #   places (the player-select portrait, the beach stage's last scanline).
 # - Town villagers walk differently on all three (Satsuma, f7810 mgba, then
 #   f11240 all three); harmless here.
-# - The blank EEPROM comes out 512 bytes on mgba and 8192 on nba.
+# - The blank EEPROM comes out 512 bytes on mgba and 8192 on the second reference.
 # In the replay all four dingbat configurations draw what mgba draws up to
-# first_gameplay; nba is a frame behind there (area_card, first_gameplay
+# first_gameplay; the second reference is a frame behind there (area_card, first_gameplay
 # SLIP +1) and its player_select portrait blends differently; the map is
 # MINOR between all three, old_man a frame apart each way; tourist identical.
 

@@ -8,10 +8,10 @@
 # crates and enemies, pause > Warp Room, START (Load-Save) > Save Game >
 # slot 1; the save menu then shows slot 1 filled (0%).
 # [load]: title > Load Game shows slot 1, load it (warp room), enter level 1.
-# Findings: nba writes an 8192-byte file for this 4Kbit EEPROM (dingbat-bios,
-# mgba: 512 bytes, same 14 data bytes); booted with it, nba shows every Load
-# Game slot EMPTY and stays on the load screen, so nba's [load] checkpoints
-# differ. Title/menu screens have blink/rotation phase differences (nba on the
+# Findings: the second reference writes an 8192-byte file for this 4Kbit EEPROM (dingbat-bios,
+# mgba: 512 bytes, same 14 data bytes); booted with it, the second reference shows every Load
+# Game slot EMPTY and stays on the load screen, so the second reference's [load] checkpoints
+# differ. Title/menu screens have blink/rotation phase differences (the second reference on the
 # title logo, mgba on the save-menu cursor at f3895), hence compare=text.
 
 [new]

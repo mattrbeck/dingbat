@@ -3,7 +3,7 @@
 @game ACBE
 @chip EEPROM
 @frozen dingbat-bios,mgba,nba
-@save skip: no save found up to Takah's figure-8 driving practice, which ends only when every item on the course has been picked up in real time (nba already loads it late, so its drive would differ); the first save lies somewhere beyond it. The field menu (Item, LRG cargo, Overdrive, Switch WPN, Status, Settings) has no Save and the title Settings write nothing; the only EEPROM write is the 58-byte header at first boot (identical in all three)
+@save skip: no save found up to Takah's figure-8 driving practice, which ends only when every item on the course has been picked up in real time (the second reference already loads it late, so its drive would differ); the first save lies somewhere beyond it. The field menu (Item, LRG cargo, Overdrive, Switch WPN, Status, Settings) has no Save and the title Settings write nothing; the only EEPROM write is the 58-byte header at first boot (identical in all three)
 # Begin New Game, name "Joe", the intro by A every 30 frames, the practice
 # battle lost by standing still, G-COM named "Pal", the next morning, then
 # on foot past the water tower to the JOB office, Takah's briefing, and the
@@ -11,13 +11,13 @@
 # Seen while recording: the shadows under sprites are drawn on alternate
 # frames, and which frames differs between the three (a frame of game-loop
 # phase); the name-entry backdrop is pink on dingbat-bios and mgba and green
-# on nba (and the other way round on G-COM's naming screen); the town's
-# wandering NPCs stand in different places on each emulator. nba runs the
+# on the second reference (and the other way round on G-COM's naming screen); the town's
+# wandering NPCs stand in different places on each emulator. The second reference runs the
 # loading into the practice late: at practice_prompt (f24760) it is still
 # typing Takah's "Are you ready" while the others show the Yes / Tell me
 # once more choice, and it reached "OK, start!" 28 frames after them. At
 # field_menu the two references agree and every dingbat configuration is
-# the same picture 7 (mgba) / 5 (nba) frames off (shadow phase and Pal's
+# the same picture 7 (mgba) / 5 (the second reference) frames off (shadow phase and Pal's
 # step), within the hash window.
 
 [new]

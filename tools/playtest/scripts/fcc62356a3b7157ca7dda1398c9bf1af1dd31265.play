@@ -60,7 +60,7 @@ wait 114
 wait 120
 checkpoint file_select_saved window=30 compare=text
 press A
-# nba could not follow from here: 'until text "ongo" timeout=1200 every=10': timed out after 1200 frames waiting for text 'ongo'
+# The second reference could not follow from here: 'until text "ongo" timeout=1200 every=10': timed out after 1200 frames waiting for text 'ongo'
 # until text ongo timeout=1200 every=10  [reached dingbat-bios+70 mgba+70]
 wait 74
 wait 120

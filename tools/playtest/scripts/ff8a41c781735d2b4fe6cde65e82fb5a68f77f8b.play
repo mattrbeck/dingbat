@@ -11,10 +11,10 @@
 # START goes straight to the world map (no intro).
 # Menu A presses need hold=10 here; hold=6 presses on the slot screen are
 # ignored on every emulator.
-# Finding: nba does not read back its own 8 KB battery file: on [load] its
+# Finding: the second reference does not read back its own 8 KB battery file: on [load] its
 # slot list is EMPTY (f1512) and it starts a fresh AAA, while dingbat-bios
 # and mgba (512-byte EEPROM file) show the saved slot and resume on the map.
-# Small in-level differences: nba's Rayman/camera is a frame off at f4476
+# Small in-level differences: the second reference's Rayman/camera is a frame off at f4476
 # and f4556; identical again at f4816.
 [new]
 wait 600

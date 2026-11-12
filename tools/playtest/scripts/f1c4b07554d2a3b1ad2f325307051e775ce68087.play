@@ -5,9 +5,9 @@
 @frozen dingbat-bios,mgba,nba
 # Single player, game 1, intro dialogue, walk Snake Way to King Yemma, past the
 # ogre at the NW door, green plane to Grand Kai's planet, save at the save circle.
-# Notes: nba draws dialogue text a character behind dingbat-bios/mgba at several
-# points, and the wandering souls at the docks sit in different places on nba.
-# After the save, the fade back in differs (f20266: nba nearly done, mgba darkest);
+# Notes: the second reference draws dialogue text a character behind dingbat-bios/mgba at several
+# points, and the wandering souls at the docks sit in different places on the second reference.
+# After the save, the fade back in differs (f20266: the second reference nearly done, mgba darkest);
 # all three converge by f20566.
 
 [new]

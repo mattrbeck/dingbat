@@ -15,7 +15,7 @@
 # first Traverse Town room on all three): the room is furnished differently on
 # each emulator: a street lamp and a crate box on dingbat-bios, a two-storey
 # building with a Heartless symbol on mgba, a crate box and paved circles on
-# nba. Everything up to the memory door (memory_door, f31127) is identical.
+# the second reference. Everything up to the memory door (memory_door, f31127) is identical.
 
 [new]
 # until text PRESS timeout=1500 every=10  [reached dingbat-bios+990 mgba+990 nba+980]
