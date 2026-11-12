@@ -519,9 +519,122 @@ grid's constants are a coupled set and move together or not at all.
   stays: skipping it loses 12 `lcdirq_precedence`/`miscmstatirq` rows.
 
 ### CGB STAT/LYC write timing
-- CGB STAT/LYC write timing: removed 2026-11-12 pending a clean-room
-  re-derivation. Rows red meanwhile: gambatte `lycEnable` (17), `m1` (6),
-  `m2enable` (3), `miscmstatirq` (3).
+- The LYC-write (FF45) half: removed 2026-11-12 pending a clean-room
+  re-derivation. Rows red meanwhile: gambatte `lycEnable` (11),
+  `miscmstatirq` (1). The STAT-write (FF41) half is the five entries below.
+
+### A CGB STAT write across a line's end: what its enables find (single speed)
+- Clean-room: derived from test ROM sources/outputs and black-box runs; no
+  emulator source consulted. (No black-box emulator was run: every figure
+  below is a gambatte hwtests row's expected value, read off the ROM's name
+  and its `.asm`, against dingbat's own `-d:gb_stat_read_trace` output.)
+- Method: each family is one STAT write stepped a CPU M-cycle at a time
+  across the end of a line, and the `_lcdoffsetN_` rows (a KEY1 round trip
+  first) put the same write on the dots in between. With `w` the dot the
+  write's M-cycle starts on, the CGB at single speed answers:
+
+  | write (old -> new) | at the end of | interrupt for `w` <= | none for `w` >= | rows [cgb] |
+  |---|---|---|---|---|
+  | $00 -> $08, mode 0 enabled late | a rendered line | 452 | 453 | `m0enable/late_enable_{1,2}`, `_lcdoffset1_{1,2}` |
+  | $00 -> $08 | line 143 | 449 | 453 | `m1/ly143_late_m0enable_{1,2}` |
+  | $00 -> $40, LY = LYC | a rendered line | 452 | 453 | `lycEnable/late_ff41_enable_{1,2}`, `_lcdoffset1_{1,2}` |
+  | $00 -> $20 | a rendered line / line 153 | 454 | 455 | `m2enable/late_enable_{1,2}`, `_lcdoffset{2,3}_{1,2}`, `late_enable_ly0_{1,2}`, `_ly0_lcdoffset2_{1,2}` |
+  | $00 -> $20 | line 143 | 449 | 453 | `m1/ly143_late_m2enable_{1,2}` |
+  | $48 -> $00, LYC = next line | a rendered line | (none: 449) | fires from 453 | `lycEnable/ff41_disable_{1,2,3}` |
+  | $08 -> $20 | a rendered line | 453 | 457 | `m2enable/late_enable_m0disable_{1,2,3}` |
+  | $10 -> $50, LYC = 0 | line 153 | fires from 454 | (none: 453) | `miscmstatirq/lycstatwirq_trigger_ly00_10_50_{1,2}`, `_lcdoffset3_{1,2}` |
+
+- Claim: the enables take hold `CGB_STAT_ENABLE_LATENCY` (2) dots after `w`,
+  as before, and inside dot 454 -- the comparator's lead dot -- the CGB's
+  sources change in a fixed order, the edge detector seeing each step:
+  (1) enables landing on 454 take hold; (2) the comparator lets go of the
+  line's match, and on line 143 the mode-1 source rises; (3) the mode-0
+  source falls; (4) the comparator answers for the next line; (5) line 143's
+  OAM pulse ends. Mode 0 therefore ends two dots before the boundary on a
+  CGB, where a write from 453 (landing 455) no longer finds it and the DMG
+  (whose write acts on its own dot) still does; a mode-0-to-LYC hand-over is
+  an edge (3 before 4) that enables about to be cleared still see; and a
+  write from 452 finds the old line's match and mode 0 both still up (1).
+- Evidence, two-sided per step (each "moved" build loses exactly the rows
+  named): no step 1, `lycEnable/late_ff41_enable_lcdoffset1_1`; step 1 for
+  LYC writes too, `late_ff45_enable_2` and `lyc0_late_ff45_enable_2`; step 3
+  ahead of 2, `lcdirq_precedence/m1irq_lcdstat18` and
+  `m1/m1irq_m0disable_{2,3}`; 3 and 4 swapped, `lycEnable/ff41_disable_2`;
+  step 5 with step 3, `lcdirq_precedence/lcdirqprecedence_lycirq_ly90_
+  lcdstat68`. The whole rule off loses seven rows (listed at the constant).
+- With the hand-over done on 454, the 143 -> 144 boundary has no comparator
+  dip left for a CGB at single speed (`ly_advance_vblank_entry`).
+- Site: `CGB_LINE_END_STEPS` (gb.nim), `fifo_cgb_line_end` (fifo_ppu.nim),
+  `m0_source`, `m2_line144` (ppu.nim).
+
+### The CGB's OAM pulse is narrower for a landing enable
+- Clean-room: derived from test ROM sources/outputs and black-box runs; no
+  emulator source consulted.
+- Claim: a CGB STAT write that sets the mode-2 enable is looked at again when
+  its M-cycle ends, and finds the OAM source still high through dot 2 of the
+  line at single speed (the DMG's `STAT_M2_PULSE` is 3, and double speed
+  keeps 3). The vblank-entry pulse is shorter again: over inside line 143 at
+  single speed (step 5 above) and high through dot 1 of line 144 at double.
+- Evidence: `m2enable/late_enable_lcdoffset2_2` and
+  `late_enable_ly0_lcdoffset2_2` [cgb] write from dot 455 (M-cycle ending on
+  dot 3) and are silent; `_lcdoffset3_1` writes from 454 and fires.
+  `CGB_M2_PULSE_SS`: 3 loses the first two, -1 loses seven, 0..2 are
+  indistinguishable (2 ships, the nearest to the DMG). Double speed,
+  `m1/ly143_late_m2enable_ds_{1,2}` and `_ds_lcdoffset1_{1,2}`: writes from
+  454 and 455 fire, 456 and 457 do not. `CGB_M2_144_PULSE_DS`: 2 loses
+  `_ds_lcdoffset1_2`, -1 loses four, 0 and 1 are indistinguishable.
+- Site: `CGB_M2_PULSE_SS`, `CGB_M2_144_PULSE_DS` (gb.nim), `m2_pulse_last`,
+  `m2_144_within_pulse` (ppu.nim).
+
+### Line 153 -> 0: the mode-1 source falls ahead of a landing enable
+- Clean-room: derived from test ROM sources/outputs and black-box runs; no
+  emulator source consulted.
+- Claim: at single speed the mode-1 source's fall where line 0 starts comes
+  before STAT enables landing on that same dot (a write from dot 454); at
+  double speed the landing is first.
+- Evidence: last row of the table above. `CGB_M1_FALL_FIRST = false` loses
+  `miscmstatirq/lycstatwirq_trigger_ly00_10_50_lcdoffset3_2` [cgb] and takes
+  nothing; the double-speed pair (`_ds_1` from dot 455 silent, `_ds_2` from
+  457 fires, `_ds_lcdoffset1_{1,2}` from 454/456) passes with the landing
+  first.
+- Site: `CGB_M1_FALL_FIRST` (gb.nim), `STAT_LAND_AFTER` in
+  `stat_enables_leading` / `stat_drop_settle` (ppu.nim).
+
+### Double speed: mode 0 falls, the enables land, the comparator lets go
+- Clean-room: derived from test ROM sources/outputs and black-box runs; no
+  emulator source consulted.
+- Claim: at double speed the three share the boundary dot (456) of a rendered
+  line in that order, for a STAT write from dot 455 (latency 1). Line 143 is
+  the exception: there mode 0 outlasts the landing.
+- Evidence: `lycEnable/late_ff41_enable_ds_1` [cgb] ($00 -> $40 from 455:
+  the old line's match is still found; `_ds_2` from 457 is not),
+  `miscmstatirq/lycstatwirq_trigger_m0_late_ly44_lyc44_08_40_ds_3` [cgb]
+  ($08 -> $40 from 455 fires: mode 0 fell before the match was enabled;
+  `_ds_2` from 453 and `_ds_4` from 457 are silent), with
+  `m0enable/late_enable_ds_2` (mode 0 enabled from 455: silent) for the
+  first half. `CGB_M0_FALL_DS_FIRST = false` loses the first two. On line
+  143 `m1/ly143_late_m0enable_ds_1` (from 455) fires, and applying the order
+  there loses `m1/lyc143_late_m0enable_lycdisable_ds_1`.
+- Site: `CGB_M0_FALL_DS_FIRST` (gb.nim), the mode-0 line boundary in
+  `fifo_tick_slow` (fifo_ppu.nim).
+
+### The 153 match outlasts the snapback for a landing STAT enable
+- Clean-room: derived from test ROM sources/outputs and black-box runs; no
+  emulator source consulted.
+- Claim: LY reads 0 from dot 5 of line 153 and nothing else sees the
+  LYC = 153 match past it, but a CGB STAT write that sets the LYC enable
+  still finds it until the dot the source relatches for LY = 0 (6 at single
+  speed, 8 at double), inclusive.
+- Evidence: gambatte `lycEnable/lyc153_late_ff41_enable_*` [cgb], writes
+  from dot 1 and 4 (single speed) and 6 and 7 (double) get the interrupt;
+  from 5 and 8 (single), 8 and 9 (double) they do not. Off loses
+  `_lcdoffset1_1`, `_ds_1`, `_ds_lcdoffset1_1`; `CGB_LYC153_HOLD_PAST = -1`
+  loses the same three. Restricted to STAT writes: the LYC-write twins
+  (`lyc153_late_ff45_enable_4`, `_ds_6`, `_ds_lcdoffset1_2`) go red if any
+  evaluation sees the held match.
+- Site: `CGB_LYC153_SRC_HOLD`, `CGB_LYC153_HOLD_PAST` (gb.nim),
+  `lyc153_src_held` (ppu.nim), `mem_flush_deferred` (memory.nim),
+  `fifo_line153_edge` (fifo_ppu.nim).
 
 ### An IF write lands one dot into its M-cycle
 - Claim: a request raised in the first dot of the M-cycle that writes IF is

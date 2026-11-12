@@ -2247,7 +2247,7 @@ template fifo_skip_target(ppu: GbFifoPpu; gb: GB; m: uint8): int32 =
       var tgt =
         if m == 2:
           when STAT_M2_PULSE_END_EVAL and STAT_M2_PULSE >= 0:
-            (if ppu.cycle_counter <= int32(STAT_M2_PULSE) + 1: int32(STAT_M2_PULSE) + 1
+            (if ppu.cycle_counter <= m2_pulse_last(gb) + 1: m2_pulse_last(gb) + 1
              else: m3_start_dot(gb))
           else: m3_start_dot(gb)
         elif ppu.ly == 143 and m == 0 and m2_144_early_active(gb): M2_144_EARLY_DOT
@@ -2310,6 +2310,14 @@ proc fifo_line153_edge(ppu: GbFifoPpu; gb: GB) {.noinline.} =
     # Two dots in a double-speed build: the SOURCE relatches an M-cycle before
     # the readable bit (LYC_SRC_RELATCH_LEAD, ppu.nim); at normal speed the
     # the two compares fold to one; at a lead of 0 they are the same dot.
+    when CGB_LYC153_SRC_HOLD:
+      # A CGB STAT write's enables landing on the source's relatch dot still
+      # find the 153 match (CGB_LYC153_SRC_HOLD, gb.nim): the landing first.
+      if gb.cgb_enabled and gb.memory.deferred_reg == 0xFF41'u16 and
+         ppu.cycle_counter == lyc_src_relatch_dot(gb):
+        gb.stat_hold = STAT_LYC153_HELD
+        ppu_handle_stat_interrupt(ppu, gb)
+        gb.stat_hold = 0
     ppu_handle_stat_interrupt(ppu, gb)
 
 # Can the mode-0 source's lead exceed the retire -> flag hand-off (m3_hold)?
@@ -2335,6 +2343,40 @@ when STAT_IRQ_SPLIT:
     (if gb.memory.current_speed == 0: int32(STAT_LYC_LY_LEAD_DOTS)
      else: int32(STAT_LYC_LY_LEAD_DS))
 
+  when CGB_LINE_END_ACTIVE:
+    proc fifo_cgb_line_end(ppu: GbFifoPpu; gb: GB) =
+      ## The end of a rendered line as the CGB's STAT line sees it at single
+      ## speed (CGB_LINE_END_STEPS, gb.nim): one dot, five steps, the edge
+      ## detector run after each.
+      # 1. A STAT write in flight whose enable bits land on this dot finds the
+      #    line's sources as they still stand.
+      gb.stat_hold = STAT_HOLD_M0 or STAT_HOLD_M2_144
+      if gb.memory.deferred_reg == 0xFF41'u16:
+        ppu_handle_stat_interrupt(ppu, gb)
+      # 2. The comparator lets go of this line's match (any LY but LYC).
+      ppu.irq_ly = ppu.lyc + 1
+      if int(ppu.ly) + 1 == GB_HEIGHT:
+        # ...and entering vblank the mode-1 source and the vblank request come
+        # up behind it (STAT_M1_LEAD, VBLANK_IRQ_LEAD), as on a DMG.
+        when VBLANK_IRQ_LEAD != 0:
+          gb.interrupts.vblank_interrupt = true
+          gb.vbl_early = true
+        when STAT_M1_LEAD != 0:
+          if not (gb.memory.deferred_reg == 0xFF41'u16 and
+                  (gb.memory.deferred_val and 0x10'u8) == 0'u8):
+            ppu_handle_stat_interrupt(ppu, gb)
+            gb.m1_early = true
+      ppu_handle_stat_interrupt(ppu, gb)
+      # 3. The mode-0 source falls.
+      gb.stat_hold = STAT_HOLD_M2_144
+      ppu_handle_stat_interrupt(ppu, gb)
+      # 4. The comparator answers for the next line.
+      ppu.irq_ly = ppu.ly + 1
+      ppu_handle_stat_interrupt(ppu, gb)
+      # 5. Line 143's OAM pulse ends.
+      gb.stat_hold = 0
+      if int(ppu.ly) + 1 == GB_HEIGHT: ppu_handle_stat_interrupt(ppu, gb)
+
   proc fifo_lyc_ly_lead(ppu: GbFifoPpu; gb: GB) {.noinline.} =
     ## The comparator's LY steps to the next line lyc_lead_dots before the
     ## readable LY does (the boundary's catch-up keeps the two equal
@@ -2351,6 +2393,10 @@ when STAT_IRQ_SPLIT:
       if ppu.ly < 143'u8 and window_enabled(ppu) and wy == ppu.ly + 1 and
          (ppu.lcd_status and 3'u8) == 0'u8:
         ppu.window_trigger = true
+    when CGB_LINE_END_ACTIVE:
+      if gb.cgb_enabled and (ppu.lcd_status and 3'u8) == 0'u8:
+        fifo_cgb_line_end(ppu, gb)
+        return
     ppu.irq_ly = ppu.ly + 1
     if int(ppu.irq_ly) == GB_HEIGHT:
       # Entering vblank: the mode-1 source and the vblank request come up
@@ -2880,7 +2926,7 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
       of 2:  # OAM search
         when STAT_M2_PULSE_END_EVAL and STAT_M2_PULSE >= 0:
           # The OAM pulse's falling edge (STAT_M2_PULSE_END_EVAL, ppu.nim).
-          if ppu.cycle_counter == int32(STAT_M2_PULSE) + 1:
+          if ppu.cycle_counter == m2_pulse_last(gb) + 1:
             ppu_handle_stat_interrupt(ppu, gb)
         # The whole boundary moves M3_GRID_EARLY early.
         let m3_dot = m3_start_dot(gb)
@@ -3064,6 +3110,16 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
             if ppu.win_check_dot >= 0: ppu.win_check_dot -= ppu.cycle_counter
           when STAT_SET_LANDING_EVAL:
             if ppu.stat_set_dot >= 0: ppu.stat_set_dot -= ppu.cycle_counter
+          when CGB_M0_FALL_DS_FIRST:
+            # Double speed: the mode-0 source falls, then a STAT write's
+            # enables land, then the comparator lets go (CGB_M0_FALL_DS_FIRST).
+            if gb.memory.deferred_reg == 0xFF41'u16 and gb.cgb_enabled and
+               gb.memory.current_speed != 0'u8 and ppu.ly != 143'u8:
+              gb.stat_hold = STAT_M0_GONE or STAT_LAND_AFTER
+              ppu_handle_stat_interrupt(ppu, gb)
+              gb.stat_hold = STAT_M0_GONE
+              ppu_handle_stat_interrupt(ppu, gb)
+              gb.stat_hold = 0
           ppu.stat_chg_dot -= ppu.cycle_counter
           when LCD_ON_TRIM_ANY:
             if ppu.lcdon_lines > 0: dec ppu.lcdon_lines
@@ -3142,7 +3198,13 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
               if lyc_lead_dots(gb) == 0: ppu_handle_stat_interrupt(ppu, gb)
             else:
               ppu_handle_stat_interrupt(ppu, gb)
+            when CGB_M1_FALL_FIRST:
+              # The mode-1 source falls ahead of a STAT write's enables
+              # landing on this dot (CGB_M1_FALL_FIRST, gb.nim).
+              if gb.cgb_enabled and gb.memory.current_speed == 0'u8:
+                gb.stat_hold = STAT_LAND_AFTER
             ppu.`mode_flag=`(2'u8, gb)
+            when CGB_M1_FALL_FIRST: gb.stat_hold = 0
             when STAT_M2_LY0_LEAD != 0: gb.m2_ly0_up = false
           else:
             ppu.ly += 1

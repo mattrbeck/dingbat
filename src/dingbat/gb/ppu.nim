@@ -875,7 +875,8 @@ when STAT_ENABLE_EARLY:
     # restarts at 0; one wrap is the whole correction.
     var elapsed = ppu.cycle_counter - int32(ppu.stat_wr_dot)
     if elapsed < 0: elapsed += ppu.gb_line_end
-    if elapsed >= lat:
+    # STAT_LAND_AFTER: this step of the dot comes before the landing (gb.nim).
+    if elapsed >= lat + int32((gb.stat_hold shr 2) and 1'u8):
       (ppu.lcd_status and 0b1000_0111'u8) or
         (gb.memory.deferred_val and 0b0111_1000'u8)
     else:
@@ -1163,14 +1164,34 @@ template m2_early_stop*(ppu: GbPpu; gb: GB): bool =
   when STAT_M2_EARLY: m2_lead_active(gb) and ppu.m2_early
   else: false
 
+const CGB_LINE_END_ACTIVE* = CGB_LINE_END_STEPS and STAT_LYC_LY_LEAD_DOTS != 0
+  ## CGB_LINE_END_STEPS (gb.nim) runs on the comparator's lead dot.
+template cgb_line_end_past*(ppu: GbPpu; gb: GB): bool =
+  ## Single-speed CGB, on or past the dot its line-end steps run on.
+  gb.cgb_enabled and gb.memory.current_speed == 0'u8 and
+    ppu.cycle_counter >= gb_line_end(ppu) - int32(STAT_LYC_LY_LEAD_DOTS)
 template m0_source*(ppu: GbPpu; gb: GB): bool =
   ## The mode-0 STAT source (STAT_M0_FALL_AT_M2_CGB).
   when STAT_M0_FALL_AT_M2_CGB and STAT_M2_EARLY:
     ppu.irq_m0_of == 0 and not (gb.cgb_enabled and ppu.ly < 143'u8 and
                                 m2_lead_active(gb) and
                                 ppu.cycle_counter >= ppu.m2_early_dot(gb))
+  elif CGB_LINE_END_ACTIVE or CGB_M0_FALL_DS_FIRST:
+    # The CGB's source ends ahead of the mode flag: on the comparator's lead
+    # dot at single speed (and it is not back on line 144's first dot, where
+    # the flag still reads 0), a step ahead of a landing at double speed.
+    ppu.irq_m0_of == 0 and (gb.stat_hold and STAT_M0_GONE) == 0 and
+      not (CGB_LINE_END_ACTIVE and (gb.stat_hold and STAT_HOLD_M0) == 0 and
+           gb.cgb_enabled and gb.memory.current_speed == 0'u8 and
+           (ppu.cycle_counter >= gb_line_end(ppu) - int32(STAT_LYC_LY_LEAD_DOTS) or
+            ppu.ly == 144'u8))
   else:
     ppu.irq_m0_of == 0
+
+template m2_pulse_last*(gb: GB): int32 =
+  ## STAT_M2_PULSE for this console and speed (CGB_M2_PULSE_SS, gb.nim).
+  (if gb.cgb_enabled and gb.memory.current_speed == 0'u8: int32(CGB_M2_PULSE_SS)
+   else: int32(STAT_M2_PULSE))
 
 proc m2_source*(ppu: GbPpu; gb: GB): bool {.inline.} =
   when STAT_M2_LY0_LEAD != 0:
@@ -1182,7 +1203,7 @@ proc m2_source*(ppu: GbPpu; gb: GB): bool {.inline.} =
   when STAT_M2_PULSE == -1: ppu.irq_mode_of == 2
   elif STAT_M2_PULSE == -2:
     ppu.irq_mode_of == 2 and ppu.cycle_counter < int32(4 shr gb.memory.current_speed)
-  else: ppu.irq_mode_of == 2 and ppu.cycle_counter <= int32(STAT_M2_PULSE)
+  else: ppu.irq_mode_of == 2 and ppu.cycle_counter <= m2_pulse_last(gb)
 
 const M2_144_PULSE* {.booldefine.} = true
   ## Whether the line-144 assertion of the OAM source is a pulse of width
@@ -1194,14 +1215,24 @@ proc m2_144_within_pulse(ppu: GbPpu; gb: GB): bool {.inline.} =
   elif STAT_M2_PULSE == -1: true
   elif STAT_M2_PULSE == -2:
     ppu.cycle_counter < int32(4 shr gb.memory.current_speed)
-  else: ppu.cycle_counter <= int32(STAT_M2_PULSE)
+  else:
+    # The CGB's pulse is over inside line 143 at single speed
+    # (CGB_LINE_END_STEPS) and CGB_M2_144_PULSE_DS dots into 144 at double.
+    if gb.cgb_enabled:
+      (if gb.memory.current_speed != 0'u8:
+         ppu.cycle_counter <= int32(CGB_M2_144_PULSE_DS)
+       else: not CGB_LINE_END_ACTIVE and ppu.cycle_counter <= int32(STAT_M2_PULSE))
+    else: ppu.cycle_counter <= int32(STAT_M2_PULSE)
 
 template m2_144_fall_dot*(gb: GB): int32 =
   ## The first dot of line 144 the source is low again. Nothing else happens
   ## on it, so the renderer runs the edge detector there explicitly; the idle
   ## skip already stops inside the first LYC_RELATCH_DOT dots of a mode-1 line.
   when STAT_M2_PULSE == -2: int32(4 shr gb.memory.current_speed)
-  else: int32(STAT_M2_PULSE) + 1
+  else:
+    (if gb.cgb_enabled and gb.memory.current_speed != 0'u8:
+       int32(CGB_M2_144_PULSE_DS) + 1
+     else: int32(STAT_M2_PULSE) + 1)
 
 proc m2_line144*(ppu: GbPpu; gb: GB): bool {.inline.} =
   ## Is the OAM STAT source asserted by the start of vblank? It goes high once
@@ -1222,6 +1253,8 @@ proc m2_line144*(ppu: GbPpu; gb: GB): bool {.inline.} =
     m2_144_within_pulse(ppu, gb)
   elif ppu.ly == 143:
     ppu.mode_flag == 0 and ppu.cycle_counter >= M2_144_EARLY_DOT and
+      not (CGB_LINE_END_ACTIVE and (gb.stat_hold and STAT_HOLD_M2_144) == 0 and
+           ppu.cgb_line_end_past(gb)) and
       (when M2_144_EARLY_DMG and M2_144_EARLY_DMG_HALT:
          gb.cgb_enabled or not gb.cpu.halted
        else: m2_144_early_active(gb))
@@ -1409,6 +1442,13 @@ when M0_HALT_BLIND_DOTS > 0 or CGB_M0_HALT_BLIND_DOTS > 0 or
       else: int32(M0_HALT_BLIND_DOTS shr gb.memory.current_speed)
     age >= 1'i32 and age <= blind
 
+proc lyc153_src_held(ppu: GbPpu; gb: GB): bool {.noinline.} =
+  ## Is this a CGB STAT write's landing, still inside the stretch of the
+  ## snapback the 153 match is held for it (CGB_LYC153_SRC_HOLD, gb.nim)?
+  ## `noinline`, behind the caller's `settling`: four dots a frame.
+  (gb.stat_hold and STAT_LYC153_HELD) != 0 and
+    ppu.cycle_counter <= lyc_src_relatch_dot(gb) + int32(CGB_LYC153_HOLD_PAST)
+
 proc stat_level_with(ppu: GbPpu; gb: GB; en, lyc: uint8): bool {.noinline.} =
   ## The STAT line's level under enable byte `en` and LYC value `lyc` at this
   ## instant: the same four sources ppu_handle_stat_interrupt ORs, without
@@ -1419,6 +1459,8 @@ proc stat_level_with(ppu: GbPpu; gb: GB; en, lyc: uint8): bool {.noinline.} =
     when LYC_SRC_RELATCH_LEAD == 0: not settling
     else: not settling or ppu.cycle_counter >= lyc_src_relatch_dot(gb)
   (ppu.irq_ly_of == lyc  and (en and 0x40'u8) != 0 and src_settled) or
+    (CGB_LYC153_SRC_HOLD and settling and lyc == 153'u8 and
+     (en and 0x40'u8) != 0 and ppu.lyc153_src_held(gb)) or
     (ppu.m2_source(gb)     and (en and 0x20'u8) != 0) or
     ((en and 0x20'u8) != 0 and ppu.m2_line144(gb)) or
     (ppu.m0_source(gb)     and (en and 0x08'u8) != 0) or
@@ -1497,7 +1539,8 @@ proc stat_drop_settle(ppu: GbPpu; gb: GB) {.noinline.} =
   if elapsed < -ppu.gb_line_end div 2: elapsed += ppu.gb_line_end  # line wrapped
   # Inclusive: `> 0` loses six CGB rows (m2enable/*_ds_1, m0enable/
   # lycdisable_ff41_scx1_1) and takes nothing.
-  if elapsed >= 0:
+  # ...and exclusive on a step that comes before the landing (STAT_LAND_AFTER).
+  if elapsed >= int32((gb.stat_hold shr 2) and 1'u8):
     ppu.stat_drop_pending = false
     if not ppu.stat_drop_level: ppu.old_stat_flag = false
   elif gb.memory.deferred_reg == 0xFF41'u16:
@@ -1543,6 +1586,9 @@ proc ppu_handle_stat_interrupt*(ppu: GbPpu; gb: GB) =
   let stat_flag =
     (ppu.irq_ly_of == ppu.lyc and (en and 0x40'u8) != 0 and
      src_settled()) or
+    # A CGB STAT write's landing still finds the 153 match (gb.nim).
+    (CGB_LYC153_SRC_HOLD and settling and ppu.lyc == 153'u8 and
+     (en and 0x40'u8) != 0 and ppu.lyc153_src_held(gb)) or
     (ppu.m2_source(gb)        and (en and 0x20'u8) != 0) or
     # The OAM source also asserts entering vblank; see m2_line144.
     ((en and 0x20'u8) != 0    and ppu.m2_line144(gb)) or
@@ -2127,6 +2173,15 @@ proc ly_advance_vblank_entry*(ppu: GbPpu; gb: GB) {.noinline.} =
   ## Line 143 -> 144: entering vblank is not a line start, so the mode 1 source
   ## and m2_line144's pulse arrive AFTER the comparator's window
   ## (VBLANK_ENTRY_MODE_AFTER). Reached at LY_BLIND_SCOPE >= 2 (gb.nim).
+  when CGB_LINE_END_ACTIVE:
+    # The CGB's comparator handed line 143 over to 144 on its lead dot, the
+    # mode-0 source and the pulse already gone (fifo_cgb_line_end): nothing
+    # is left to dip here. gambatte `lcdirq_precedence/lcdirqprecedence_
+    # lycirq_ly90_lcdstat68` [cgb].
+    if gb.cgb_enabled and gb.memory.current_speed == 0'u8:
+      ppu_handle_stat_interrupt(ppu, gb)
+      ppu.`mode_flag=`(1'u8, gb)
+      return
   let lyc_en = ly_advance_open(ppu)
   ppu_handle_stat_interrupt(ppu, gb)
   when VBLANK_ENTRY_MODE_AFTER != 0:
@@ -2767,6 +2822,10 @@ proc ppu_write*(ppu: GbPpu; gb: GB; idx: int; val: uint8) =
     # NOT deferred on a DMG: LYC is the comparator's other input and wilbertpol
     # acceptance/gpu/ly_lyc_write-GS wants the new value inside its own
     # M-cycle; only the STAT edge is held back. On CGB see CGB_LYC_WRITE_DEFER.
+    when defined(gb_stat_read_trace):
+      # Diagnostic (tools only): the dot each LYC write commits on.
+      echo "LYCW ly=", ppu.ly, " cc=", ppu.cycle_counter,
+           " mode=", (ppu.lcd_status and 3), " old=", ppu.lyc, " new=", val
     var edge_here = true
     let old_lyc = ppu.lyc
     when CGB_LYC_WRITE_DEFER:

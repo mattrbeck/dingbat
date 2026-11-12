@@ -50,6 +50,15 @@ proc mem_flush_deferred*(mem: GbMemory; gb: GB) =
     let reg = int(mem.deferred_reg)
     let v   = mem.deferred_val
     mem.deferred_reg = 0
+    when CGB_LYC153_SRC_HOLD:
+      # A CGB STAT write's enables, landing, still find the 153 match the
+      # source holds through the snapback (CGB_LYC153_SRC_HOLD, gb.nim).
+      if reg == 0xFF41 and gb.cgb_enabled:
+        gb.stat_hold = STAT_LYC153_HELD
+        ppu_write_machinery(gb.ppu, gb, reg, v)
+        ppu_flush_stat_write(gb.ppu, gb)
+        gb.stat_hold = 0
+        return
     ppu_write_machinery(gb.ppu, gb, reg, v)
   ppu_flush_stat_write(gb.ppu, gb)
 

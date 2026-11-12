@@ -1,13 +1,13 @@
 # gambatte Test Suite - Detailed Results
 
-*Generated: 2026-11-12 11:02:19*
+*Generated: 2026-11-12 11:46:16*
 
 Each row is one ROM run on one device. `[dmg]` / `[cgb]` is the
 device the filename asks for; `[.., png]` rows are scored against the
 reference image next to the ROM, the rest against the hex value the
 ROM draws on screen. See tests/README.md for the mechanism.
 
-**5184/5213 passed.**
+**5201/5213 passed.**
 
 ## bgen
 
@@ -73,26 +73,20 @@ All 6 tests passed.
 
 All 16 tests passed.
 
-## lycEnable (208/225 passed)
+## lycEnable (214/225 passed)
 
-208/225 tests passed, 17 failed:
+214/225 tests passed, 11 failed:
 
 | Test | Result |
 |------|--------|
-| lycEnable/ff41_disable_2_dmg08_out0_cgb04c_out2 [cgb] | got 0, expected 2 |
 | lycEnable/ff45_enable_weirdpoint_2_dmg08_out3_cgb04c_out1 [cgb] | got 3, expected 1 |
 | lycEnable/ff45_enable_weirdpoint_ds_2_cgb04c_out1 [cgb] | got 3, expected 1 |
 | lycEnable/ff45_enable_weirdpoint_ds_lcdoffset1_2_cgb04c_out0 [cgb] | got 2, expected 0 |
 | lycEnable/ff45_enable_weirdpoint_ds_lcdoffset1_3_cgb04c_out0 [cgb] | got 2, expected 0 |
 | lycEnable/ff45_enable_weirdpoint_ds_lcdoffset1_4_cgb04c_out2 [cgb] | got 0, expected 2 |
 | lycEnable/ff45_enable_weirdpoint_lcdoffset1_2_cgb04c_out0 [cgb] | got 2, expected 0 |
-| lycEnable/late_ff41_enable_ds_1_cgb04c_out3 [cgb] | got 1, expected 3 |
-| lycEnable/late_ff41_enable_lcdoffset1_1_cgb04c_out2 [cgb] | got 0, expected 2 |
 | lycEnable/late_ff45_enable_ds_2_cgb04c_out1 [cgb] | got 3, expected 1 |
 | lycEnable/late_ff45_enable_ds_lcdoffset1_2_cgb04c_out0 [cgb] | got 2, expected 0 |
-| lycEnable/lyc153_late_ff41_enable_ds_1_cgb04c_outE2 [cgb] | got E0, expected E2 |
-| lycEnable/lyc153_late_ff41_enable_ds_lcdoffset1_1_cgb04c_outE2 [cgb] | got E0, expected E2 |
-| lycEnable/lyc153_late_ff41_enable_lcdoffset1_1_cgb04c_outE2 [cgb] | got E0, expected E2 |
 | lycEnable/lyc153_late_ff45_enable_ds_2_cgb04c_outE0 [cgb] | got E2, expected E0 |
 | lycEnable/lyc153_late_ff45_enable_lcdoffset1_1_cgb04c_outE2 [cgb] | got E0, expected E2 |
 | lycEnable/lycwirq_trigger_ly00_stat50_ds_lcdoffset1_2_cgb04c_outE2 [cgb] | got E0, expected E2 |
@@ -137,28 +131,13 @@ All 12 tests passed.
 
 All 6 tests passed.
 
-## m1 (164/170 passed)
+## m1
 
-164/170 tests passed, 6 failed:
+All 170 tests passed.
 
-| Test | Result |
-|------|--------|
-| m1/ly143_late_m0enable_2_dmg08_out3_cgb04c_out1 [cgb] | got 3, expected 1 |
-| m1/ly143_late_m2enable_2_dmg08_out3_cgb04c_out1 [cgb] | got 3, expected 1 |
-| m1/ly143_late_m2enable_ds_2_cgb04c_out1 [cgb] | got 3, expected 1 |
-| m1/ly143_late_m2enable_ds_lcdoffset1_2_cgb04c_out1 [cgb] | got 3, expected 1 |
-| m1/lyc143_late_m0enable_lycdisable_2_dmg08_cgb04c_out1 [cgb] | got 3, expected 1 |
-| m1/lyc143_late_m2enable_lycdisable_2_dmg08_cgb04c_out1 [cgb] | got 3, expected 1 |
+## m2enable
 
-## m2enable (117/120 passed)
-
-117/120 tests passed, 3 failed:
-
-| Test | Result |
-|------|--------|
-| m2enable/late_enable_lcdoffset2_2_cgb04c_out0 [cgb] | got 2, expected 0 |
-| m2enable/late_enable_ly0_lcdoffset2_2_cgb04c_out0 [cgb] | got 2, expected 0 |
-| m2enable/late_enable_m0disable_2_dmg08_out0_cgb04c_out2 [cgb] | got 0, expected 2 |
+All 120 tests passed.
 
 ## m2int_m0irq
 
@@ -180,14 +159,12 @@ All 8 tests passed.
 
 All 44 tests passed.
 
-## miscmstatirq (276/279 passed)
+## miscmstatirq (278/279 passed)
 
-276/279 tests passed, 3 failed:
+278/279 tests passed, 1 failed:
 
 | Test | Result |
 |------|--------|
-| miscmstatirq/lycstatwirq_trigger_ly00_10_50_lcdoffset3_2_cgb04c_outE2 [cgb] | got E0, expected E2 |
-| miscmstatirq/lycstatwirq_trigger_m0_late_ly44_lyc44_08_40_ds_3_cgb04c_outE2 [cgb] | got E0, expected E2 |
 | miscmstatirq/lycwirq_trigger_m0_late_ly44_lyc45_ds_3_cgb04c_outE2 [cgb] | got E0, expected E2 |
 
 ## oam_access

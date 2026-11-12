@@ -122,6 +122,108 @@ const CGB_LYC_WRITE_DEFER_DS* {.booldefine.} = false
   ## wilbertpol ROMs are single-speed and gambatte `lycEnable/*_ds_*` is net
   ## worse with it on. Unmeasured rather than decided.
 
+# ---- The line end as the CGB's STAT line sees it ----------------------------
+#
+# A CGB STAT write's enable bits reach the line CGB_STAT_ENABLE_LATENCY dots
+# into the write's M-cycle. Stepping that write one dot at a time across a
+# line's end (gambatte's `_lcdoffsetN_` rows, which shift the CPU against the
+# PPU with a speed-switch round trip) shows the sources leaving and arriving
+# in a fixed order inside what the comparator's lead (STAT_LYC_LY_LEAD_DOTS)
+# models as one dot. The constants below are that order and the widths that go
+# with it. Clean-room: derived from test ROM sources/outputs and black-box
+# runs; no emulator source consulted. docs/gb-derivations.md has the tables.
+const CGB_LINE_END_STEPS* {.booldefine.} = true
+  ## Single speed: a rendered line's end is five steps on the comparator's
+  ## lead dot (454), the edge detector run after each (fifo_cgb_line_end).
+  ## Each step's place is pinned by the rows that go red when it is moved:
+  ##  1. a STAT write in flight whose enables land on this dot takes hold, the
+  ##     line's sources still standing (`lycEnable/late_ff41_enable_
+  ##     lcdoffset1_1` [cgb] sets the LYC enable from dot 452 and gets the
+  ##     interrupt; lost without this step);
+  ##  2. the comparator lets go of this line's match, and on line 143 the
+  ##     mode-1 source and the vblank request come up (STAT_M1_LEAD);
+  ##  3. the mode-0 source falls -- two dots before the boundary it used to
+  ##     share with the DMG (`m1/ly143_late_m0enable_2` [cgb] enables mode 0
+  ##     from dot 453 and hardware is silent, where the DMG fires;
+  ##     `m1/lyc143_late_m0enable_lycdisable_2`), and after the mode-1 rise,
+  ##     so mode 0 hands vblank the line without a gap (ahead of step 2 it
+  ##     loses `lcdirq_precedence/m1irq_lcdstat18`, `m1/m1irq_m0disable_{2,3}`
+  ##     [cgb]);
+  ##  4. the comparator answers for the next line -- after the mode-0 fall, so
+  ##     mode 0 handing the line to the next line's match IS an edge, seen by
+  ##     enables a write is about to clear (`lycEnable/ff41_disable_2` [cgb]
+  ##     writes $48 -> $00 from dot 453 and still gets the interrupt; lost
+  ##     with 3 and 4 swapped; `m2enable/late_enable_m0disable_2` [cgb]);
+  ##  5. line 143's OAM pulse (m2_line144) ends: it is gone before a write
+  ##     from dot 453 lands (`m1/ly143_late_m2enable_2`, `lyc143_late_
+  ##     m2enable_lycdisable_2` [cgb]: no interrupt), but not before the match
+  ##     for line 144 is up (ended with step 3 it loses `lcdirq_precedence/
+  ##     lcdirqprecedence_lycirq_ly90_lcdstat68` [cgb]).
+  ## Step 1 runs only for a STAT write: an LYC write's edge is later still
+  ## (`lycEnable/late_ff45_enable_2`, `lyc0_late_ff45_enable_2` [cgb] go red
+  ## if it runs unconditionally). With the hand-over done here, entering
+  ## vblank has no comparator dip left at the boundary
+  ## (ly_advance_vblank_entry; the `lcdstat68` row above sees a second edge
+  ## with the dip). false loses seven: `lycEnable/ff41_disable_2`,
+  ## `late_ff41_enable_lcdoffset1_1`, `m1/ly143_late_m{0,2}enable_2`,
+  ## `lyc143_late_m{0,2}enable_lycdisable_2`, `m2enable/late_enable_
+  ## m0disable_2` [cgb].
+const CGB_M2_PULSE_SS* {.intdefine.} = 2
+  ## The CGB's STAT_M2_PULSE at single speed: the last dot of a line on which
+  ## a STAT write's landing enable still finds the OAM source high. 3 (the
+  ## DMG's) loses `m2enable/late_enable_lcdoffset2_2` and `late_enable_ly0_
+  ## lcdoffset2_2` [cgb]: the write from dot 455 is flushed on dot 3 and
+  ## hardware is silent. 0, 1 and 2 are indistinguishable (a write from dot
+  ## 454 or earlier is already caught where the line starts); -1 loses seven
+  ## (`m2enable/late_enable_1`, `late_enable_lcdoffset3_1`, `late_enable_
+  ## after_lycint{,_disable}_2`, `late_enable_m0disable_2`, `lyc1_late_
+  ## m2enable_lycdisable_1`, `lcdirq_precedence/lcdirqprecedence_lycirq_
+  ## ly44_lcdstat68`). Double speed keeps STAT_M2_PULSE
+  ## (`late_enable_ds_{1,2}`, `_ds_lcdoffset1_{1,2}` pass at 3).
+const CGB_M2_144_PULSE_DS* {.intdefine.} = 1
+  ## The last dot of line 144 on which the CGB's vblank-entry OAM pulse
+  ## (m2_line144) is still high at double speed; at single speed it ends
+  ## inside line 143 (CGB_LINE_END_STEPS step 5). 2 loses `m1/ly143_late_
+  ## m2enable_ds_lcdoffset1_2` [cgb] (3, the DMG's STAT_M2_PULSE, also
+  ## `ly143_late_m2enable_ds_2`); -1 loses `ly143_late_m2enable_ds_1`,
+  ## `m1irq_m2disable_lycdisable_ds_2`, `m1irq_m2enable_lyc_ds_1` and
+  ## `m2m1irq_ifw_ds_2`; 0 and 1 are indistinguishable.
+const CGB_M1_FALL_FIRST* {.booldefine.} = true
+  ## Single speed: where line 153 hands over to line 0, the mode-1 source
+  ## falls before a STAT write's enables landing on that same dot take hold.
+  ## gambatte `miscmstatirq/lycstatwirq_trigger_ly00_10_50_lcdoffset3_2` [cgb]
+  ## adds the LYC enable (LYC = 0) from dot 454 and gets the interrupt: the
+  ## line dipped; `..._10_50_1`, from dot 453, does not. At double speed the
+  ## landing is first (`..._ds_1`, `..._ds_lcdoffset1_1`).
+const CGB_M0_FALL_DS_FIRST* {.booldefine.} = true
+  ## Double speed: at a rendered line's boundary the mode-0 source falls, then
+  ## a STAT write's enables landing on that dot take hold, then the comparator
+  ## lets go. gambatte `lycEnable/late_ff41_enable_ds_1` [cgb] (LYC enable
+  ## from dot 455: the old match is still found) and `miscmstatirq/
+  ## lycstatwirq_trigger_m0_late_ly44_lyc44_08_40_ds_3` ($08 -> $40 from dot
+  ## 455: mode 0 is gone before the match is enabled, an edge). false loses
+  ## both. Not on line 143, where mode 0 outlasts the landing: `m1/
+  ## ly143_late_m0enable_ds_1` [cgb] enables it from dot 455 and fires, and
+  ## with this order there `lyc143_late_m0enable_lycdisable_ds_1` goes red.
+const CGB_LYC153_SRC_HOLD* {.booldefine.} = true
+  ## Through line 153's snapback the CGB's LYC = 153 match is still there for
+  ## a STAT write's landing enable until the source relatches for LY = 0
+  ## (lyc_src_relatch_dot), though nothing else sees it past LY153_SNAP_DOT.
+const CGB_LYC153_HOLD_PAST* {.intdefine.} = 0
+  ## Dots past that relatch dot the landing still finds it. -1 loses
+  ## `lycEnable/lyc153_late_ff41_enable_lcdoffset1_1`, `_ds_1` and
+  ## `_ds_lcdoffset1_1` [cgb] (writes from dot 4 at single speed, 6 and 7 at
+  ## double, all want the interrupt). Positive values are inert: a later
+  ## write's enables are next looked at when its M-cycle ends, past the
+  ## snapback's window (LYC_RELATCH_DOT), and `lyc153_late_ff41_enable_2`
+  ## (from dot 5), `_ds_2` (9) and `_ds_lcdoffset1_2` (8) are silent.
+const
+  # GB.stat_hold bits: what a step inside one dot still holds (scratch).
+  STAT_HOLD_M0*     = 1'u8   # the mode-0 source, past its fall dot
+  STAT_HOLD_M2_144* = 2'u8   # line 143's OAM pulse, past its fall dot
+  STAT_LAND_AFTER*  = 4'u8   # a STAT write landing on this dot has not yet
+  STAT_LYC153_HELD* = 8'u8   # the landing's view of the 153 match
+  STAT_M0_GONE*     = 16'u8  # the mode-0 source, ahead of the mode flag
 const STAT_ENABLE_EARLY* = STAT_ENABLE_LATENCY < 4 or CGB_STAT_ENABLE_LATENCY < 4
   ## Whether either device's enable field lands before the M-cycle boundary;
   ## at 4/4 the rule and its GbPpu field compile out.
@@ -2714,6 +2816,7 @@ type
     m1_early*:         bool
     vbl_early*:        bool
     m2_ly0_up*:        bool
+    stat_hold*:        uint8   # STAT_HOLD_* / STAT_LAND_AFTER: live inside one dot's steps. Scratch.
     # DMG_HALT_MIN_MCYCLES: the scheduler cycle the CPU halted on. Scratch.
     halt_start*:       CycleCount
     win_check_gap*:    int32   # WIN_CHECK_TWO_SLOTS: a second sample, dots after the first
