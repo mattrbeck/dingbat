@@ -387,7 +387,13 @@ proc to_screen(g: Geometry; v: var Vertex) =
   let vh = int64(g.vp_y2 - g.vp_y1 + 1)
   v.sx = lo32((int64(v.x) + w) * vw div (2 * w) + g.vp_x1)
   v.sy = lo32((w - int64(v.y)) * vh div (2 * w) + (191 - g.vp_y2))
-  v.z24 = lo32(clamp(((int64(v.z) shl 14) div w + 0x3FFF) * 0x200, 0'i64, 0xFF_FFFF'i64))
+  # Z-buffer depth on the rear plane's scale (GBATEK "CLEAR_DEPTH": 15-bit,
+  # 7FFFh most distant, widened as D * 200h): z / w as a truncated 14-bit
+  # quotient (-4000h..4000h between the near and far planes), moved up so the
+  # far plane lands on 7FFFh, then widened and clamped. 3d_probe_zmap{,_eq,
+  # _far,_near} pin the truncation, the scale and both clamps; the reference
+  # cores sit one 200h step nearer against the clear depth (docs/oracles.md).
+  v.z24 = lo32(clamp(((int64(v.z) shl 14) div w + (0x7FFF - 0x4000)) * 0x200, 0'i64, 0xFF_FFFF'i64))
 
 proc hd_screen(g: Geometry; v: Vertex): array[2, int32] =
   ## to_screen's position in 1/HD_SUB dots: the sub-dot fraction that the
