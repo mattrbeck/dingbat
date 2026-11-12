@@ -147,14 +147,14 @@ a reference PNG, `mGBA suite <section>` a section of mGBA's test ROM.
   pair, where the disable landing on the latency's last dot still blocks;
   a strict comparison loses six other CGB rows, so that source's window is
   one dot longer, an open row of triage A3.
-- The LYC write is the same disable through the comparator: `LYC_DROP_
-  LATENCY_DMG = 1`, `_CGB = 6` (the CGB's one-M-cycle LYC defer plus the
-  2-dot latency), both bracketed at the constants by `m0enable/lycdisable_
-  ff45_*` and `m2enable/lyc1_m2irq_late_lyc255_*` (+7, nothing lost). An
-  LYC write in the M-cycle of the line boundary does not drop the line
+- The DMG's LYC write is the same disable through the comparator: `LYC_DROP_
+  LATENCY_DMG = 1`, bracketed at the constant by `m0enable/lycdisable_
+  ff45_*` and `m2enable/lyc1_m2irq_late_lyc255_*`. A DMG LYC write in the
+  M-cycle of the line boundary does not drop the line
   (`LYC_DROP_BOUNDARY_SKIP`): the comparator meets the new LYC and the new
   LY together, so `lycEnable/ff45_enable_weirdpoint_3` and `lyc153_late_
-  ff45_enable_3` [dmg] see no edge.
+  ff45_enable_3` [dmg] see no edge. The CGB's LYC write does not come
+  through here: "CGB LYC write: a sampled comparator", section 7.
 
 ### CPU VRAM/OAM locks close on the live mode and open with the STAT bits
 - Site: `cpu_vram_open` / `cpu_oam_open`, checked on the CPU bus
@@ -517,6 +517,116 @@ grid's constants are a coupled set and move together or not at all.
   comparator that already stepped (`LY_BLIND_SKIP_LED`;
   `ly0/lycint152_lyc153irq_late_retrigger_2`). A rendered line's window
   stays: skipping it loses 12 `lcdirq_precedence`/`miscmstatirq` rows.
+
+### CGB LYC write: a sampled comparator
+- Ships: `CGB_LYC_CMP_LATCH = true`, `CGB_LYC_LAND_T = 2`,
+  `CGB_LYC_LATCH_PHASE = 0`, `CGB_LYC_BRIDGE = 1` (`gb.nim`); `GB.lyc_cmp`,
+  `lyc_cmp_write` / `lyc_cmp_land` / `lyc_cmp_settle` (`ppu.nim`),
+  `fifo_tick_lyc_land` (`fifo_ppu.nim`).
+- Claim: on a CGB the LY = LYC STAT source does not read the LYC register
+  the CPU reads back. (1) A write reaches the comparator's input half a CPU
+  M-cycle after the top of the write's M-cycle: 2 dots at single speed, 1 at
+  double. (2) The comparator's answer reaches the STAT line only on a 4-dot
+  grid of the PPU's own clock, the grid its LY step is on (dot 454 of a
+  line at single speed, `STAT_LYC_LY_LEAD_DOTS`; the line boundary at
+  double speed, where that lead is 0). So the line moves, up or down, on
+  the first grid dot at or after the landing: 2..5 dots after the top of
+  the write's M-cycle at single speed (5 on the power-on CPU grid, 2 on the
+  grid a KEY1 round trip leaves), 1..4 at double. (3) The sample is one
+  event with whatever else the PPU does on its dot: a mode source rising or
+  falling there, or the comparator's own LY changing (the step before the
+  boundary, line 153's snap to 0), meets the new LYC, and the line sees one
+  change, not two. (4) A write whose sample is the LY step itself, moving a
+  match on the line ending onto the line starting, is therefore never seen
+  low, and the line boundary's comparator window (`ly_advance_open`) stays
+  shut for it; if the old LYC did not match the line ending, the window
+  opens as on any line and a mode-0 source hands the line to the new match
+  with an edge. The readable register and STAT bit 2 keep their own timing
+  (`CGB_LYC_WRITE_DEFER`, `CGB_LYC_EDGE_DEFER`).
+- Evidence, single speed (W = the first dot of the write's M-cycle; every
+  row is gambatte, [cgb]):
+  - `lycEnable/ff45_enable_weirdpoint_{1,2,3,4}` and `_lcdoffset1_{1,2,3}`
+    hold LYC = LY = 5 and write LYC = 6 around the 5 -> 6 boundary. W = 445
+    and 448 request (the old match drops on the sample before the step, the
+    new one rises at 454), W = 449 and 452 do not (both inputs move under
+    the sample at 454), W = 453, 456 and 457 request again (the line is low
+    from 454 until the next sample finds the new LYC). The quiet window is
+    exactly one grid period, W in 449..452, across both CPU grids, so the
+    grid is the PPU's and not the CPU's.
+  - `lycEnable/late_ff45_enable_{1,2,3}` and `_lcdoffset1_{1,2}` turn a match
+    on late in the matching line: W = 445 and 448 request, 449, 452 and 453
+    do not (the first sample that holds the new LYC is the one LY leaves on).
+  - `lycEnable/lyc153_late_ff45_enable_{1..5}` and `_lcdoffset1_{1,2}` do the
+    same across 152 -> 153, where the comparator's LY is 153 for two
+    samples only (454 and dot 2; it is 0 from dot 6): W = 445 requests, 449
+    is the carried match, 453 and 456 request (sample on dot 2), dot 1, dot
+    4 and dot 5 do not (their sample is dot 6, the snap's own).
+  - `lycEnable/lyc0_ff45_disable_{1,2,3}` take LYC = 0 away around the snap:
+    W = dot 1 is quiet (sampled on dot 6 together with the snap), dots 5
+    and 9 request.
+  - `m0enable/lycdisable_ff45_{1..4}` and `_scx{1,2,3}_{1,2,3}` break a
+    match ahead of the mode-0 rise at dot 250 + SCX: W = 241 (sample 246)
+    and W = 245 with the rise on 251..253 (sample 250) dip and request;
+    W = 245 with the rise on 250 itself does not (one event), nor does
+    W = 249 (sample 254).
+  - `lycEnable/lycwirq_trigger_ly00_stat50_{1,2,3}` and `_lcdoffset1_{1,2}`
+    (mode-1 source up through line 153, LYC 255 -> 0): W = 449 and 452 are
+    quiet (LYC is up at 454, before mode 1 lets go at the boundary), 453,
+    456 and dot 1 request.
+  - `miscmstatirq/lycwirq_trigger_m0_late_ly44_lyc45_{1..5}`: the old LYC
+    did not match the line ending, so every position requests, W = 449
+    (sample on the step) included: the bridge is for a carried match only.
+- Evidence, double speed (the grid is on the boundary's phase, the landing
+  one dot in): `ff45_enable_weirdpoint_ds_{1..4}` and
+  `_ds_lcdoffset1_{1..4}` are quiet for W = 452..455 and request at 450,
+  451, 456 and dot 1, again one grid period over both CPU grids;
+  `late_ff45_enable_ds_{1,2}`, `_ds_lcdoffset1_{1,2}` request at 450 and
+  451 and not at 452 and 453; `lyc153_late_ff45_enable_ds_{1..6}` and
+  `_ds_lcdoffset1_{1,2}` (the comparator's LY is 153 on the samples at the
+  boundary and dot 4, 0 from dot 8); `lyc0_ff45_disable_ds_{1,2}`;
+  `m0enable/lycdisable_ff45_ds_1`, `_scx1_ds_{1,2}`;
+  `lycwirq_trigger_ly00_stat50_ds_{1,2}`, `_ds_lcdoffset1_{1,2}` (W = 454
+  and 455 land on the boundary's sample with the mode-1 source's fall: one
+  event, quiet; 456 and dot 1 request); `miscmstatirq/
+  lycwirq_trigger_m0_late_ly44_lyc45_ds_{1..4}`.
+- Brackets (gambatte hex rows, 4,302 scored; this model is 4,285):
+  `CGB_LYC_LAND_T` 0 or 1 loses 22 (the single-speed `_2` arms of nearly
+  every family above and the `ds_lcdoffset1` arms), 3 loses 5 (the
+  single-speed `lcdoffset1` arms: `ff45_enable_weirdpoint_lcdoffset1_{1,2}`,
+  `late_ff45_enable_lcdoffset1_1`, `lyc153_late_ff45_enable_lcdoffset1_1`,
+  `lycwirq_trigger_ly00_stat50_lcdoffset1_1`), 4 loses 20 (those and the
+  `_ds_` arms). `CGB_LYC_LATCH_PHASE` 1, 2, 3 lose 29, 28, 26.
+  `CGB_LYC_BRIDGE` 0 loses 8 (the six quiet `ff45_enable_weirdpoint` arms,
+  `lyc153_late_ff45_enable_ds_{2,3}`); 2 (shut for any write on the step's
+  sample) loses `lycwirq_trigger_m0_late_ly44_lyc45_{3,ds_2,ds_3}`.
+  Sampling ahead of the dot's own events loses `m0enable/lycdisable_ff45_2`;
+  sampling after them, with the line evaluated in between, loses
+  `lyc0_ff45_disable_{1,ds_1}`. `CGB_LYC_CMP_LATCH = false` is the tree
+  before this entry, row for row.
+- Rows taken (12, nothing lost anywhere in `tests/results*.md`):
+  `lycEnable/ff45_enable_weirdpoint_{2, ds_2, ds_lcdoffset1_2,
+  ds_lcdoffset1_3, ds_lcdoffset1_4, lcdoffset1_2}`,
+  `late_ff45_enable_{ds_2, ds_lcdoffset1_2}`,
+  `lyc153_late_ff45_enable_{ds_2, lcdoffset1_1}`,
+  `lycwirq_trigger_ly00_stat50_ds_lcdoffset1_2`,
+  `miscmstatirq/lycwirq_trigger_m0_late_ly44_lyc45_ds_3`.
+- Supersedes, on the CGB's STAT line only: `LYC_DROP_LATENCY_CGB`,
+  `LYC_DROP_LATENCY_CGB_DS` (the fall is the sample's) and the line half of
+  `CGB_LYC_EDGE_DEFER` (the rise is too; its event still times the readable
+  bit for wilbertpol `ly_lyc*_write-C`).
+- Not serialized: the write is in flight for at most five dots, and
+  `step_frame` runs an instruction past a frame edge that would cut one.
+- Open: why the double-speed grid sits on the boundary's phase rather than
+  two dots ahead of it is the existing `STAT_LYC_LY_LEAD_DS = 0` question,
+  not a new one; the grid is anchored to whatever dot the comparator's LY
+  steps on. The DMG's LYC write keeps its own spelling
+  (`LYC_DROP_LATENCY_DMG`, `LYC_DROP_BOUNDARY_SKIP`, `DMG_LYC_BOUNDARY_OPEN`);
+  its quiet arm (`ff45_enable_weirdpoint_3`, W = 453) is consistent with
+  the same grid and a later landing, but nothing was moved there.
+- Clean-room: derived from test ROM sources/outputs and black-box runs; no
+  emulator source consulted. (Black-box runs: none were needed; every
+  figure above is a gambatte test ROM's own filename verdict against
+  dingbat's trace of the write's dot.)
 
 ### CGB STAT/LYC write timing
 - The LYC-write (FF45) half: removed 2026-11-12 pending a clean-room

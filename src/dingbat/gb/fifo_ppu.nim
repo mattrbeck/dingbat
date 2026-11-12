@@ -2809,9 +2809,31 @@ proc fifo_lazy_enter(ppu: GbFifoPpu; gb: GB; remaining: int; h: int32) =
     ppu.tile_data_low = 0x3C; ppu.tile_data_high = 0xC3; ppu.fetch_scy = 0x77
     ppu.tdsel_addr = 0x1234567
 
+proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int)
+
+when CGB_LYC_CMP_LATCH:
+  proc fifo_tick_lyc_land(ppu: GbFifoPpu; gb: GB; cycles: int) {.noinline.} =
+    ## A span with a CGB LYC write in flight to the comparator: the dots up
+    ## to its sample, the landing (lyc_cmp_land), the rest. Cold: at most
+    ## two ticks per LYC write.
+    var left = cycles
+    while left > 0 and gb.lyc_land_left >= 0:
+      let n = gb.lyc_land_left
+      gb.lyc_land_left = -1
+      if n == 0: lyc_cmp_land(ppu, gb)
+      fifo_tick_slow(ppu, gb, 1)
+      dec left
+      if n == 0: lyc_cmp_settle(ppu, gb)
+      else: gb.lyc_land_left = n - 1
+    if left > 0: fifo_tick_slow(ppu, gb, left)
+
 proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
   ## Everything the PPU can do in a span that is not a pure idle skip; the
   ## idle case inlines into fifo_tick.
+  when CGB_LYC_CMP_LATCH:
+    if gb.lyc_land_left >= 0:
+      fifo_tick_lyc_land(ppu, gb, cycles)
+      return
   gb.wl_mark = gb.scheduler.cycles
   when PLAIN_LAZY_ON:
     if ppu.lazy_end != 0: fifo_lazy_sync(ppu, gb)
@@ -3153,6 +3175,8 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
           else:
             when LY_BLIND_SCOPE >= 0: ly_advance_line(ppu, gb)
             else:                     ppu.`mode_flag=`(2'u8, gb)
+          # A carried match is this boundary's alone (lyc_cmp_land).
+          when CGB_LYC_CMP_LATCH: gb.lyc_bridge = false
       of 1:  # V-Blank
         # The line-144 OAM pulse's falling edge (M2_144_PULSE, ppu.nim): run
         # the edge detector explicitly or the STAT line stays latched high.
@@ -3212,6 +3236,7 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
             when STAT_IRQ_SPLIT: ppu.irq_ly = ppu.ly
             when LY_BLIND_SCOPE >= 1: ly_advance_vblank(ppu, gb)
             else:                     ppu_handle_stat_interrupt(ppu, gb)
+          when CGB_LYC_CMP_LATCH: gb.lyc_bridge = false
         when STAT_IRQ_SPLIT:
           # The LYC=0 source sees the snapback a lead ahead of the readable LY
           # (gambatte lyc0int_* / lyc153int_*). Not re-derived against the
@@ -3266,7 +3291,8 @@ proc fifo_tick*(ppu: GbFifoPpu; gb: GB; cycles: int) {.inline.} =
     # `<=`: landing exactly on the target leaves the transition for the next
     # entry, as the loop does.
     if next <= target and
-       (m != 1 or ppu.cycle_counter > LYC_RELATCH_DOT):
+       (m != 1 or ppu.cycle_counter > LYC_RELATCH_DOT) and
+       (not CGB_LYC_CMP_LATCH or gb.lyc_land_left < 0):
       ppu.cycle_counter = next
       return
   elif (ppu.lcd_control and 0x80'u8) == 0:
@@ -3279,7 +3305,8 @@ proc fifo_tick*(ppu: GbFifoPpu; gb: GB; cycles: int) {.inline.} =
   elif PLAIN_LAZY_ON:
     # A deferred mode 3 costs one compare a tick, as an idle span does.
     let next = ppu.cycle_counter + int32(cycles)
-    if next <= ppu.lazy_end:
+    if next <= ppu.lazy_end and
+       (not CGB_LYC_CMP_LATCH or gb.lyc_land_left < 0):
       ppu.cycle_counter = next
       return
   fifo_tick_slow(ppu, gb, cycles)

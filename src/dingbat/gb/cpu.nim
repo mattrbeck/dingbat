@@ -856,6 +856,10 @@ proc wl_horizon(gb: GB; reads_ly, reads_stat: bool; period = 0): int =
   var dots: int32
   var lcd_off = false
   let ppu {.cursor.} = gb.fifo_ppu
+  # A CGB LYC write still in flight to the comparator lands on a dot of its
+  # own (CGB_LYC_CMP_LATCH).
+  when CGB_LYC_CMP_LATCH:
+    if gb.lyc_land_left >= 0: return 0
   if not ppu.lcd_enabled:
     # Switched off and settled (fifo_tick): LY, STAT and the rest hold still
     # up to the dot before the blank frame.

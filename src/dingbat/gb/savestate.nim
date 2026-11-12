@@ -382,6 +382,12 @@ proc load_ppu_state(ppu: GbPpu; gb: GB; r: var Reader; rev: uint32) =
                       $int(ppu.ly) & ", which is a vblank line: only mode 1 " &
                       "exists there")
   ppu.lyc = r.read_u8()
+  # Derived: the comparator's copy differs from the register for at most
+  # five dots after a CGB write (CGB_LYC_CMP_LATCH).
+  when CGB_LYC_CMP_LATCH:
+    gb.lyc_cmp = ppu.lyc
+    gb.lyc_land_left = -1
+    gb.lyc_bridge = false
   r.read_bytes(ppu.bgp)
   r.read_bytes(ppu.obp0)
   r.read_bytes(ppu.obp1)

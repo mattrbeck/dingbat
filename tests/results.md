@@ -1,14 +1,14 @@
 # Dingbat Test Results
 
-*Generated: 2026-11-12 11:46:16 · commit 070a5637 · game-boy-test-roms v7.0*
+*Generated: 2026-11-12 11:49:48 · commit ebe27dc1 · game-boy-test-roms v7.0*
 
 Device column: the hardware the row is scored on. `cart` = the cart header picks the device (DMG-ABC for a DMG cart, CPU CGB C for a CGB one); `DMG`/`CGB`/`SGB` = forced; a trailing token is a specific boot table/revision (`--model`); `—` = GBA, which has no device axis here. A row name ending `@<model>` is one ARM of a test whose name declares several machines: a ROM that states the devices it was verified on (AGE's `ei-halt-dmgC-cgbBCE`, mealybug's `_cgb_c`/`_cgb_d` capture pair, mooneye's `-GS` family) gets one row per revision rather than one row on whichever machine happened to be the default, so each revision is actually covered. A suite where every row passes has only its summary row — its per-row section comes back as soon as anything in it fails.
 
 ## Summary
 
 - **Total:** 1586
-- **Pass:** 1566
-- **Fail:** 20
+- **Pass:** 1567
+- **Fail:** 19
 
 | Suite | Pass | Total | Status |
 |-------|------|-------|--------|
@@ -18,7 +18,7 @@ Device column: the hardware the row is scored on. `cart` = the cart header picks
 | Game Boy - Blargg cgb_sound | 12 | 12 | 👌 |
 | Game Boy - Blargg dmg_sound | 12 | 12 | 👌 |
 | [Game Boy - DocBoy](results_docboy.md) | 53 | 70 | 👀 |
-| [Game Boy - gambatte](results_gambatte.md) | 46 | 48 | 👀 |
+| [Game Boy - gambatte](results_gambatte.md) | 47 | 48 | 👀 |
 | Game Boy - GBMicrotest | 480 | 480 | 👌 |
 | Game Boy - MagenTests | 7 | 7 | 👌 |
 | Game Boy - MBC | 6 | 6 | 👌 |
@@ -117,7 +117,7 @@ Device column: the hardware the row is scored on. `cart` = the cart header picks
 
 Each row is one section of a DocBoy manifest (`docboy/<manifest>/<section>`). See [detailed results](results_docboy.md) for individual test outcomes.
 
-## Game Boy - gambatte (46/48)
+## Game Boy - gambatte (47/48)
 
 | Test | Device | Result |
 |------|--------|--------|
@@ -137,7 +137,7 @@ Each row is one section of a DocBoy manifest (`docboy/<manifest>/<section>`). Se
 | gambatte/ly0 | per-ROM | 👌 96/96 passed |
 | gambatte/lyc0int_m0irq | per-ROM | 👌 6/6 passed |
 | gambatte/lyc153int_m2irq | per-ROM | 👌 16/16 passed |
-| gambatte/lycEnable | per-ROM | 👀 214/225 passed |
+| gambatte/lycEnable | per-ROM | 👀 224/225 passed |
 | gambatte/lycint_ly | per-ROM | 👌 6/6 passed |
 | gambatte/lycint_lycflag | per-ROM | 👌 12/12 passed |
 | gambatte/lycint_lycirq | per-ROM | 👌 4/4 passed |
@@ -155,7 +155,7 @@ Each row is one section of a DocBoy manifest (`docboy/<manifest>/<section>`). Se
 | gambatte/m2int_m2irq | per-ROM | 👌 18/18 passed |
 | gambatte/m2int_m2stat | per-ROM | 👌 8/8 passed |
 | gambatte/m2int_m3stat | per-ROM | 👌 44/44 passed |
-| gambatte/miscmstatirq | per-ROM | 👀 278/279 passed |
+| gambatte/miscmstatirq | per-ROM | 👌 279/279 passed |
 | gambatte/oam_access | per-ROM | 👌 69/69 passed |
 | gambatte/oamdma | per-ROM | 👌 802/802 passed |
 | gambatte/scx_during_m3 | per-ROM | 👌 138/138 passed |

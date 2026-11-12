@@ -102,7 +102,11 @@ const CGB_LYC_EDGE_DEFER* {.booldefine.} = true
   ## at the boundary of the M-cycle AFTER its byte lands, as a one-shot
   ## `etGbLycEdge` scheduler event (so the pending edge rides the already
   ## serialized event array). Ships true: the six wilbertpol `ly_lyc*_write-C`
-  ## arms and gambatte `lycEnable/lyc_ff45_trigger_delay_2`. Do not respell it
+  ## arms and gambatte `lycEnable/lyc_ff45_trigger_delay_2`. With
+  ## CGB_LYC_CMP_LATCH the STAT line is the comparator's own (GB.lyc_cmp) and
+  ## has already moved by then (the gambatte row passes with this off); what
+  ## the event still times is the readable coincidence bit, which is what the
+  ## wilbertpol arms read. Do not respell it
   ## as a per-M-cycle poll in `mem_tick_components`: the test destroys the
   ## `fifo_tick` tail call and costs ~1.2% of retired instructions on every
   ## machine, DMG included.
@@ -224,6 +228,26 @@ const
   STAT_LAND_AFTER*  = 4'u8   # a STAT write landing on this dot has not yet
   STAT_LYC153_HELD* = 8'u8   # the landing's view of the 153 match
   STAT_M0_GONE*     = 16'u8  # the mode-0 source, ahead of the mode flag
+const CGB_LYC_CMP_LATCH* {.booldefine.} = true
+  ## Whether the CGB's LY = LYC STAT source reads LYC through a sampled copy
+  ## (GB.lyc_cmp) rather than the register: see "The CGB comparator samples
+  ## LYC" in ppu.nim and docs/gb-derivations.md. false = the source reads the
+  ## readable register (CGB_LYC_WRITE_DEFER) and takes the old drop/edge path.
+const CGB_LYC_LAND_T* {.intdefine.} = 2
+  ## CPU T-cycles after the top of its M-cycle at which a CGB LYC write
+  ## reaches the comparator's input: half an M-cycle, 2 dots at single speed
+  ## and 1 at double (`shr current_speed`).
+const CGB_LYC_LATCH_PHASE* {.intdefine.} = 0
+  ## Dots by which the comparator's 4-dot sample grid is offset from the dot
+  ## its LY steps on (line end - STAT_LYC_LY_LEAD_DOTS / _DS). 0 ships: the
+  ## LY step is itself a sample.
+const CGB_LYC_BRIDGE* {.intdefine.} = 1
+  ## Whether a match that an LYC write carries across the comparator's LY
+  ## step (old LYC = old LY, landing on the step's own sample) keeps the
+  ## line boundary's comparator window shut (ly_advance_open). 0 = the
+  ## window opens regardless; 2 = any write landing on the step's sample
+  ## shuts it, matched before or not.
+
 const STAT_ENABLE_EARLY* = STAT_ENABLE_LATENCY < 4 or CGB_STAT_ENABLE_LATENCY < 4
   ## Whether either device's enable field lands before the M-cycle boundary;
   ## at 4/4 the rule and its GbPpu field compile out.
@@ -2840,6 +2864,15 @@ type
                                # Serialized raw from GB payload rev 6 (it is not rebased with the
                                # scheduler); with stop_op_latch and lyc_write_old, in GB_SEC_MACH.
     lyc_write_old*:    int16   # DMG_LYC_BOUNDARY_OPEN: LYC before a parked DMG LYC write (+1; 0 = none)
+    # CGB_LYC_CMP_LATCH: the LYC the LY = LYC STAT source compares against
+    # (equal to ppu.lyc except while a CGB write is in flight to it), the
+    # write in flight (dots left until it lands, -1 = none; its value), and
+    # whether the last landing carried a match across the LY step. In flight
+    # for at most five dots; not serialized (load_ppu_state re-derives).
+    lyc_cmp*:          uint8
+    lyc_land_val*:     uint8
+    lyc_land_left*:    int8
+    lyc_bridge*:       bool
     when defined(test_harness):
       test_output*:  TestOutput
 
@@ -3760,6 +3793,7 @@ proc new_gb*(bootrom_path: string; rom_path: string; headless: bool; run_bios: b
   # mode there (cgb_native, gb_sync_cgb_native).
   result.cgb_enabled = force_cgb or
     ((cgb_bootrom or cgb_device) and not force_dmg)
+  when CGB_LYC_CMP_LATCH: result.lyc_land_left = -1
   # Default revision: the one the references are scored against. CGB C --
   # mealybug's `_cgb_c` set (`m3_bgp_change` exact at CGB_MIXER_LATENCY = 1),
   # `cgb-acid-hell`'s `$FEA0` branch. DMG ABC -- mooneye `boot_regs-dmgABC`,
@@ -3955,8 +3989,15 @@ proc step_frame*(gb: GB) =
   # to the end of mode 3; the machine runs the same instructions either way,
   # only the host's frame edge moves (by under a line). A CPU in STOP mode
   # freezes the PPU (mem_tick_stopped), so it is left where it is.
-  while (gb.ppu.lcd_status and 3'u8) == 3'u8 and gb.ppu.lcd_enabled and
-        not gb.cpu.stopped:
+  # Likewise a CGB LYC write still in flight to the comparator (GB.lyc_cmp,
+  # at most two dots past its instruction), which is not in the format
+  # either; `settle` bounds it, so a run of back-to-back LYC writes cannot
+  # hold the frame.
+  var settle = 4
+  while gb.ppu.lcd_enabled and not gb.cpu.stopped:
+    if (gb.ppu.lcd_status and 3'u8) == 3'u8: discard
+    elif CGB_LYC_CMP_LATCH and gb.lyc_land_left >= 0 and settle > 0: dec settle
+    else: break
     gb.cpu.tick(gb)
   gb.ppu.frame = false
   if gb.sgb != nil: sgb_frame_end(gb)
