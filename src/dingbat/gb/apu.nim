@@ -173,12 +173,7 @@ const APU_SPSW_EXTRA_DOTS_SINGLE* {.intdefine.} = 3
   ## speedchange{,2,3,4,5}*_ch1_duty0_pos6_to_pos7_timing_* [cgb] (36 rows,
   ## one to five switches, both directions first) is additive in these:
   ## 7 / 9 and 2 / 4 each lose rows. Refused: 10 / 7 (without the re-phase;
-  ## the two- to five-switch rows want sums no constant pair gives),
-  ## 5 / 1 (APU_CLOCK_CARRY's shares).
-const APU_SPSW_EXTRA_DOTS_CARRY* {.intdefine.} = 5
-const APU_SPSW_EXTRA_DOTS_CARRY_SINGLE* {.intdefine.} = 1
-  ## The same shares under APU_CLOCK_CARRY (apu/psg_host.nim), which is
-  ## refuted (docs/gb-failure-triage.md H2).
+  ## the two- to five-switch rows want sums no constant pair gives).
 
 const APU_SPSW_REPHASE_LEAD_T* {.intdefine.} = 3
 const APU_SPSW_REPHASE_GRID_T* {.intdefine.} = 1
@@ -259,14 +254,8 @@ proc apu_rescale_speed*(apu: GbApu; gb: GB; old_speed, new_speed: uint8) =
   # A deferred step 7 lands before the switch (at most ENV_CLOCK_DS_LATE_T
   # early); its timing is tied to the old speed's divider tap.
   if apu.env_late_pending: apu_env_late_run(apu)
-  var now = gb.scheduler.cycles
-  var base_new = now
-  when APU_CLOCK_CARRY != 0:
-    if gb.quirks.apu_clock_carry:
-      # Deadlines keep their distance in 2 MHz cycles from the carried clock's
-      # last cycle, which the switch re-reads (APU_CLOCK_CARRY).
-      now = CycleCount(gb.sh_l0)
-      base_new = CycleCount(gb.sh_l1)
+  let now = gb.scheduler.cycles
+  let base_new = now
   template conv(x: CycleCount): CycleCount =
     block:
       let remaining = x - now
@@ -317,8 +306,6 @@ proc gb_rebase*(gb: GB): CycleCount {.discardable.} =
   ch4_advance_divisor(gb.apu.channel4, gb)
   result = gb.scheduler.rebase()
   gb.apu.apu_rebase(gb, result)
-  when APU_CLOCK_CARRY != 0:
-    gb.sh_last -= int64(result); gb.sh_l0 -= int64(result); gb.sh_l1 -= int64(result)
 
 proc tick_frame_sequencer*(apu: GbApu; gb: GB) =
   # length_step clears `enabled` and sweep_step rewrites ch1.frequency, so
@@ -632,7 +619,6 @@ proc apu_write*(apu: GbApu; idx: int; val: uint8; gb: GB) =
       apu_drop_spsw_lag(apu, gb)
     elif (val and 0x80) != 0 and not apu.sound_enabled:
       when APU_DS_TRIGGER_SNAP != 0: gb.apu_power_on_at = int64(gb.scheduler.cycles)
-      when APU_CLOCK_CARRY != 0: apu_sh_power_on(gb)
       apu.spsw_rephase_pending = true
       apu.env_late_pending = false
       apu.sound_enabled = true

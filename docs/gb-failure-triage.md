@@ -137,11 +137,7 @@ late_{enable_,}m1disable_2 [dmg]`, `lyc153_m1disable_ds_1`; lost
 `lycEnable/lyc153_late_{enable_,}m1disable_2 [cgb]`, whose LYC = 153 rise
 meets a mode-1 disable landing on the latency's last dot and still blocks
 (a strict `>` loses six other CGB rows instead: that source's latency is
-one dot longer than the mode-0/2 sources', not the rule's edge). Second-
-emulator cross-check (gambatte-core `mstat_irq.h`, `lyc_irq.cpp`, read for
-facts): each source event reads a copy of STAT that a write updates only
-when it lands more than 2 cycles (CGB) before the event, i.e. the same
-window, spelled per source.
+one dot longer than the mode-0/2 sources', not the rule's edge).
 
 **Closed 2026-09-22: the same for LYC writes (+7).** An LYC write that
 breaks the match is the same disable through the comparator
@@ -182,10 +178,8 @@ edge. Sub-shapes, each a separate rule:
   `lyc143_late_m2enable_lycdisable_2` and `_ds_2` twins, both devices);
   `m2_line144` now holds through the boundary. The three CGB arms left are
   the same rows one M-cycle later: the CGB write's enable lands 2 dots after
-  its commit, one dot BEFORE dingbat's boundary events, where gambatte-core's
-  model (read for facts: `mstat_irq.h`, the mode-1 event 2 cycles before the
-  LY increment, a write latched only if `cc + 2 < event`) has it tie with
-  them and lose. The vblank-entry sources sit 2 dots earlier against the CPU
+  its commit, one dot BEFORE dingbat's boundary events, where the rows have
+  it tie with them and lose. The vblank-entry sources sit 2 dots earlier against the CPU
   grid than the mode-0 source, whose rows bracket `CGB_STAT_ENABLE_LATENCY`
   at 2; a per-source spelling is the next step.
 * `lycEnable/lyc153_late_*`, `lyc0_m1disable_*`, `lcdoff_lycirqen_*` (15):
@@ -232,8 +226,8 @@ the full 5157-row list:
   dot. The six it loses (`m1/lyc143_late_m{0,2}enable_lycdisable_2`,
   `offset2_lyc8fint_m1irq_2`, `m2enable/late_enable_lcdoffset2_2`, `vram_m3/
   pre{read,write}_lcdoffset1_2`) are rows where the ending line's match must
-  NOT dip before a same-M-cycle enable lands: gambatte's `lycperiod` (a match
-  with more than 2 cycles to the step) blocks any STAT write from triggering.
+  NOT dip before a same-M-cycle enable lands (CGB STAT/LYC write timing:
+  removed 2026-11-12 pending a clean-room re-derivation).
   Double speed is left at 0 (`STAT_LYC_LY_LEAD_DS`): every `_ds_` sibling
   moves the other way, and the double-speed constants are a coupled set
   (see below).
@@ -242,15 +236,9 @@ the full 5157-row list:
   late_ff41_enable_after_m2int{,_disable}` enable LYC inside the mode-2
   handler with LYC == LY; the line had fallen at dot 4 and nothing ran the
   detector, so the enable found `old_stat_flag` still high.
-* *The CGB's last-M-cycle mode-2 enable* (`STAT_M2_ENABLE_WINDOW_CGB`):
-  gambatte-core's `statChangeTriggersM2IrqCgb` as a rule of its own -- a
-  CGB STAT write committing in the line's last M-cycle (lines 0..142) that
-  newly sets the OAM enable with mode 0 off, while the LYC source is not
-  holding the line, requests the interrupt at once; line 143 has no window
-  at single speed and line 153 a one-dot window at double speed only. +1
-  (`m2enable/late_enable_m0disable_2 [cgb]`); the level model cannot spell
-  it because the mode-0 source is still up at the commit on both devices
-  and the DMG must not fire.
+* *The CGB's last-M-cycle mode-2 enable* (`m2enable/late_enable_m0disable_2
+  [cgb]`): CGB STAT/LYC write timing: removed 2026-11-12 pending a
+  clean-room re-derivation.
 
 Measured and refused the same day (all on top of the three): the STAT
 drop sampled with `old and new` enables (`STAT_DROP_OLD_LEVEL`, -33: the
@@ -1030,36 +1018,24 @@ instead of the power-on loses the five `_ds_2` rows, whose power-on follows
 a switch. With all of it, SameSuite APU 70/70 and blargg `dmg_sound` /
 `cgb_sound` stay green, and `freq_change_timing-cgb0BC` passes on CPU CGB C.
 
-**The 2026-09-22/23 conflict, for the record.** `APU_CLOCK_CARRY = 1`
-(psg_host.nim, still in the tree, ships 0) shadows gambatte-core's 2 MHz PSG
-counter (carried remainder, DIV-reset re-alignment, power-on keeping the
-counter's low bits, the 1 MHz trigger edge at or before the write by counter
-parity) with stall extras 5 / 1; it greens all 13 and turns
-`freq_change_timing-cgb0BC` red, one NOP early in BOTH halves. It fits the
-ladder to the dot (moving the first trigger by one T either way loses a
-row) because it puts the first trigger after a single-speed power-on 3 T
-early, which is the re-phase's 3 T charged to the trigger instead of the
-switch. gambatte-core itself (built 2026-10-14 from
+**The 2026-09-22/23 conflict, for the record.** An alternative APU clock
+model (refuted, shipped compiled out) greened all 13 and turned
+`freq_change_timing-cgb0BC` red, one NOP early in BOTH halves, by charging
+the re-phase's 3 T to the first trigger after a single-speed power-on
+instead of to the switch; it was removed 2026-11-12 pending a clean-room
+re-derivation. gambatte-core itself (built 2026-10-14 from
 pokemon-speedrunning/gambatte-core master, headless driver over
 libgambatte) passes all 36 `speedchange` audio rows and FAILS the SameSuite
 row: `00 00 0F 0F FF FF F0 F0` / `0F 0F 0F 0F 0F FF FF FF` against
 `00 00 00 0F 0F FF FF F0` / `00 00 0F 0F 0F 0F 0F 0F`, with the real CGB
-boot ROM and from its post-boot state alike. Its PSG model is not the
-unified one; it is the ladder's fit. The boot hand-off is not a hidden
-variable either: at single speed the APU's grids are locked to the M-cycle
-grid (a 1 MHz edge is one M-cycle), so SameSuite's first half and every
-ladder's first trigger (both 25 M-cycles after a single-speed power-on)
-see the same edge, and flipping the carried counter's boot parity moves
-ten ladder rows and no SameSuite digit. Refuted under the carried clock:
-the shipping trigger rule with the grid's real-time phase carried across
-the switch; a divider-locked grid (K = 4 reproduces the shipping results
-exactly, and no extras pair then closes the ladder); gambatte's trigger rule
-only after a switch (29/36 at best over the extras); the carried clock with
-its grid re-aligned to the power-on write; real-time grids with constant
-extras and no one-off (28/36 at best); the snap anchored at the switch
-(29/36). The measurement and revision checks of 2026-09-23 stand: the audio
-verdict is gambatte's runner rule verbatim, the PCM12/34 sample point is
-pinned by 48 SameSuite rows, and both records are CPU CGB C.
+boot ROM and from its post-boot state alike. The boot hand-off is not a
+hidden variable either: at single speed the APU's grids are locked to the
+M-cycle grid (a 1 MHz edge is one M-cycle), so SameSuite's first half and
+every ladder's first trigger (both 25 M-cycles after a single-speed
+power-on) see the same edge. The measurement and revision checks of
+2026-09-23 stand: the audio verdict is gambatte's runner rule verbatim, the
+PCM12/34 sample point is pinned by 48 SameSuite rows, and both records are
+CPU CGB C.
 
 SameBoy (2026-09-23): on CGB C it passes the SameSuite row and 32/46 of
 gambatte's duty ladder (its fourteen misses are `audio1` members, including
@@ -2005,9 +1981,10 @@ One line each; the knob's own comment carries the derivation.
   `CGB_OBJ_YIELD_LAST` (C2); `CGB_WX_LATE_SS`, `CGB_WE_ENABLE_LATE`,
   `WIN_HEAD_LATE_DOT`, `WIN_CHECK_DEFER_CGB_DS` + `WIN_LATCH_END_CGB_DS`
   (window arming); `OAMDMA_HALT_GRACE`/`_WAKE_EXTRA`/`_HALT_RELEASE` (OAM
-  DMA across HALT and the speed-switch stall); `CGB_STAT_LYC_DISABLE_HOLD`,
-  `CGB_LYC_EVENT_HOLD_SS`, `LYC_DROP_LATENCY_CGB_DS` (lycEnable 225/225,
-  m0enable 167/167); `CRAM_LOCK_OFF_LAT_DS`, `CRAM_LOCK_LINE0_EXTRA_DS`
+  DMA across HALT and the speed-switch stall); `LYC_DROP_LATENCY_CGB_DS`
+  and two CGB STAT/LYC write-timing knobs (lycEnable 225/225, m0enable
+  167/167; the latter removed 2026-11-12 pending a clean-room
+  re-derivation); `CRAM_LOCK_OFF_LAT_DS`, `CRAM_LOCK_LINE0_EXTRA_DS`
   (cgbpal_m3 44/44); `TIMER_ACK_LOOKAHEAD` (the dispatch acks a timer
   request due within an M-cycle); `HDMA_LCD_OFF_BLOCK`,
   `HDMA_START_GRANT_FETCH`, `GDMA_AFTER_FETCH` (DMA hand-over at the next

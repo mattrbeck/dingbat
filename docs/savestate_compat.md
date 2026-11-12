@@ -134,12 +134,10 @@ have; the old build had no count to carry.
 
 Deadlines (the sweep's, CH4's divisor) are written as a signed distance from
 the payload's own `scheduler.cycles` with a pending flag, because
-`CycleCount` is 32 bits in the web build and 64 on desktop. The inert
-`APU_CLOCK_CARRY` fields (`sh_*`) are not carried: the mechanism ships off
-(`APU_CLOCK_CARRY = 0`) and nothing in the shipping build reads or writes
-them. `lcdon_lines` and the other fields that exist only under a `when`
-of a control that ships off are left out for the same reason; a payload
-never depends on a compile-time switch.
+`CycleCount` is 32 bits in the web build and 64 on desktop.
+`lcdon_lines` and the other fields that exist only under a `when` of a
+control that ships off are not carried: nothing in the shipping build reads
+or writes them, and a payload never depends on a compile-time switch.
 
 Rev 6 also changes which states load. The LCD-on frame's state (the LCDC
 write pushes the frame from inside the instruction, leaving the PPU at LY 0

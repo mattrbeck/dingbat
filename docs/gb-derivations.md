@@ -518,34 +518,10 @@ grid's constants are a coupled set and move together or not at all.
   `ly0/lycint152_lyc153irq_late_retrigger_2`). A rendered line's window
   stays: skipping it loses 12 `lcdirq_precedence`/`miscmstatirq` rows.
 
-### A CGB STAT write's own interrupt is a rule, not the level model's edge
-- Claim: whether a CGB STAT write that newly enables a source requests the
-  interrupt depends on the source and on how far the next LY increment is:
-  a mode-0 enable fires only after mode 0 has begun and with more than 4
-  cycles (8 in double speed) of the line left; a mode-1 enable on a vblank
-  line; the OAM enable (with mode 0 off) only in the last 4 cycles before
-  the next line's request; an LYC enable only inside the comparator's match
-  period. Sources rising inside the write's 2-cycle latency see the old OR
-  the new enables for the mode-0 request, and a mode-1 or line-0 OAM rise
-  there is blocked only by what the OLD enables held.
-- Evidence: gambatte `m1/ly143_late_m{0,2}enable_*`,
-  `lyc143_late_m*enable_lycdisable_2`, `m1irq_m{0,2}enable_*_2`,
-  `lycEnable/late_ff41_enable_*`, `lyc153_late_ff41_enable_*`,
-  `m0enable/*_ds_1`, `m2enable/late_enable_*lcdoffset2_2`,
-  `disable_by_m1enable_ly0_1` [cgb]; the rule is gambatte-core's
-  statChangeTriggersStatIrqCgb read as a statement of the timing.
-- Site: `CGB_STAT_WRITE_RULE`, `cgb_stat_write_trigger` (ppu.nim).
-- The LYC write is the same kind of rule: an unchanged value does nothing; a
-  new value requests the interrupt if it equals the comparator's LY (the
-  next line's within 6 cycles, 10 in double speed, of the step, unless the
-  old value already matched there), not while a mode-0 or mode-1 source
-  holds the line; single speed requests it one M-cycle after the byte lands.
-  In double speed a write of the next line's LY in the line's last 4 dots is
-  too late for that line's comparator event. Evidence: gambatte
-  `lycEnable/late_ff45_enable_ds_*`, `ff45_enable_weirdpoint_ds_*`,
-  `lyc_ff45_trigger_delay_{2,3}`, `ff45_reenable_3` (same value), `ff45_
-  disable_ds_1` (a disabling write is not held). Site: `CGB_LYC_WRITE_RULE`,
-  `CGB_LYC_EVENT_HOLD_DS`.
+### CGB STAT/LYC write timing
+- CGB STAT/LYC write timing: removed 2026-11-12 pending a clean-room
+  re-derivation. Rows red meanwhile: gambatte `lycEnable` (17), `m1` (6),
+  `m2enable` (3), `miscmstatirq` (3).
 
 ### An IF write lands one dot into its M-cycle
 - Claim: a request raised in the first dot of the M-cycle that writes IF is

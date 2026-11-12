@@ -70,70 +70,6 @@ proc gb_apu_edge_before*(gb: GB): CycleCount =
   let now  = gb.scheduler.cycles
   now - ((now + tick - (gb.apu.tick_phase mod tick)) mod tick)
 
-const APU_CLOCK_CARRY* {.intdefine.} = 0
-  ## Refuted; ships 0. 1: on CPU CGB C and older (GbQuirks.apu_clock_carry) the
-  ## square channels count their start-up from the 1 MHz edge at or BEFORE
-  ## the write on a 2 MHz APU clock whose phase is carried through APU
-  ## power-on, DIV resets and speed switches (the apu_sh_* shadow below, the
-  ## rules gambatte-core's PSG uses), and a switch carries every APU deadline
-  ## across by its distance in 2 MHz cycles (apu_rescale_speed), with
-  ## APU_SPSW_EXTRA_DOTS_CARRY{,_SINGLE} = 5 / 1 for the stall. It takes the
-  ## gambatte speed-switch duty ladder and loses SameSuite channel_1_freq_
-  ## change_timing-cgb0BC one NOP early in both halves: it charges the first
-  ## switch's re-phase (APU_SPSW_REPHASE_*, apu.nim, which takes both) to
-  ## the trigger after a power-on instead. gambatte-core fails that SameSuite
-  ## row too. docs/gb-failure-triage.md H2.
-
-when APU_CLOCK_CARRY != 0:
-  template sh_now(gb: GB): int64 = int64(gb.scheduler.cycles)
-  template sh_ds(gb: GB): int64 = int64(gb.memory.current_speed)
-  proc apu_sh_advance*(gb: GB; t: int64; ds: int64) =
-    ## Whole 2 MHz cycles up to `t` (2 scheduler cycles each at single speed,
-    ## 4 at double); the remainder stays carried in `sh_last`.
-    let step = 2'i64 shl ds
-    if t > gb.sh_last:
-      let n = (t - gb.sh_last) div step
-      gb.sh_last += n * step
-      gb.sh_cc += n
-  proc apu_sh_boot*(gb: GB) =
-    let t = sh_now(gb)
-    gb.sh_last = t - 1
-    gb.sh_cc = t shr 1
-  proc apu_sh_power_on*(gb: GB) =
-    ## Power-on keeps the counter's low bits and re-aligns the clock to a
-    ## multiple of four cycles.
-    let t = sh_now(gb)
-    let ds = sh_ds(gb)
-    apu_sh_advance(gb, t, ds)
-    let off = gb.sh_last and ds
-    let c = gb.sh_cc + off
-    gb.sh_cc = (c and 0xFFF) + 2 * ((not (c + 1 + (1 - ds))) and 0x800)
-    gb.sh_last = ((gb.sh_last + 3) and not 3'i64) - (1 - ds)
-  proc apu_sh_div_reset*(gb: GB; t: int64) =
-    ## A DIV reset re-aligns the counter to a 4096-cycle boundary.
-    let ds = sh_ds(gb)
-    apu_sh_advance(gb, t, ds)
-    let off = gb.sh_last and ds
-    let c = gb.sh_cc + off
-    gb.sh_cc = (c and not 0xFFF'i64) + 2 * (c and 0x800) - off
-  proc apu_sh_speed_change*(gb: GB; t: int64; old_ds: int64) =
-    ## The carried remainder is re-read at the new speed (one cycle less going
-    ## down); going up the counter also drops half its cycles since the reset.
-    apu_sh_advance(gb, t, old_ds)
-    gb.sh_l0 = gb.sh_last
-    gb.sh_last -= old_ds
-    gb.sh_l1 = gb.sh_last
-    if old_ds == 0:
-      gb.sh_cc = gb.sh_cc - (gb.sh_cc and 0xFFF) div 2 - (gb.sh_last and 1)
-  proc apu_sh_edge*(gb: GB): CycleCount =
-    ## The 1 MHz edge at or before the write, on the carried clock.
-    let t = sh_now(gb)
-    let ds = sh_ds(gb)
-    apu_sh_advance(gb, t, ds)
-    let refv = if ds != 0 and (gb.sh_last and 1) != 0: 0'i64 else: 1'i64
-    let k = gb.sh_cc - ((gb.sh_cc - refv) and 1)
-    CycleCount(max(0'i64, gb.sh_last + (k - gb.sh_cc) * (2'i64 shl ds)))
-
 const APU_DS_TRIGGER_SNAP* {.intdefine.} = 1
   ## CPU CGB C and older (GbQuirks.apu_clock_carry), double speed: a square
   ## trigger counts its start-up from the nearest point of a 2 us grid that
@@ -161,8 +97,6 @@ proc gb_trigger_deadline*(gb: GB; period: CycleCount;
       let w = int64(gb.scheduler.cycles)
       let d = ((w - gb.apu_power_on_at - 8) mod 16 + 16) mod 16
       edge = CycleCount(if d < 8: w - d else: w + (16 - d))
-  when APU_CLOCK_CARRY != 0:
-    if gb.quirks.apu_clock_carry: edge = apu_sh_edge(gb)
   edge + period + CycleCount(extra_ticks) * gb_apu_tick(gb)
 
 template psg_trigger_deadline(h: GB; period: CycleCount;
@@ -173,15 +107,13 @@ proc gb_trigger_pickup*(gb: GB): CycleCount =
   ## The 1 MHz edge a square trigger written now takes effect on: the edge at
   ## or after the write (gb_trigger_deadline's rule). PSG_NO_STEP where
   ## another rule places the trigger (APU_DS_TRIGGER_SNAP's 2 us grid on CPU
-  ## CGB C and older at double speed, the refuted carried clock, the
+  ## CGB C and older at double speed, the
   ## edge-before arm): the pickup rules in sq_trigger are stated on this edge.
   when APU_TRIGGER_EDGE_BEFORE != 0:
     return PSG_NO_STEP
   when APU_DS_TRIGGER_SNAP != 0:
     if gb.memory.current_speed != 0 and gb.quirks.apu_clock_carry:
       return PSG_NO_STEP
-  when APU_CLOCK_CARRY != 0:
-    if gb.quirks.apu_clock_carry: return PSG_NO_STEP
   gb_apu_edge(gb)
 
 template psg_trigger_pickup(h: GB): CycleCount = gb_trigger_pickup(h)

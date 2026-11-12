@@ -169,47 +169,6 @@ const LY_BLIND_SKIP_LED* {.intdefine.} = 1
   ## devices), `lycEnable/lyc153_late_ff45_enable_2` [cgb]. A rendered line's
   ## window stays (skipping it there loses 12 `lcdirq_precedence`,
   ## `miscmstatirq/lycwirq_trigger_m0_late_ly44_lyc45_*`, `ff41_disable_3`).
-const CGB_STAT_WRITE_RULE* {.intdefine.} = 1
-  ## A CGB STAT write's own interrupt comes from an explicit rule over the
-  ## time left to the next LY increment (cgb_stat_write_trigger, ppu.nim),
-  ## the same decision gambatte-core makes (statChangeTriggersStatIrqCgb:
-  ## a newly enabled mode-0 source fires only once mode 0 has begun and more
-  ## than 4 cycles (4 + 4 in double speed) remain on a rendered line, mode 1
-  ## on vblank lines, the OAM source only in the last 4 cycles before the
-  ## next line's request, LYC only inside the comparator's match period),
-  ## instead of the level model's edge when the enables land. The line takes
-  ## the new level without an edge; a mode-1 or line-0 OAM rise inside the
-  ## write's latency is judged against the OLD enables. +16 -1 on the hunt
-  ## list: `m1/ly143_late_m{0,2}enable_*`, `lyc143_late_m*enable_lycdisable_2`,
-  ## `lycEnable/late_ff41_enable_{ds_1,lcdoffset1_1}`,
-  ## `lyc153_late_ff41_enable_*`, `m0enable/{disable,lycdisable_ff41}_ds_1`,
-  ## `m2enable/late_enable_{,ly0_}lcdoffset2_2`, two `miscmstatirq`; loses
-  ## `m1/ly143_late_m2enable_ds_lcdoffset1_1` (the double-speed line-144
-  ## pulse's phase, A1). Supersedes STAT_M2_ENABLE_WINDOW_CGB. 0 = the level
-  ## model's edge.
-const CGB_LYC_WRITE_RULE* {.intdefine.} = 1
-  ## The same for a CGB LYC write (cgb_lyc_write_trigger, ppu.nim;
-  ## gambatte-core's lycRegChangeTriggersStatIrq read as the timing): an
-  ## unchanged value does nothing; a write requests the interrupt if the new
-  ## value equals the comparator's LY, stepped to the next line within 6
-  ## cycles (10 double speed) of it unless the old value already matched
-  ## there, and not while a mode-0 or mode-1 source holds the line. The line
-  ## rises to the new level without an edge; a fall stays stat_drop_arm's.
-  ## +10 on the hunt list with the two below, nothing lost: `lycEnable/
-  ## late_ff45_enable_ds_{2,lcdoffset1_2}`, `ff45_enable_weirdpoint_ds_*`,
-  ## `lyc153_late_ff45_enable_lcdoffset1_1`, `lycwirq_trigger_ly00_stat50_
-  ## ds_lcdoffset1_2`, `miscmstatirq/lycwirq_trigger_m0_late_ly44_lyc45_ds_3`.
-const DMG_LYC_WRITE_RULE* {.intdefine.} = 0
-  ## CGB_LYC_WRITE_RULE on a DMG (no CGB-only terms), requesting at the
-  ## write. Refused: it takes gambatte `miscmstatirq/lycwirq_trigger_m0_late_
-  ## ly44_lyc45_4` [dmg] but fails mooneye acceptance/ppu/stat_irq_blocking
-  ## and stat_lyc_onoff and wilbertpol gpu/stat_irq_blocking, which the DMG
-  ## level model passes. Kept compilable with DMG_LYC_EVENT_HOLD.
-const DMG_LYC_EVENT_HOLD* {.intdefine.} = 4
-  ## CGB_LYC_EVENT_HOLD_DS for a DMG at single speed: 3..6 score alike, 2 loses
-  ## `lycEnable/ff45_enable_weirdpoint_3` [dmg], 8 three `ff45_enable_
-  ## weirdpoint`/`lyc153_late_ff45_enable`/`lycwirq_trigger_*` rows; 4 is
-  ## gambatte-core's window.
 const LCDON_M0_LAG_DS* {.intdefine.} = 8
   ## Scheduler cycles (4 per M-cycle) the mode-0 STAT source trails the mode
   ## flag on the first line after an LCD enable at double speed. On that line
@@ -218,7 +177,6 @@ const LCDON_M0_LAG_DS* {.intdefine.} = 8
   ## (STAT_M0_LEAD_DS), so the same 2 dots show as a lag. gambatte
   ## `enable_display/ly0_m0irq_scx{0,1}_ds_1`, `frame0_m0irq_count_scx{2,3}_
   ## ds_1` (+4, none lost); 4 is inert, 12 loses the four `_2` twins.
-const CGB_LYC_RULE_FIRE_T* {.intdefine.} = 4
 const VRAM_WRITE_LINE0_CGB_GRACE* {.intdefine.} = 1
   ## Whether a CGB VRAM write on the LCD-on line meets a late close edge
   ## (cpu_vram_open): the lock shuts one CPU M-cycle and a dot past the
@@ -237,38 +195,6 @@ const VRAM_WRITE_LINE0_OPEN_LEAD* {.intdefine.} = 1
   ## open edge, writes one double-speed M-cycle apart) takes 2..3 and loses
   ## 4 and 0..1; SameBoy (CGB E) passes it. No single-speed row reaches it
   ## (nothing moves at either value); applied at both speeds, as the lead is.
-const CGB_LYC_EVENT_HOLD_SS* {.intdefine.} = 7
-  ## CGB_LYC_EVENT_HOLD_DS at single speed: a CGB LYC write committed in the
-  ## last 7 dots of a line (gambatte-core: within 6 cycles of the event, plus
-  ## dingbat's one-dot write offset) is not seen by the next line's event.
-  ## gambatte `lycEnable/ff45_enable_weirdpoint_{2,lcdoffset1_2}` [cgb];
-  ## 6 loses the first, 8 `ff45_enable_weirdpoint_lcdoffset1_1`.
-const CGB_STAT_LYC_DISABLE_HOLD* {.intdefine.} = 2
-  ## CPU cycles before the next line's LYC event inside which a CGB STAT write
-  ## clearing the LYC enable no longer reaches that event: it still requests
-  ## the interrupt (gambatte-core's LYC event keeps the old STAT unless the
-  ## write is more than two cycles ahead). gambatte `lycEnable/ff41_disable_2`
-  ## [cgb]; 1 is inert, 4 loses `ff41_disable_ds_1`. 0 compiles it out.
-  ## Scheduler cycles after the byte lands (single speed) at which the rule's
-  ## request goes up: after that boundary's interrupt check, before the next
-  ## (gambatte `lycEnable/lyc_ff45_trigger_delay_{2,3}`; 6 loses both, 0
-  ## dispatches an M-cycle early). Double speed requests at the write.
-const CGB_LYC_WRITE_RULE_DS* {.intdefine.} = 1
-  ## The rule in double speed too; 0 keeps the old path there (+1 instead of
-  ## +10).
-const CGB_LYC_EVENT_HOLD_DS* {.intdefine.} = 4
-  ## Double speed: a write of the NEXT line's LY within this many dots of the
-  ## line end is too late for that line's comparator event, which still
-  ## compares the old value; the new one lands after it without an edge.
-  ## Two-sided: 3 loses one of the rule's rows, 5 three (`_ds_1` members).
-const CGB_STAT_RULE_OR* {.intdefine.} = 1
-  ## Inside the write's latency a source sees the old OR the new enables
-  ## (the mode-0 request fires for either); 0 (old only) loses seven.
-const CGB_STAT_RULE_OFF* {.intdefine.} = 1
-const CGB_STAT_RULE_OFF_DS* {.intdefine.} = 3
-  ## The rule's clock against dingbat's dot: the write's M-cycle starts this
-  ## many dots after the rule's cycle count (1 single speed, 3 double; the
-  ## side-by-side traces' offsets). Two-sided: 0/2 and 2/4 lose 9..30.
 const LCDOFF_STAT_LYC_IRQ* {.intdefine.} = 1
   ## With the LCD off the comparator's match is frozen where it stood, and a
   ## STAT write that turns the LYC enable on over a frozen match requests
@@ -284,14 +210,12 @@ const M0_IRQ_EDGE_X* {.intdefine.} = 1
   ## begins, unless a WX = 166 window is still to start. gambatte
   ## `sprites/10spritesPrLine_10xposA7_m0irq_2` (both devices),
   ## `window/m2int_wxA6_m0irq{,2}_2` [cgb], `m2int_wxA6_spxA7_m0irq_2` [dmg],
-  ## `m0enable/enable_wxA6_2x_spxA7_ds_1`; the CGB STAT-write rule reads
-  ## "mode 0 has begun" off the same request. 0 = the request waits for the
+  ## `m0enable/enable_wxA6_2x_spxA7_ds_1`. 0 = the request waits for the
   ## fetcher.
 const DMG_LYC_BOUNDARY_OPEN* {.intdefine.} = 1
   ## A DMG LYC write parked in the M-cycle a rendered line starts in still
   ## lets the comparator's boundary window open (ly_advance_open), unless the
-  ## old LYC matched the line ending: a match that moves with LY sees no edge
-  ## (gambatte-core's LYC-write rule, "old value already matched there").
+  ## old LYC matched the line ending: a match that moves with LY sees no edge.
   ## gambatte `miscmstatirq/lycwirq_trigger_m0_late_ly44_lyc45_4` [dmg] (the
   ## mode-0 source hands the line to the new match); `lycEnable/
   ## ff45_enable_weirdpoint_3` [dmg] is the matched case and is lost without
@@ -1094,16 +1018,6 @@ const WIN_CHECK_TWO_SLOTS*    {.intdefine.} = 1
   ## line 0's own check pending ahead of it: that check still runs, against
   ## the WY it sees, and the write's is queued behind it. Needed by the
   ## line-0 dots above; 0 loses `late_wy_2` again.
-const STAT_M2_ENABLE_WINDOW_CGB* {.booldefine.} = true
-  ## A CGB STAT write in the last M-cycle of a rendered line that newly sets
-  ## the OAM enable (with mode 0 off) requests the interrupt at once, unless
-  ## the LYC source already holds the line: the next line's OAM source is up
-  ## and the enable meets it. gambatte m2enable/late_enable_m0disable_2
-  ## [cgb]: commit 453 fires, 449 fires through the source's own rise, 1 (the
-  ## next line) does not, and the DMG never does. Line 143 has no window at
-  ## single speed, line 153's is one dot wide in double speed only. The level
-  ## model cannot spell it: the mode-0 source is still up at the commit on
-  ## both devices (STAT_M0_FALL_AT_M2_CGB, ppu.nim). +1, no losses.
 const STAT_SET_LANDING_EVAL*  {.booldefine.} = false
   ## Whether the STAT edge detector runs on the dot a CGB STAT write's SET
   ## enable bits land (CGB_STAT_ENABLE_LATENCY after the commit), so a source
@@ -2802,18 +2716,10 @@ type
     m2_ly0_up*:        bool
     # DMG_HALT_MIN_MCYCLES: the scheduler cycle the CPU halted on. Scratch.
     halt_start*:       CycleCount
-    # CGB_LYC_WRITE_RULE: a CGB LYC write's byte is in flight, and whether it
-    # requests the interrupt. Live one M-cycle; not serialized.
-    lyc_rule_on*:      bool
-    lyc_rule_trig*:    bool
-    lyc_rule_fire*:    bool
     win_check_gap*:    int32   # WIN_CHECK_TWO_SLOTS: a second sample, dots after the first
     wy_inflight*:      bool    # WIN_NEXT_LINE_CHECK: a CGB WY store not yet landed
     wy_inflight_val*:  uint8
     wy_inflight_dot*:  int32
-    lyc_hold_on*:      bool    # CGB_LYC_EVENT_HOLD_DS: a new LYC waits out the event
-    lyc_hold_new*:     uint8
-    lyc_hold_ly*:      uint8
     m0_late_fire*:     bool    # LCDON_M0_LAG_DS: the LCD-on line's mode-0 source is owed
     dma_halt_grace*:   uint8   # OAMDMA_HALT_GRACE: the halted M-cycle the OAM DMA still gets
     timer_irq_acked*:  bool    # TIMER_ACK_LOOKAHEAD: the dispatch acked the reload's request
@@ -2827,11 +2733,6 @@ type
     wd_ds_push*:       bool
     wd_ds_ly*:         uint8
     stop_op_latch*:    int16   # STOP_OPERAND_LATCH: STOP's operand byte, run as the next opcode (+1; 0 = none)
-    sh_last*:          int64   # APU_CLOCK_CARRY: the 2 MHz APU clock's last whole cycle (scheduler cycles)
-    sh_cc*:            int64   # APU_CLOCK_CARRY: that clock's counter; its parity picks the 1 MHz trigger edge
-    sh_l0*:            int64   # APU_CLOCK_CARRY: the clock's last cycle at a switch, before / after its re-read
-    sh_l1*:            int64
-    sh_skip_div*:      bool    # APU_CLOCK_CARRY: the switch's own DIV reset is booked by stop_instr
     apu_power_on_at*:  int64   # APU_DS_TRIGGER_SNAP: the scheduler cycle of the last APU power-on.
                                # Serialized raw from GB payload rev 6 (it is not rebased with the
                                # scheduler); with stop_op_latch and lyc_write_old, in GB_SEC_MACH.
@@ -3784,7 +3685,6 @@ proc gb_skip_boot(gb: GB) =
   gb.memory.skip_boot(gb)
   gb.ppu.skip_boot(gb)
   gb.timer.skip_boot(gb)
-  when APU_CLOCK_CARRY != 0: apu_sh_boot(gb)
   # The boot ROM powered the APU on and switched no speed.
   gb.apu.spsw_rephase_pending = true
 
@@ -3836,14 +3736,7 @@ proc gb_dispatch(gb: GB): proc(kind: EventType) {.closure.} =
             if gb.ppu.first_line and (gb.ppu.lcd_status and 3'u8) == 0'u8:
               ppu_set_irq_mode(gb.ppu, gb, 0'u8)
             return
-        when CGB_LYC_WRITE_RULE != 0:
-          # Booked by the rule for a write that requests the interrupt.
-          if gb.lyc_rule_fire:
-            gb.lyc_rule_fire = false
-            gb.interrupts.lcd_stat_interrupt = true
-          else: ppu_handle_stat_interrupt(gb.ppu, gb)
-        else:
-          ppu_handle_stat_interrupt(gb.ppu, gb)
+        ppu_handle_stat_interrupt(gb.ppu, gb)
     of etHandleInput:
       # Booked only by the test harness's timed input (joypad.nim).
       when defined(test_harness):
