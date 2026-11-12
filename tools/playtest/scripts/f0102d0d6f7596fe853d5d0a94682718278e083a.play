@@ -2,11 +2,16 @@
 @file WarioWare - Twisted! (U).gba
 @game RZWE
 @chip SRAM
-@frozen dingbat-bios,mgba,nba
-# Health screen, intro, title, How To Play, Modes, Story, Wario's stage: the opening scene waits for the player
-# to wind the watch by turning the console, and the harness holds every emulator's gyro at rest, so [new]
-# ends there. The game has already written its save by then (27 bytes); [load] boots it to Story.
+@frozen dingbat-bios,mgba
+# Health screen, intro, title, How To Play, Modes, Story, Wario's stage: the scene waits for the player to wind
+# the watch by turning the console (`gyro 0.6`), then the stage's microgames, played by turning back and forth
+# (shaving, a swinging rope, ...) with A, to the souvenir toy; START pauses, a turn moves the cursor to EXIT, and
+# the Story map shows the stage not cleared. The game has written its save by then; [load] boots it to Story.
 # Picked for the cart's Z-axis gyro (a serial ADC on the GPIO pins, read every frame) and rumble.
+# Recorded in lockstep on dingbat-bios and mgba only: the second reference has no gyro input (its public
+# API offers none), so the `gyro` steps do nothing there and it stays at the watch scene from wind_watch on.
+# The microgames' random layouts differ between emulators (the shaving stubble at f7394), so they win and
+# lose different ones; both reach the souvenir toy on the same frame.
 
 [new]
 wait 600
@@ -41,6 +46,378 @@ wait 300
 tap A times=10 every=60 hold=4
 wait 600
 checkpoint wind_watch window=30
+gyro 0.6
+wait 180
+gyro 0
+wait 300
+tap A times=8 every=60 hold=4
+wait 300
+gyro 0.8
+wait 60
+gyro -0.8
+wait 60
+gyro 0.8
+wait 60
+gyro -0.8
+wait 60
+gyro 0
+wait 60
+gyro 0.8
+wait 45
+gyro -0.8
+wait 45
+gyro 0.8
+wait 45
+gyro -0.8
+wait 45
+gyro 0.8
+wait 45
+gyro -0.8
+wait 45
+gyro 0.8
+wait 45
+gyro -0.8
+wait 45
+gyro 0.8
+wait 45
+gyro -0.8
+wait 45
+gyro 0.8
+wait 45
+gyro -0.8
+wait 45
+gyro 0.8
+wait 45
+gyro -0.8
+wait 45
+gyro 0.8
+wait 45
+gyro -0.8
+wait 45
+gyro 0.8
+wait 45
+gyro -0.8
+wait 45
+gyro 0.8
+wait 45
+gyro -0.8
+wait 45
+gyro 0.8
+wait 45
+gyro -0.8
+wait 45
+gyro 0.8
+wait 45
+gyro -0.8
+wait 45
+gyro 0.8
+wait 45
+gyro -0.8
+wait 45
+gyro 0.8
+wait 45
+gyro -0.8
+wait 45
+gyro 0.8
+wait 45
+gyro -0.8
+wait 45
+gyro 0
+wait 120
+gyro 0.8
+wait 40
+press A hold=4
+gyro -0.8
+wait 40
+gyro 0.8
+wait 40
+press A hold=4
+gyro -0.8
+wait 40
+gyro 0.8
+wait 40
+press A hold=4
+gyro -0.8
+wait 40
+gyro 0.8
+wait 40
+press A hold=4
+gyro -0.8
+wait 40
+gyro 0.8
+wait 40
+press A hold=4
+gyro -0.8
+wait 40
+gyro 0.8
+wait 40
+press A hold=4
+gyro -0.8
+wait 40
+gyro 0.8
+wait 40
+press A hold=4
+gyro -0.8
+wait 40
+gyro 0.8
+wait 40
+press A hold=4
+gyro -0.8
+wait 40
+gyro 0.8
+wait 40
+press A hold=4
+gyro -0.8
+wait 40
+gyro 0.8
+wait 40
+press A hold=4
+gyro -0.8
+wait 40
+gyro 0.8
+wait 40
+press A hold=4
+gyro -0.8
+wait 40
+gyro 0.8
+wait 40
+press A hold=4
+gyro -0.8
+wait 40
+gyro 0.8
+wait 40
+press A hold=4
+gyro -0.8
+wait 40
+gyro 0.8
+wait 40
+press A hold=4
+gyro -0.8
+wait 40
+gyro 0.8
+wait 40
+press A hold=4
+gyro -0.8
+wait 40
+gyro 0.8
+wait 40
+press A hold=4
+gyro -0.8
+wait 40
+gyro 0.8
+wait 40
+press A hold=4
+gyro -0.8
+wait 40
+gyro 0.8
+wait 40
+press A hold=4
+gyro -0.8
+wait 40
+gyro 0.8
+wait 40
+press A hold=4
+gyro -0.8
+wait 40
+gyro 0.8
+wait 40
+press A hold=4
+gyro -0.8
+wait 40
+gyro 0.8
+wait 40
+press A hold=4
+gyro -0.8
+wait 40
+gyro 0.8
+wait 40
+press A hold=4
+gyro -0.8
+wait 40
+gyro 0.8
+wait 40
+press A hold=4
+gyro -0.8
+wait 40
+gyro 0.8
+wait 40
+press A hold=4
+gyro -0.8
+wait 40
+gyro 0.8
+wait 40
+press A hold=4
+gyro -0.8
+wait 40
+gyro 0
+wait 120
+gyro 0.8
+wait 40
+press A hold=4
+gyro -0.8
+wait 40
+gyro 0.8
+wait 40
+press A hold=4
+gyro -0.8
+wait 40
+gyro 0.8
+wait 40
+press A hold=4
+gyro -0.8
+wait 40
+gyro 0.8
+wait 40
+press A hold=4
+gyro -0.8
+wait 40
+gyro 0.8
+wait 40
+press A hold=4
+gyro -0.8
+wait 40
+gyro 0.8
+wait 40
+press A hold=4
+gyro -0.8
+wait 40
+gyro 0.8
+wait 40
+press A hold=4
+gyro -0.8
+wait 40
+gyro 0.8
+wait 40
+press A hold=4
+gyro -0.8
+wait 40
+gyro 0.8
+wait 40
+press A hold=4
+gyro -0.8
+wait 40
+gyro 0.8
+wait 40
+press A hold=4
+gyro -0.8
+wait 40
+gyro 0.8
+wait 40
+press A hold=4
+gyro -0.8
+wait 40
+gyro 0.8
+wait 40
+press A hold=4
+gyro -0.8
+wait 40
+gyro 0.8
+wait 40
+press A hold=4
+gyro -0.8
+wait 40
+gyro 0.8
+wait 40
+press A hold=4
+gyro -0.8
+wait 40
+gyro 0.8
+wait 40
+press A hold=4
+gyro -0.8
+wait 40
+gyro 0.8
+wait 40
+press A hold=4
+gyro -0.8
+wait 40
+gyro 0.8
+wait 40
+press A hold=4
+gyro -0.8
+wait 40
+gyro 0.8
+wait 40
+press A hold=4
+gyro -0.8
+wait 40
+gyro 0.8
+wait 40
+press A hold=4
+gyro -0.8
+wait 40
+gyro 0.8
+wait 40
+press A hold=4
+gyro -0.8
+wait 40
+gyro 0.8
+wait 40
+press A hold=4
+gyro -0.8
+wait 40
+gyro 0.8
+wait 40
+press A hold=4
+gyro -0.8
+wait 40
+gyro 0.8
+wait 40
+press A hold=4
+gyro -0.8
+wait 40
+gyro 0.8
+wait 40
+press A hold=4
+gyro -0.8
+wait 40
+gyro 0.8
+wait 40
+press A hold=4
+gyro -0.8
+wait 40
+gyro 0.8
+wait 40
+press A hold=4
+gyro -0.8
+wait 40
+gyro 0.8
+wait 40
+press A hold=4
+gyro -0.8
+wait 40
+gyro 0.8
+wait 40
+press A hold=4
+gyro -0.8
+wait 40
+gyro 0.8
+wait 40
+press A hold=4
+gyro -0.8
+wait 40
+gyro 0.8
+wait 40
+press A hold=4
+gyro -0.8
+wait 40
+gyro 0
+wait 120
+checkpoint souvenir window=30
+wait 300
+tap A times=6 every=60 hold=4
+wait 400
+press START
+wait 200
+gyro 0.8
+wait 90
+gyro 0
+wait 120
+checkpoint pause_exit window=30
+press A
+wait 400
+checkpoint story_after window=30
+wait 120
 
 [load]
 wait 600

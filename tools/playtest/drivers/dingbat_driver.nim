@@ -225,6 +225,14 @@ proc main() =
       of "flush":
         emu.storage.write_save()
         reply "ok"
+      of "motion":
+        # motion GYRO TILTX TILTY: the frontend's motion inputs, held until
+        # the next motion command (-1..1 each; gpio.nim gyro_z, CW positive;
+        # bus.nim tilt_in_x / tilt_in_y). The apps set the same fields.
+        emu.bus.gpio.gyro_z = parseFloat(parts[1])
+        emu.bus.tilt_in_x = parseFloat(parts[2])
+        emu.bus.tilt_in_y = parseFloat(parts[3])
+        reply "ok"
       of "state_save":
         reply(if emu.save_state(parts[1]): "ok" else: "err state_save failed")
       of "state_load":

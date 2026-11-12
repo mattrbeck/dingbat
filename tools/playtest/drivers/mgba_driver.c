@@ -93,10 +93,25 @@ static void drain_audio(struct mCore* core) {
  * both axes -- a sensor pinned at full tilt -- and calibrate to that, where
  * dingbat answers its level reading (bus.nim TILT_X/Y_CENTER). Zero tilt is
  * the frontend's "level" through mGBA's public peripheral interface. */
+/* `motion GYRO TILTX TILTY`, held until the next: the harness's units are
+ * dingbat's frontend inputs (-1..1; gpio.nim gyro_z, bus.nim tilt_in_x/y),
+ * scaled here so the game sees the same change from rest in both. Measured
+ * through the games' own copies of the readings (WarioWare: Twisted! at
+ * 0x03000F94, Yoshi Topsy-Turvy at 0x03001DE2/4): mGBA moves the gyro
+ * reading by readGyroZ / 2^17 (saturating at +-0x4000) where dingbat moves
+ * it by 0x1918 per unit, and the tilt readings by -readTiltX / 2^22 where
+ * dingbat moves them by +0xE0 per unit. The resting readings differ (gyro
+ * 0x7000 here against dingbat's 0x3600, tilt 0x3A0 on both axes against
+ * 0x392/0x3A0) and both games calibrate at boot. */
+#define GYRO_PER_UNIT  ((double) (0x1918 << 17))
+#define TILT_PER_UNIT  (-(double) (0xE0 << 22))
+static int32_t g_gyro_z, g_tilt_x, g_tilt_y;
 static void rot_sample(struct mRotationSource* r) { (void) r; }
-static int32_t rot_zero(struct mRotationSource* r) { (void) r; return 0; }
+static int32_t rot_tilt_x(struct mRotationSource* r) { (void) r; return g_tilt_x; }
+static int32_t rot_tilt_y(struct mRotationSource* r) { (void) r; return g_tilt_y; }
+static int32_t rot_gyro_z(struct mRotationSource* r) { (void) r; return g_gyro_z; }
 static struct mRotationSource g_level = {
-  .sample = rot_sample, .readTiltX = rot_zero, .readTiltY = rot_zero, .readGyroZ = rot_zero,
+  .sample = rot_sample, .readTiltX = rot_tilt_x, .readTiltY = rot_tilt_y, .readGyroZ = rot_gyro_z,
 };
 
 /* apulog: the CPU's stores to the sound registers 0x04000060-0x0400008F
@@ -292,6 +307,13 @@ int main(int argc, char** argv) {
       reply(f ? out : "err cannot write");
     } else if (!strcmp(cmd, "flush")) {
       svf->sync(svf, NULL, 0);
+      reply("ok");
+    } else if (!strcmp(cmd, "motion")) {
+      double gz = 0, tx = 0, ty = 0;
+      sscanf(arg, "%lf %lf %lf", &gz, &tx, &ty);
+      g_gyro_z = (int32_t) (gz * GYRO_PER_UNIT);
+      g_tilt_x = (int32_t) (tx * TILT_PER_UNIT);
+      g_tilt_y = (int32_t) (ty * TILT_PER_UNIT);
       reply("ok");
     } else if (!strcmp(cmd, "state_save")) {
       struct VFile* vf = VFileOpen(arg, O_CREAT | O_TRUNC | O_RDWR);

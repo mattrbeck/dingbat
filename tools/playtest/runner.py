@@ -114,6 +114,10 @@ class Executor:
             e.run(step['after'])
         elif op == 'hold':
             e.set_keys(_mask(step['keys']))
+        elif op == 'gyro':
+            e.set_motion(gyro=step['rate'])
+        elif op == 'tilt':
+            e.set_motion(tilt=(step['x'], step['y']))
         elif op == 'until':
             self.run_until(step, step['cond'])
         elif op == 'tap':

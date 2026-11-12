@@ -16,6 +16,13 @@ Steps (keys: A B SELECT START RIGHT LEFT UP DOWN R L, combined with +):
                                  N presses of KEYS, one every `every` frames
                                  (what a frozen `mash` becomes)
   hold KEYS / release            change held keys without running
+  gyro RATE                      hold the cart's gyro at RATE (-1..1, clockwise
+                                 positive) until the next `gyro`; 0 is at rest
+  tilt X Y                       hold the tilt sensor at X, Y (-1..1) until the
+                                 next `tilt`; 0 0 is level. Both start at rest
+                                 in every section. The second reference has
+                                 no motion input: there they do nothing and
+                                 the run is marked motion_ignored
   until COND [timeout=600] [every=4]
                                  run `every` frames at a time until COND holds;
                                  failing the timeout fails the run
@@ -89,6 +96,13 @@ def parse_cond(tokens):
     raise ScriptError(f'unknown condition {kind!r}')
 
 
+def _unit(s):
+    v = float(s)
+    if not -1.0 <= v <= 1.0:
+        raise ScriptError(f'{s}: motion inputs run -1..1')
+    return v
+
+
 def parse_step(line):
     tokens = shlex.split(line, comments=False)
     op = tokens[0].lower()
@@ -107,6 +121,10 @@ def parse_step(line):
         return {'op': 'hold', 'keys': parse_keys(args[0])}
     if op == 'release':
         return {'op': 'hold', 'keys': []}
+    if op == 'gyro':
+        return {'op': 'gyro', 'rate': _unit(args[0])}
+    if op == 'tilt':
+        return {'op': 'tilt', 'x': _unit(args[0]), 'y': _unit(args[1])}
     if op == 'until':
         opts, rest = _opts(args, {'timeout', 'every'})
         return {'op': 'until', 'cond': parse_cond(rest), 'timeout': opts.get('timeout', 600),
@@ -145,6 +163,10 @@ def format_step(step):
         return f"tap {'+'.join(step['keys'])} times={step['times']} every={step['every']} hold={step['hold']}"
     if op == 'hold':
         return f"hold {'+'.join(step['keys'])}" if step['keys'] else 'release'
+    if op == 'gyro':
+        return f"gyro {step['rate']:g}"
+    if op == 'tilt':
+        return f"tilt {step['x']:g} {step['y']:g}"
     cond = ''
     if 'cond' in step:
         c = step['cond']

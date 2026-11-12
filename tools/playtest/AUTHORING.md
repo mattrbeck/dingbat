@@ -28,7 +28,9 @@ python3 playtest.py do NAME 'mash A until text "NEW GAME" every=20' look
 
 - Steps: `wait N`, `press KEYS [hold=6] [after=0]`, `hold KEYS`, `release`,
   `tap KEYS times=N [every=20] [hold=4]`, `until COND`, `mash KEYS until COND`,
-  `checkpoint NAME`. Keys `A B SELECT START RIGHT LEFT UP DOWN R L`, combined
+  `checkpoint NAME`, and for motion-sensor carts `gyro RATE` / `tilt X Y`
+  (-1..1, held until the next one; turning the console clockwise is a positive
+  gyro rate). Keys `A B SELECT START RIGHT LEFT UP DOWN R L`, combined
   with `+` (`press A+B`). Conditions: `text "STR"`, `notext "STR"`,
   `selected "STR"`, `stable N`, `changed`, `blank`, `notblank` (script.py).
 - `look` writes a PNG (path printed) and prints each emulator's OCR text.
@@ -133,5 +135,8 @@ battery save at all (passwords) gets `@save none`.
 ## Rules
 
 - Never write into the ROM library; the harness works on symlinks in `out/`.
+- A route that needs the gyro or tilt sensor: serve with
+  `--emus dingbat-bios,mgba` (the second reference has no motion input, so
+  it cannot follow), and say so in the script's comment and `@frozen`.
 - Do not edit the harness code or rebuild `bin/` (it kills running sessions).
 - In script comments name emulators only by their keys (`mgba`, `nba`).

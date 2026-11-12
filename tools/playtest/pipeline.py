@@ -71,6 +71,8 @@ def run_phase(name, rom, steps, workdir, rtc, save_in=None, log=print, audio=Fal
             res['failed_text'] = reader.read(fail)['text']
         res['checkpoints'] = ex.checkpoints
         res['frame'] = e.frame
+        if e.motion_ignored:
+            res['motion_ignored'] = True   # gyro/tilt steps this emulator cannot take
         e.quit()
         res['save'] = e.save_path if os.path.exists(e.save_path) else None
         if e.audio and os.path.exists(e.audio):

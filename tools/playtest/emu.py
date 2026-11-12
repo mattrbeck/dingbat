@@ -47,6 +47,10 @@ EEPROM_4K = frozenset('''
     FADJ FMKJ FMRE FNMJ FSME FTKJ FXVJ KHPJ KYGE'''.split())
 
 
+# Drivers whose emulator has no gyro or tilt input to feed (set_motion)
+NO_MOTION = frozenset({'nba_driver'})
+
+
 def game_code(rom):
     with open(rom, 'rb') as f:
         f.seek(0xAC)
@@ -134,6 +138,7 @@ class Emulator:
         emulator's battery file before boot (a copy, never a link). `audio`
         names a file for the raw output (s16le stereo, 32768 Hz)."""
         binary, real_bios, flags = EMULATORS[name]
+        self.binary = binary
         self.name = name
         self.envdir = os.path.abspath(envdir)
         if os.path.exists(self.envdir):
@@ -167,6 +172,8 @@ class Emulator:
                                      text=True, bufsize=1, env=env, cwd=self.envdir)
         self.frame = 0
         self.held = 0
+        self.motion = (0.0, 0.0, 0.0)   # gyro, tilt x, tilt y (script.py `gyro`, `tilt`)
+        self.motion_ignored = False     # a motion step this driver cannot take
         self.ready = self._read()
         if not self.ready.startswith('ready'):
             raise DriverError(f'{name}: bad handshake {self.ready!r}')
@@ -201,6 +208,25 @@ class Emulator:
         if mask != self.held:
             self.cmd(f'keys {mask}')
             self.held = mask
+
+    def set_motion(self, gyro=None, tilt=None):
+        """Hold the cart's motion sensors at these readings until the next
+        call: gyro rate and tilt (x, y), each -1..1 in dingbat's frontend
+        units (the drivers scale them, drivers/mgba_driver.c). The second
+        reference's public API has no gyro or tilt input, so there the step
+        does nothing and the run says so (`motion_ignored`)."""
+        g, tx, ty = self.motion
+        if gyro is not None:
+            g = float(gyro)
+        if tilt is not None:
+            tx, ty = (float(v) for v in tilt)
+        if (g, tx, ty) == self.motion:
+            return
+        self.motion = (g, tx, ty)
+        if self.binary in NO_MOTION:
+            self.motion_ignored = True
+            return
+        self.cmd(f'motion {g:.4f} {tx:.4f} {ty:.4f}')
 
     def run(self, n):
         # counted here, not taken from the driver: a state load rewinds the
