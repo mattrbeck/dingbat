@@ -337,7 +337,7 @@ Three changes, each exact by construction and each with a check build:
   start, next object, WX check dot). Everything that reads the pipeline or
   changes what it reads calls `fifo_sync` first: `write_byte` for VRAM, OAM
   and I/O, `ppu_write`, the CGB late pipeline stores, `ppu_write_machinery`,
-  `ppu_blank_frame`, `stop_instr`, `hdma_edge_lookahead`, the state writer;
+  `ppu_blank_frame`, `stop_instr`, the state writer;
   a state load drops the deferral. `-d:gb_lazypoison` fills the deferred
   fields with garbage so a missed reader shows up in a sweep.
 * **Idle loops and HALT (`GB_IDLE_SKIP`).** A taken backward JR/JP marks a

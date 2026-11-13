@@ -1549,7 +1549,10 @@ proc run_gb_rev6() =
           check(replays_in_new_core(emu, lcdon, 12),
                 "GB LCD-on frame state (LY 0, mode 2) loads and replays",
                 "frame " & $f)
-    check(seen > 0, "the LCD-on test ROM ends frames on the LCD-on write")
+    # LCD_ON_FRAME_DOTS = 0 pushes no frame at the LCD-on write (re-fit
+    # pending), so the LCD-on frame state is only reachable with it set.
+    when LCD_ON_FRAME_DOTS != 0:
+      check(seen > 0, "the LCD-on test ROM ends frames on the LCD-on write")
 
   block:
     let emu = new_gb_at(spsw)

@@ -149,16 +149,9 @@ proc write_nrx2(ch: PsgEnvChannel; value: uint8) =
   if not ch.dac_enabled: ch.enabled = false
 
 proc psg_env_trigger_extra(h: PsgHost): int =
-  ## Extra envelope clocks for a trigger now (ENV_TRIGGER_PRECLOCK_SKIP): one
-  ## for a trigger inside step 6's period, or taken within 4 T-cycles of its
-  ## edge.
-  when ENV_TRIGGER_PRECLOCK_SKIP == 0:
-    0
-  else:
-    let d = psg_fs_next_edge_in(h)
-    let lead = 4 shl psg_shl(h)
-    let stage = psg_fs_next_stage(h)
-    if (stage == 7 and d > lead) or (stage == 6 and d <= lead): 1 else: 0
+  ## Extra envelope clocks for a trigger now. The rule next to the envelope
+  ## clock was removed 2026-11-13 for a clean rewrite; none for now.
+  0
 
 when not PSG_AGB:
   # GB only: the AGB has no such lead (ch1_trigger_sweep).
@@ -170,10 +163,9 @@ when not PSG_AGB:
     if lead_t == 0: return 0
     let d = psg_fs_next_edge_in(h)
     let stage = psg_fs_next_stage(h)
-    # The lead is CPU cycles (one or two M-cycles), not real time: at double
-    # speed a CGB trigger 3 M-cycles (6 T) before the clock takes it (DocBoy
-    # double_speed change_period_nr14_during_recalc{,_double_trigger_*}_
-    # delay12240, step0_delay12240), so the 8 T lead is 4 T there.
+    # The lead is CPU cycles, not real time (DocBoy double_speed
+    # change_period_nr14_during_recalc{,_double_trigger_*}_delay12240,
+    # step0_delay12240 sit on it at double speed).
     if (stage == 2 or stage == 6) and d <= lead_t: 1
     else: 0
 

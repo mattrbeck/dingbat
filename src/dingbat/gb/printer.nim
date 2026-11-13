@@ -13,9 +13,9 @@
 # byte outside a packet keeps the parser in MAGIC1, so mid-packet aborts and
 # state loads self-heal.
 #
-# Status bits: 0 checksum error, 1 printing, 2 print done, 3 unprocessed data
-# present. Sequence: 0x00 idle -> 0x08 data buffered -> 0x06 printing -> 0x04
-# done -> 0x00 once the game has seen the 0x04. Assumed; no ROM pins this.
+# Status byte: bit 0 checksum error and bit 4 packet error are modelled. The
+# status sequencing across DATA / PRINT / completion and its latching were
+# removed 2026-11-13 for a clean rewrite.
 
 import gb
 
@@ -93,6 +93,10 @@ proc emit_strip(prn: GbPrinter) =
 
 const PRN_TIMEOUT_FRAMES = 6  # 100 ms at 59.7 fps
 
+proc printing*(prn: GbPrinter): bool =
+  ## Whether a PRINT's countdown is still running.
+  prn.print_left > 0
+
 proc tick_frame*(prn: GbPrinter) =
   ## Advance the print countdown; call once per emulated frame.
   # Pan Docs: a 100 ms packet timeout returns the printer to its initialized
@@ -108,10 +112,6 @@ proc tick_frame*(prn: GbPrinter) =
   if prn.print_left > 0:
     dec prn.print_left
     if prn.print_left == 0:
-      # "Done" (bit 2) stays latched until a later INIT or DATA, never cleared
-      # by a status read: clear-on-read leaves Hello Kitty Pocket Camera
-      # re-PRINTing forever because a second poll reports idle.
-      prn.status = 0x04
       if prn.feed_after:
         prn.emit_strip()
 
@@ -154,19 +154,13 @@ proc exec_command(prn: GbPrinter) =
       prn.buffer.setLen(0)
       prn.feed_after = sheets != 0
       prn.print_left = max(30, printed_rows * PRN_FRAMES_PER_ROW_NUM div PRN_FRAMES_PER_ROW_DEN)
-      prn.status = 0x06          # printing
   of 0x04:  # DATA: append a band (empty payload = the conventional flush)
     let chunk = if prn.compressed: rle_decode(prn.payload) else: prn.payload
     # Only a full band counts: a short/zero-length packet (the conventional
-    # flush) is ignored and leaves the status be. Assumed; no ROM pins this.
+    # flush) is ignored. Assumed; no ROM pins this. Overflow drops the band.
     if chunk.len == PRN_BAND_TILES * 16:
       if prn.buffer.len + chunk.len <= PRN_MAX_IMAGE:
         prn.buffer.add(chunk)
-      # Overflow drops the band and sets no bit: bit 2 must only ever mean
-      # "print complete". Assignment, not `or`: this clears a latched done
-      # from the previous job; ORing reported 0x0C where hardware reports
-      # 0x08 and Game Boy Camera Gold sat on "transferring" forever.
-      prn.status = 0x08                  # unprocessed data present
   of 0x08:  # BREAK: abort
     prn.print_left = 0
     prn.buffer.setLen(0)
@@ -231,18 +225,12 @@ proc feed*(prn: GbPrinter; b: uint8): uint8 =
     prn.state = psAck
   of psAck:
     result = 0x81                # device id / alive
-    # Latch the status reply NOW, before the command runs: the status byte is
-    # captured during this ACK transfer and the command executes afterwards,
-    # so a packet reports the status as of before its own command. Executing
-    # first makes PRINT ack 0x06 where hardware acks 0x08, and Game Boy
-    # Camera Gold re-PRINTs forever.
+    # The status reply is taken here; the command executes after it.
     if prn.chk_recv != prn.chk:
       prn.status = prn.status or 0x01
     else:
       prn.status = prn.status and not 0x01'u8
-    # INIT's status slot always reads 0x00, whatever was latched before it
-    # (Assumed; Pocket Camera and Camera Gold rely on it).
-    prn.reply = if (prn.cmd and 0x0F) == 0x01: 0'u8 else: prn.status
+    prn.reply = prn.status
     prn.state = psStatus
   of psStatus:
     result = prn.reply            # latched at psAck, pre-execution

@@ -327,8 +327,8 @@ its row into the tile map with the LCD on, straddling mode 3. Those writes are r
 phase of the blit — a screen check fails on correct emulation and can be "fixed" by any
 constant that nudges the phase. The runner asserts only `--screen-check`. The gate for
 this class of bug is differential (`tools/gbfuzz`, `tools/gbgate`,
-`tools/gbppu/blargg_canary.sh`); the constant it guards, `SPEED_SWITCH_STALL_T`, is
-ROM-bracketed but not ROM-pinned (`docs/oracles.md`).
+`tools/gbppu/blargg_canary.sh`); the constant it guards, `SPEED_SWITCH_STALL_CPU`, is
+ROM-bracketed.
 
 Screenshot notes:
 

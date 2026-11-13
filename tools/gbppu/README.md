@@ -133,7 +133,7 @@ wake lands (`M0_HALT_BLIND_DOTS` / `CGB_M0_HALT_BLIND_DOTS` in `ppu.nim`).
 `gb_irq_trace` (dispatch) cannot show for the `IME = 0` members of gambatte's `halt/`
 families. It also identifies ROMs anchored to a single halt: `strikethrough` takes one
 wake a frame at LY 67, daid's `speed_switch_timing_{ly,stat}` one each at LY 144. It is
-the instrument for `CGB_HALT_PPU_LEAD` (`gb/gb.nim`) and `SPEED_SWITCH_STALL_T`
+the instrument for `CGB_HALT_PPU_LEAD` (`gb/gb.nim`) and `SPEED_SWITCH_STALL_CPU`
 (`gb/memory.nim`).
 
     tools/gbppu/daidswitch.sh [<dingbat_test>]

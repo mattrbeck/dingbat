@@ -1,13 +1,9 @@
 # GB APU master (included by gb.nim)
 
-const APU_POWERON_TAP_LEAD* {.intdefine.} = 4
+const APU_POWERON_TAP_LEAD* {.intdefine.} = 0
   ## Divider counts ahead of an NR52 power-on write at which the DIV-APU tap
-  ## bit is sampled for the skipped first edge (GbApu.div_skip). gambatte
-  ## sound/ch2_init_reset_env_counter_timing_{5 [dmg], 7 [cgb]}: each family
-  ## powers the APU on at a different divider phase, and 0 ticks their
-  ## envelope one clock early on exactly those two; 4 lands all 32
-  ## `init_reset_env_counter_timing` tests and every SameSuite
-  ## div_write_trigger row.
+  ## bit is sampled for the skipped first edge (GbApu.div_skip). Re-fit
+  ## pending; neutral value 0.
 
 const APU_SPSW_TAP_LAG_T* {.intdefine.} = 4
   ## Divider counts added to every etAPUFrameSeq re-aim while
@@ -178,8 +174,7 @@ const APU_SPSW_EXTRA_DOTS_SINGLE* {.intdefine.} = 3
 const APU_SPSW_REPHASE_LEAD_T* {.intdefine.} = 3
 const APU_SPSW_REPHASE_GRID_T* {.intdefine.} = 1
   ## The first KEY1 switch after an APU power-on re-phases the APU clock: its
-  ## tick grids (the 1 MHz square grid and APU_DS_TRIGGER_SNAP's 2 us grid)
-  ## come out GRID_T T-cycles later than real time plus the stall's
+  ## tick grid (the 1 MHz square grid) comes out GRID_T T-cycles later than real time plus the stall's
   ## APU_SPSW_EXTRA_DOTS, and a running square's next step LEAD_T earlier --
   ## onto the re-phased grid's previous edge. Later switches move the APU by
   ## the extras alone. The grid half is pinned by speedchange_ch1_nr4init_
@@ -225,8 +220,6 @@ proc apu_stall_extra*(apu: GbApu; gb: GB; dots: int) =
   let tick = gb_apu_tick(gb)
   apu.tick_phase  = (apu.tick_phase + tick - (d mod tick)) mod tick
   apu.noise_phase = (apu.noise_phase + 2 * tick - (d mod (2 * tick))) mod (2 * tick)
-  # APU_DS_TRIGGER_SNAP's grid runs with the APU too.
-  gb.apu_power_on_at -= int64(d)
 
 proc apu_spsw_rephase*(apu: GbApu; gb: GB) =
   ## APU_SPSW_REPHASE_*: once per APU power-on, at the first KEY1 switch's
@@ -245,7 +238,6 @@ proc apu_spsw_rephase*(apu: GbApu; gb: GB) =
   let g = CycleCount(APU_SPSW_REPHASE_GRID_T) shl sh
   let tick = gb_apu_tick(gb)
   apu.tick_phase = (apu.tick_phase + (g mod tick)) mod tick
-  gb.apu_power_on_at += int64(g)
 
 proc apu_rescale_speed*(apu: GbApu; gb: GB; old_speed, new_speed: uint8) =
   ## CGB speed switch: remaining delays are in CPU cycles, so entering double
@@ -282,16 +274,6 @@ proc apu_rescale_speed*(apu: GbApu; gb: GB; old_speed, new_speed: uint8) =
   # power-on that sets it).
   apu.tick_phase  = gb.scheduler.cycles mod (CycleCount(4) shl new_speed)
   apu.noise_phase = gb.scheduler.cycles mod (CycleCount(8) shl new_speed)
-  # APU_DS_TRIGGER_SNAP's 2 us grid keeps its real-time phase, re-expressed in
-  # the new speed's cycles (a power-on before the switch still anchors a
-  # double-speed trigger after it: speedchange_ch1_nr4init_*). Only the
-  # phase is kept, so the stamp stays near the clock.
-  block:
-    let g_old = 8'i64 shl int64(old_speed)
-    let ph = floorMod(int64(now) - gb.apu_power_on_at, g_old)
-    gb.apu_power_on_at = int64(base_new) -
-      (if new_speed > old_speed: ph shl int64(new_speed - old_speed)
-       else: ph shr int64(old_speed - new_speed))
 
 proc gb_rebase*(gb: GB): CycleCount {.discardable.} =
   ## Frame-boundary scheduler rebase. Catching the channels up first keeps every
@@ -618,7 +600,6 @@ proc apu_write*(apu: GbApu; idx: int; val: uint8; gb: GB) =
       apu.channel4.div_counter = 0
       apu_drop_spsw_lag(apu, gb)
     elif (val and 0x80) != 0 and not apu.sound_enabled:
-      when APU_DS_TRIGGER_SNAP != 0: gb.apu_power_on_at = int64(gb.scheduler.cycles)
       apu.spsw_rephase_pending = true
       apu.env_late_pending = false
       apu.sound_enabled = true

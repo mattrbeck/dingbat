@@ -167,49 +167,36 @@ proc load_joypad_state(j: GbJoypad; r: var Reader) =
 # ---- The machine object (rev 6) ----
 #
 # Fields that live on GB itself rather than on a component. The rest of GB's
-# scratch (the HBlank-DMA halt/switch rules, the comparator leads, the CGB
-# write-in-flight slots) is live only inside an M-cycle, a halt or a stall,
-# never at the frame boundary a state is written on.
+# scratch (the comparator leads, the CGB write-in-flight slots) is live only
+# inside an M-cycle or a halt, never at the frame boundary a state is written
+# on. Rev 6 also carried three slots whose rules were removed 2026-11-13; they
+# stay in the format as reserved zeroes so older and newer states still load.
 
 proc save_machine_state(gb: GB; w: var Writer) =
   w.write_tag(GB_SEC_MACH)
   # The silicon revision the quirks were resolved from (gb_set_revision).
   w.write_u8(uint8(ord(gb.revision)))
-  # STOP_OPERAND_LATCH: a speed switch that found an HBlank DMA request runs
-  # STOP's operand byte as the next opcode, parked behind halted + locked.
-  w.write_i16(gb.stop_op_latch)
-  # DMG_LYC_BOUNDARY_OPEN: LYC before a DMG LYC write still parked.
-  w.write_i16(gb.lyc_write_old)
-  # APU_DS_TRIGGER_SNAP: the scheduler cycle of the last APU power-on, raw
-  # (it is not rebased with the scheduler; the snap reads it mod 16).
-  w.write_u64(cast[uint64](gb.apu_power_on_at))
-  # HDMA_BLOCK_SWALLOW: the dot an HBlank block's swallow window ends on, in
-  # the line counter, or -1. Consumed by the next mode-0 edge an armed
-  # transfer sees, which can be frames later.
-  w.write_i32(gb.hdma_swallow_end)
+  # Reserved (rev 6): i16, i16, u64, then i32 (-1).
+  w.write_i16(0)
+  w.write_i16(0)
+  w.write_u64(0)
+  w.write_i32(-1)
 
 proc load_machine_state(gb: GB; r: var Reader; rev: uint32) =
   if rev < 6:
     # Before rev 6 none of these was carried and a load kept the running
-    # machine's revision and power-on stamp. The two latches are empty at
-    # every boundary an older build wrote (it had no way to resume them).
-    gb.stop_op_latch = 0
-    gb.lyc_write_old = 0
-    gb.hdma_swallow_end = -1
+    # machine's revision.
     return
   r.expect_tag(GB_SEC_MACH)
   let revb = int(r.read_u8())
   check_range(revb, 0, ord(high(GbRevision)), "gb.revision")
   let loaded = GbRevision(revb)
   if loaded != gb.revision: gb.gb_set_revision(loaded)
-  gb.stop_op_latch = r.read_i16()
-  # An opcode byte + 1, or 0 for none.
-  check_range(int(gb.stop_op_latch), 0, 0x100, "gb.stop_op_latch")
-  gb.lyc_write_old = r.read_i16()
-  check_range(int(gb.lyc_write_old), 0, 0x100, "gb.lyc_write_old")
-  gb.apu_power_on_at = cast[int64](r.read_u64())
-  gb.hdma_swallow_end = r.read_i32()
-  check_range(int(gb.hdma_swallow_end), -1, 1024, "gb.hdma_swallow_end")
+  # The reserved slots (read and dropped).
+  discard r.read_i16()
+  discard r.read_i16()
+  discard r.read_u64()
+  discard r.read_i32()
 
 # ---- Memory ----
 
@@ -232,10 +219,10 @@ proc save_mem_state(mem: GbMemory; w: var Writer) =
   w.write_bool(mem.requested_speed_switch)
   w.write_u8(mem.current_speed)
   # rev 6: $FEA0-$FEFF (real RAM on CGB 0-D, GbQuirks.unusable_region), RP,
-  # and SVBK's raw readback byte.
+  # and a reserved SVBK byte (written as the mapped bank; not read back).
   w.write_bytes(mem.unusable)
   w.write_u8(mem.rp)
-  w.write_u8(mem.svbk_raw)
+  w.write_u8(mem.wram_bank)
   # rev 9: OPRI's bit.
   w.write_u8(mem.opri)
   # rev 10: whether the PPU is sitting out a leaf switch's restart.
@@ -248,7 +235,6 @@ proc load_mem_state(mem: GbMemory; r: var Reader; rev: uint32) =
   # than reject: a real machine could not have produced anything else.
   mem.wram_bank = r.read_u8() and 0x7'u8
   if mem.wram_bank == 0: mem.wram_bank = 1
-  mem.svbk_raw = mem.wram_bank  # readback reconstruction; see GbMemory.svbk_raw
   r.read_bytes(mem.hram)
   mem.bootrom = r.read_seq_u8()
   mem.ff72 = r.read_u8()
@@ -269,11 +255,10 @@ proc load_mem_state(mem: GbMemory; r: var Reader; rev: uint32) =
   if rev >= 6:
     r.read_bytes(mem.unusable)
     mem.rp = r.read_u8() and 0xC1'u8
-    # Only what a read of SVBK returns (a written 0 reads back 0, mapped as
-    # bank 1); three bits, as the write path keeps it.
-    mem.svbk_raw = r.read_u8() and 0x7'u8
-  # Before rev 6 none of the three was carried and a load kept the running
-  # machine's: $FEA0-$FEFF and RP as they were, SVBK reconstructed above.
+    # The reserved SVBK byte.
+    discard r.read_u8()
+  # Before rev 6 neither was carried and a load kept the running machine's
+  # $FEA0-$FEFF and RP.
   # OPRI from rev 9; an older state gets the hand-off's 0 (a CGB-mode cart
   # boots with it clear; in compatibility mode the register reads $FF and
   # the bit is never seen).
@@ -342,9 +327,7 @@ proc save_ppu_state(ppu: GbPpu; w: var Writer) =
   let fp = GbFifoPpu(ppu)
   w.write_bool(fp.win_carry)
   w.write_bool(fp.win_carry_gap)
-  # The mode-2 comparator's Y/X input latches (OAM_SCAN_DMA_HOLD), which keep
-  # the last entry a scan read across lines and frames: a transfer holding
-  # the bus at the next scan's start compares against them.
+  # The mode-2 comparator's Y/X input latches: the last entry a scan read.
   w.write_u8(fp.scan_y_bus)
   w.write_u8(fp.scan_x_bus)
   # CGB_TDSEL_GLITCH's address latch: the last $8000-region tile-data read,

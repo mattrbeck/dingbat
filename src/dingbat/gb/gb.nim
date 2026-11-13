@@ -21,13 +21,11 @@ const LY_BLIND_SCOPE* {.intdefine.} = 2
 # (dots, so it scales with double speed). 4 = the M-cycle's end, which
 # compiles the field and the split tick out. See `irq_read` in interrupts.nim.
 const IF_READ_SAMPLE_T* {.intdefine.} = 0
-const IF_READ_M2_144_TIE_DS* {.intdefine.} = 1
-  ## Double speed: an IF read whose M-cycle starts on the line-144 OAM pulse's
-  ## dot (M2_144_EARLY_DOT_DS) latches after that dot. The pulse sits on a
-  ## whole dot and ties with the read, which sees it (gambatte
-  ## `enable_display/frame{0,1}_m2irq_count_ds_2`); the other sources land on
-  ## half dots at double speed, and a one-dot sample for every read loses
-  ## seven of their rows.
+const IF_READ_M2_144_TIE_DS* {.intdefine.} = 0
+  ## Double speed: whether an IF read whose M-cycle starts on the line-144
+  ## OAM pulse's dot (M2_144_EARLY_DOT_DS) latches after that dot and so sees
+  ## the pulse (0 = no, 1 = yes). Re-fit pending, jointly with
+  ## M2_144_EARLY_DOT_DS; neutral value 0.
 
 const TIMER_IRQ_RUN_LEAD* {.intdefine.} = 1
   ## M-cycles by which a running CPU's interrupt dispatch sees a TIMA overflow
@@ -55,13 +53,22 @@ const STAT_M0_LEAD_T* {.intdefine.} = 2
   ## gambatte `sprites/*_m3stat_ds_1` tests; `M3_END_EARLY` would move the
   ## readable field too and fail GBMicrotest `poweron_stat_*`, `win*_a`.
 const STAT_DISPATCH_MIN_AGE_DS* {.intdefine.} = 0
-  ## Retired: 0 compiles it out. Double speed only: dots the mode-0 source's
-  ## rise must have been up at an instruction boundary before the running CPU
-  ## dispatches it. Replaced by STAT_M0_LEAD_DS, which moves the source itself
-  ## (the IF-write tests are pinned through IF_WRITE_LAND_DOTS_DS); 0, 2 and 4
-  ## now score the same and AGE stays green. It was 2 for AGE
-  ## stat-interrupt/stat-int's double-speed half; the derivation is in this
-  ## file's git history.
+  ## Ships 0 (compiled out); the double-speed joint set it interacts with
+  ## (STAT_M0_LEAD_DS, IRQ_SAMPLE_T_DS, IF_WRITE_LAND_DOTS_DS,
+  ## CGB_M0_HALT_BLIND_DS_DOTS) is pending a re-fit. The original note follows.
+  ## Double speed only: dots the MODE-0 source's own rise must have been up
+  ## for at an instruction boundary before the running CPU dispatches it; 0
+  ## = any age (compiles out). The double-speed dispatch grid sits on odd
+  ## dots and the source rises at flag - STAT_M0_LEAD_DS, so for an odd SCX
+  ## it rises one dot before a boundary and was taken there. AGE
+  ## stat-interrupt/stat-int's double-speed half (the mode-0 source set at
+  ## the head of line 3, STAT read back at two delays one M-cycle apart, SCX
+  ## 0..9) pairs SCX (1,2), (3,4), (5,6): that rise waits a boundary.
+  ## Applied to every STAT rise it breaks the mode 2 and mode 1 cells of
+  ## the same ROM (those sources rise on the boundary's own dot and are
+  ## taken), and to CPU-written enables gambatte m2int_m0irq/*_ds_1. 2 ships:
+  ## a rise two dots old (an even SCX) is taken; gambatte
+  ## m0int_m0stat/m0int_m0stat_scx5_ds_2 comes with it.
 const STAT_ENABLE_LATENCY* {.intdefine.} = 0
   ## Dots from the top of its M-cycle until a STAT write's four source-enable
   ## bits reach the STAT interrupt line; 4 = the M-cycle boundary (the old
@@ -124,7 +131,9 @@ const CGB_LYC_WRITE_DEFER_DS* {.booldefine.} = false
 # trace runs; no emulator source consulted. docs/gb-derivations.md has the tables.
 const CGB_LINE_END_STEPS* {.booldefine.} = true
   ## Single speed: a rendered line's end is five steps on the comparator's
-  ## lead dot (454), the edge detector run after each (fifo_cgb_line_end).
+  ## lead dot (STAT_LYC_LY_LEAD_DOTS before the boundary), the edge detector
+  ## run after each (fifo_cgb_line_end). Dormant while that lead is 0
+  ## (CGB_LINE_END_ACTIVE).
   ## Each step's place is pinned by the rows that go red when it is moved:
   ##  1. a STAT write in flight whose enables land on this dot takes hold, the
   ##     line's sources still standing (`lycEnable/late_ff41_enable_
@@ -132,7 +141,7 @@ const CGB_LINE_END_STEPS* {.booldefine.} = true
   ##     interrupt; lost without this step);
   ##  2. the comparator lets go of this line's match, and on line 143 the
   ##     mode-1 source and the vblank request come up (STAT_M1_LEAD);
-  ##  3. the mode-0 source falls -- two dots before the boundary it used to
+  ##  3. the mode-0 source falls -- ahead of the boundary it used to
   ##     share with the DMG (`m1/ly143_late_m0enable_2` [cgb] enables mode 0
   ##     from dot 453 and hardware is silent, where the DMG fires;
   ##     `m1/lyc143_late_m0enable_lycdisable_2`), and after the mode-1 rise,
@@ -256,56 +265,33 @@ const STAT_M0_LEAD_FIRST_LINE* {.booldefine.} = false
   ## Whether STAT_M0_LEAD_T applies on the first line after an LCD enable.
   ## Off: tools/gbppu/gam_dispatch.py reads that line's dispatch as exact.
 
-const STAT_LYC_LY_LEAD_DOTS* {.intdefine.} = 2
+const STAT_LYC_LY_LEAD_DOTS* {.intdefine.} = 0
   ## Dots before a line's boundary at which the LYC comparator's LY (irq_ly)
   ## steps to the next line in SINGLE speed, so its STAT source rises and
-  ## falls ahead of the readable LY (fifo_lyc_ly_lead). After a KEY1 round
-  ## trip (the CPU grid 3 dots behind the PPU's) a source rising on the
-  ## boundary is dispatched one M-cycle late: every gambatte `*_lcdoffset1_1`
-  ## row on the LYC/mode-1 sources. Bracketed on the 5157-row list: 1 is
-  ## +8/-3, 2 +15/-6, 3 +15/-9 (docs/gb-failure-triage.md A3). 0 compiles it
-  ## out.
+  ## falls ahead of the readable LY (fifo_lyc_ly_lead). 0 compiles it out
+  ## (and with it CGB_LINE_END_ACTIVE). Re-fit pending; neutral value 0.
 const STAT_LYC_LY_LEAD_DS* {.intdefine.} = 0
-  ## The same in double speed. 0: a lead there (1..3 were tried with the
-  ## single-speed one) loses every `_ds_` sibling; the double-speed constants
-  ## are a coupled set (STAT_READ_SAMPLE_DS_ADD, SPEED_SWITCH_PPU_EXTRA_DOTS,
-  ## IRQ_SAMPLE_T_DS) and move together or not at all.
-const VBLANK_IRQ_LEAD* {.intdefine.} = 1
-  ## The vblank request goes up with STAT_M1_LEAD's mode-1 source, the
-  ## comparator's lead before line 144 (2 dots at single speed), not on the
-  ## boundary. The retriggering dispatch of
-  ## `m1/lycint_vblankirq_late_retrigger_2` (both
-  ## devices) clears a request raised then; `lcd_offset/
-  ## offset2_lyc8fint_m1irq_2` [cgb] sees it an M-cycle earlier. 0 loses the
-  ## three and takes nothing.
-const LY_BLIND_SKIP_LED* {.intdefine.} = 1
-  ## A vblank line's boundary opens no comparator blind window
-  ## (ly_advance_vblank) when the comparator already stepped
-  ## STAT_LYC_LY_LEAD_DOTS earlier: the match it holds is already the new
-  ## line's, and dropping it again re-raises a request a dispatch has just
-  ## cleared. gambatte `ly0/lycint152_lyc153irq_late_retrigger_2` (both
-  ## devices), `lycEnable/lyc153_late_ff45_enable_2` [cgb]. A rendered line's
-  ## window stays (skipping it there loses 12 `lcdirq_precedence`,
-  ## `miscmstatirq/lycwirq_trigger_m0_late_ly44_lyc45_*`, `ff41_disable_3`).
-const LCDON_M0_LAG_DS* {.intdefine.} = 8
+  ## The same in double speed, in dots. The double-speed constants are a
+  ## coupled set (STAT_READ_SAMPLE_DS_ADD, SPEED_SWITCH_PPU_EXTRA_DOTS,
+  ## IRQ_SAMPLE_T_DS). Re-fit pending; neutral value 0.
+const VBLANK_IRQ_LEAD* {.intdefine.} = 0
+  ## Whether the vblank request goes up with STAT_M1_LEAD's mode-1 source,
+  ## the comparator's lead before line 144, rather than on the boundary
+  ## (0 = on the boundary). Re-fit pending; neutral value 0.
+# A vblank line's comparator blind window after the comparator already
+# stepped: removed 2026-11-13 for a clean rewrite.
+const LCDON_M0_LAG_DS* {.intdefine.} = 0
   ## Scheduler cycles (4 per M-cycle) the mode-0 STAT source trails the mode
-  ## flag on the first line after an LCD enable at double speed. On that line
-  ## the source loses the 2-dot lead every later line has at single speed
-  ## (`m0_source_lead`, fifo_ppu.nim); at double speed that lead is already 0
-  ## (STAT_M0_LEAD_DS), so the same 2 dots show as a lag. gambatte
-  ## `enable_display/ly0_m0irq_scx{0,1}_ds_1`, `frame0_m0irq_count_scx{2,3}_
-  ## ds_1` (+4, none lost); 4 is inert, 12 loses the four `_2` twins.
-const VRAM_WRITE_LINE0_CGB_GRACE* {.intdefine.} = 1
+  ## flag on the first line after an LCD enable at double speed (0 = none).
+  ## Re-fit pending; neutral value 0.
+const VRAM_WRITE_LINE0_CGB_GRACE* {.intdefine.} = 0
   ## Whether a CGB VRAM write on the LCD-on line meets a late close edge
-  ## (cpu_vram_open): the lock shuts one CPU M-cycle and a dot past the
-  ## mode-3 flag edge, 5 dots at single speed and 3 at double. gambatte
-  ## enable_display/ly0_late_vramw_2 [cgb] takes widths 5..8 at single speed
-  ## and 10 loses `ly0_late_vramw_3`; DocBoy `double_speed_ppu_vram_write_
-  ## block_timing_ly0_1_out_of_4` (CPU CGB E, writes one double-speed M-cycle
-  ## apart) takes 2..3 and loses 4, and SameBoy (CGB E) passes it. The width
-  ## used to be the read side's 7 (and 5 at double speed, the read lock's
-  ## LCD_ON_LINE0_LOCK_LEAD included), which no single-speed row separates
-  ## from 5.
+  ## (cpu_vram_open; 0 = no, 1 = yes): the lock shuts one CPU M-cycle and a
+  ## dot past the mode-3 flag edge, 5 dots at single speed and 3 at double.
+  ## The width: DocBoy `double_speed_ppu_vram_write_block_timing_ly0_1_out_of_4`
+  ## (CPU CGB E, writes one double-speed M-cycle apart) takes 2..3 and loses
+  ## 4, and SameBoy (CGB E) passes it. Re-fit pending (the switch); neutral
+  ## value 0.
 const VRAM_WRITE_LINE0_OPEN_LEAD* {.intdefine.} = 1
   ## Whether a CGB VRAM write on the LCD-on line sees mode 3 end
   ## LCD_ON_LINE0_LOCK_LEAD dots late, as a read does (lcdon_latched_mode):
@@ -313,49 +299,18 @@ const VRAM_WRITE_LINE0_OPEN_LEAD* {.intdefine.} = 1
   ## open edge, writes one double-speed M-cycle apart) takes 2..3 and loses
   ## 4 and 0..1; SameBoy (CGB E) passes it. No single-speed row reaches it
   ## (nothing moves at either value); applied at both speeds, as the lead is.
-const LCDOFF_STAT_LYC_IRQ* {.intdefine.} = 1
-  ## With the LCD off the comparator's match is frozen where it stood, and a
-  ## STAT write that turns the LYC enable on over a frozen match requests
-  ## the interrupt (on a DMG any STAT write does: its $FF phase). gambatte
-  ## `lycEnable/lcdoff_lycirqen_1` (both devices), `_4` [dmg]; `_2`/`_3`
-  ## (no frozen match, enable already on) stay quiet.
-const M0_IRQ_EDGE_X* {.intdefine.} = 1
-  ## The mode-0 STAT request rises where the line's pixels end even when an
-  ## object at X = 167 or a window started at WX = 166 keeps the fetcher (and
-  ## the STAT mode, which still reads 3) busy past it.
-  ## Raised as the X = 167 object's fetch or the WX = 166 window's start
-  ## begins, unless a WX = 166 window is still to start. gambatte
-  ## `sprites/10spritesPrLine_10xposA7_m0irq_2` (both devices),
-  ## `window/m2int_wxA6_m0irq{,2}_2` [cgb], `m2int_wxA6_spxA7_m0irq_2` [dmg],
-  ## `m0enable/enable_wxA6_2x_spxA7_ds_1`. 0 = the request waits for the
-  ## fetcher.
-const DMG_LYC_BOUNDARY_OPEN* {.intdefine.} = 1
-  ## A DMG LYC write parked in the M-cycle a rendered line starts in still
-  ## lets the comparator's boundary window open (ly_advance_open), unless the
-  ## old LYC matched the line ending: a match that moves with LY sees no edge.
-  ## gambatte `miscmstatirq/lycwirq_trigger_m0_late_ly44_lyc45_4` [dmg] (the
-  ## mode-0 source hands the line to the new match); `lycEnable/
-  ## ff45_enable_weirdpoint_3` [dmg] is the matched case and is lost without
-  ## the exception. 0 = any parked write closes the window.
-const STAT_GLITCH_M0_LEAD* {.intdefine.} = 1
+# A STAT write over the comparator's frozen match with the LCD off, the
+# mode-0 request against an X = 167 object or WX = 166 window, and a parked
+# DMG LYC write at a line's start: removed 2026-11-13 for a clean rewrite.
+const STAT_GLITCH_M0_LEAD* {.intdefine.} = 0
   ## Dots before the mode 3 -> 0 flag at which the DMG STAT-write bug's $FF
   ## phase already finds the mode-0 source (ppu_stat_write_glitch); measured
   ## from the source's own change dot, STAT_M0_LEAD_T ahead of the flag.
-  ## gambatte `miscmstatirq/m0statwirq_scx{2,3,5}_{1,2}` [dmg]: SCX 2 fires
-  ## on the M-cycle SCX 3 does not, SCX 5 on the one after. 0 loses scx2_2
-  ## and scx5_2, 2 loses scx2_2; nothing else moves.
-const STAT_M1_LEAD* {.intdefine.} = 1
-  ## The mode-1 STAT source rises with the LYC comparator's lead
-  ## (STAT_LYC_LY_LEAD_DOTS, 2 dots at single speed) at the end of line 143,
-  ## ahead of the mode flag and the vblank interrupt. Line 143's LYC match
-  ## lets go first and the mode-1 source rises after it, so a match on 143
-  ## still leaves the edge detector an edge (0 of that order loses 15 rows,
-  ## `m1/lycint143_m1irq_*` and `lcdirq_precedence/m1irq_lcdstat50_lyc8f`); a
-  ## STAT write still in flight that clears the enable is the enable the rise
-  ## sees (CGB_STAT_ENABLE_LATENCY would otherwise land it too late:
-  ## `m1/m1irq_disable_1` [cgb]). Takes `m1/lycint143_m1irq_late_retrigger_2`
-  ## (both devices), `m1irq_m0disable_2`, `m1irq_m2disable_lycdisable_2`
-  ## [cgb]; 0 is the old rise at line 144's first dot.
+  ## Re-fit pending; neutral value 0.
+const STAT_M1_LEAD* {.intdefine.} = 0
+  ## Whether the mode-1 STAT source rises with the LYC comparator's lead
+  ## (STAT_LYC_LY_LEAD_DOTS) at the end of line 143, ahead of the mode flag,
+  ## rather than at line 144's first dot (0). Re-fit pending; neutral value 0.
 const STAT_LYC_LY_LEAD_ANY* = STAT_LYC_LY_LEAD_DOTS != 0 or STAT_LYC_LY_LEAD_DS != 0
 const STAT_IRQ_SPLIT* = STAT_IRQ_LEAD != 0 or STAT_LYC_LEAD != 0 or
                         STAT_M0_LEAD_T != 0 or STAT_LYC_LY_LEAD_ANY
@@ -512,29 +467,22 @@ const CGB_HALT_PPU_LEAD* {.intdefine.} = 1
   ## cheaper form, if ever needed, decides at halt entry rather than per
   ## halted M-cycle.
 const OAMDMA_HALT_PAUSE* {.intdefine.} = 1
-const OAMDMA_SRCCHANGE_BUS* {.intdefine.} = 1
-  ## Whether an FF46 write while a transfer runs moves the running unit onto
-  ## the NEW source's bus at once (the old transfer keeps copying until the
-  ## restart takes over, but its bus conflicts are the new source's). gambatte
-  ## oamdma/oamdma_src8000_srcchange0000_busyinc (both devices): the ROM
-  ## fetch right after the restart to $0000 is already blocked (+2).
-const OAMDMA_HALT_GRACE* {.intdefine.} = 1
-  ## M-cycles the OAM DMA unit still clocks after the CPU halts: the pause
-  ## starts one M-cycle late, and the wake then owes no extra hand-back cycle
-  ## (OAMDMA_WAKE_EXTRA 0). The same byte for the `oamdmasrc80_halt_*` tests,
-  ## which pinned the old (0, 4) pair; with OAMDMA_HALT_RELEASE it takes
-  ## gambatte `oamdma/oamdma_late_halt_stat_2` on both devices (a HALT on the
-  ## transfer's last M-cycle still lets it finish). (1, 4) and (2, *) lose
-  ## the five `oamdmasrc80_halt`/`hdma_transition_oamdma_2` tests.
-const OAMDMA_WAKE_EXTRA* {.intdefine.} = 0
-const OAMDMA_HALT_RELEASE* {.intdefine.} = 1
-  ## A transfer whose last byte is written hands OAM back even with the CPU
-  ## halted, instead of on the wake.
   ## The OAM DMA unit is clocked by the CPU's bus cycles, so it freezes while
-  ## the CPU is halted, one M-cycle into the HALT (OAMDMA_HALT_GRACE). Default 1; 0 runs the transfer through a HALT; 2 (pause, no
-  ## hand-back) and 3 (pause, wake M-cycle does not clock) are controls. Pinned
-  ## to the byte by gambatte `oamdma/oamdmasrc80_halt_{lycirq,m2irq}_read8000`
-  ## (all four rows want $81; the other arms answer $A0, $2B or $82).
+  ## the CPU is halted (OAMDMA_HALT_GRACE says when). 1 ships; 0 runs the
+  ## transfer through a HALT; 2 (pause, no hand-back) and 3 (pause, wake
+  ## M-cycle does not clock) are controls. Pinned to the byte by gambatte
+  ## `oamdma/oamdmasrc80_halt_{lycirq,m2irq}_read8000` (all four rows want
+  ## $81; the other arms answer $A0, $2B or $82).
+# OAM DMA restarted while running, and OAM DMA finishing under HALT or the
+# speed-switch stall: removed 2026-11-13 for a clean rewrite.
+const OAMDMA_HALT_GRACE* {.intdefine.} = 0
+  ## M-cycles the OAM DMA unit still clocks after the CPU halts before
+  ## OAMDMA_HALT_PAUSE freezes it (M-cycles; 0 = it freezes at once). Re-fit
+  ## pending, jointly with OAMDMA_WAKE_EXTRA; neutral value 0.
+const OAMDMA_WAKE_EXTRA* {.intdefine.} = 4
+  ## T-cycles of hand-back the OAM DMA unit is owed at the wake from a HALT
+  ## that paused it (T-cycles). Re-fit pending, jointly with
+  ## OAMDMA_HALT_GRACE; neutral value 4.
 const CGB_OAM_DMA_START_T* {.intdefine.} = 8
   ## T-cycles between the FF46 write and the OAM DMA unit taking the bus, on
   ## CGB. 8, the same as DMG (mem_dma_tick); the knob records that
@@ -552,10 +500,8 @@ const GB_POWERUP_WRAM_PATTERN* {.intdefine.} = 1
   ## pages to buy them back would fit the capture rig, not hardware.
 const HDMA_SPEEDSWITCH_KILL_W* {.intdefine.} = 1
   ## Dots from a CGB speed switch's STOP within which the mode 3 -> 0 edge
-  ## counts as a request the switch's HALT found pending (0 = off); what that
-  ## does is HDMA_SWITCH_REQ (into double speed the block runs in the stall and
-  ## the transfer ends). An ordinary HALT only defers the block (Pan Docs FF55;
-  ## gambatte `hdma_m3halt_m1unhalt_hdma5`). Default 1: `-d:gb_dma_trace` puts
+  ## destroys the armed transfer (0 = off). An ordinary HALT only defers the
+  ## block (Pan Docs FF55; gambatte `hdma_m3halt_m1unhalt_hdma5`). 1 ships: `-d:gb_dma_trace` puts
   ## STOP and the edge on the same dot in every gambatte
   ## `transition_speedchange_hdmalen*` / `late_m3speedchange_hdma5_*_2` row
   ## that wants the transfer gone, and `late_m3speedchange_hdma5_scx2_1`, one
@@ -595,15 +541,6 @@ const HDMA_GRANT_BOUNDARY_DOTS* {.intdefine.} = 3
   ## <= 3 by gambatte `irq_precedence/late_hdma_vs_{ei,ie}_scx2_2` and
   ## `late_hdma_vs_tima_scx2_1`. 2 and 3 are row-for-row identical; the dot
   ## between the two thresholds is real and unexplained.
-const HDMA_EDGE_BEATS_DISPATCH* {.intdefine.} = 1
-  ## An HBlank request raised on the very dot an interrupt dispatch would
-  ## begin takes the bus first. The PPU retires mode 3 inside the NEXT tick,
-  ## so at a boundary where the fetcher has retired on the current dot the
-  ## edge has not fired yet; the DMA is decided ahead of the dispatch anyway
-  ## (gambatte `irq_precedence/hdma_vs_m0_scx1`, `late_hdma_vs_{ei,ie}_scx1_2`,
-  ## `late_hdma_vs_tima_scx1_1` running, and with HDMA_WAKE_DEBT_RECHECK the
-  ## `_halt` tests woken). Only on the dispatch path, so it costs nothing per
-  ## instruction. 0 = off (loses those rows, wins none).
 const HDMA_GRANT_FETCH_HOLD* {.booldefine.} = false
   ## Whether a block granted at a hand-over point still holds its bytes back
   ## HDMA_VISIBLE_DOTS (`in_cpu_cycle`). It does not: the grant is between two
@@ -663,107 +600,18 @@ const HDMA_HALT_BLIND_LAG* {.intdefine.} = 2
   ## `hdma_late_m0halt_lcdoffset3_2` halts 2 dots before it and must.
 const HDMA_HALT_BLIND_LAG_DS* {.intdefine.} = 0
   ## The same lag in double speed, separately bracketed: gambatte
-  ## `hdma_late_m0halt_ds_1` fails with any nonzero value.
-const HDMA_HALT_REQ_DOTS* {.intdefine.} = 0
-  ## A mode-0 edge up to this many dots after the CPU halted is a request
-  ## raised before the HALT (the edge is processed in the tick after the dot
-  ## it is on), and a request the HALT finds pending is "requested": paid at
-  ## the wake whatever the mode then is, even in mode 2 or 3. -1 = off. 0 is
-  ## two-sided: off loses gambatte `dma/hdma_late_m3halt_m2unhalt_scx1_2` and
-  ## `hdma_transition_{,ei_}halt_late_unhalt_*_2`, 1 loses
-  ## `hdma_late_m3halt_m2unhalt_scx2_1` (edge one dot after the HALT).
-const HDMA_HALT_DEFERS_DUE* {.intdefine.} = 1
-  ## The same state for a block already owed, not yet granted, when the HALT
-  ## executes: the HALT is not a hand-over point, it parks the request for the
-  ## wake (and the boundary after the HALT does not grant it either). gambatte
-  ## `dma/hdma_late_m3halt_m2unhalt_inc_scx2_2` and `_ly_scx2_4`; 0 = the old
-  ## grant at the HALT's fetch.
-const HDMA_HALT_REQ_BUG* {.intdefine.} = 1
-  ## A HALT that leaves a request "requested" has already fetched the next
-  ## opcode without moving PC past it. With IME off the wake runs that
-  ## prefetched byte (read before the block could overwrite it) and PC still
-  ## points at it, so it runs twice, as in the halt bug; the block's release
-  ## M-cycle is that fetch, not charged twice. gambatte
-  ## `dma/hdma_late_m3halt_m2unhalt_inc_scx1_2` (`inc a` twice),
-  ## `hdma_transition_7fffhalt_inc_m3unhalt` (the byte at $8000 read before the
-  ## block rewrote it), `hdma_transition_halt_{late_unhalt,m0unhalt}_ldaaimm_*`.
-  ## With IME on see HDMA_HALT_REQ_BUG_IME.
-const HDMA_HALT_REQ_BUG_IME* {.intdefine.} = 1
-  ## HDMA_HALT_REQ_BUG with IME on: the prefetched opcode also runs (once,
-  ## PC still on it) between the wake's block and the dispatch, whose push
-  ## then carries the PC after it; the block's release M-cycle is refunded
-  ## as with IME off. gambatte `dma/hdma_transition_ei_halt_late_unhalt_
-  ## ldaaimm_hdma_scx1_1` (`LD (a16),A` reads its low operand as its own
-  ## opcode $EA and stores to $80EA before the dispatch). Without the
-  ## refund it loses `hdma_late_ei_m3halt_m2unhalt_ly_scx1_3` and the `_2`
-  ## twin; 0 = the dispatch comes first.
-const HDMA_BLOCK_SWALLOW* {.intdefine.} = 1
-  ## A mode-0 edge that falls while an HBlank block is running is lost: the
-  ## block acknowledges the request line as it ends. Only a block taken at a
-  ## wake can run into the next line's edge; with the refunded M-cycle above
-  ## the window reaches 4 dots past the block's last. 0 loses gambatte
-  ## `dma/hdma_transition_halt_late_unhalt_scx1_1`.
-const HDMA_SWITCH_HALTS* {.intdefine.} = 1
-  ## The speed switch's stall is a HALT to the HBlank DMA's edge detector
-  ## (Pan Docs' STOP chart: the switch leaf is HALT mode): it freezes across
-  ## the stall and the stall's end is a wake, without HDMA_WAKE_BLIND_DOTS
-  ## (the interrupt wake's own M-cycle). 0 loses gambatte
-  ## `dma/hdma_m0speedchange_late_m3wakeup_scx{1,2}_2`, whose mode-0 edge
-  ## falls in the stall's last dots after a switch made inside mode 0.
-const HDMA_SWITCH_REQ* {.intdefine.} = 1
-  ## An HBlank request pending when a speed switch halts the CPU (owed and not
-  ## yet granted at the STOP, or its edge on the STOP's dot): switching to
-  ## double speed, the block runs inside the stall and the transfer ends with
-  ## its length unchanged (FF55 reads length | $80); switching to single, the
-  ## request waits for the stall's end and is paid there whatever the mode,
-  ## with HDMA_HALT_REQ_BUG's refund. 0 = the old HDMA_SPEEDSWITCH_KILL_W drop
-  ## (no block), which leaves gambatte `dma/hdma_late_m3speedchange_*` and
-  ## `hdma_transition_speedchange_*` ten rows short.
-const HDMA_SWITCH_REQ_AGE* {.intdefine.} = 2
-  ## Dots a pending request must have been up at the STOP for the switch's
-  ## HALT to find it (HDMA_SWITCH_REQ). From double speed it is two-sided:
-  ## gambatte `dma/hdma_late_m3speedchange_*_scx2_ds_1` fail at 1 and the
-  ## `_scx1_ds_2`/`tima_scx1_ds_{3,4}` tests fail at 3. From single speed 0..3
-  ## score alike and 4 loses `late_m3speedchange_{hdma5,read_hdmadst00}_scx2_2`.
-const HDMA_SWITCH_REQ_KILL_DS* {.intdefine.} = 0
-  ## Whether the HDMA_SPEEDSWITCH_KILL_W edge (the mode-0 edge on the STOP's
-  ## dot) is a pending request on a switch INTO single speed too. 0: only into
-  ## double; 1 loses `late_m3speedchange_read_hdmadst00_scx1_ds_1` and
-  ## `tima_scx1_ds_{1,2}`, whose edge on that dot comes after the STOP.
-const STOP_OPERAND_LATCH* {.intdefine.} = 1
-  ## With HDMA_STOP_OPERAND_RUNS: the operand runs as the byte STOP's own
-  ## M-cycle fetched, not a re-read of its address after the stall, which the
-  ## block run inside the stall (or a VRAM lock) may have changed. gambatte
-  ## `dma/hdma_transition_speedchange_7fffstop_inc` (STOP at $7FFF, operand
-  ## $3C at $8000: the block overwrites it and the re-read lands in mode 3).
-  ## Run from the halted path (cpu_run_latched) so the fetch pays nothing.
-const HDMA_STOP_OPERAND_RUNS* {.intdefine.} = 1
-  ## STOP fetches its operand byte into the opcode latch; when the switch's
-  ## HALT finds an HBlank request pending that latch is live, and the operand
-  ## runs as the first opcode after the stall (a two-byte STOP becomes a
-  ## one-byte one). gambatte `dma/hdma_late_m3speedchange_inc_scx1_2` and
-  ## `hdma_late_speedchange_inc_scx1_ds_2` (`stop, 3c` = INC A), `_ly_scx1_4`,
-  ## `hdma_transition_speedchange_{ldaaimm_scx1,ldaaimm_scx1_ds,oamdma}`.
-  ## 0 loses those six and wins none.
-const HDMA_WAKE_BLIND_DOTS* {.intdefine.} = 4
-  ## Dots after an interrupt wake from HALT (measured before the CGB halt's
-  ## PPU debt is paid) for which the HBlank edge detector is still frozen
-  ## (halved in double speed; 0 = none): the wake's own M-cycle. A CPU that
-  ## halted inside mode 0 and wakes this close before the next mode-0 edge
-  ## misses it. gambatte `dma/hdma_m0halt_late_m3unhalt_scx1_2` (edge 4 dots
-  ## after the wake) wants 4..7, `_1` (8 dots) fails at 8, 3 misses `_2`.
-const HDMA_WAKE_DEBT_RECHECK* {.intdefine.} = 1
-  ## At a wake that dispatches, a block the CGB halt's debt dots made due
-  ## (the edge fell in them) is taken before the dispatch, like
-  ## HDMA_EDGE_BEATS_DISPATCH. gambatte `irq_precedence/hdma_vs_m0_scx2_halt`,
-  ## `late_hdma_vs_tima_scx2_halt_1`; 0 loses them.
-const HDMA_WAKE_M0_MARGIN* {.intdefine.} = 4
+  ## `hdma_late_m0halt_ds_1` refuses any nonzero value.
+# HBlank DMA across HALT and STOP (requests a HALT or the speed switch finds
+# pending, the wake's dispatch order, the opcode latch): removed 2026-11-13
+# for a clean rewrite.
+const HDMA_WAKE_BLIND_DOTS* {.intdefine.} = 0
+  ## Dots after an interrupt wake from HALT for which the HBlank edge
+  ## detector is still frozen (normal-speed dots, halved in double speed;
+  ## 0 = none). Re-fit pending; neutral value 0.
+const HDMA_WAKE_M0_MARGIN* {.intdefine.} = 8
   ## Normal-speed dots of the owing mode 0 that must remain at the wake for the
-  ## block to be taken there (halved in double speed; 0 = any): the HBlank
-  ## request window closes a few dots before the line ends, and a wake past
-  ## that close finds no request. gambatte `dma/hdma_late_m0unhalt_{1,2}` and
-  ## `_ds_{1,2}` bracket it: 3..5 take all four, 2 loses `_1`, 6 loses `_ds_2`,
-  ## and 0, 1 and 8 fail too (8 leaves both `_2` red).
+  ## block to be taken there (halved in double speed; 0 = any). Re-fit
+  ## pending; neutral value 8.
 const HDMA_OVERHEAD_LEADS* {.intdefine.} =
   (if HDMA_GRANT_FETCH_DOTS >= 0: 0 else: 1)
   ## Charge HDMA_BLOCK_OVERHEAD_BUS before the transfer's bytes rather than
@@ -813,55 +661,30 @@ const CGB_HALT_PPU_LEAD_ANY* = CGB_HALT_PPU_LEAD_DOTS != 0
 #   sweep saturates from 3 up.
 # WX 1, AGB only (GbQuirks.wx_write_late): the AGB SP photograph of
 #   tools/gbprobe probe_h_wx (2026-09-04, docs/flashcart-runbook.md row 32)
-#   puts the first firing band one later than 0 predicts. On the CGB 0 and 1
-#   traded one gambatte row each (`window/late_wx_scx3_2*` wants 1, the
-#   double-speed `late_wx_scx5_ds_1*` wants 0) until the latency was read as
-#   a CPU clock, which is half a dot at double speed (CGB_WX_LATE_SS); the
-#   CGB's own pages are still unphotographed.
+#   puts the first firing band one later than 0 predicts. Whether the CGB
+#   takes it too is CGB_WX_LATE_SS; the CGB's own pages are still
+#   unphotographed.
 const CGB_WX_LATENCY*         {.intdefine.} = 1
-const CGB_WE_ENABLE_LATE* {.intdefine.} = 1
-  ## A CGB LCDC.5 rise at single speed reaches the window comparator a dot
-  ## late, as a WX store does (CGB_WX_LATE_SS): the match is missed when the
-  ## shifter pops the window's first pixel on the write's own dot. gambatte
-  ## window/late_reenable_scx3_2 [cgb] (the discard pops it there) against
-  ## late_reenable_1 (SCX 0: the pixel pops a dot later and the window starts).
+const CGB_WE_ENABLE_LATE* {.intdefine.} = 0
+  ## Dots a CGB LCDC.5 rise at single speed takes to reach the window
+  ## comparator (0 = on the write's dot). Re-fit pending; neutral value 0.
 const WIN_LX_OFF_V* = -128'i32
   ## fifo_ppu.nim's WIN_LX_OFF (the comparator parked), here for ppu.nim.
-const CGB_WX_LATE_SS* {.intdefine.} = 1
-const SCX_BORROW_DISCARD_END* {.intdefine.} = 1
-  ## Once a mid-discard SCX store has made the fine-scroll discard wrap
-  ## (SCX_FINE_LATCH_WRAP), the fetcher's map column borrows against where the
-  ## discard ENDED (`scx_live_fine`), one tile back per wrap, instead of the
-  ## line's latched fine scroll: the tiles after the discard are counted from
-  ## its end (the column is `(SCX + 8 - F_end + 8j) / 8`). gambatte
-  ## `scx_during_m3/scx_0761c0/
-  ## scx_during_m3_{2,3,4,ds_2..ds_5}` [cgb] (a $61 store in the discard of a
-  ## line latched at 7 wraps it; the later $C0 store then borrows one tile
-  ## more). Without the wrap term the reference change breaks every frame;
-  ## CGB-only scores the same. 0 = the line's latched reference always.
-const WIN_REVOKE_DS_PUSH* {.intdefine.} = 1
-  ## At CGB double speed a window start is still revoked by an LCDC.5 fall
-  ## landing on the dot its restart pushes the first tile (k = W - D =
-  ## CGB_WIN_EN_DEFER + 1), a double-speed M-cycle being two dots: the undo
-  ## restores the ring the push overwrote and charges k - 1, the same line
-  ## length a fall on the dot before gets. gambatte `window/
-  ## late_disable_scx5_ds_1` (k = 6 revoked; `_ds_2`, k = 8, kept); charging
-  ## the extra dot loses `late_disable_late_scx00_wx10_ds_2`. Single speed
-  ## keeps k = 6 (`late_disable_scx5_2`).
-const WIN_CARRY_CANCEL_OFF* {.intdefine.} = 1
-  ## A carried DMG window start (DMG_WIN_LAST_PX_CARRY) that meets LCDC.5 low
-  ## at the head of mode 3 is dropped rather than held for a later head: the
-  ## window-started state is decided there. gambatte `window/on_screen/
-  ## wxA6_late_we_reenable_3` [dmg] (the start owed from line 143 meets LY 0
-  ## with the bit still low; held, it draws line 1). 0 loses it, nothing else.
-const CGB_WE_DISABLE_LATE* {.intdefine.} = 2
+const CGB_WX_LATE_SS* {.intdefine.} = 0
+  ## Whether every CGB (not only the AGB, GbQuirks.wx_write_late) takes a WX
+  ## store CGB_WX_LATENCY dots late at single speed (0 = no, 1 = yes).
+  ## Re-fit pending; neutral value 0.
+# The map column after a wrapped fine-scroll discard: removed 2026-11-13 for
+# a clean rewrite.
+const WIN_REVOKE_DS_PUSH* {.intdefine.} = 0
+  ## Whether, at CGB double speed, a window start is still revoked by an
+  ## LCDC.5 fall landing on the dot its restart pushes the first tile (0 = no,
+  ## 1 = yes). Re-fit pending; neutral value 0.
+# A carried DMG window start meeting LCDC.5 low at the head of mode 3: removed
+# 2026-11-13 for a clean rewrite.
+const CGB_WE_DISABLE_LATE* {.intdefine.} = 0
   ## Dots a CGB LCDC.5 fall takes to reach the fetcher's window abort
-  ## (WIN_EN_ABORT): a map read inside them still fetches a window tile.
-  ## gambatte
-  ## `window/on_screen/wx17_weoff_wxA5_weon` [cgb] (the fall a dot before a
-  ## map read keeps one more window tile); 1 is inert, 3 and 4 lose
-  ## `weon_wx18_weoff_weon_wx80` [cgb]. Double speed is unpinned: the
-  ## CPU-clock form (1 dot there) scores the same.
+  ## (WIN_EN_ABORT; 0 = on the write's dot). Re-fit pending; neutral value 0.
 const WIN_TAIL_PASSED_MATCH* {.intdefine.} = 1
   ## Whether mode 3's tail stops waiting on a window whose WX match the
   ## shifter has already passed (a match LCDC.5 refused, the bit set again
@@ -888,27 +711,16 @@ const CGB_WE_ENABLE_FETCH_LATE* {.intdefine.} = 2
   ## the rest of the line). 286 picture rows across the 51 frames now match
   ## SameBoy; 1 leaves 177 of them dingbat's alone; 3 moves one row of
   ## `*_nops6_sprites_x{16,24}` from SameBoy's picture to DocBoy's, which
-  ## disagree there (one-sided: 2 is the fall's value). No row passes on it
+  ## disagree there (one-sided). No row passes on it
   ## alone (the frames keep DocBoy's glitch pixels, I3); gambatte's `window`
   ## rows are unmoved by 1..3.
-const HDMA_START_GRANT_FETCH* {.intdefine.} = 2
-  ## An FF55 write that arms an HBlank transfer inside mode 0 raises the block's
-  ## request at once, but the CPU hands the bus over at the end of its NEXT
-  ## opcode fetch, not at the boundary the write's own instruction ends on
-  ## (HDMA_GRANT_FETCH_DOTS' rule); the request stands if mode 0 ends first.
-  ## The value is the deadline past the write in dots: 2..4 take gambatte
-  ## dma/hdma_pc_7ffe (the opcode at $8000 is fetched before the block
-  ## overwrites it), 1 and 6 do not. 0 = the old immediate block.
-const HDMA_LCD_OFF_BLOCK* {.intdefine.} = 1
-const GDMA_AFTER_FETCH* {.intdefine.} = 1
-  ## Whether a general-purpose DMA started by FF55 takes the bus at the end of
-  ## the CPU's next opcode fetch (the HBlank transfer's hand-over point,
-  ## HDMA_GRANT_FETCH_DOTS) rather than on the write's own boundary. gambatte
-  ## dma/late_gdma_pc_7ffe_1: the opcode at $8000 is fetched in mode 2 before
-  ## the burst, the operands after it in mode 3 (+1, none lost).
-  ## Whether switching the LCD off with an HBlank DMA armed requests a block,
-  ## as the LCD-off PPU sits in mode 0. gambatte
-  ## dma/hdma_disable_display_1 (+1, none lost).
+const HDMA_START_GRANT_FETCH* {.intdefine.} = 0
+  ## An FF55 write that arms an HBlank transfer inside mode 0: the deadline in
+  ## dots past the write by which the CPU hands the bus over at an opcode
+  ## fetch (HDMA_GRANT_FETCH_DOTS' hand-over point); 0 = the block runs on
+  ## the write. Re-fit pending; neutral value 0.
+# HBlank DMA at an LCD switch-off, and where a general-purpose DMA takes the
+# bus: removed 2026-11-13 for a clean rewrite.
 const VDMA_OVERHEAD_FREES_BUS* {.intdefine.} = 1
   ## HDMA_BLOCK_OVERHEAD_BUS's M-cycle (the acquire before, or the release
   ## after, a block's bytes) does not drive the external bus: an OAM DMA slot
@@ -963,8 +775,9 @@ const VDMA_M3_PORT* {.intdefine.} = 1
   ## object penalty moves the holes a dot), c keeps 1. Hardware question 21
   ## (gbedge p21 VDMABUS) photographs the SCX 0 map. 0 = every byte lands.
 const HDMA_LCD_OFF_EDGE* {.intdefine.} = 1
-  ## With HDMA_LCD_OFF_BLOCK: the LCD-off block is an HBlank EDGE, so only a
-  ## PPU not already in HBlank makes one (mode 2, 3 or 1 dropping to the
+  ## For the LCD-off HBlank DMA rule (removed 2026-11-13 for a clean rewrite;
+  ## this knob is inert until it returns): the LCD-off block is an HBlank
+  ## EDGE, so only a PPU not already in HBlank makes one (mode 2, 3 or 1 dropping to the
   ## LCD-off mode 0); switched off inside HBlank, after that HBlank's block,
   ## nothing more moves. A block still owed when the write lands is paid.
   ## DocBoy `cgb/hdma/hdma_ppu_on_turn_off_during_{ly0,ly1}_hblank` (2 and 3
@@ -988,17 +801,8 @@ const HDMA_LCDON_LINE0_LAG* {.intdefine.} = 1
   ## two-sided: every SCX shares one CPU timeline, whose grant points leave
   ## the request at dots 258..261, so SCX 0 (edge 252) needs >= 2 and SCX 3
   ## (edge 255) <= 2. 0 loses `_scx{0,1}_round1`; SameBoy passes both.
-const TIMER_ACK_LOOKAHEAD* {.intdefine.} = 4
-  ## T-cycles past its IF clear within which a timer request still to rise is
-  ## acknowledged by the same dispatch (dingbat's clear cannot move later
-  ## without lengthening the dispatch). One M-cycle: gambatte
-  ## tima/tc00_irq_late_
-  ## retrigger_{2 [cgb],3 [dmg],ds_2}; the DMG takes 2..5, the CGB 4..7, and
-  ## 6/8 lose `_2` [dmg] and the `_1` tests. 0 compiles it out.
-  ## Whether every CGB takes the WX store CGB_WX_LATENCY dots late at single
-  ## speed. At double speed the same CPU clock is half a dot and rounds to
-  ## none, which resolves the trade below: `late_wx_scx3_2` [cgb] takes it,
-  ## `late_wx_scx5_ds_1` keeps 0 (+1, none lost).
+# A timer request rising just after the dispatch's IF clear: removed
+# 2026-11-13 for a clean rewrite.
 const CGB_WY_LATENCY*         {.intdefine.} = 4
   ## One M-cycle, clipped to 3 dots by CGB_LATENCY_CAP; the whole of the
   ## gambatte `window/arg/late_wy_*` device split.
@@ -1068,83 +872,25 @@ const CGB_MAP_ANY* = CGB_MAP_LATENCY != 0
   ## Whether anything records the map-select bits' change dot; at 0 the field
   ## is never written and the fetcher's compare never takes.
 const CGB_WY_LATCH_LATENCY*   {.intdefine.} = 0
-const WIN_CHECK_DEFER_CGB*    {.intdefine.} = 5
+const WIN_CHECK_DEFER_CGB*    {.intdefine.} = 0
   ## Dots after a WY write's (or an LCDC.5 enable's) commit at which the
   ## window's WY == LY comparator samples on a CGB, in place of the immediate
-  ## latch (ppu_latch_wy). gambatte window/arg/late_wy_FFto0_ly2 and
-  ## late_enable_afterVblank flip between commits 445 and 449 of the line
-  ## before: the write lands at the end of its M-cycle and the comparator
-  ## runs one CPU M-cycle later, reading the LY of that dot. Bracketed with
-  ## STAT_LYC_LY_LEAD_DOTS on: 4 and 5 are +41/-13 and +42/-13, 6 +42/-19,
-  ## 7 +42/-21, 8 +49/-22 (8 takes two more boundary rows and loses the
-  ## mid-line `late_wy_FFto2_ly2_*_1` writes, whose window must still start
-  ## on the same line). 0 = immediate.
-const WIN_LATCH_END_DMG*      {.intdefine.} = 451
-const WIN_LATCH_END_CGB*      {.intdefine.} = 454
-  ## First dot of a line at which a WY == LY match (the write's immediate
-  ## latch on DMG, the deferred check on CGB) no longer latches the window
-  ## for the frame (0 = never): the per-line check that would carry it has
-  ## already run, and a match on the next line's LY is the boundary's check.
-  ## DMG (the check lands WIN_CHECK_DEFER_DMG after the
-  ## write): 451..454 take `window/arg/late_wy_{10to0_ly1,FFto0_ly2,
-  ## FFto1_ly2}_3` and `late_enable_afterVblank_{3,5}`, 450 loses five `_2`s,
-  ## 455 the five it takes.
-  ## CGB (the check lands WIN_CHECK_DEFER_CGB after the write): 454 is
-  ## two-sided, +8 (`late_wy_*_2`, `late_enable_afterVblank_{2,4,ds_2,
-  ## ds_lcdoffset1_2}`); 453 loses three `_ds_1`/`lcdoffset1_1`, 455 six.
-const WIN_CHECK_DEFER_CGB_DS* {.intdefine.} = 1
+  ## latch (ppu_latch_wy); 0 = immediate. Re-fit pending; neutral value 0.
+const WIN_CHECK_DEFER_CGB_DS* {.intdefine.} = 0
   ## WIN_CHECK_DEFER_CGB at double speed, in dots (-1 = the single-speed value
-  ## halved, 2): one dot, with WIN_LATCH_END_CGB_DS moved with it. The pair is
-  ## +2 (`window/arg/late_wy_FFto2_ly2_ds_1`, `late_enable_ly0_ds_1`), none
-  ## lost; 0 or 2 at 453, and 452/454/455 at 1, each lose one to three
-  ## `late_wy_FFto0_ly2_ds_*`/`late_enable_afterVblank_ds_*` tests.
-const WIN_LATCH_END_CGB_DS* {.intdefine.} = 453
-  ## WIN_LATCH_END_CGB at double speed (0 = the same 454).
-const WIN_CHECK_DEFER_DMG*    {.intdefine.} = 1
-  ## The same on a DMG (its writes land at the commit): one dot. With
-  ## WIN_LATCH_END_DMG: 1 takes
-  ## `window/arg/late_enable_afterVblank_5`, `late_wy_FFto2_ly2_scx3_3`,
-  ## `late_enable_afterVblank_3` [dmg]; 0 takes none, 2 loses 11
-  ## (`late_wy_FFto2_ly2_*_2`, `late_wy_10to1_ly1_2`, ...).
-const WIN_LINE0_CHECK_DOT_CGB* {.intdefine.} = 3
+  ## halved). Re-fit pending; neutral value 0.
+const WIN_CHECK_DEFER_DMG*    {.intdefine.} = 0
+  ## The same deferral on a DMG, in dots (0 = immediate). Re-fit pending;
+  ## neutral value 0.
+const WIN_LINE0_CHECK_DOT_CGB* {.intdefine.} = 0
   ## Dot of line 0 at which a CGB runs the per-line WY == LY check, instead of
-  ## the mode-2 entry at the boundary (lines 1..143 keep the boundary). A WY
-  ## write committed in the boundary M-cycle (453) must be seen, one on dot 1
-  ## must not (window/late_wy_{1,2}, late_wy_lcdoffset1_{1,2}). With
-  ## WIN_CHECK_TWO_SLOTS: 3 is two-sided (2 loses `late_wy_lcdoffset1_1`, 4
-  ## `late_wy_2` and `arg/late_wy_2`). 0 = boundary.
-const WIN_LINE0_CHECK_DOT_CGB_DS* {.intdefine.} = 4
-  ## The same in double speed, in dots: 4 is two-sided (3 loses
-  ## `late_wy_ds_1`, 5 `late_wy_ds_lcdoffset1_2`).
-const WIN_NEXT_LINE_CHECK*    {.intdefine.} = 1
-  ## The window's next-line check (LY + 1 == WY latches it for the frame)
-  ## also runs at dot 454 of lines 0..142, with the LYC comparator's lead,
-  ## besides the boundary's. A CGB WY write in
-  ## the line's last M-cycle is not yet visible there, so the window still
-  ## starts: gambatte `window/arg/late_wy_{1,2}toFF_2` [cgb].
-const WIN_NEXT_LINE_WY_SEEN*  {.intdefine.} = 2
-  ## Dots after its commit from which that check reads a CGB WY store still in
-  ## the pipeline (CGB_WY_LATENCY lands it later): two-sided, 1 takes neither
-  ## row above, 3 loses `late_wy_1toFF_lcdoffset1_1`.
-const WIN_CHECK_TWO_SLOTS*    {.intdefine.} = 1
-  ## A WY write's deferred check (WIN_CHECK_DEFER_CGB) no longer replaces
-  ## line 0's own check pending ahead of it: that check still runs, against
-  ## the WY it sees, and the write's is queued behind it. Needed by the
-  ## line-0 dots above; 0 loses `late_wy_2` again.
-const STAT_SET_LANDING_EVAL*  {.booldefine.} = false
-  ## Whether the STAT edge detector runs on the dot a CGB STAT write's SET
-  ## enable bits land (CGB_STAT_ENABLE_LATENCY after the commit), so a source
-  ## already high there is a rising edge without waiting for the boundary
-  ## flush. Off: -10 (-7 with STAT_M0_FALL_AT_M2_CGB) -- gambatte m2enable/
-  ## late_enable_*_3 commit the enable on dot 1 of the next line, landing on
-  ## 3 with the OAM pulse still high, and hardware does not fire; a source
-  ## already high when the set bits land is not an edge.
-const WIN_CHECK_CMP_LY*       {.intdefine.} = 0
-  ## 1: the deferred window check compares WY with the comparator's LY
-  ## (irq_ly, which STAT_LYC_LY_LEAD_DOTS steps before the boundary) rather
-  ## than the readable LY. Row-for-row identical to 0 at the shipping
-  ## deferral (no check lands in the two dots that differ); kept as the
-  ## control.
+  ## the mode-2 entry at the boundary (0 = the boundary). Re-fit pending;
+  ## neutral value 0.
+const WIN_LINE0_CHECK_DOT_CGB_DS* {.intdefine.} = 0
+  ## The same in double speed, in dots. Re-fit pending; neutral value 0.
+# The window's latch cut-off late in a line, its next-line check, and the
+# queueing of a WY write's check behind line 0's: removed 2026-11-13 for a
+# clean rewrite.
 const WIN_CHECK_DEFER_ANY* = WIN_CHECK_DEFER_CGB != 0 or WIN_CHECK_DEFER_DMG != 0 or
                              WIN_LINE0_CHECK_DOT_CGB != 0
 const WIN_EN_ABORT*           {.intdefine.} = 1
@@ -1222,8 +968,8 @@ const CGB_WIN_EN_DEFER*       {.intdefine.} = 5
   ## global phase serves both. Refunding through `m3_lead` would still draw the
   ## window; a fixed defer fails the pairs. Cheap because the FIFO is
   ## empty for all five dots: the undo is nine scalars plus one replayed
-  ## shifter step, counted in tick_shifter's FIFO-empty arm. Double speed
-  ## also revokes k = 6 (WIN_REVOKE_DS_PUSH).
+  ## shifter step, counted in tick_shifter's FIFO-empty arm. Whether double
+  ## speed also revokes on the push dot is WIN_REVOKE_DS_PUSH.
 const CGB_WIN_REVOKE_KEEP*    {.intdefine.} = 1
   ## What a revoked CGB window start (CGB_WIN_EN_DEFER) leaves at single
   ## speed: 1 = the restart is cut where the undo lands, its first window
@@ -1307,17 +1053,15 @@ const WIN_FINE_PAD*           {.intdefine.} = 1
   ## its own rule (WIN_WX0_PHASE); WX >= 6 reaches the window through the
   ## shifter's equality, after the discard, and never shifted.
 const WIN_LINE_START_LATCH*   {.intdefine.} = 1
-const WIN_HEAD_LATE_DOT* {.intdefine.} = 84
-  ## A WY match can still make the line a window line (WX below
-  ## WIN_LINE_START_WX) until this dot plus SCX & 7, the end of the fine-scroll
-  ## discard, not only at the head (fifo_head_window_late). gambatte
-  ## window/arg/late_scx_late_wy_FFto4_ly4_wx00_{1 [cgb],2 [dmg]} (SCX 4: a
-  ## check on dot 86 takes, 90 does not) against late_wy_FFto2_ly2_wx00_*
-  ## (SCX 0: 82 takes, 86 does not). 82..85 score alike; 0 compiles it out.
   ## Which dot WX is read on to decide whether a line starts as a window line:
   ## the last dot of the throw-away fetch at the head of mode 3 (1, default) or
   ## the mode 2 -> 3 edge six dots earlier (0). Bracketed on both sides by two
   ## mealybug ROMs; see the head latch in fifo_ppu.nim.
+const WIN_HEAD_LATE_DOT* {.intdefine.} = 0
+  ## Line dot (plus SCX & 7) until which a WY match can still make the line a
+  ## window line when WX is below WIN_LINE_START_WX, beyond the head
+  ## (fifo_head_window_late); 0 compiles it out. Re-fit pending; neutral
+  ## value 0.
 const WIN_START_PRE_PIXEL*    {.intdefine.} = 1
   ## Whether the window's WX comparator can match one slot LEFT of the
   ## shifter's first pixel (screen x = -1 when SCX & 7 = 0, i.e. WX = 6).
@@ -1728,8 +1472,9 @@ type
       ## AGB SP photograph of tools/gbprobe probe_h_scy (2026-09-04) is pixel-
       ## identical to the latched render (docs/flashcart-runbook.md row 31).
     pcm_read_edge_zero*: bool
-    apu_clock_carry*: bool
-      ## CGB 0 / A / B / C. A PCM12 read landing on the very cycle a square
+    cgb_c_or_older*: bool
+      ## CGB 0 / A / B / C (a revision set, no rule of its own today).
+      ## pcm_read_edge_zero: a PCM12 read landing on the very cycle a square
       ## channel's duty step lands reads 0 for that channel if its output was 0
       ## before the step (the rising edge is invisible to a read taken on it).
       ## True on the default revision: SameSuite `channel_1_freq_change_timing`
@@ -2289,7 +2034,6 @@ type
     # past its dot, so it can still be set at a frame boundary; serialized
     # from GB payload rev 6. The dot is in cycle_counter's terms.
     win_check_dot*:      int32     # WIN_CHECK_DEFER: dot the comparator samples on, -1 none
-    stat_set_dot*:       int32     # STAT_SET_LANDING_EVAL: dot a STAT write's set bits land, -1 none
     stat_drop_pending*:  bool
     stat_drop_level*:    bool
     stat_drop_dot*:      int32
@@ -2419,7 +2163,6 @@ type
       # (SCX_LIVE_BORROW_LATCHED). Inside the same `when` as its field.
       when SCX_LIVE_BORROW_LATCHED:
         scx_live_fine*:   int32
-        scx_wraps*:       int32   # SCX_BORROW_DISCARD_END: discard wraps this line
     # Low three bits of the dot the line latched its fine scroll on: the slot
     # index the wrap needs, which `scx_latch_until` cannot supply once a store
     # has moved the window's end. A byte because that is all it is (int32
@@ -2682,9 +2425,6 @@ type
     # readback ORs $3E -- bits 2-5 read set, bit 1 is "no IR signal", which
     # is all this models. hardware: gbedge p00 on AGS reads $3E at boot.
     rp*:                   uint8
-    # SVBK readback is the raw written byte; only the mapping aliases 0 -> 1
-    # (a written 0 reads back $F8). Both serialized from GB payload rev 6.
-    svbk_raw*:             uint8
     # OPRI ($FF6C) bit 0, readable and writable in CGB mode only (Pan Docs,
     # "FF6C — OPRI"). Storage only: Pan Docs has a write after the boot ROM
     # unmaps change nothing (TO BE VERIFIED there), and the priority the
@@ -2695,7 +2435,7 @@ type
     hram*:                 array[0x7F, uint8]
     # $FEA0-$FEFF: real RAM on CGB 0-D (Pan Docs, "FEA0-FEFF range"); which
     # model applies is GbQuirks.unusable_region. Serialized from GB payload
-    # rev 6, with `rp` and `svbk_raw`.
+    # rev 6, with `rp`.
     unusable*:             array[0x60, uint8]
     bootrom*:              seq[uint8]
     cycle_tick_count*:     int
@@ -2807,19 +2547,11 @@ type
     sgb*:            SgbState
     cheats*:         CheatEngine
     cheat_hooks:     MemHooks       # built once, reused each frame
-    # HBlank-DMA scratch for the halt and speed-switch rules (HDMA_HALT_REQ_*,
-    # HDMA_SWITCH_*, HDMA_WAKE_BLIND_DOTS, HDMA_BLOCK_SWALLOW). Kept here, at
-    # the end of the machine object, and not in GbPpu: a field inserted into
-    # GbPpu moves GbFifoPpu's hot state (+0.5% retired instructions measured).
-    # Live only across a halt or a stall, like hdma_block_due; not serialized,
-    # except hdma_swallow_end (GB payload rev 6): the next mode-0 edge an armed
-    # transfer sees consumes it, and that can be frames later.
-    hdma_due_forced*:  bool    # requested before the HALT: paid at the wake
-    hdma_stalled*:     bool    # inside a speed switch's stall
-    hdma_stop_req*:    bool    # the switch found a request: STOP's operand runs
-    hdma_prefetch_op*: int16   # the opcode the HALT prefetched, or -1
+    # HBlank-DMA scratch (HDMA_WAKE_BLIND_DOTS). Kept here, at the end of the
+    # machine object, and not in GbPpu: a field inserted into GbPpu moves
+    # GbFifoPpu's hot state (+0.5% retired instructions measured). Live only
+    # across a halt; not serialized.
     hdma_wake_dot*:    int32   # the dot the CPU last woke from a HALT on
-    hdma_swallow_end*: int32   # the dot a block's swallow window ends on, or -1
     # The comparator-lead sources entering and leaving vblank (STAT_M1_LEAD,
     # VBLANK_IRQ_LEAD, STAT_M2_LY0_LEAD): up ahead of the boundary, cleared on
     # it, so never live at a frame edge. Here for the same layout reason.
@@ -2829,15 +2561,9 @@ type
     stat_hold*:        uint8   # STAT_HOLD_* / STAT_LAND_AFTER: live inside one dot's steps. Scratch.
     # DMG_HALT_MIN_MCYCLES: the scheduler cycle the CPU halted on. Scratch.
     halt_start*:       CycleCount
-    win_check_gap*:    int32   # WIN_CHECK_TWO_SLOTS: a second sample, dots after the first
-    wy_inflight*:      bool    # WIN_NEXT_LINE_CHECK: a CGB WY store not yet landed
-    wy_inflight_val*:  uint8
-    wy_inflight_dot*:  int32
     m0_late_fire*:     bool    # LCDON_M0_LAG_DS: the LCD-on line's mode-0 source is owed
     dma_halt_grace*:   uint8   # OAMDMA_HALT_GRACE: the halted M-cycle the OAM DMA still gets
-    timer_irq_acked*:  bool    # TIMER_ACK_LOOKAHEAD: the dispatch acked the reload's request
     hdma_start_req*:   bool    # HDMA_START_GRANT_FETCH: the owed block was raised by FF55
-    gdma_owed*:        bool    # GDMA_AFTER_FETCH: a general-purpose DMA waits for the next fetch
     vdma_residue*:     int16   # VDMA_BUS_RESIDUE: the cartridge bus's byte at the hand-over (+1; 0 = none)
     hdma_boundary_grant*: bool # HDMA_BOUNDARY_ACQUIRE: the block now granted is at an instruction boundary
     we_off_dot*:       int32   # CGB_WE_DISABLE_LATE: dot a CGB LCDC.5 fall reaches the fetcher
@@ -2845,11 +2571,6 @@ type
     wd_fifo*:          GbPixelFifo  # WIN_REVOKE_DS_PUSH: the ring at a CGB double-speed window start
     wd_ds_push*:       bool
     wd_ds_ly*:         uint8
-    stop_op_latch*:    int16   # STOP_OPERAND_LATCH: STOP's operand byte, run as the next opcode (+1; 0 = none)
-    apu_power_on_at*:  int64   # APU_DS_TRIGGER_SNAP: the scheduler cycle of the last APU power-on.
-                               # Serialized raw from GB payload rev 6 (it is not rebased with the
-                               # scheduler); with stop_op_latch and lyc_write_old, in GB_SEC_MACH.
-    lyc_write_old*:    int16   # DMG_LYC_BOUNDARY_OPEN: LYC before a parked DMG LYC write (+1; 0 = none)
     # CGB_LYC_CMP_LATCH: the LYC the LY = LYC STAT source compares against
     # (equal to ppu.lyc except while a CGB write is in flight to it), the
     # write in flight (dots left until it lands, -1 = none; its value), and
@@ -3686,7 +3407,7 @@ proc gb_quirks_for*(rev: GbRevision): GbQuirks =
     wx_write_late: rev == grAgb,
     scy_fetch_latch: rev in {grCgbD, grCgbE, grAgb},
     pcm_read_edge_zero: rev in {grCgb0, grCgbAB, grCgbC},
-    apu_clock_carry: rev in {grCgb0, grCgbAB, grCgbC},
+    cgb_c_or_older: rev in {grCgb0, grCgbAB, grCgbC},
     square_reload_halftick: rev in {grCgbD, grCgbE},
     lyc_compare_hold: rev in {grCgbD, grCgbE, grAgb},
     oam_read_open_late: rev == grCgbE,

@@ -54,33 +54,14 @@ proc gb_apu_edge_at*(gb: GB; t: CycleCount): CycleCount =
 
 template psg_edge_at(h: GB; t: CycleCount): CycleCount = gb_apu_edge_at(h, t)
 
-const APU_TRIGGER_EDGE_BEFORE* {.intdefine.} = 0
-  ## 1: a square trigger counts its startup from the 1 MHz edge at or BEFORE
-  ## the write; 0: from the edge at or after it. Only distinguishable at double
-  ## speed, where a CPU write can land half a tick off the grid. The two
-  ## claims contradict on CPU CGB C: gambatte sound/ch1_duty0_pos6_to_pos7_
-  ## timing_ds_{5,6} want 1 (a first trigger one NOP later lands on the same
-  ## edge), SameSuite channel_{1,2}_align{,_cpu} and channel_1_freq_change_
-  ## timing-* (7 rows) want 0 and lose with 1. Default 0; the two gambatte rows
-  ## are the residual (docs/gb-failure-triage.md H1).
-
 proc gb_apu_edge_before*(gb: GB): CycleCount =
   ## The last edge of the APU's 1 MHz tick grid at or before the current cycle.
   let tick = gb_apu_tick(gb)
   let now  = gb.scheduler.cycles
   now - ((now + tick - (gb.apu.tick_phase mod tick)) mod tick)
 
-const APU_DS_TRIGGER_SNAP* {.intdefine.} = 1
-  ## CPU CGB C and older (GbQuirks.apu_clock_carry), double speed: a square
-  ## trigger counts its start-up from the nearest point of a 2 us grid that
-  ## starts 8 CPU cycles after the APU's power-on write (a write 4 cycles off
-  ## it rounds toward it either way). gambatte `sound/ch1_duty0_pos6_to_
-  ## pos7_timing_ds_{1..6}` [cgb]: `_5`, whose first trigger is 124 cycles
-  ## past power-on, counts from the same edge as `_1` at 120 (rounding down),
-  ## while SameSuite `channel_1_freq_change_timing-cgb0BC`'s triggers 100
-  ## cycles past power-on round up. The 1 MHz edge-after rule alone cannot
-  ## give both. CGB D/E keep the 1 MHz rule: SameSuite `channel_{1,2}_align`
-  ## on E lose with the snap. 0 = the 1 MHz grid on every revision.
+# Where a double-speed square trigger is placed on CPU CGB C and older:
+# removed 2026-11-13 for a clean rewrite.
 
 proc gb_trigger_deadline*(gb: GB; period: CycleCount;
                           extra_ticks: int): CycleCount =
@@ -90,13 +71,7 @@ proc gb_trigger_deadline*(gb: GB; period: CycleCount;
   ## extra_ticks of startup delay -- 2 for a square that was off
   ## (channel_1_delay), 1 for a restart (channel_1_restart). The waveform
   ## position is untouched. Channel 4 has its own rule: psg_noise_first_inc.
-  var edge = if APU_TRIGGER_EDGE_BEFORE != 0: gb_apu_edge_before(gb)
-             else: gb_apu_edge(gb)
-  when APU_DS_TRIGGER_SNAP != 0:
-    if gb.memory.current_speed != 0 and gb.quirks.apu_clock_carry:
-      let w = int64(gb.scheduler.cycles)
-      let d = ((w - gb.apu_power_on_at - 8) mod 16 + 16) mod 16
-      edge = CycleCount(if d < 8: w - d else: w + (16 - d))
+  let edge = gb_apu_edge(gb)
   edge + period + CycleCount(extra_ticks) * gb_apu_tick(gb)
 
 template psg_trigger_deadline(h: GB; period: CycleCount;
@@ -105,15 +80,9 @@ template psg_trigger_deadline(h: GB; period: CycleCount;
 
 proc gb_trigger_pickup*(gb: GB): CycleCount =
   ## The 1 MHz edge a square trigger written now takes effect on: the edge at
-  ## or after the write (gb_trigger_deadline's rule). PSG_NO_STEP where
-  ## another rule places the trigger (APU_DS_TRIGGER_SNAP's 2 us grid on CPU
-  ## CGB C and older at double speed, the
-  ## edge-before arm): the pickup rules in sq_trigger are stated on this edge.
-  when APU_TRIGGER_EDGE_BEFORE != 0:
-    return PSG_NO_STEP
-  when APU_DS_TRIGGER_SNAP != 0:
-    if gb.memory.current_speed != 0 and gb.quirks.apu_clock_carry:
-      return PSG_NO_STEP
+  ## or after the write (gb_trigger_deadline's rule): the pickup rules in
+  ## sq_trigger are stated on this edge (PSG_NO_STEP would mean another rule
+  ## places the trigger).
   gb_apu_edge(gb)
 
 template psg_trigger_pickup(h: GB): CycleCount = gb_trigger_pickup(h)
@@ -161,8 +130,7 @@ proc sq_pcm_edge_zero(ch: PsgSquare; gb: GB): bool {.inline.} =
   ## quirk): the read sits on a duty step whose previous output was 0. The
   ## position is post-step, so the previous duty entry is the replaced
   ## output; the volume cannot move across a step without an envelope tick (an
-  ## observation point). Measured on channel 1; channel 2 is the same duty
-  ## hardware and no channel_2 build of the ROM measures it -- assumed.
+  ## observation point). Measured on channel 1.
   ch.enabled and ch.dac_enabled and ch.last_step_at == gb.scheduler.cycles and
     int(PSG_DUTY[ch.duty][(ch.wave_duty_position + 7) and 7]) *
       int(ch.current_volume) == 0

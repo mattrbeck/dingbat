@@ -76,17 +76,13 @@ proc skip_boot*(t: GbTimer; gb: GB) =
     # The length gate goes with the step, as memory.skip_boot sets it.
     gb.apu.first_half_of_length_period = (gb.apu.frame_sequencer_stage and 1) == 1
 
-const TAC_SELECT_LEAD_T* {.intdefine.} = 0
+const TAC_SELECT_LEAD_T* {.intdefine.} = 4
   ## T-cycles before the end of a TAC write's M-cycle at which the newly
   ## selected divider bit is sampled; the bit being left stays the latched
   ## `previous_bit`. A select change can tick TIMA by itself (Pan Docs, "Timer
   ## Obscure Behaviour"). 0 (compiled out): both taps are judged at the end
-  ## of the write. gambatte `tima/tc00_late_tc01_5` has the old tap (bit 9)
-  ## rise on the write's own T-cycle and the new one (bit 3) low, a glitch
-  ## increment; `_7` the new tap high, none. 4, the old value, missed both
-  ## (both devices); 1..3 take neither. Nothing else moves, including
-  ## `tc00_tc01_late_tc00_of_*`. A $FF05 read DOES see an increment or reload
-  ## that landed in its own M-cycle (unlike SB/SC/IF, see
+  ## of the write. Re-fit pending; neutral value 4. A $FF05 read DOES see an
+  ## increment or reload that landed in its own M-cycle (unlike SB/SC/IF, see
   ## SERIAL_CPU_SAMPLE_T); a pre-edge latch for TIMA loses 18+ tima rows.
 
 const SPEED_SWITCH_IRQ_LEAF_HOLD_T* {.intdefine.} = 8
@@ -134,14 +130,7 @@ proc timer_reload_tima(t: GbTimer; gb: GB) =
     # Diagnostic (tools only): the divider the overflow reload landed on, the
     # anchor of the gambatte speedchange*_tima0N_* rows.
     echo "TIMAIRQ tdiv=", t.tdiv, " tap=", t.bit_for_tima
-  when TIMER_ACK_LOOKAHEAD != 0:
-    if gb.timer_irq_acked:
-      # Already acknowledged by the dispatch that ran just ahead of it.
-      gb.timer_irq_acked = false
-    else:
-      gb.interrupts.timer_interrupt = true
-  else:
-    gb.interrupts.timer_interrupt = true
+  gb.interrupts.timer_interrupt = true
   when defined(gb_io_trace):
     echo "TIMERIF ly=", gb.ppu.ly, " dot=", gb.ppu.cycle_counter, " sched=", gb.scheduler.cycles
   t.tima = t.tma

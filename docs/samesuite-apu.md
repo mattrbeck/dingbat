@@ -91,10 +91,10 @@ step as it stands when it ends. A trigger that lands while a calculation runs
 restarts it a tick sooner than a fresh one (`channel_1_sweep_restart` round 2: nine
 M-cycles at shift 7, DocBoy `disable_on_double_trigger_*`). The model, with what
 else DocBoy's rows and SameBoy (black box) pin, is in `psg_channels.nim`, "Channel 1's
-sweep unit"; `channel_1_sweep_restart_2`'s cut-off (a restart 3 M-cycles before the
-clock counts, 2 does not) is the CGB's 8 T trigger lead (`SWEEP_TRIGGER_LEAD_T_CGB`),
-not a shadow-load delay: the DMG takes the restart 2 M-cycles before the clock
-(DocBoy `change_period_nr14_during_recalc_step0_delay14284`).
+sweep unit"; `channel_1_sweep_restart_2`'s cut-off is the trigger lead before a
+sweep clock (`SWEEP_TRIGGER_LEAD_T_DMG` / `_CGB`, scheduler cycles; re-fit pending,
+neutral value 0), with DocBoy `change_period_nr14_during_recalc_step0_delay14284`
+on the DMG side.
 
 Trap: a lazily-evaluated check that can clear `enabled` must run on every reader of
 `enabled`. blargg's `sync_sweep` polls NR52 for the overflow disable

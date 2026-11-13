@@ -2095,14 +2095,13 @@ const NotScored: seq[(string, string)] = @[
     "SameBoy gives the written bit on all ten. The other 258 rows of the " &
     "family ARE scored. Hardware check pending: the ten on an MGB " &
     "(docs/gb-failure-triage.md I5). (build_docboy_rows, DocboyNotScored)"),
-  ("DocBoy: a CGB trigger 2 M-cycles before a sweep clock (2)",
+  ("DocBoy: a CGB retrigger shortly before a sweep clock (2)",
     "`cgb/apu/ch1/ch1_period_sweep_change_period_nr14_during_recalc_" &
     "{delay14284,step0_delay14284_round1}` want the clock 2 M-cycles after a " &
-    "retrigger to take the new frequency, the DMG's 1 M-cycle trigger lead. " &
-    "On the CGB a trigger that close misses the clock: SameSuite " &
-    "`channel_1_sweep_restart_2` (CGB hardware; a restart 3 M-cycles before " &
-    "the clock is seen, 2 is not), gambatte `sound/ch1_init_reset_sweep_" &
-    "counter_timing_10` [cgb04c] (SWEEP_TRIGGER_LEAD_T_CGB = 8 T), and " &
+    "retrigger to take the new frequency. They disagree with SameSuite " &
+    "`channel_1_sweep_restart_2` (CGB hardware) and gambatte " &
+    "`sound/ch1_init_reset_sweep_counter_timing_10` [cgb04c] on the CGB's " &
+    "trigger lead (SWEEP_TRIGGER_LEAD_T_CGB, re-fit pending), and " &
     "SameBoy (CGB E) fails both. The DMG rows of the same family ARE scored " &
     "and pass (docs/gb-failure-triage.md I2). (build_docboy_rows, " &
     "DocboyNotScored)"),

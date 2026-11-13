@@ -3,13 +3,10 @@
 # Dots the re-enabled PPU is already into line 0 when the LCDC write retires;
 # see the LCDC-enable path in ppu_write.
 const LCD_ON_HEAD_START* {.intdefine.} = 5'i32
-const LYC_JUST_CHANGED_HOLD_DS* {.intdefine.} = 2
+const LYC_JUST_CHANGED_HOLD_DS* {.intdefine.} = 0
   ## At double speed a STAT read whose M-cycle stepped LY still reports the
   ## comparison against the line being left while the dot counter is below
-  ## this: the bit reads set 4 dots before the line end and clear 3 before
-  ## (`enable_display/frame{0,1}_m2stat_count_ds_1`, `lycint_lycflag_
-  ## ds_3`, `ly0/lycint152_lyc0flag_ds_3`; +4, none lost). 3 loses
-  ## `lcd_offset/offset1_lyc8fint_m1stat_ds_1`, 0 is the old clear-always.
+  ## this (dots; 0 = cleared always). Re-fit pending; neutral value 0.
 
 # Dots past the start of VBlank at which the CGB boot ROM hands off (skip_boot).
 const CGB_BOOT_PHASE* {.intdefine.} = 165
@@ -112,7 +109,6 @@ proc skip_boot*(ppu: GbPpu; gb: GB) =
   # (gambatte window/*). The boot ROM ends in VBlank with the latch clear.
   ppu.window_trigger = false
   ppu.win_check_dot = -1
-  ppu.stat_set_dot = -1
   when CGB_LYC_CMP_LATCH:
     gb.lyc_land_left = -1
     gb.lyc_sampled = ppu.lyc
@@ -214,9 +210,10 @@ const DOTS_PER_FRAME* = 70224   # 154 lines x 456 dots
 # frame at the enable once this much time has passed since the last present,
 # so a frame-paced frontend does not see a dropped frame on every toggle. No
 # hardware quantity corresponds to the threshold (nothing is displayed while
-# the LCD is off); any value up to one frame period paces the same, and ten
-# lines is an arbitrary choice. No test ROM scores it.
-const LCD_ON_FRAME_DOTS* = 10 * 456
+# the LCD is off). No test ROM scores it.
+const LCD_ON_FRAME_DOTS* {.intdefine.} = 0
+  ## Dots since the last present past which an LCD enable pushes a frame
+  ## (0 = never). Re-fit pending; neutral value 0.
 
 when defined(gb_dot_counter):
   # Diagnostic frame-pacing instrumentation (tools only). gb_total_dots is the
@@ -371,19 +368,15 @@ template lcdon_latched_mode(ppu: GbPpu; ds: bool): uint8 =
         m = 3'u8
     m
 
-const VRAM_READ_CGB_M3_EDGE_SS* {.intdefine.} = 4
+const VRAM_READ_CGB_M3_EDGE_SS* {.intdefine.} = 0
   ## CGB, single speed: a VRAM read whose M-cycle began on mode 3's first dot
   ## (live mode 3, prev 2, the edge this many dots back) is locked although
-  ## the M-cycle-start latch still says mode 2. Reachable only on the CPU grid
-  ## a speed-switch round trip leaves: gambatte `vram_m3/preread_lcdoffset1_2`
-  ## (read ending on dot 84 locked) against `preread_lcdoffset2_1` (83, open)
-  ## and `preread_2` [cgb] (81, open). 3 loses `lcdoffset2_1`, 5 is inert;
-  ## double speed already agrees (`preread_ds_lcdoffset1_{1,2}`).
-const VRAM_WRITE_CGB_M3_EDGE_SS* {.intdefine.} = 80
-  ## The write side's twin: a CGB write committed at single speed with the PPU
-  ## on mode 2's last dot boundary (dot 80, where mode 3 begins) is locked.
-  ## gambatte `vram_m3/prewrite_lcdoffset1_2`; 79 loses `prewrite_lcdoffset2_1`,
-  ## 81 is inert.
+  ## the M-cycle-start latch still says mode 2 (dots; 0 = off). Re-fit
+  ## pending; neutral value 0.
+const VRAM_WRITE_CGB_M3_EDGE_SS* {.intdefine.} = 0
+  ## The write side's twin: the line dot from which a CGB write committed at
+  ## single speed with the PPU still in mode 2 is locked (0 = off). Re-fit
+  ## pending; neutral value 0.
 proc cpu_vram_open*(ppu: GbPpu; is_write: bool; cgb = false;
                     ds = false): bool {.inline.} =
   if not lcd_enabled(ppu): return true
@@ -456,34 +449,28 @@ proc cpu_vram_open*(ppu: GbPpu; is_write: bool; cgb = false;
 
 const CRAM_LOCK_R {.intdefine.} = 3
 const CRAM_LOCK_W {.intdefine.} = 0
-  ## The mode-based spellings of the lock, used only with CRAM_LOCK_DOTS off.
+  ## The mode-based spellings of the lock, used with CRAM_LOCK_DOTS off.
   ## R=3: the latched mode (one M-cycle later than the VRAM lock on the read
-  ## side) plus the LCD-on line-0 exemption; the dot window above is the same
-  ## edges to the dot, plus the unlock's two-dot trail.
+  ## side) plus the LCD-on line-0 exemption.
 
-const CRAM_LOCK_DOTS* {.booldefine.} = true
+const CRAM_LOCK_DOTS* {.booldefine.} = false
   ## Dot-based CGB palette-RAM lock (replaces CRAM_LOCK_R/W when true): locked
   ## from CRAM_LOCK_ON_LAT{,_DS} dots after the mode-3 edge until
-  ## CRAM_LOCK_OFF_LAT dots after the mode-0 edge; the LCD-on first line locks
-  ## CRAM_LOCK_LINE0_EXTRA dots later. A write is asked at its commit, a read
-  ## at the start of its M-cycle. gambatte cgbpal_m3 (42/44) and
-  ## enable_display/ly0_late_cgbp{r,w}_2, +11 rows and none lost. Brackets
-  ## on the 5157-row list: ON 0 and 2 lose 2 and 6 more than 1; ON_DS 1, 3
-  ## and 4 lose 1, 2 and 5 more than 2; OFF 3 loses `m3end_scx3_{2,4}`
-  ## (their mode 3 ends 3 dots later under the same sled) and 4 loses nine.
-  ## docs/gb-failure-triage.md B2.
-const CRAM_LOCK_ON_LAT*    {.intdefine.} = 1
-const CRAM_LOCK_ON_LAT_DS* {.intdefine.} = 2
-const CRAM_LOCK_OFF_LAT*   {.intdefine.} = 2
-const CRAM_LOCK_OFF_LAT_DS* {.intdefine.} = 3
-  ## CRAM_LOCK_OFF_LAT at double speed (-1 = the same 2): 3 takes gambatte
-  ## `cgbpal_m3/cgbpal_m3end_scx5_ds_{1,3}`; 2 is the old value, 4 loses
-  ## `cgbpal_m3end_ds_{2,4}`.
-const CRAM_LOCK_LINE0_EXTRA* {.intdefine.} = 4
-const CRAM_LOCK_LINE0_EXTRA_DS* {.intdefine.} = 2
-  ## CRAM_LOCK_LINE0_EXTRA at double speed (-1 = the same 4): the 4 dots
-  ## halved. gambatte enable_display/ly0_late_cgbp{r,w}_ds_2; 2 and 3 take
-  ## both, 1 loses the `_ds_1` twins, 4 the `_ds_2` pair.
+  ## CRAM_LOCK_OFF_LAT{,_DS} dots after the mode-0 edge; the LCD-on first line
+  ## locks CRAM_LOCK_LINE0_EXTRA{,_DS} dots later. A write is asked at its
+  ## commit, a read at the start of its M-cycle. Re-fit pending; neutral value
+  ## false (the mode-based lock), and every latency below is inert until it
+  ## is true.
+const CRAM_LOCK_ON_LAT*    {.intdefine.} = 0
+const CRAM_LOCK_ON_LAT_DS* {.intdefine.} = 0
+const CRAM_LOCK_OFF_LAT*   {.intdefine.} = 0
+const CRAM_LOCK_OFF_LAT_DS* {.intdefine.} = -1
+  ## Dots; -1 = the single-speed value. Re-fit pending; neutral value -1.
+const CRAM_LOCK_LINE0_EXTRA* {.intdefine.} = 0
+const CRAM_LOCK_LINE0_EXTRA_DS* {.intdefine.} = -1
+  ## Dots; -1 = the single-speed value. Re-fit pending; neutral values 0
+  ## (the four single-speed and ON_DS latencies) and -1 (the two _DS
+  ## fall-backs).
 
 proc cpu_cram_open_dots(ppu: GbPpu; gb: GB; is_write: bool): bool {.noinline.} =
   ## CRAM_LOCK_DOTS: the lock as a dot window around the mode-3 edges.
@@ -701,7 +688,7 @@ proc cpu_oam_open*(ppu: GbPpu; is_write: bool; mcycle_dots: int32 = 0;
 # at the instructions (oam_bug_if: inc/dec rr, and the SP step of push, call,
 # rst and the interrupt dispatch, the one M-cycle of theirs with no bus access
 # of its own); every CPU data read and every write is hooked on the memory
-# path (mem_read_data, mem_write, mem_write_split), before the M-cycle's dots,
+# path (mem_read_data, mem_write), before the M-cycle's dots,
 # the point the IDU hook samples. An IDU step in the same M-cycle as a CPU
 # access adds nothing: a write with one "behaves just like a single write"
 # (Pan Docs), and DocBoy's dmg/oam_bug tables measure `ld a,[hli]` identical
@@ -902,19 +889,11 @@ proc `coincidence_flag=`*(ppu: GbPpu; on: bool) {.inline.} =
   else:  ppu.lcd_status = ppu.lcd_status and not 0x04'u8
 proc mode_flag*(ppu: GbPpu): uint8 {.inline.} = ppu.lcd_status and 0x03
 
-const STAT_M0_LEAD_DS_D {.intdefine: "STAT_M0_LEAD_DS".} = 0
+const STAT_M0_LEAD_DS_D {.intdefine: "STAT_M0_LEAD_DS".} = 1
 const STAT_M0_LEAD_DS* = int32(STAT_M0_LEAD_DS_D)
-  ## The mode-0 source's lead in double speed, in dots. Default 0 (was the
-  ## identity `STAT_M0_LEAD_T shr 1` = 1), one of a joint double-speed move
-  ## with IF_WRITE_LAND_DOTS_DS 1, IRQ_SAMPLE_T_DS 18 and
-  ## CGB_M0_HALT_BLIND_DS_DOTS 0: +6 on the hunt list with none lost
-  ## (`enable_display/frame1_m0irq_count_scx3_ds_1`, `lcd_offset/offset1_
-  ## lyc99int_m0irq_count_scx2_ds_1`, `m0enable/{disable,lycdisable_ff41}_
-  ## ds_1`, `m2int_m0irq_scx5_ds_1`, `serial/start_wait_trigger_int8_read_if_
-  ## ds_2`), and every one-constant neighbour of that point loses 1..9. 0 turns
-  ## AGE stat-interrupt/stat-int's double-speed odd-SCX cells green but moves
-  ## the mode 3 -> 0 edge two gambatte `_ds_` tests measure; the defect is the
-  ## double-speed dispatch grid sitting one dot late (CGB_LATENCY_CAP, gb.nim).
+  ## The mode-0 source's lead in double speed, in dots (1 = the identity
+  ## `STAT_M0_LEAD_T shr 1`). Re-fit pending, jointly with IRQ_SAMPLE_T_DS,
+  ## IF_WRITE_LAND_DOTS_DS and CGB_M0_HALT_BLIND_DS_DOTS; neutral value 1.
 
 proc stat_irq_lead*(gb: GB): int32 {.inline.} =
   ## How far ahead of the mode flag the STAT interrupt line runs, in dots.
@@ -982,20 +961,13 @@ proc stat_m0_tail(ppu: GbPpu; gb: GB): int32 {.noinline.} =
     if io_mc > int32(STAT_M0_TAIL_MAX_MC): return 0'i32
   tail
 
-const STAT_READ_M1_LAG* {.intdefine.} = 1
+const STAT_READ_M1_LAG* {.intdefine.} = 0
   ## Extra dots a STAT read's mode field keeps showing mode 0 after line 144
-  ## begins, at single speed. Only reachable on the CPU grid a speed-switch
-  ## round trip plus a double-speed NOP leaves (the read's sample lands on
-  ## line 144's dot 0): gambatte `lcd_offset/offset3_lyc8fint_m1stat_1`
-  ## [cgb] reads $C0 there. 2 loses `offset2_lyc8fint_m1stat_2`; the same
-  ## dot at double speed loses `enable_display/frame{0,1}_m1stat_ds_2`.
-const STAT_READ_M23_LEAD_DS* {.intdefine.} = 1
+  ## begins, at single speed (0 = none). Re-fit pending; neutral value 0.
+const STAT_READ_M23_LEAD_DS* {.intdefine.} = 0
   ## Dots by which a double-speed STAT read sees mode 2 or mode 3 sooner after
-  ## its rise than STAT_READ_SAMPLE + _DS_ADD gives (modes 0 and 1 keep the
-  ## full hold: `_DS_ADD` 0 for every mode loses 136 rows). Reachable only on
-  ## the grid a speed-switch round trip leaves: gambatte `lcd_offset/
-  ## offset1_lyc99int_m{2,3}stat_count_ds_2` read the new mode there.
-  ## 2 (mode 2 alone) loses sixteen `_ds_` rows.
+  ## its rise than STAT_READ_SAMPLE + _DS_ADD gives (0 = no sooner). Re-fit
+  ## pending; neutral value 0.
 const STAT_M2_DMA_READS_0* {.intdefine.} = 1
   ## Whether a STAT read reports mode 0 for the OAM scan while an OAM DMA
   ## holds OAM (`dma_busy`, the same window the CPU's bus conflict uses; 1
@@ -1020,11 +992,11 @@ proc stat_read_mode*(ppu: GbPpu; gb: GB): uint8 {.inline.} =
   when STAT_M0_TAIL_ANY:
     t += stat_m0_tail(ppu, gb)
   when STAT_READ_M23_LEAD_DS != 0:
-    # Modes 2 and 3 read a dot early at double speed (STAT_READ_M23_LEAD_DS).
+    # Modes 2 and 3 read early at double speed (STAT_READ_M23_LEAD_DS).
     if gb.memory.current_speed != 0'u8 and (ppu.lcd_status and 2'u8) != 0'u8:
       t -= int32(STAT_READ_M23_LEAD_DS)
   when STAT_READ_M1_LAG != 0:
-    # Entering vblank is read one dot later at single speed (STAT_READ_M1_LAG).
+    # Entering vblank is read later at single speed (STAT_READ_M1_LAG).
     if (ppu.lcd_status and 3'u8) == 1'u8 and ppu.ly == 144'u8 and
        gb.memory.current_speed == 0'u8:
       t += int32(STAT_READ_M1_LAG)
@@ -1035,15 +1007,10 @@ proc stat_read_mode*(ppu: GbPpu; gb: GB): uint8 {.inline.} =
 # The dot within line 143 at which CGB raises the line-144 mode 2 STAT source.
 # See m2_line144 below: 456 - 4 dots, i.e. one M-cycle before the line ends.
 const M2_144_EARLY_DOT_SS* = 452'i32
-const M2_144_EARLY_DOT_DS_D {.intdefine: "M2_144_EARLY_DOT_DS".} = 455
-  ## In double speed the line-144 pulse rises 8 CPU cycles (4 dots; 455 on
-  ## dingbat's +3 offset) before the line ends. A STAT write landing on 454
-  ## is ahead of it (gambatte `m1/
-  ## ly143_late_m2enable_ds_lcdoffset1_1`), and an IF read whose M-cycle
-  ## starts on 455 sees it (IF_READ_M2_144_TIE_DS: `enable_display/
-  ## frame{0,1}_m2irq_count_ds_2`, which alone held this at 454). 453 loses
-  ## `lcd_offset/offset1_lyc99int_m2irq_count_ds_1` and `m1/lyc143_late_
-  ## m2enable_lycdisable_ds_1`.
+const M2_144_EARLY_DOT_DS_D {.intdefine: "M2_144_EARLY_DOT_DS".} = 452
+  ## The dot of line 143 the line-144 pulse rises on in double speed. Re-fit
+  ## pending, jointly with IF_READ_M2_144_TIE_DS; neutral value 452 (the
+  ## single-speed dot).
 const M2_144_EARLY_DOT_DS* = int32(M2_144_EARLY_DOT_DS_D)
 template M2_144_EARLY_DOT*: int32 =
   ## The line-144 OAM source's rising dot: one CPU M-cycle before the line
@@ -1099,17 +1066,10 @@ const STAT_M2_LEAD* {.intdefine.} = 1
 const STAT_M2_EARLY_LY0* {.booldefine.} = false
   ## Line 0's pulse does not take STAT_M2_LEAD's whole M-cycle (line 153 scans
   ## no OAM): mooneye acceptance/ppu/intr_1_2_timing-GS. See STAT_M2_LY0_LEAD.
-const STAT_M2_LY0_LEAD* {.intdefine.} = 1
-  ## Line 0's OAM pulse rises with the comparator's lead instead
-  ## (STAT_LYC_LY_LEAD_DOTS: dot 454 of line 153 at single speed, none in
-  ## double); the mode 1 -> 2 hand-over at the boundary is then no dip, and
-  ## a STAT write in flight that clears the enable is the enable the rise
-  ## sees. gambatte
-  ## `lyc153int_m2irq/lyc153int_m2irq_late_retrigger_2` (both devices),
-  ## `m2enable/late_m1disable_ly0_2`, `lyc0_late_m2enable_lycdisable_2`,
-  ## `m1/m1irq_late_enable_2`, `lcd_offset/offset{1,2}_lyc99int_m2irq_count_2`,
-  ## `window/late_enable_afterVblank_lcdoffset1_1` [cgb]; the in-flight rule
-  ## keeps `m2enable/disable_ly0_1` [cgb]. intr_1_2_timing-GS is unmoved.
+const STAT_M2_LY0_LEAD* {.intdefine.} = 0
+  ## Whether line 0's OAM pulse rises with the comparator's lead
+  ## (STAT_LYC_LY_LEAD_DOTS / _DS) at the end of line 153 rather than on the
+  ## boundary (0). Re-fit pending; neutral value 0.
 const STAT_M2_LEAD_CGB* {.intdefine.} = 0
   ## CGB-only addition to STAT_M2_LEAD. The source's M-cycle is
   ## device-independent (GBMicrotest oam_int_if_edge_* put the CGB exact and
@@ -1136,19 +1096,8 @@ template m2_early_dot*(ppu: GbPpu; gb: GB): int32 =
   ## The dot of the outgoing line the source comes up on.
   gb_line_end(ppu) - m2_lead_mcycles(gb) * int32(4 shr gb.memory.current_speed)
 
-const STAT_M0_FALL_AT_M2_CGB* {.booldefine.} = false
-  ## Whether the CGB's mode-0 STAT source ends where the next line's OAM
-  ## source begins (m2_early_dot, lines 0..142), rather than at the boundary
-  ## -- SameBoy's single "mode for the interrupt", which turns to 2 there.
-  ## Off: -1 alone (m0enable/late_enable_{1,ds_1,lcdoffset1_1} enable mode 0
-  ## in that last M-cycle and want the edge, which then needs the set bits'
-  ## landing evaluated, STAT_SET_LANDING_EVAL, and that loses more).
-const STAT_M2_PULSE_END_EVAL* {.booldefine.} = true
-  ## Whether the edge detector runs when a line's OAM pulse ends (dot
-  ## STAT_M2_PULSE + 1), so the line is seen low before a later enable:
-  ## gambatte lycEnable/late_ff41_enable_after_m2int{,_disable} enable LYC
-  ## inside the mode-2 handler with LYC == LY and hardware fires again. +4 on
-  ## both devices, nothing lost.
+# The edge detector at the end of a line's OAM pulse: removed 2026-11-13 for
+# a clean rewrite.
 
 proc m2_early*(ppu: GbPpu): bool {.inline.} =
   ## Is this line's tail handing over to a line that scans OAM? Mode 0 on
@@ -1179,12 +1128,8 @@ template cgb_line_end_past*(ppu: GbPpu; gb: GB): bool =
   gb.cgb_enabled and gb.memory.current_speed == 0'u8 and
     ppu.cycle_counter >= gb_line_end(ppu) - int32(STAT_LYC_LY_LEAD_DOTS)
 template m0_source*(ppu: GbPpu; gb: GB): bool =
-  ## The mode-0 STAT source (STAT_M0_FALL_AT_M2_CGB).
-  when STAT_M0_FALL_AT_M2_CGB and STAT_M2_EARLY:
-    ppu.irq_m0_of == 0 and not (gb.cgb_enabled and ppu.ly < 143'u8 and
-                                m2_lead_active(gb) and
-                                ppu.cycle_counter >= ppu.m2_early_dot(gb))
-  elif CGB_LINE_END_ACTIVE or CGB_M0_FALL_DS_FIRST:
+  ## The mode-0 STAT source.
+  when CGB_LINE_END_ACTIVE or CGB_M0_FALL_DS_FIRST:
     # The CGB's source ends ahead of the mode flag: on the comparator's lead
     # dot at single speed (and it is not back on line 144's first dot, where
     # the flag still reads 0), a step ahead of a landing at double speed.
@@ -1285,11 +1230,10 @@ proc m2_line144*(ppu: GbPpu; gb: GB): bool {.inline.} =
 # device-split: gambatte's `_dmg08_cgb04c_` ly0 filenames carry one value, and
 # a sweep breaks `[cgb]` ly0 rows on both sides of 9.
 const LY153_SNAP_DOT_D {.intdefine: "LY153_SNAP_DOT".} = 5
-const LYC153_HOLD_DS* {.intdefine.} = 1
-  ## At double speed every CGB reads the comparison against 153 through the
-  ## snapback's blind window, as CGB D+ do at both speeds
-  ## (quirks.lyc_compare_hold): gambatte ly0/lycint152_lyc153flag_ds_3 reads
-  ## the bit set 4 cycles into line 153 and clear at 6 (+1, none lost).
+const LYC153_HOLD_DS* {.intdefine.} = 0
+  ## Whether at double speed every CGB reads the comparison against 153
+  ## through the snapback's blind window, as CGB D+ do at both speeds
+  ## (quirks.lyc_compare_hold); 0 = no. Re-fit pending; neutral value 0.
 const LYC_SETTLE_DOTS_D {.intdefine: "LYC_SETTLE_DOTS".} = 4
 const LY153_SNAP_DOT* = int32(LY153_SNAP_DOT_D)
 const LYC_SETTLE_DOTS* = int32(LYC_SETTLE_DOTS_D)
@@ -1353,15 +1297,12 @@ proc lyc_settling*(ppu: GbPpu): bool {.noinline.} =
 # M-cycle, not four dots: gambatte's `_ds_` ly0/lycEnable arms step by exactly
 # the M-cycle a flat four overshoots them by.
 const LYC_SRC_RELATCH_LEAD* {.intdefine.} = 1
-const LYC_SRC_RELATCH_ADJ* {.intdefine.} = 1
-  ## Dots added to that source relatch: dot 6 of line 153 at single speed
-  ## (dot 8 in double speed).
-  ## Found with IF_WRITE_LAND_DOTS: gambatte `ly0/lycint152_lyc0irq_ifw_1`
-  ## clears IF on dot 5 and must still see the request, and on its own it
-  ## takes `lycEnable/lyc0_ff41_disable_ds_1`, `lyc0_m1disable_ds_1`. 2 loses
-  ## ten `lyc0*` tests.
-  ## CPU M-cycles by which the LY = LYC STAT source leaves the snapback's blind
-  ## window before the readable bit does; 0 compiles the split out.
+  ## CPU M-cycles by which the LY = LYC STAT source
+  ## leaves the snapback's blind window before the readable bit does; 0
+  ## compiles the split out.
+const LYC_SRC_RELATCH_ADJ* {.intdefine.} = 0
+  ## Dots added to that source relatch (lyc_src_relatch_dot). Re-fit pending,
+  ## jointly with IF_WRITE_LAND_DOTS; neutral value 0.
 
 proc lyc_src_relatch_dot*(gb: GB): int32 {.inline.} =
   ## The dot of line 153 the LY = LYC STAT source relatches on; folds to
@@ -1396,9 +1337,9 @@ proc lyc_settle_halt_skip(gb: GB): bool {.inline.} =
 #
 # A DMG rule. wilbertpol's -C / -GS pair asks the same 32 questions of both
 # devices with different expected tables: the CGB's halted latch is not blind
-# at single speed (the staircase drops at SCX 3 and 7, not 1 and 5) and is
-# blind for one dot in double speed (gambatte halt/m0{int,irq}_m0stat_scx3_ds_2,
-# two-sided). gambatte irq_precedence/hdma_vs_m0_scx2_halt goes red with it:
+# at single speed (the staircase drops at SCX 3 and 7, not 1 and 5); its
+# double-speed figure is CGB_M0_HALT_BLIND_DS_DOTS. gambatte
+# irq_precedence/hdma_vs_m0_scx2_halt goes red with it:
 # that family needs a halted/running split in the HDMA-vs-mode-0 arbitration
 # this does not reach.
 const M0_HALT_BLIND_DOTS* {.intdefine.} = 2
@@ -1406,10 +1347,9 @@ const M0_HALT_BLIND_DOTS* {.intdefine.} = 2
   ## rise is invisible to the halted CPU's latch; 0 compiles it out. DMG only.
 const CGB_M0_HALT_BLIND_DOTS* {.intdefine.} = 0
   ## The CGB's single-speed value, in DOTS (not scaled). Saturates at 0.
-const CGB_M0_HALT_BLIND_DS_DOTS* {.intdefine.} = 0
-  ## And the CGB's double-speed value, in DOTS: 0 with STAT_M0_LEAD_DS 0 (the
-  ## joint move there; 1 loses `halt/m0{int,irq}_m0stat_scx2_ds_1`). It was
-  ## 1, bracketed on both sides, with the one-dot lead.
+const CGB_M0_HALT_BLIND_DS_DOTS* {.intdefine.} = 1
+  ## And the CGB's double-speed value, in DOTS. Re-fit pending, jointly with
+  ## STAT_M0_LEAD_DS; neutral value 1.
 
 when M0_HALT_BLIND_DOTS > 0 or CGB_M0_HALT_BLIND_DOTS > 0 or
      CGB_M0_HALT_BLIND_DS_DOTS > 0:
@@ -1474,48 +1414,20 @@ proc stat_level_with(ppu: GbPpu; gb: GB; en, lyc: uint8): bool {.noinline.} =
     (ppu.m0_source(gb)     and (en and 0x08'u8) != 0) or
     (ppu.irq_m1_of(gb) == 1    and (en and 0x10'u8) != 0)
 
-const LYC_DROP_LATENCY_DMG* {.intdefine.} = 1
-const LYC_DROP_LATENCY_CGB_DS* {.intdefine.} = 2
-  ## The same at double speed, in dots (-1 = LYC_DROP_LATENCY_CGB halved, 3).
-  ## The double-speed byte is applied at the write, not deferred a boundary,
-  ## so the halved single-speed figure carries a defer it does not have. 2 is
-  ## two-sided: 3 loses `m0enable/lycdisable_ff45_scx1_ds_1`, 1 `m2enable/
-  ## lyc1_m2irq_late_lyc255_ds_2`.
-const LYC_DROP_LATENCY_CGB* {.intdefine.} = 6
+const LYC_DROP_LATENCY_DMG* {.intdefine.} = 0
   ## Dots after an LYC write's commit at which a broken match lets the STAT
-  ## line fall (stat_drop_arm), per device. The two CGB figures are live only
-  ## with CGB_LYC_CMP_LATCH off: with it on the CGB line falls, and rises, on
-  ## the comparator's sample (lyc_sample_land). The STAT write's own latency is
-  ## STAT_ENABLE_LATENCY / CGB_STAT_ENABLE_LATENCY; the CGB's LYC byte is
-  ## itself deferred one M-cycle (CGB_LYC_WRITE_DEFER), hence 4 + 2. Brackets
-  ## (gambatte, 2026-09-22): DMG 0 loses m0enable/lycdisable_ff45_scx3_3, 2
-  ## loses lycdisable_ff45_3, 1 takes both plus lycdisable_ff45_scx{1,2}_2
-  ## and m2enable/lyc1_m2irq_late_lyc255_2; CGB 2 and 4 flip the `_1`/`_2`
-  ## arms of lycdisable_ff45_scx{1,2}, `_2` and lyc255 against each other,
-  ## 6 takes the `_1` arms and lyc255_1 with nothing lost, 8 takes none.
-const LYC_DROP_BOUNDARY_SKIP* {.intdefine.} = 1
+  ## line fall (stat_drop_arm). The CGB uses it too, but only with
+  ## CGB_LYC_CMP_LATCH off: with it on the CGB line falls, and rises, on the
+  ## comparator's sample (lyc_sample_land). Re-fit pending; neutral value 0.
+const LYC_DROP_BOUNDARY_SKIP* {.intdefine.} = 0
   ## 1: an LYC write whose M-cycle holds the line boundary does not drop the
-  ## line -- the comparator meets the new LYC and the new LY together, so a
-  ## match that moves with LY never goes low. 0 loses gambatte
-  ## lycEnable/ff45_enable_weirdpoint_3 and lyc153_late_ff45_enable_3 [dmg]
-  ## (the write moves LYC onto the line about to start and hardware sees no
-  ## edge) and takes nothing.
-
-const STAT_DROP_OLD_LEVEL* {.intdefine.} = 0
-  ## How stat_drop_arm samples the line a STAT write is about to move. 0:
-  ## with the write's NEW enables (the line falls only if the new value reads
-  ## low right now). 1: with the enables both values share (old AND new), so
-  ## a swap between two sources dips. Measured -33: gambatte miscmstatirq
-  ## `*statwirq_trigger_*_08_40` / `_40_08` swap two high sources and want
-  ## no edge on either device. The pulse's end is handled where it happens
-  ## instead (STAT_M2_PULSE_END_EVAL).
+  ## line (stat_drop_arm is not armed); 0: it does. Re-fit pending; neutral
+  ## value 0.
 
 template stat_write_drop_enables*(ppu: GbPpu; val: uint8): uint8 =
-  ## The enables stat_drop_arm samples for a STAT write of `val`.
-  when STAT_DROP_OLD_LEVEL != 0:
-    (ppu.lcd_status and 0b1000_0111'u8) or (val and ppu.lcd_status and 0b0111_1000'u8)
-  else:
-    (ppu.lcd_status and 0b1000_0111'u8) or (val and 0b0111_1000'u8)
+  ## The enables stat_drop_arm samples for a STAT write of `val`: the write's
+  ## NEW enables (the line falls only if the new value reads low right now).
+  (ppu.lcd_status and 0b1000_0111'u8) or (val and 0b0111_1000'u8)
 
 proc stat_drop_arm*(ppu: GbPpu; gb: GB; en, lyc: uint8; lat_dots: int32) =
   ## A STAT or LYC write commits: its effect reaches the line
@@ -1642,15 +1554,15 @@ proc ppu_handle_stat_interrupt*(ppu: GbPpu; gb: GB) =
 # write. The new value reaches the comparator's input half an M-cycle after
 # the top of the write's M-cycle (CGB_LYC_LAND_T), and the comparator's
 # answer reaches the STAT line only on a 4-dot grid of the PPU's own clock:
-# the grid the comparator's LY step sits on (line end - STAT_LYC_LY_LEAD_DOTS,
-# dot 454 at single speed; the boundary itself in double). The line therefore
+# the grid the comparator's LY step sits on (line end - STAT_LYC_LY_LEAD_DOTS
+# at single speed, line end - STAT_LYC_LY_LEAD_DS in double). The line therefore
 # moves on the first grid dot at or after the landing, whichever way it moves,
 # and a write whose grid dot is the LY step itself changes both comparator
 # inputs under one sample: when the write moves a match on the old line to
 # the new line the comparator's answer does not change and the line stays
 # high through the step (GB.lyc_bridge: the single-speed line end has no
 # match to let go of, fifo_cgb_line_end, and the boundary's window stays
-# shut, as DMG_LYC_BOUNDARY_OPEN does for the DMG's parked write).
+# shut).
 # The readable register and coincidence bit keep their own timing
 # (CGB_LYC_WRITE_DEFER, CGB_LYC_EDGE_DEFER). Rows and brackets:
 # docs/gb-derivations.md, "CGB LYC write: a sampled comparator".
@@ -1769,7 +1681,6 @@ proc ppu_flush_stat_write*(ppu: GbPpu; gb: GB) =
   ## are not an M-cycle (post-boot table, cheat pokes) call it directly.
   if ppu.stat_write_pending:
     ppu.stat_write_pending = false
-    when DMG_LYC_BOUNDARY_OPEN != 0: gb.lyc_write_old = 0
     ppu_handle_stat_interrupt(ppu, gb)
 
 proc ppu_flush_hdma_bytes*(ppu: GbPpu; gb: GB) =
@@ -1950,9 +1861,6 @@ proc ppu_step_hdma*(ppu: GbPpu; gb: GB; in_cpu_cycle = false;
   ppu.hdma_copying   = true
   ppu.hdma_block_due = false
   let may_continue = ppu_copy_hdma_block(ppu, gb, in_cpu_cycle, charge_overhead)
-  when HDMA_BLOCK_SWALLOW != 0:
-    ppu.hdma_block_due = false
-    gb.hdma_swallow_end = ppu.cycle_counter + (if charge_overhead: 0'i32 else: 4'i32)
   if ppu.hdma5 == 0xFF or not may_continue: ppu.hdma_active = false
   ppu.hdma_copying = false
 
@@ -1973,43 +1881,12 @@ when STAT_IRQ_SPLIT:
       else:
         ppu_handle_stat_interrupt(ppu, gb)
 
-proc ppu_hdma_switch_req*(ppu: GbPpu; gb: GB) =
-  ## HDMA_SWITCH_REQ: a request the speed switch's HALT found pending.
-  ppu.hdma_block_due = false
-  gb.hdma_stop_req = true
-  if not ppu.hdma_active: return
-  if gb.memory.current_speed == 1'u8:
-    # Into double speed: the block, with no CPU on the bus to observe its
-    # dots (the stall absorbs them), then the transfer stops.
-    let src_base = int(ppu.hdma_src)
-    let dst_base = 0x8000 or int(ppu.hdma_dst and 0x1FF0'u16)
-    let src_legal = src_base < 0x8000 or (src_base >= 0xA000 and src_base < 0xE000)
-    ppu_flush_hdma_bytes(ppu, gb)
-    for byte in 0 ..< 0x10:
-      let val = if src_legal: gb.memory.read_byte(gb, src_base + byte) else: 0xFF'u8
-      gb.memory.write_byte(gb, dst_base + byte, val)
-    ppu.hdma_src = ppu.hdma_src + 0x10
-    ppu.hdma_dst = ppu.hdma_dst + 0x10
-    ppu.hdma_active = false
-  else:
-    ppu.hdma_block_due = true
-    gb.hdma_due_forced = true
-    ppu.hdma_due_deadline = high(int32)
-
-proc ppu_hdma_wake*(ppu: GbPpu; gb: GB; prefetch = false): bool {.discardable.} =
-  ## A HALT (or a speed switch's stall) ending: an HBlank block that came due
-  ## while halted transfers the moment the CPU is back on the bus, if it was
-  ## requested before the HALT (HDMA_HALT_REQ_DOTS) or the mode 0 that owed it
-  ## is still running with room left (HDMA_WAKE_M0_MARGIN).
+proc ppu_hdma_wake*(ppu: GbPpu; gb: GB) =
+  ## A HALT ending: an HBlank block that came due while halted transfers the
+  ## moment the CPU is back on the bus, if the mode 0 that owed it is still
+  ## running with room left (HDMA_WAKE_M0_MARGIN).
   if not ppu.hdma_block_due: return
-  let forced = HDMA_HALT_REQ_DOTS >= 0 and gb.hdma_due_forced
-  gb.hdma_due_forced = false
-  if ppu.hdma_active and forced:
-    # The prefetched opcode's fetch M-cycle (HDMA_HALT_REQ_BUG) is the block's
-    # release M-cycle: it is not charged twice.
-    ppu_step_hdma(ppu, gb, charge_overhead = not prefetch or HDMA_HALT_REQ_BUG == 0)
-    return true
-  elif ppu.hdma_active and (ppu.lcd_status and 3'u8) == 0'u8 and
+  if ppu.hdma_active and (ppu.lcd_status and 3'u8) == 0'u8 and
      (HDMA_WAKE_M0_MARGIN == 0 or
       ppu.cycle_counter +
         int32(HDMA_WAKE_M0_MARGIN shr int(gb.memory.current_speed)) <
@@ -2073,7 +1950,7 @@ proc `mode_flag=`*(ppu: GbPpu; mode: uint8; gb: GB) =
     if ppu.irq_mode != mode:
       when LCDON_M0_LAG_DS != 0:
         # The LCD-on line's mode-0 source trails its flag at double speed
-        # (LCDON_M0_LAG_DS, gb.nim); later lines keep the joint-move lead.
+        # (LCDON_M0_LAG_DS, gb.nim); later lines keep STAT_M0_LEAD_DS.
         if mode == 0'u8 and ppu.first_line and gb.memory.current_speed != 0'u8:
           gb.m0_late_fire = true
           gb.scheduler.schedule(LCDON_M0_LAG_DS, etGbLycEdge)
@@ -2096,7 +1973,7 @@ proc `mode_flag=`*(ppu: GbPpu; mode: uint8; gb: GB) =
   # DUE and cpu.tick pays it at the wake if still in that mode 0 (gambatte
   # dma/hdma_m3halt_m1unhalt_hdma5). `in_cpu_cycle`: the edge lands inside a
   # CPU access still on the bus, so the bytes are held HDMA_VISIBLE_DOTS dots.
-  let hdma_halted = gb.cpu.halted or gb.hdma_stalled
+  let hdma_halted = gb.cpu.halted
   when HDMA_HALT_M0_BLIND != 0:
     # The edge detector's registered mode, clocked by the CPU: read before this
     # change updates it, and not updated while halted (HDMA_HALT_M0_BLIND).
@@ -2118,22 +1995,10 @@ proc `mode_flag=`*(ppu: GbPpu; mode: uint8; gb: GB) =
           echo "KILLWIN ly=", ppu.ly, " dot=", ppu.cycle_counter,
                " stopdot=", ppu.hdma_kill_from, " d=", d
         ppu.hdma_kill_from = -1
-        if d >= 0 and d < HDMA_SPEEDSWITCH_KILL_W and
-           (HDMA_SWITCH_REQ_KILL_DS != 0 or gb.memory.current_speed == 1'u8 or
-            HDMA_SWITCH_REQ == 0):
-          when HDMA_SWITCH_REQ != 0:
-            ppu_hdma_switch_req(ppu, gb)
-            return
-          else:
-            ppu.hdma_active    = false
-            ppu.hdma_block_due = false
+        if d >= 0 and d < HDMA_SPEEDSWITCH_KILL_W:
+          ppu.hdma_active    = false
+          ppu.hdma_block_due = false
           return
-    when HDMA_BLOCK_SWALLOW != 0:
-      if ppu.hdma_copying: return
-      if gb.hdma_swallow_end >= 0:
-        let se = gb.hdma_swallow_end
-        gb.hdma_swallow_end = -1
-        if ppu.cycle_counter <= se and ppu.cycle_counter + 8 > se: return
     when HDMA_DISABLE_GRACE_DOTS != 0:
       ppu.hdma_due_dot = ppu.cycle_counter
     when defined(gb_dma_trace):
@@ -2150,15 +2015,6 @@ proc `mode_flag=`*(ppu: GbPpu; mode: uint8; gb: GB) =
       when HDMA_HALT_M0_BLIND != 0:
         # Halted inside a mode 0 the detector still registers: no edge to see.
         if hdma_seen_was == 0'u8: return
-      when HDMA_HALT_REQ_DOTS >= 0:
-        var since = ppu.cycle_counter - ppu.hdma_halt_dot
-        if since < 0: since += gb_line_end(ppu)
-        gb.hdma_due_forced = since <= HDMA_HALT_REQ_DOTS and not gb.hdma_stalled
-        when HDMA_HALT_REQ_BUG != 0:
-          # The HALT's prefetch of the next opcode, before the block can
-          # overwrite it (gambatte dma/hdma_transition_halt_hdmadst_unhalt).
-          if gb.hdma_due_forced:
-            gb.hdma_prefetch_op = int16(gb.memory.read_byte(gb, int(gb.cpu.pc)))
       ppu.hdma_block_due = true
       ppu.hdma_due_delay = 0
       when HDMA_GRANT_FETCH_DOTS >= 0:
@@ -2212,27 +2068,15 @@ proc ly_advance_line*(ppu: GbPpu; gb: GB) {.noinline.} =
   ## call rather than open/`mode_flag=`/close at the call site: written inline
   ## in fifo_tick_slow's dot loop it costs +1.19% of retired instructions on
   ## Pokemon Crystal.
-  var lyc_en = ly_advance_open(ppu, gb)
-  when DMG_LYC_BOUNDARY_OPEN != 0:
-    # A parked DMG LYC write does not close the window unless the old value
-    # matched the line now ending (DMG_LYC_BOUNDARY_OPEN).
-    if ppu.stat_write_pending and gb.lyc_write_old > 0'i16 and
-       int(gb.lyc_write_old) != int(ppu.ly):
-      lyc_en = ppu.lcd_status and 0x40'u8
-      ppu.lcd_status = ppu.lcd_status and 0b1011_1111'u8
+  # A parked DMG LYC write at a line's start: removed 2026-11-13 for a clean
+  # rewrite.
+  let lyc_en = ly_advance_open(ppu, gb)
   ppu.`mode_flag=`(2'u8, gb)
   ly_advance_close(ppu, gb, lyc_en)
 
 proc ly_advance_vblank*(ppu: GbPpu; gb: GB) {.noinline.} =
   ## A vblank line starting: the same window with no mode change inside it.
   ## `noinline` for the reason above.
-  when LY_BLIND_SKIP_LED != 0:
-    # The comparator already stepped STAT_LYC_LY_LEAD_DOTS ago; nothing
-    # changes for it here.
-    if (if gb.memory.current_speed != 0'u8: STAT_LYC_LY_LEAD_DS
-        else: STAT_LYC_LY_LEAD_DOTS) != 0:
-      ppu_handle_stat_interrupt(ppu, gb)
-      return
   let lyc_en = ly_advance_open(ppu, gb)
   ppu_handle_stat_interrupt(ppu, gb)
   ly_advance_close(ppu, gb, lyc_en)
@@ -2296,15 +2140,11 @@ proc ppu_run_gdma*(ppu: GbPpu; gb: GB) =
   when GDMA_SETUP_MCYCLES != 0:
     mem_tick_components(gb.memory, gb, 4 * GDMA_SETUP_MCYCLES, from_cpu = false)
 
-const HDMA_START_CUTOFF_SS* {.intdefine.} = 2
+const HDMA_START_CUTOFF_SS* {.intdefine.} = 0
   ## Dots before the line's end from which an FF55 write arming an HBlank
   ## transfer no longer counts as inside this HBlank (the block waits for the
-  ## next mode-0 edge), at single speed; `_DS` at double speed, where only the
-  ## boundary dot itself is excluded. gambatte `dma/hdma_late_enable_
-  ## lcdoffset3_2` and `ds_lcdoffset1_2` (the grids a speed-switch round
-  ## trip leaves put the write on dots 454 and 456) against `_1` twins and
-  ## `hdma_late_enable_{1,ds_1}`: SS 1 takes only the double-speed row, 3
-  ## loses `hdma_late_enable_1`; DS 1 loses `hdma_late_enable_ds_1`.
+  ## next mode-0 edge), at single speed; `_DS` at double speed. Dots; 0 = no
+  ## cutoff. Re-fit pending; neutral value 0 (both).
 const HDMA_START_CUTOFF_DS* {.intdefine.} = 0
 const HDMA_M2_DMA_HBLANK* {.intdefine.} = 1
   ## The OAM scan reads as mode 0 in STAT while an OAM DMA holds OAM
@@ -2342,7 +2182,7 @@ proc ppu_start_hdma*(ppu: GbPpu; gb: GB; val: uint8) =
     # exactly one block and no more (SameSuite dma/hdma_lcd_off).
     var in_m0 = ppu_hdma_hblank_level(ppu, gb)
     when HDMA_START_CUTOFF_SS != 0 or HDMA_START_CUTOFF_DS != 0:
-      # (DS 0 still excludes the boundary dot.) Too close to the line's end, the arming write misses this HBlank
+      # Too close to the line's end, the arming write misses this HBlank
       # (HDMA_START_CUTOFF_SS/_DS).
       if in_m0 and ppu.lcd_enabled and
          ppu.cycle_counter >= gb_line_end(ppu) -
@@ -2365,13 +2205,8 @@ proc ppu_start_hdma*(ppu: GbPpu; gb: GB; val: uint8) =
         ppu_step_hdma(ppu, gb)
   else:
     if not ppu.hdma_active:
-      when GDMA_AFTER_FETCH != 0 and HDMA_GRANT_FETCH_DOTS >= 0:
-        if not gb.cpu.halted:
-          # The CPU hands the bus over at the end of its next opcode fetch
-          # (GDMA_AFTER_FETCH); cpu.tick runs the burst there.
-          gb.gdma_owed = true
-          ppu.hdma_block_due = true
-          return
+      # Where a general-purpose DMA takes the bus: removed 2026-11-13 for a
+      # clean rewrite (the burst runs on the write).
       ppu_run_gdma(ppu, gb)
     else:
       # Terminating an armed HBlank transfer: the block this HBlank owed is owed
@@ -2462,20 +2297,13 @@ template win_check_defer*(gb: GB): int32 =
 proc win_check_now*(ppu: GbPpu; gb: GB) =
   ## The WY == LY comparator, sampled now (WIN_CHECK_DEFER).
   ppu.win_check_dot = -1
-  # Against the comparator's LY (irq_ly when a lead is on): the WY comparator
-  # steps with the LYC one, ahead of the readable LY (WIN_CHECK_CMP_LY).
-  let cmp_ly = when WIN_CHECK_CMP_LY != 0: ppu.irq_ly_of else: ppu.ly
+  let cmp_ly = ppu.ly
   if ppu.lcd_enabled and window_enabled(ppu) and (ppu.lcd_status and 3'u8) != 1'u8 and
-     cmp_ly == ppu.wy and
-     (let e = (if gb.cgb_enabled:
-                 (if WIN_LATCH_END_CGB_DS != 0 and gb.memory.current_speed != 0'u8:
-                    WIN_LATCH_END_CGB_DS
-                  else: WIN_LATCH_END_CGB)
-               else: WIN_LATCH_END_DMG);
-      e == 0 or ppu.cycle_counter < int32(e)):
+     cmp_ly == ppu.wy:
     when defined(gb_win_trace):
       echo "WYCHECK ly=", ppu.ly, " cmp=", cmp_ly, " wy=", ppu.wy, " dot=", ppu.cycle_counter
-    let was = ppu.window_trigger
+    when WIN_HEAD_LATE_DOT != 0:
+      let was = ppu.window_trigger
     ppu.window_trigger = true
     fifo_arm_window(gb.fifo_ppu)
     when WIN_HEAD_LATE_DOT != 0:
@@ -2483,23 +2311,11 @@ proc win_check_now*(ppu: GbPpu; gb: GB) =
       if not was and (ppu.lcd_status and 3'u8) == 3'u8 and
          ppu.cycle_counter <= int32(WIN_HEAD_LATE_DOT) + int32(ppu.scx and 7):
         fifo_head_window_late(gb.fifo_ppu)
-  when WIN_CHECK_TWO_SLOTS != 0:
-    # A later sample queued behind this one (win_check_schedule).
-    if gb.win_check_gap > 0:
-      ppu.win_check_dot = ppu.cycle_counter + gb.win_check_gap
-      gb.win_check_gap = 0
 
 proc win_check_schedule*(ppu: GbPpu; gb: GB; dots: int32) {.inline.} =
   ## Sample the comparator `dots` from now (may fall on the next line; the
-  ## boundary rebases it). With WIN_CHECK_TWO_SLOTS an earlier pending sample
-  ## (line 0's own check) is kept and this one queued behind it; otherwise a
-  ## later schedule replaces an earlier one.
-  let at = ppu.cycle_counter + dots
-  when WIN_CHECK_TWO_SLOTS != 0:
-    if ppu.win_check_dot >= ppu.cycle_counter and ppu.win_check_dot < at:
-      gb.win_check_gap = at - ppu.win_check_dot
-      return
-  ppu.win_check_dot = at
+  ## boundary rebases it). A later schedule replaces an earlier one.
+  ppu.win_check_dot = ppu.cycle_counter + dots
 
 proc ppu_store_wy*(ppu: GbPpu; gb: GB; val: uint8) {.inline.} =
   fifo_sync(gb)
@@ -2516,8 +2332,7 @@ proc ppu_latch_wy*(ppu: GbPpu; gb: GB; val: uint8) {.inline.} =
   when WIN_CHECK_DEFER_ANY:
     if win_check_defer(gb) != 0: return
   if ppu.ly == val and (ppu.lcd_status and 3'u8) != 1'u8 and ppu.lcd_enabled and
-     window_enabled(ppu) and
-     (WIN_LATCH_END_DMG == 0 or ppu.cycle_counter < int32(WIN_LATCH_END_DMG)):
+     window_enabled(ppu):
     ppu.window_trigger = true
     fifo_arm_window(gb.fifo_ppu)
 
@@ -2538,16 +2353,8 @@ proc ppu_store_lcdc*(ppu: GbPpu; gb: GB; val: uint8) {.inline.} =
       echo "LCDC2 ly=", ppu.ly, " dot=", ppu.cycle_counter,
            " mode=", (ppu.lcd_status and 3'u8), " val=", toHex(val, 2)
   ppu.lcd_control = val
-  # LCDC.5 turning on is the third event that can make "WY match while
-  # enabled" newly true: set mid-line on the WY line the window starts on
-  # that same line (hardware: gbprobe probe_g_wy0 on AGB SP). Pan Docs
-  # states the WY condition per line only.
-  if (moved and val and 0x20'u8) != 0 and ppu.ly == ppu.wy and
-     (ppu.lcd_status and 3'u8) != 1'u8 and ppu.lcd_enabled:
-    when WIN_CHECK_DEFER_ANY:
-      if win_check_defer(gb) == 0: ppu.window_trigger = true
-    else:
-      ppu.window_trigger = true
+  # The WY match on an LCDC.5 rise at the store itself: removed 2026-11-13 for
+  # a clean rewrite (Pan Docs states the WY condition per line only).
   when CGB_WE_DISABLE_LATE != 0:
     # The fall's own latency to the window abort (CGB_WE_DISABLE_LATE).
     if (moved and 0x20'u8) != 0 and (val and 0x20'u8) == 0'u8:
@@ -2766,7 +2573,7 @@ proc ppu_write*(ppu: GbPpu; gb: GB; idx: int; val: uint8) =
       # The PPU restarts at the top of the frame; if enough time has passed
       # since the last present, push one now rather than let the gap stretch
       # (LCD_ON_FRAME_DOTS: a pacing rule, not a hardware one).
-      if ppu.dots_since_frame > LCD_ON_FRAME_DOTS:
+      if LCD_ON_FRAME_DOTS != 0 and ppu.dots_since_frame > LCD_ON_FRAME_DOTS:
         when defined(gb_dot_counter): inc gb_frame_lcd_on
         if gb.sgb != nil:
           # SGB freeze, same as lcd_off_frame: re-present the held picture.
@@ -2807,8 +2614,6 @@ proc ppu_write*(ppu: GbPpu; gb: GB; idx: int; val: uint8) =
     when defined(gb_win_trace):
       echo "LCDC ly=", ppu.ly, " dot=", ppu.cycle_counter, " mode=",
            (ppu.lcd_status and 3), " old=", toHex(ppu.lcd_control,2), " new=", toHex(val,2)
-    let lcd_going_off = (ppu.lcd_control and 0x80'u8) != 0 and (val and 0x80'u8) == 0
-    let hblank_before = ppu_hdma_hblank_level(ppu, gb)
     # Only the six bits the pipeline reads are late on CGB; the enable bit has
     # already restarted the mode machinery above on this dot.
     when CGB_LCDC_LATENCY_ANY:
@@ -2818,13 +2623,8 @@ proc ppu_write*(ppu: GbPpu; gb: GB; idx: int; val: uint8) =
         ppu_store_lcdc(ppu, gb, val)
     else:
       ppu_store_lcdc(ppu, gb, val)
-    when HDMA_LCD_OFF_BLOCK != 0:
-      # Switching the LCD off with an HBlank DMA armed requests a block, as
-      # entering mode 0 does (HDMA_LCD_OFF_BLOCK) -- only as an edge, from
-      # outside HBlank (HDMA_LCD_OFF_EDGE).
-      if lcd_going_off and ppu.hdma_active and not ppu.hdma_copying and
-         (HDMA_LCD_OFF_EDGE == 0 or not hblank_before or ppu.hdma_block_due):
-        ppu_step_hdma(ppu, gb, in_cpu_cycle = true)
+    # HBlank DMA at an LCD switch-off: removed 2026-11-13 for a clean
+    # rewrite (HDMA_LCD_OFF_EDGE is to be re-attached to it).
     # Deferred to the end of this M-cycle (stat_write_pending). LCDC.1 and, in
     # CGB mode, LCDC.0 are mixer reads (mealybug m3_lcdc_obj_en_change; see
     # fifo_recompose_last).
@@ -2858,13 +2658,8 @@ proc ppu_write*(ppu: GbPpu; gb: GB; idx: int; val: uint8) =
     # DMG only. The $FF phase of the write acts here at the commit point; only
     # the real value waits for the M-cycle boundary (ppu_stat_write_glitch).
     if not gb.cgb_enabled: ppu_stat_write_glitch(ppu, gb)
-    when LCDOFF_STAT_LYC_IRQ != 0:
-      # LCD off: the comparator's frozen match meets an LYC enable the write
-      # turns on (on a DMG any write does, as the $FF phase).
-      if not ppu.lcd_enabled and (ppu.lcd_status and 0x04'u8) != 0'u8 and
-         (ppu.lcd_status and 0x40'u8) == 0'u8 and
-         (not gb.cgb_enabled or (val and 0x40'u8) != 0'u8):
-        gb.interrupts.lcd_stat_interrupt = true
+    # A STAT write over the comparator's frozen match with the LCD off:
+    # removed 2026-11-13 for a clean rewrite.
     when STAT_ENABLE_EARLY:
       # Where the M-cycle's PPU dots start. mem_write applies the byte between
       # mem_tick_bus and mem_tick_ppu, so the dot counter has not moved yet.
@@ -2873,12 +2668,6 @@ proc ppu_write*(ppu: GbPpu; gb: GB; idx: int; val: uint8) =
     stat_drop_arm(ppu, gb, stat_write_drop_enables(ppu, val), ppu.lyc,
                   int32(if gb.cgb_enabled: CGB_STAT_ENABLE_LATENCY
                         else: STAT_ENABLE_LATENCY))
-    when STAT_SET_LANDING_EVAL:
-      # The set bits' landing is an evaluation of its own (gb.nim).
-      if (val and not ppu.lcd_status and 0b0111_1000'u8) != 0:
-        let lat = int32(if gb.cgb_enabled: CGB_STAT_ENABLE_LATENCY
-                        else: STAT_ENABLE_LATENCY) shr gb.memory.current_speed
-        if lat > 0: ppu.stat_set_dot = ppu.cycle_counter + lat
   of 0xFF42:
     when defined(gb_m3_trace):
       # Diagnostic (tools only): the dot each mid-mode-3 SCY write lands on.
@@ -2911,7 +2700,6 @@ proc ppu_write*(ppu: GbPpu; gb: GB; idx: int; val: uint8) =
            " line=", (if ppu.old_stat_flag: 1 else: 0),
            " ds=", gb.memory.current_speed
     var edge_here = true
-    let old_lyc = ppu.lyc
     # The STAT source's side of a CGB write is the comparator's own
     # (lyc_sample_write); what follows is then only the readable register.
     let latched = CGB_LYC_CMP_LATCH and gb.cgb_enabled
@@ -2929,8 +2717,6 @@ proc ppu_write*(ppu: GbPpu; gb: GB; idx: int; val: uint8) =
       ppu.lyc = val
     when CGB_LYC_CMP_LATCH:
       if not gb.cgb_enabled: gb.lyc_sampled = val
-    when DMG_LYC_BOUNDARY_OPEN != 0:
-      if not gb.cgb_enabled: gb.lyc_write_old = int16(old_lyc) + 1
     if latched and not parked:
       # The register moved here (double speed) and the readable bit follows
       # it now. The line is the comparator's and does not move, so this is
@@ -2943,8 +2729,7 @@ proc ppu_write*(ppu: GbPpu; gb: GB; idx: int; val: uint8) =
        (LYC_DROP_BOUNDARY_SKIP == 0 or
         ppu.cycle_counter + (4'i32 shr gb.memory.current_speed) < ppu.gb_line_end):
       stat_drop_arm(ppu, gb, ppu.lcd_status, val,
-                    int32(if gb.cgb_enabled: LYC_DROP_LATENCY_CGB
-                          else: LYC_DROP_LATENCY_DMG))
+                    int32(LYC_DROP_LATENCY_DMG))
   of 0xFF46: discard  # handled by memory DMA
   # The three DMG palettes are pure mixer reads -- nothing else in the PPU looks
   # at them -- so each one carries the mixer's extra dot (fifo_recompose_last).

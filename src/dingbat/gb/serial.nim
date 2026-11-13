@@ -245,15 +245,10 @@ proc serial_read*(serial: GbSerial; gb: GB; idx: int): uint8 =
   of 0xFF02: serial.sc or serial_sc_unused_bits(gb)
   else: 0xFF'u8
 
-const SERIAL_SC_WRITE_LEAD_T* {.intdefine.} = 4
+const SERIAL_SC_WRITE_LEAD_T* {.intdefine.} = 0
   ## T-cycles before the divider's present count at which an SC store samples
-  ## the tap it restarts the slot sequence from: the store meets the shifter at
-  ## the top of its M-cycle (SERIAL_CPU_SAMPLE_T), before the divider ticks
-  ## that M-cycle, so a tap edge on the store's own M-cycle counts after it
-  ## and opens the first slot. gambatte `serial/nopx1_start{,83}_wait_read_if_2`
-  ## (a handler's restart on the edge) and `start83_late_div_write_wait_read_
-  ## if_{1b,2b}`; bracket [1,4]: 0 loses those five, 5 loses `nopx2_start_
-  ## wait_read_if_1` (both devices), whose restart is one M-cycle later.
+  ## the tap it restarts the slot sequence from (0 = the present count,
+  ## serial_prime_history). Re-fit pending; neutral value 0.
 
 proc serial_write_commit(serial: GbSerial; gb: GB; idx: int; val: uint8) =
   case idx

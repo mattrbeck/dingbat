@@ -68,12 +68,12 @@ Each of these is a candidate Pan Docs correction (docs/pandocs-upstream.md).
 | Audio_Registers NR10: sweep trigger actions immediate | the calculation shifts one bit per APU tick: the trigger's check stops the channel step + 3 M-cycles after the write, a clock's second check step + 1 after the clock, NR10 read when it ends | SameSuite `channel_1_sweep_restart*`; DocBoy `ch1_period_sweep_*` (SameBoy agrees) |
 | Audio: CH3 sample buffer clears only on APU power-on | also clears on NR30 DAC-off | SameSuite `channel_3_restart_stop_delay`; hardware re-check queued (flashcart folder 7) |
 | Power_Up_Sequence footnote: CGB registers read $FF in Non-CGB mode | VBK reads `$FE|bank`; FF72/73/75/PCM12/34 answer in compat mode; KEY1/SVBK/HDMA/RP/FF74 do read $FF | mooneye `misc/bits/unused_hwio-C` |
-| Gameboy_Printer: status bit 2 = "image data full" | bit 3 is data-present, bit 2 is print-done | real carts: Hello Kitty and Camera Gold re-print forever under clear-on-read variants |
+| Gameboy_Printer: status bits | status sequencing and done latch removed 2026-11-13 for a clean rewrite | pending; observable: Hello Kitty and Camera Gold print loops |
 | MMM01 heading: RAM-bank-high is bits 1–2 | bits 2–3 | Pan Docs' own diagrams |
 | STOP with LCD on (DMG): "horizontal black line" | leaves the frame white | daid `stop_instr.gb` reference; panel decay is analog |
 | Compat colorization per title | one fallback palette | boot-ROM data deliberately not lifted |
 | OAM_DMA_Transfer: "CPU can access only HRAM during OAM DMA" | per-bus conflict model | 314 gambatte `oamdma/busy*` rows, 0 mismatches |
-| CGB_Registers SVBK: R/W | write 0 reads back $F8 raw | hardware AGS: SVBK = $F8 (gbedge p00) |
+| CGB_Registers SVBK: R/W | readback rule removed 2026-11-13 for a clean rewrite | hardware AGS post-boot IDENT read (gbedge p00) |
 | MBC5: RAM enable = exactly $0A | any low nibble $A | MBCs.md current text; hardware unconfirmed (needs a real MBC5 cart) |
 
 ## D — subsystems absent

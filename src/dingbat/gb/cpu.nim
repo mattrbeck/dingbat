@@ -147,32 +147,16 @@ when HDMA_GRANT_FETCH_DOTS >= 0:
       gb.hdma_start_req = false
       ppu.hdma_block_due = false
 
-  proc gdma_hand_over(gb: GB; pc: uint16; opcode: uint8) {.noinline.} =
-    ## The owed general-purpose burst at the end of an opcode fetch
-    ## (GDMA_AFTER_FETCH), with VDMA_BUS_RESIDUE's byte from that fetch.
-    gb.gdma_owed = false
-    gb.ppu.hdma_block_due = false
-    when VDMA_BUS_RESIDUE != 0:
-      gb.vdma_residue = vdma_hand_over_residue(gb, pc, opcode, 1)
-    ppu_run_gdma(gb.ppu, gb)
-    when VDMA_BUS_RESIDUE != 0: gb.vdma_residue = 0
-
-const HALT_IME_PENDING_REDO* {.intdefine.} = 1
-  ## A HALT that finds IME on and IF & IE != 0 does not halt: the opcode after
-  ## it was fetched without moving PC, the dispatch undoes that fetch and
-  ## pushes the HALT's own address, and RETI runs the HALT again (the halt
-  ## bug's IME-on shape).
-  ## gambatte `halt/late_m0int_halt_m0stat_scx{2,3}_3a` (both devices) and
-  ## `scx3_3b` [dmg] halt again after the handler; 0 returns past the HALT.
-const DMG_HALT_MIN_MCYCLES* {.intdefine.} = 2
-  ## Halted M-cycles a DMG spends before a pending interrupt can end the HALT:
-  ## an interrupt raised during the HALT's first M-cycle is answered at the
-  ## end of the second. gambatte `halt/late_m0{int,irq}_halt_m0stat_scx3_2b`
-  ## [dmg] want 2; 3 loses six `_1b`/`_2a` tests. The CGB's side of this is
+# HALT with IME on and an interrupt already pending: removed 2026-11-13 for a
+# clean rewrite (cpu_halt).
+const DMG_HALT_MIN_MCYCLES* {.intdefine.} = 1
+  ## Halted M-cycles a DMG spends before a pending interrupt can end the HALT
+  ## (M-cycles, counted from the HALT; 1 = the first halted M-cycle may end
+  ## it). Re-fit pending; neutral value 1. The CGB's side of this is
   ## CGB_HALT_PPU_LEAD.
 const HALT_PENDING_RUN_VIEW* {.booldefine.} = true
   ## Whether the HALT opcode asks "IF & IE != 0?" (the halt bug with IME
-  ## clear, HALT_IME_PENDING_REDO with it set) with the running CPU's view,
+  ## clear) with the running CPU's view,
   ## interrupt_ready_run: the HALT is still an executing instruction when it
   ## decides, so a TIMA overflow reaches it TIMER_IRQ_RUN_LEAD early, as it
   ## reaches any running instruction's dispatch check. DocBoy
@@ -195,12 +179,6 @@ proc cpu_halt*(cpu: GbCpu; gb: GB) =
   if not ime_at_fetch and pending:
     cpu.halt_bug = true
     cpu.halted   = false
-  elif HALT_IME_PENDING_REDO != 0 and cpu.ime and pending:
-    # IME on and a request already up: the HALT does not halt; its fetch of
-    # the next opcode is undone by the dispatch, which pushes the HALT's own
-    # address (dispatch_interrupt's halt-bug path), so RETI runs it again.
-    cpu.halt_bug = true
-    cpu.halted   = false
   else:
     cpu.halted = true
     when DMG_HALT_MIN_MCYCLES > 1: gb.halt_start = gb.scheduler.cycles
@@ -210,19 +188,10 @@ proc cpu_halt*(cpu: GbCpu; gb: GB) =
       # and free for a HALT-idling title). A block owed to an already halted
       # CPU carries a high(int32) deadline and is paid at the wake instead
       # (gambatte dma/hdma_late_m3halt_m2unhalt_scx2_2).
+      # HBlank DMA across HALT/STOP: removed 2026-11-13 for a clean rewrite.
       if unlikely(gb.ppu.hdma_block_due) and
          gb.ppu.hdma_due_deadline != high(int32):
-        when HDMA_HALT_DEFERS_DUE != 0:
-          # The HALT finds the request pending and parks it for the wake
-          # (HDMA_HALT_REQ_DOTS' "requested" state), with its prefetch.
-          if gb.ppu.hdma_active and (gb.ppu.lcd_status and 3'u8) == 0'u8:
-            gb.ppu.hdma_due_deadline = high(int32)
-            gb.hdma_due_forced = true
-            gb.hdma_prefetch_op = int16(gb.memory.read_byte(gb, int(cpu.pc)))
-          else:
-            gb.ppu.hdma_block_due = false
-        else:
-          hdma_grant(gb, int32(HDMA_GRANT_FETCH_DOTS))
+        hdma_grant(gb, int32(HDMA_GRANT_FETCH_DOTS))
     when HDMA_HALT_M0_BLIND != 0:
       # The dot the VRAM DMA's HBlank edge detector stops being clocked on
       # (HDMA_HALT_M0_BLIND in gb.nim).
@@ -241,29 +210,14 @@ proc cpu_lock*(cpu: GbCpu) =
   cpu.halted = true
   cpu.locked = true
 
-const IRQ_PUSH_T* {.intdefine.} = 12
-  ## T-cycles of internal wait charged before the dispatch's two push
-  ## M-cycles. Ships 12 with IRQ_PUSH_LATE: three waits, then the pushes, the
-  ## low one being the dispatch's last M-cycle. 0
-  ## (pushes first) and 8 (Pan Docs' wait-wait-push-push-jump) score alike
-  ## everywhere but on an OAM DMA's bus: gambatte `oamdma/oamdma_src0000_
-  ## busyint0002` (both devices) reads the pushed PC back from DMA slots
-  ## $9E/$9F, three M-cycles after where pushes-first puts it.
-const IRQ_PUSH_LATE* {.intdefine.} = 1
-  ## With IRQ_PUSH_T = 12: the low push is split at the IF clear
-  ## (IRQ_SAMPLE_T, plus IRQ_SAMPLE_CGB_TIMER_SERIAL_ADD), so the clear keeps
-  ## its T-cycle inside the push's M-cycle (mem_write_split). Without the
-  ## split the clear moves to 20 and 19 rows are lost.
-static:
-  doAssert IRQ_PUSH_LATE == 0 or IRQ_PUSH_T == 12,
-    "IRQ_PUSH_LATE splits the dispatch's last M-cycle; it needs IRQ_PUSH_T = 12"
+# Dispatch push order and the IF clear's place inside it: removed 2026-11-13
+# for a clean rewrite (dispatch_interrupt pushes first, then clears IF at
+# IRQ_SAMPLE_T).
 
-const IRQ_SAMPLE_T_DS* {.intdefine.} = 18
-  ## IRQ_SAMPLE_T for a dispatch taken in double speed, in CPU T-cycles: 18,
-  ## as single speed, since STAT_M0_LEAD_DS's joint move (16 and 20 lose there;
-  ## it was 16 with the one-dot lead). An odd value is off the dot grid
-  ## (17/17 loses 150 `_ds_` tests), and 20 flips every `_ds_1`
-  ## *_late_retrigger arm the other way.
+const IRQ_SAMPLE_T_DS* {.intdefine.} = 16
+  ## IRQ_SAMPLE_T for a dispatch taken in double speed, in CPU T-cycles (an
+  ## odd value is off the dot grid). Re-fit pending, jointly with
+  ## STAT_M0_LEAD_DS and CGB_M0_HALT_BLIND_DS_DOTS; neutral value 16.
 const IRQ_SAMPLE_T* {.intdefine.} = 18
   ## T-cycles into the 5 M-cycle interrupt dispatch at which the taken line's
   ## IF bit is cleared: inside the fifth M-cycle, after the two waits and two
@@ -288,43 +242,15 @@ const IRQ_SAMPLE_T* {.intdefine.} = 18
   ## reach the dispatch one M-cycle later, relative to the instant IF rises,
   ## than the mode-2 source does. Settling the per-source rise phases (A3) is
   ## what moves them, not this constant.
-when HDMA_EDGE_BEATS_DISPATCH != 0:
-  proc hdma_edge_lookahead(gb: GB) {.noinline.} =
-    ## HDMA_EDGE_BEATS_DISPATCH: mode 3 retiring on this very dot raises the
-    ## HBlank request now, and it takes the bus ahead of the dispatch.
-    fifo_sync(gb)
-    if gb.ppu.hdma_active and not gb.ppu.hdma_block_due and
-       (gb.ppu.lcd_status and 3'u8) == 3'u8 and
-       fetcher_retired(gb.fifo_ppu) and gb.fifo_ppu.m3_hold == 0:
-      ppu_step_hdma(gb.ppu, gb)
-
-const IRQ_VECTOR_T* {.intdefine.} = 16
-  ## T-cycles into the dispatch at which the vector is chosen: after the high
-  ## push, inside the fifth M-cycle's lead-in, so a request rising in the
-  ## dispatch's fourth M-cycle still wins on priority. IE is the value the
-  ## high push left, and a low push aimed at IF decides ahead of its own
-  ## byte. gambatte
-  ## `irq_precedence/late_m0irq_vs_tima_scx{2,3}{,_halt}_1` (both devices: the
-  ## mode-0 request rises 16 T in, beats the timer, and the handler reads the
-  ## timer bit still set); 14 and 18 lose four, 4 (the old choice after the
-  ## high push) takes none of them.
-const IRQ_SAMPLE_CGB_TIMER_SERIAL_ADD* {.intdefine.} = 2
+# An HBlank request raised on the dot a dispatch begins: removed 2026-11-13
+# for a clean rewrite.
+const IRQ_SAMPLE_CGB_TIMER_SERIAL_ADD* {.intdefine.} = 0
   ## T-cycles past IRQ_SAMPLE_T at which a CGB dispatch clears a TIMER or
-  ## SERIAL request: those two lines are acknowledged later than the LCD
-  ## ones, so a timer or serial request raised in the dispatch's last T-cycles
-  ## is still taken back. gambatte `tima/tc00_irq_late_retrigger_3` [cgb] and
-  ## `serial/start_wait_trigger_int8_read_if_2` [cgb]; 0 and 1 take neither,
-  ## and above 2 the clear would fall outside the dispatch's 20 T. One-sided:
-  ## `tc00_irq_late_retrigger_2` [cgb] wants the timer later still, i.e. its
-  ## request rises later here than on hardware (A2).
+  ## SERIAL request (0 = with the LCD lines). Re-fit pending; neutral value 0.
 proc dispatch_interrupt(cpu: GbCpu; gb: GB) {.noinline.} =
   ## The taken half of handle_interrupts: push PC, vector, charge 5 M-cycles.
   ## Out of line: two inlined mem_writes give handle_interrupts a prologue
   ## paid on every non-taken call (+0.8% retired instructions).
-  when HDMA_EDGE_BEATS_DISPATCH != 0:
-    # Here and not in handle_interrupts, which is inlined into `tick`: the
-    # call there cost +0.4% retired instructions on a title with no HDMA.
-    hdma_edge_lookahead(gb)
   cpu.ime = false
   # An armed halt bug is spent here when the dispatch follows the HALT
   # (EI; HALT with IF & IE != 0): the pushed address is the HALT's own, so
@@ -340,69 +266,18 @@ proc dispatch_interrupt(cpu: GbCpu; gb: GB) {.noinline.} =
     echo "IRQ ly=", gb.fifo_ppu.ly, " dot=", gb.fifo_ppu.cycle_counter,
          " if=", toHex(irq_read(gb.interrupts, 0xFF0F), 2),
          " pc=", toHex(cpu.pc, 4)
-  when IRQ_PUSH_T > 0:
-    mem_tick_components(gb.memory, gb, IRQ_PUSH_T)
   # The same OAM-bug M-cycles as PUSH (cpu_push16; Pan Docs lists interrupt
-  # handling with it): the SP step here, the two writes in mem_write and
-  # mem_write_split.
+  # handling with it): the SP step here, the two writes in mem_write.
   oam_bug_if(gb, cpu.sp, obIdu)
   cpu.sp = cpu.sp - 1
   mem_write(gb.memory, gb, int(cpu.sp), uint8(cpu.pc shr 8))
   # Which line is taken is decided between the two push bytes, not at the
   # clear below: gambatte irq_precedence/if_and_ie_0_vector pushes over $FFFF
   # and vectors to $0000 from SP = $0000 (new IE seen) but $0050 from $0001.
-  when IRQ_VECTOR_T <= 4 + IRQ_PUSH_T:
-    let interrupt = highest_priority(gb.interrupts)
-  else:
-    # The vector is chosen IRQ_VECTOR_T into the dispatch, against the IE the
-    # high push left (the low push's own byte is not seen). A low push onto
-    # IF itself decides here, ahead of its byte (irq_precedence/
-    # if_and_ie_0_vector_4).
-    let ie_hi = irq_read(gb.interrupts, 0xFFFF)
-    let early_irq = highest_priority(gb.interrupts)
-    # Only a timer, serial or joypad choice can still be overtaken; the split
-    # tick costs every other dispatch (0.24% retired instructions).
-    let early = (cpu.sp - 1) == 0xFF0F'u16 or early_irq == INT_VBLANK or
-                early_irq == INT_STAT
+  let interrupt = highest_priority(gb.interrupts)
   cpu.sp = cpu.sp - 1
-  when IRQ_PUSH_LATE != 0:
-    # The low push is the dispatch's last M-cycle; the IF clear falls inside
-    # it (IRQ_PUSH_LATE).
-    let sample_t0 =
-      if gb.memory.current_speed == 1: IRQ_SAMPLE_T_DS else: IRQ_SAMPLE_T
-    when IRQ_VECTOR_T > 4 + IRQ_PUSH_T:
-      let interrupt = if early: early_irq
-                      else: highest_priority_ie(gb.interrupts, ie_hi)
-    var sample_t1 = sample_t0
-    when IRQ_SAMPLE_CGB_TIMER_SERIAL_ADD != 0:
-      if gb.cgb_enabled and (interrupt == INT_TIMER or interrupt == INT_SERIAL):
-        sample_t1 += IRQ_SAMPLE_CGB_TIMER_SERIAL_ADD
-    let pre = max(0, min(4, sample_t1 - 16))
-    mem_write_split(gb.memory, gb, int(cpu.sp), uint8(cpu.pc and 0xFF), pre)
-    cpu.pc = interrupt
-    clear_interrupt(gb.interrupts, interrupt)
-    when TIMER_ACK_LOOKAHEAD != 0:
-      if interrupt == INT_TIMER:
-        const k = TIMER_ACK_LOOKAHEAD
-        let t = gb.timer
-        var due = -1
-        if t.countdown > 0: due = t.countdown
-        elif t.enabled and t.tima == 0xFF'u8:
-          let period = 1 shl (t.bit_for_tima + 1)
-          due = period - (int(t.tdiv) and (period - 1)) + 4
-        if due > 0 and due <= k:
-          gb.timer_irq_acked = true
-    mem_write_finish(gb.memory, gb, 4 - pre)
-    mem_tick_extra(gb.memory, gb, 20)
-    return
   mem_write(gb.memory, gb, int(cpu.sp), uint8(cpu.pc and 0xFF))
-  var elapsed = 8 + IRQ_PUSH_T
-  when IRQ_VECTOR_T > 4 + IRQ_PUSH_T:
-    if IRQ_VECTOR_T > elapsed and not early:
-      mem_tick_components(gb.memory, gb, IRQ_VECTOR_T - elapsed)
-      elapsed = IRQ_VECTOR_T
-    let interrupt = if early: early_irq
-                    else: highest_priority_ie(gb.interrupts, ie_hi)
+  let elapsed = 8
   cpu.pc = interrupt
   # Run out to the sample point before clearing IF (IRQ_SAMPLE_T). One call,
   # not one per M-cycle.
@@ -414,18 +289,6 @@ proc dispatch_interrupt(cpu: GbCpu; gb: GB) {.noinline.} =
     if gb.cgb_enabled and (interrupt == INT_TIMER or interrupt == INT_SERIAL):
       mem_tick_components(gb.memory, gb, IRQ_SAMPLE_CGB_TIMER_SERIAL_ADD)
   clear_interrupt(gb.interrupts, interrupt)
-  when TIMER_ACK_LOOKAHEAD != 0:
-    # A timer request due within the lookahead is acknowledged with this one.
-    if interrupt == INT_TIMER:
-      const k = TIMER_ACK_LOOKAHEAD
-      let t = gb.timer
-      var due = -1
-      if t.countdown > 0: due = t.countdown
-      elif t.enabled and t.tima == 0xFF'u8:
-        let period = 1 shl (t.bit_for_tima + 1)
-        due = period - (int(t.tdiv) and (period - 1)) + 4
-      if due > 0 and due <= k:
-        gb.timer_irq_acked = true
   mem_tick_extra(gb.memory, gb, 20)
 
 proc handle_interrupts*(cpu: GbCpu; gb: GB) =
@@ -448,12 +311,6 @@ proc handle_interrupts*(cpu: GbCpu; gb: GB) =
          gb.ppu.ly == gb.ppu.stat_if_ly and
          gb.ppu.cycle_counter - gb.ppu.stat_if_dot < STAT_DISPATCH_MIN_AGE_DS:
         return
-    when STOP_OPERAND_LATCH != 0:
-      # A dispatch discards STOP's latched opcode; the pushed PC is its byte's
-      # address, re-fetched on return.
-      if gb.stop_op_latch > 0:
-        gb.stop_op_latch = 0
-        cpu.locked = false
     cpu.halted = false
     if cpu.ime: dispatch_interrupt(cpu, gb)
 
@@ -481,15 +338,14 @@ const HALT_IF_SAMPLE_T* {.intdefine.} = 4
 # and no blinding all five collapse onto their late arm. So the source rises
 # in the tail of its M-cycle and a halted CPU catches it at the boundary,
 # the same classification HALT_IF_SAMPLE_T's table makes for the OAM source.
-# On the CGB, CGB_HALT_PPU_LEAD already pays for it: blinding there too
-# fails all five intr_2_* on CGB C and E and gambatte halt/noime_m2irq_
-# m0stat_1 [cgb]; DMG-only passes all six (M2_LEAD_HALT_BLIND_DMG_ONLY).
+# Whether the blindness is DMG-only is M2_LEAD_HALT_BLIND_DMG_ONLY.
 const M2_LEAD_HALT_BLIND* {.booldefine.} = true
   ## Whether a HALTED CPU is blind to the mode 2 STAT source for the
   ## STAT_M2_LEAD M-cycles it leads the line boundary by. On by default with
   ## STAT_M2_LEAD; false is the control build.
-const M2_LEAD_HALT_BLIND_DMG_ONLY* {.intdefine.} = 1
-  ## The blindness on DMG-family machines only (see above). 0 = both.
+const M2_LEAD_HALT_BLIND_DMG_ONLY* {.intdefine.} = 0
+  ## The blindness on DMG-family machines only (0 = every device, 1 = DMG
+  ## family only). Re-fit pending; neutral value 0.
 
 when STAT_M2_EARLY and M2_LEAD_HALT_BLIND:
   proc halt_m2_lead_blind(gb: GB): bool {.noinline.} =
@@ -615,8 +471,7 @@ when defined(gbfuzz_trace):
   var gbfuzz_trace_hook*: proc(pc: uint16; opcode: uint8) {.closure.}
 
 template cpu_exec_fetched(cpu: GbCpu; gb: GB; opcode: uint8) =
-  ## Everything after the opcode fetch: shared by `tick` and the STOP operand
-  ## latch's run (cpu_run_latched).
+  ## Everything after the opcode fetch.
   when defined(test_harness):
     # Timed input keyed on an opcode fetch (joypad.nim, gb_harness_op).
     if unlikely(opcode in gb_harness_ops): gb_harness_op(gb, opcode)
@@ -626,10 +481,7 @@ template cpu_exec_fetched(cpu: GbCpu; gb: GB; opcode: uint8) =
     # `LD A,[HL]` vs mealybug three-M-cycle `LDH A,[rHDMA5]` split;
     # HDMA_GRANT_FETCH_DOTS in gb.nim).
     if unlikely(gb.ppu.hdma_block_due):
-      when GDMA_AFTER_FETCH != 0:
-        if gb.gdma_owed: gdma_hand_over(gb, cpu.pc, opcode)
-        else: hdma_grant(gb, 0, cpu.pc, opcode, 1)
-      else: hdma_grant(gb, 0, cpu.pc, opcode, 1)
+      hdma_grant(gb, 0, cpu.pc, opcode, 1)
   when STAT_M0_TAIL_MAX_MC != 0:
     # So stat_read_mode can tell a read on its instruction's second M-cycle
     # from one on its third.
@@ -642,9 +494,7 @@ template cpu_exec_fetched(cpu: GbCpu; gb: GB; opcode: uint8) =
     # a block already owed takes the bus ahead of the dispatch (gambatte
     # irq_precedence/hdma_vs_m0, late_hdma_vs_{ei,ie,tima}: the DMA's source
     # is the stack the dispatch pushes onto).
-    if unlikely(gb.ppu.hdma_block_due) and
-       (HDMA_HALT_DEFERS_DUE == 0 or not cpu.halted) and
-       (GDMA_AFTER_FETCH == 0 or not gb.gdma_owed):
+    if unlikely(gb.ppu.hdma_block_due):
       hdma_grant(gb, int32(HDMA_GRANT_FETCH_DOTS - HDMA_GRANT_BOUNDARY_DOTS),
                  cpu.pc, opcode, 2)
   when HDMA_STEAL_DELAY_M != 0 and HDMA_STEAL_LEAD_DOTS < 0 and
@@ -669,7 +519,7 @@ proc cpu_halt_wake(cpu: GbCpu; gb: GB) {.noinline.} =
   ## threshold for the halted loop (+0.5% retired instructions on a
   ## HALT-idling DMG title).
   when DMG_HALT_MIN_MCYCLES > 1:
-    # A DMG HALT answers no earlier than its second M-cycle.
+    # A DMG HALT answers no earlier than DMG_HALT_MIN_MCYCLES M-cycles in.
     if not gb.cgb_enabled and
        gb.scheduler.cycles - gb.halt_start < CycleCount(4 * DMG_HALT_MIN_MCYCLES):
       return
@@ -696,9 +546,7 @@ proc cpu_halt_wake(cpu: GbCpu; gb: GB) {.noinline.} =
          " mode=", (gb.ppu.lcd_status and 3'u8)
   when HDMA_WAKE_BLIND_DOTS > 0:
     gb.hdma_wake_dot = gb.ppu.cycle_counter
-  let prefetched = ppu_hdma_wake(gb.ppu, gb,
-                                prefetch = not cpu.ime or HDMA_HALT_REQ_BUG_IME != 0) and
-    HDMA_HALT_REQ_BUG != 0
+  ppu_hdma_wake(gb.ppu, gb)
   when CGB_HALT_PPU_LEAD_ANY:
     # The dots the head of this halt held back, paid with no bus half: a
     # phase, not a charge.
@@ -707,46 +555,7 @@ proc cpu_halt_wake(cpu: GbCpu; gb: GB) {.noinline.} =
                    ignore_speed = true)
       gb.cpu.halt_ppu_debt = 0
   cpu.halted = false
-  when HDMA_EDGE_BEATS_DISPATCH != 0 and HDMA_WAKE_DEBT_RECHECK != 0:
-    # A block the debt's dots made due also goes ahead of the dispatch (the
-    # dispatch runs HDMA_EDGE_BEATS_DISPATCH's lookahead itself).
-    if cpu.ime and gb.ppu.hdma_block_due: ppu_hdma_wake(gb.ppu, gb)
-  when HDMA_HALT_REQ_BUG_IME != 0:
-    if cpu.ime and prefetched and gb.hdma_prefetch_op >= 0:
-      # HDMA_HALT_REQ_BUG_IME: the prefetched opcode runs (PC still on it)
-      # before the dispatch.
-      let op = uint8(gb.hdma_prefetch_op)
-      gb.hdma_prefetch_op = -1
-      mem_reset_cycle_count(gb.memory)
-      mem_tick_components(gb.memory, gb, 4)
-      cpu.halt_bug = true
-      cpu_exec_fetched(cpu, gb, op)
-      return
   if cpu.ime: dispatch_interrupt(cpu, gb)
-  elif prefetched and not cpu.ime and gb.hdma_prefetch_op >= 0:
-    # The HALT found the HBlank request pending and had already fetched
-    # the next opcode without moving PC past it (HDMA_HALT_REQ_BUG): it
-    # runs now, from the prefetch, and PC still points at it.
-    let op = uint8(gb.hdma_prefetch_op)
-    gb.hdma_prefetch_op = -1
-    mem_reset_cycle_count(gb.memory)
-    mem_tick_components(gb.memory, gb, 4)
-    cpu.halt_bug = true
-    let cycles_taken = UNPREFIXED[op](cpu, gb)
-    cpu.cached_hl = -1
-    mem_tick_extra(gb.memory, gb, cycles_taken)
-
-when STOP_OPERAND_LATCH != 0:
-  proc cpu_run_latched(cpu: GbCpu; gb: GB) {.noinline.} =
-    ## STOP_OPERAND_LATCH: the byte STOP latched as its next opcode runs now.
-    ## The fetch M-cycle is still spent; its byte is not used. Parked behind
-    ## `halted`/`locked` so the running CPU's fetch pays nothing for it.
-    cpu.halted = false
-    cpu.locked = false
-    discard mem_read(gb.memory, gb, int(cpu.pc))
-    let opcode = uint8(gb.stop_op_latch - 1)
-    gb.stop_op_latch = 0
-    cpu_exec_fetched(cpu, gb, opcode)
 
 # ==================== IDLE-LOOP SKIP ====================
 # A loop that polls memory until an interrupt or the PPU changes it runs the
@@ -1013,7 +822,6 @@ proc tick*(cpu: GbCpu; gb: GB) =
     # the cheapest shape measured on a HALT-idling title.
     if cpu.locked:
       if cpu.stopped: cpu_stop_tick(cpu, gb)
-      elif STOP_OPERAND_LATCH != 0 and gb.stop_op_latch > 0: cpu_run_latched(cpu, gb)
       else:           mem_tick_extra(gb.memory, gb, 4)
       return
     when defined(gb_idlecheck):
