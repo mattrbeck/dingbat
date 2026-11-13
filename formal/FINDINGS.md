@@ -24,8 +24,8 @@ every interleaving of the real `step`.
 **Driven through the real UI.** Headless Chromium ran every serious and
 medium item's scenario through the visible UI, with the real wasm core. Drive
 ran on two browser profiles against a fake Google that answers like the
-Drive v3 and GIS documentation. The pass found three bugs and fixed them
-(the last three rows). The results:
+Drive v3 and GIS documentation. The pass found and fixed three bugs (the
+last three rows).
 - The local scenarios (game switch, resume, close, import, reset, update in
   another tab, home-screen keys, clip export, modals, double taps,
   thumbnails, rename, delete, state slots, rewind) all pass.
@@ -92,75 +92,88 @@ Drive v3 and GIS documentation. The pass found three bugs and fixed them
   probably unreachable.
 - **Fixed 2026-09-25 (c577df15, Matt's call: respect the delete, keep the
   old save restorable for 30 days): a deleted game loaded again got its
-  deleted save back.** Device 1 deleted a game and loaded it again; device 2,
-  not yet pulled, uploaded its old save and device 1 took it, because
-  `mergeLibrary` dropped a tombstone once a newer entry existed. Library
-  entries, tombstones and Drive files now carry a generation (new on a
-  re-import after a delete; absent = 0, so old libraries merge as before); a
-  save from an older generation is never applied, but kept as "a save from
-  before you deleted this game" with Restore (swap, so undoable) in the
-  game's menu and Manage Saves, for 30 days, then dropped everywhere.
-  Deleting and re-importing on one device before a sync no longer cancels
-  the queued Drive deletes. `DriveLibrary` Layer 3 models it
-  (`bug_reimport_gets_deleted_save`, `regress_reimport_keeps_deleted_save_aside`);
-  `web/tests/deleted-save.test.mjs` (8 tests, all failing on the old code)
-  and the two-device UI rig guard it. The anchors of DriveSession,
-  GameLifecycle, Modals, SavePersistence and Thumbnails now list functions
-  this change touched: re-model them at the next audit. Kept aside, not
-  lost: a new file an old build (no generation stamp) creates for a
-  re-imported game, until that device's service worker updates.
+  deleted save back.**
+  - Trace: device 1 deleted a game and loaded it again. Device 2, not yet
+    pulled, uploaded its old save, and device 1 took it.
+  - Cause: `mergeLibrary` dropped a tombstone once a newer entry existed.
+  - Fix: library entries, tombstones and Drive files carry a generation
+    (new on a re-import after a delete; absent = 0, so old libraries merge
+    as before). A save from an older generation is never applied. It is
+    kept as "a save from before you deleted this game", with Restore (a
+    swap, so undoable) in the game's menu and Manage Saves, for 30 days,
+    then dropped everywhere. Deleting and re-importing on one device before
+    a sync no longer cancels the queued Drive deletes.
+  - Model: `DriveLibrary` Layer 3 (`bug_reimport_gets_deleted_save`,
+    `regress_reimport_keeps_deleted_save_aside`). Tests:
+    `web/tests/deleted-save.test.mjs` (8 tests, all failing on the old
+    code) and the two-device UI rig.
+  - To do: the anchors of DriveSession, GameLifecycle, Modals,
+    SavePersistence and Thumbnails now list functions this change touched.
+    Re-model them at the next audit.
+  - Kept aside, not lost: a new file an old build (no generation stamp)
+    creates for a re-imported game, until that device's service worker
+    updates.
 
 ## Re-audit at 03f88d6c (2026-10-05): GameLifecycle, RunPause, Modals
 
 The three models follow the code at 03f88d6c (citations at that commit).
 
-- **GameLifecycle.** The paused card is the hero's paused mode (it stays up,
-  stale but inert, after a close until the library re-renders); a launch from
-  the home screen can go back into the session at the boot (`launchRom`'s
-  `resume`: the session read before `touchRecent`, applied in L4 only if taken
-  with the battery just installed); going home stores the session and the
-  save and dismisses the Resume offer; a hidden tab stores the save too; the
-  pull's hand-off lets the game in memory go (no flush, only when its live
-  battery is the stored save) and lands Drive's save; checkpoints store the
-  session every minute of play. Every property still holds over every
-  interleaving; new: `boot_resume_keeps_battery`, `handoff_drops_only_stored`.
+- **GameLifecycle.** Now modelled:
+  - The paused card is the hero's paused mode. After a close it stays up,
+    stale but inert, until the library re-renders.
+  - A launch from the home screen can go back into the session at the boot
+    (`launchRom`'s `resume`: the session read before `touchRecent`, applied
+    in L4 only if taken with the battery just installed).
+  - Going home stores the session and the save and dismisses the Resume
+    offer. A hidden tab stores the save too.
+  - The pull's hand-off lets the game in memory go (no flush, only when its
+    live battery is the stored save) and lands Drive's save.
+  - Checkpoints store the session every minute of play.
+
+  Every property still holds over every interleaving. New:
+  `boot_resume_keeps_battery`, `handoff_drops_only_stored`.
 - **Modals.** The clip export's progress panel is a trap owner that closes
   itself when the export ends. Without nesting it returns focus where it was
-  (`single_progress_returns`). Found at 03f88d6c, **fixed in fbdb7975**: a
-  file failing the ROM check dropped during an export put its prompt over
-  the panel, and after Cancel and the export's end focus was on `<body>`
-  (low). The drop is now refused while a clip records:
-  `regress_drop_during_clip_export_loses_focus`; test "a file dropped while a
-  clip records is refused (bug_drop_during_clip_export_loses_focus)" in
-  `web/tests/run-pause.test.mjs`. Still open in the known nested-trap class:
-  a sync begun before the export reaching its deleted-games prompt over the
-  panel (`obs_tomb_over_progress_loses_focus`).
+  (`single_progress_returns`).
+  - Found at 03f88d6c, **fixed in fbdb7975** (low): a file failing the ROM
+    check, dropped during an export, put its prompt over the panel. After
+    Cancel and the export's end, focus was on `<body>`. The drop is now
+    refused while a clip records:
+    `regress_drop_during_clip_export_loses_focus`; test "a file dropped while a
+    clip records is refused (bug_drop_during_clip_export_loses_focus)" in
+    `web/tests/run-pause.test.mjs`.
+  - Still open, in the known nested-trap class: a sync begun before the
+    export reaching its deleted-games prompt over the panel
+    (`obs_tomb_over_progress_loses_focus`).
 - **RunPause.** The off-screen export: Cancel and a load landing mid-encode
   both restore `paused` once, and the encode's tail does not touch it again
   (`clip_cancel_restores_pause`, `clip_load_mid_encode`,
   `clip_cancel_then_tail`). **Found at 03f88d6c, fixed in fbdb7975 (low-medium):
-  a flight's hold was a plain `paused = true`.** `holdForFlight` (resume from the hero, or a launch
-  from the home screen, for the 460 ms the picture flies) writes the global
-  every pausing surface snapshots as the player's choice, and
-  `releaseFlight` unpauses whenever `body.running` and the button is unlit:
-  - an overlay opened during the flight (Rewind double-tap, Report a Bug,
-    Clip that!) records the flight's pause; the landing runs the game behind
-    it, and closing it freezes the game under a Pause icon
-    (`bug_overlay_in_flight_runs_behind`, `bug_overlay_in_flight_sticks_paused`);
-  - the Link Cable modal opened during the flight does not freeze the game,
-    which then runs behind it (`bug_link_modal_in_flight_runs_behind`);
-  - Pause / Space / Period during the flight unpauses (Period frame-steps)
+  a flight's hold was a plain `paused = true`.** `holdForFlight` (resume from
+  the hero, or a launch from the home screen, for the 460 ms the picture
+  flies) wrote the global that every pausing surface snapshots as the
+  player's choice. `releaseFlight` unpaused whenever `body.running` and the
+  button was unlit. So:
+  - An overlay opened during the flight (Rewind double-tap, Report a Bug,
+    Clip that!) recorded the flight's pause. The landing ran the game behind
+    it, and closing it froze the game under a Pause icon
+    (`bug_overlay_in_flight_runs_behind`, `bug_overlay_in_flight_sticks_paused`).
+  - The Link Cable modal opened during the flight did not freeze the game,
+    which then ran behind it (`bug_link_modal_in_flight_runs_behind`).
+  - Pause / Space / Period during the flight unpaused (Period frame-stepped)
     instead of pausing (`bug_pause_in_flight_lost`).
+
   The fix: `playerPaused()` reads the pause button while a flight holds the
   game, and `takePlayerPause()` also takes the run state over from the
-  flight; every snapshot and toggle takes it (`openReportModal`,
+  flight. Every snapshot and toggle uses them (`openReportModal`,
   `openRewindScrubber`, `openClipScrubber`, `startClipExport`, `togglePause`,
   netplay's `netFrozeGame`), and Period asks `playerPaused()`. The model
-  follows it; the invariant holds over every reachable state again
+  follows the fix. The invariant holds over every reachable state again
   (`inv_reachable`, `pause_tap_flips`), and the traces are
   `regress_overlay_in_flight_runs_behind`,
   `regress_overlay_in_flight_sticks_paused`,
   `regress_link_modal_in_flight_runs_behind`, `regress_pause_in_flight_lost`.
+
   Tests in `web/tests/run-pause.test.mjs`: "Report a Bug opened mid-flight
   keeps the game frozen, and closing it runs it (bug_overlay_in_flight_runs_behind,
   bug_overlay_in_flight_sticks_paused)", "Pause pressed mid-flight pauses, and
@@ -180,7 +193,7 @@ items marked *hand-checked* were also re-read by the coordinating session. Where
 a file has a `fix`/`stepF` variant, the proposed fix is proved to close the bug
 under every interleaving, not just on the one trace.
 
-Line numbers are `web/index.js` unless marked. No JS was changed.
+Functions are in `web/index.js` unless marked. No JS was changed.
 
 ## High: saves and library data lost or cross-contaminated
 
@@ -189,8 +202,8 @@ Line numbers are `web/index.js` unless marked. No JS was changed.
    `GameLifecycle.bug_stale_sav_inherited`.
    - Trace: play A (it saves), go home, tap B, which has no save on this
      device.
-   - Why it happens: `launchRom` writes every ROM as `rom.<ext>` (4494), and
-     `restoreSave` returns early when there is no `save:B` (5271). So B boots
+   - Why it happens: `launchRom` writes every ROM as `rom.<ext>`, and
+     `restoreSave` returns early when there is no `save:B`. So B boots
      on A's battery RAM, including its RTC trailer.
    - Result: the next 5 s tick writes A's bytes to `save:B` and uploads them to
      Drive. Sibling games (Gold/Silver, Ruby/Sapphire) load each other's save.
@@ -198,7 +211,7 @@ Line numbers are `web/index.js` unless marked. No JS was changed.
 
 2. **The outgoing GB core flushes over the incoming game's save.** *Hand-checked.*
    `SavePersistence.bug_gb_init_flush_replaces_save`.
-   - Why it happens: `initFromEmscripten` (src/dingbat_wasm.nim 1706) calls
+   - Why it happens: `initFromEmscripten` (src/dingbat_wasm.nim) calls
      `stateGb.cartridge.mbc_save()` after `restoreSave` has written B's save to
      `rom.sav`.
    - When it triggers: A's GB cart RAM is dirty when you switch, for instance
@@ -211,8 +224,8 @@ Line numbers are `web/index.js` unless marked. No JS was changed.
    save, and Drive loses the newer copy.**
    `SavePersistence.bug_pull_overwritten_by_stale_flush`,
    `GameLifecycle.bug_pull_mid_load_loses_remote_save`.
-   - Why it happens: the pull checks `isRomLoaded` (3005) before
-     `await driveDownload` (3007), not after it. Meanwhile the boot reads the old
+   - Why it happens: the pull checks `isRomLoaded` before
+     `await driveDownload`, not after it. Meanwhile the boot reads the old
      save, and the first tick writes it back.
    - Result: `flushSyncInner` then uploads that stale save over the other
      device's newer one.
@@ -220,11 +233,11 @@ Line numbers are `web/index.js` unless marked. No JS was changed.
 
 4. **Launching a game during a rollback link session writes the session's
    save into the new game.** `Netplay.bug_launch_during_rollback_corrupts_save`.
-   - Why it happens: `loadRom` only tears down `if (netMode)` (7886), and
+   - Why it happens: `loadRom` only tears down `if (netMode)`, and
      `netMode` is false once rollback starts. On disconnect, `rbTeardown` runs
      `persistSave(rbrom, currentOriginalName)`, and by then that name belongs to
      the new game.
-   - Fix: `if (netMode || rollbackMode)` at 7886, 11206 and 11227.
+   - Fix: `if (netMode || rollbackMode)` at all three guards.
 
 5. **Closing the tab during a rollback session loses that session's saves.**
    `Netplay.bug_pagehide_in_rollback_loses_progress`. It has the same guard as
@@ -235,7 +248,7 @@ Line numbers are `web/index.js` unless marked. No JS was changed.
    `DriveLibrary.bug_rename_undo_oscillates`, `bug_rename_undo_loses_save`,
    `bug_rename_into_retired_name`, root cause `bug_merge_not_idempotent`.
    - Why it happens: rename markers never retire. `renameGame` writes the new
-     entry without `imp` (3283), and `imp` is the only thing that spends a
+     entry without `imp`, and `imp` is the only thing that spends a
      marker. Renaming another game into a previously vacated name drops that
      game from the library and moves its save onto the wrong ROM.
    - Fix: `list.unshift({ name: newName, ts, imp: ts })`.
@@ -244,8 +257,8 @@ Line numbers are `web/index.js` unless marked. No JS was changed.
    `DriveLibrary.bug_delete_during_flush_resurrects` (and `_permanent`),
    `bug_delete_during_pull_resurrects`, `bug_import_during_pull_orphans`,
    `bug_rename_during_pull_orphans`.
-   - Why it happens: `syncState.tomb/ren = lib.*` (2802, 3031) and
-     `dbPut("recent", …)` (3048) assign a library that was merged before the
+   - Why it happens: `syncState.tomb/ren = lib.*` and
+     `dbPut("recent", …)` assign a library that was merged before the
      awaits.
    - Result: a "Deleted from all your devices" game comes back, and no
      tombstone remains anywhere. On iOS, closing the file picker fires
@@ -257,8 +270,8 @@ Line numbers are `web/index.js` unless marked. No JS was changed.
 
 8. **A second save of a key during that key's own upload never reaches Drive.**
    *Hand-checked.* `DriveSession.bug_redirty_dropped`.
-   - Why it happens: `markUpload` is a no-op while the name is queued (2656),
-     and the flush filters the name out after the upload (2799).
+   - Why it happens: `markUpload` is a no-op while the name is queued,
+     and the flush filters the name out after the upload.
    - Fix: a `syncRemarked` set that keeps the name queued (proved with
      `fix_no_lost_upload`).
 9. **Close during a switch, and double taps.**
@@ -288,10 +301,10 @@ Line numbers are `web/index.js` unless marked. No JS was changed.
     `body.running`.
 13. **Updating in one tab reloads another tab mid-game.**
     `ServiceWorker.bug_update_in_one_tab_reloads_the_other_midgame`. The
-    `controllerchange` handler (79) reloads unconditionally.
+    `controllerchange` handler reloads unconditionally.
 14. **Clip export leaves the game running with the Resume icon showing.**
     `RunPause.bug_clip_export_drops_pause`. `startClipExport` sets
-    `paused = false` (8471), and nothing restores it.
+    `paused = false`, and nothing restores it.
 15. **Reset save is undone by a flush in its gap.** `SavePersistence.bug_reset_undone_by_flush`.
     Fix: detach before deleting.
 16. **The service-worker install can cache a mix of two builds.**
@@ -335,13 +348,13 @@ Line numbers are `web/index.js` unless marked. No JS was changed.
 
 ## Found by reading, not modelled
 
-- `driveListAll` (2100) reads one page of 1000 files and ignores
+- `driveListAll` reads one page of 1000 files and ignores
   `nextPageToken`. *Hand-checked.* A large library (up to about 22 Drive files
   per game) can miss the `library` file, and then `writeDriveLibrary` creates a
   second one.
 - Two devices syncing for the first time can each create a `library` file.
 - `markDelete` during an in-flight upload of the same key: the delete is then
-  "outranked" and dropped (2773-2779).
+  "outranked" and dropped.
 
 ## What is proved to hold
 
@@ -367,39 +380,42 @@ Each file lists its theorems. The headline ones:
 
 ## Picking a game up on another device (2026-10-01, `WebState/Handoff`)
 
-Models the hand-off shipped in 43b30d1c (main 11025707): the session as a
+Models the hand-off added in 43b30d1c (main 11025707): the session as a
 Drive file, the flush's hold-back of a session another device wrote unseen,
 the pull's hand-off of the game held in memory (taken at home when fully
 sent, else offered as Switch), `switchToHandoff`, and what the home screen
-shows. Two devices, one game, one Drive; every await that matters is an
+shows. Two devices, one game, one Drive. Every await that matters is an
 event boundary, and a Sync tapped while a job runs queues behind it.
 
 **Proved** (the file's header lists every theorem):
 - Matt's fourteen steps, for all four ways device 2 opens (never opened,
   reopened, tab open on the library, tab paused on an older moment), saving
   in game or not: device 2 shows and resumes device 1's moment on device
-  1's save, then device 1 shows and resumes device 2's. Also on the shipped
-  code: the story itself has no race.
-- Over every state: a tap never rolls the save back (a session is resumed
-  only where it was taken with the stored save); Drive's session changes only
-  when an upload lands, and an upload starts only from a read whose listing
-  showed nothing this device had not seen (or Switch waived it); a pull lets
-  the game in memory go only at home, unmoved, with nothing waiting to go up
-  (fixed code), and then always does, landing every file as downloaded; a
-  pull that lands a file redraws the closed hero from what is stored.
+  1's save, then device 1 shows and resumes device 2's. This also holds on
+  11025707: the story itself has no race.
+- Over every state:
+  - A tap never rolls the save back (a session is resumed only where it was
+    taken with the stored save).
+  - Drive's session changes only when an upload lands. An upload starts only
+    from a read whose listing showed nothing this device had not seen (or
+    Switch waived it).
+  - A pull lets the game in memory go only at home, unmoved, with nothing
+    waiting to go up (fixed code), and then always does, landing every file
+    as downloaded.
+  - A pull that lands a file redraws the closed hero from what is stored.
 - Convergence over 686 histories (three moves, alternating devices, out of:
   sync stopped mid-pull, play, play and save, Close, Sync, page killed and
   reopened, Switch): syncing each device in turn, both resume the same
   moment on the same save as Drive's copy, each hero showing where a tap
   goes.
 
-**Found and fixed.** Each trace is a `bug_*` theorem on the shipped code and
-a `regress_*` theorem on the fixed one, and each has a test in
+**Found and fixed.** Each trace is a `bug_*` theorem on 11025707 and
+a `regress_*` theorem on the fixed code, and each has a test in
 `web/tests/handoff.test.mjs` that fails on 11025707:
 
 | # | Severity | What happened | Fix |
 |---|---|---|---|
-| H1 | Medium | **Switch tapped while this device's own session was uploading** (the offer schedules that upload 2 s later; a GBA session is ~500 KB, so a tap a few seconds in lands mid-upload). The upload's completion took the key off the queue, so the chosen copy never went up: Drive kept the moment the player had just turned down, the other device picked *that* up, and the two diverged until a later Sync. | `switchToHandoff` marks what it re-queues as saved again (`syncRemarked`). |
+| H1 | Medium | **Switch tapped while this device's own session was uploading.** The offer schedules that upload 2 s later and a GBA session is ~500 KB, so a tap a few seconds in lands mid-upload. The upload's completion took the key off the queue, so the chosen copy never went up. Drive kept the moment the player had turned down, the other device picked *that* up, and the two diverged until a later Sync. | `switchToHandoff` marks what it re-queues as saved again (`syncRemarked`). |
 | H2 | Medium | **Close tapped while a Sync downloaded the other device's session.** The pull went on as if the game were still held: it offered Switch (a no-op by then) and marked the session seen, so the files pass skipped it. The closed device resumed its own older moment until the other device uploaded again. No conflict needed: one player, paused on device 1, played on device 2, came back, tapped Sync then Close. | The hand-off section acts only on a game still held by the player's leave (`stillHeld`); a game closed meanwhile is left to the files pass. |
 | H3 | Low | **Resume tapped during `heldGameIsSent`'s read** (an IndexedDB get, a few ms). The pull had decided "at home" before it, and unloaded the game the player had just gone back into. | `heldGameIsSent` asks after its read; the caller checks `running` and `loadGen` in the run that takes the hand-off. |
 
@@ -419,7 +435,7 @@ make all three recoverable.
 
 **Found by reading, fixed (2026-10-01):** a session file on Drive written
 for an older generation of the game (a delete and re-import racing another
-device's upload) was never marked seen, so the flush held this device's
+device's upload) was never marked seen. The flush held this device's
 session back on every pass and the lamp stayed on "Syncing…". The hold-back
 now applies only when `fileGen(r0) >= gen`; regression test "a session from
 a deleted generation of the game does not hold this one back" in
@@ -429,19 +445,19 @@ guarded by the test alone.
 **Parallel sync (2026-10-01), re-checked against the model, not re-modelled:**
 the flush now sends up to `SYNC_PARALLEL` keys at once (`runPool`) and the
 pull starts its downloads ahead (`downloadAhead`), still checking and
-writing each file in listing order. Each key's flush segment touches only
-that key's queue entry, `sigs`, `rmt` and delete stamp, and the model
-already lets any event fall between a key's read, its upload and its
-landing, so two keys in flight together reach no state one key at a time
-could not. A prefetched download is read nearer its listing, which the
-abstraction ("a pull reads a file's bytes at the listing") already assumes.
-Two unit tests that pinned one-at-a-time order were restated as their end
-state: a key saved again or deleted while the flush sends others is on
-Drive with its newest bytes, or off it, after the next flush. The library
-is no longer written when the merge leaves its text unchanged
-(`libraryUnchanged`); `DriveLibrary`'s anchors were stale before this.
-Both Drive models were re-modelled against the parallel code on 2026-10-05
-(below).
+writing each file in listing order.
+- No new states: each key's flush segment touches only that key's queue
+  entry, `sigs`, `rmt` and delete stamp, and the model already lets any
+  event fall between a key's read, its upload and its landing. A prefetched
+  download is read nearer its listing, which the abstraction ("a pull reads
+  a file's bytes at the listing") already assumes.
+- Two unit tests that pinned one-at-a-time order now check the end state: a
+  key saved again or deleted while the flush sends others is on Drive with
+  its newest bytes, or off it, after the next flush.
+- The library is no longer written when the merge leaves its text unchanged
+  (`libraryUnchanged`); `DriveLibrary`'s anchors were stale before this.
+- Both Drive models were re-modelled against the parallel code on 2026-10-05
+  (below).
 
 **Abstractions:** listed in the file's header. Bytes are opaque (compression
 is invisible here), one game, both devices hold its ROM, loads are atomic.
@@ -455,24 +471,27 @@ The three models follow 03f88d6c again; SavePersistence follows the fix of its t
   moments sheet's forced resume), the hero's Resume that boots straight into
   the session (`loadRom`'s `opts.resume`), the session epochs, quota
   evictions that free checkpoints before ROMs, the Saves panel's Reset as its
-  own path, and the Drive pull's delete-queue check. `provenance`,
-  `resume_only_on_sig_match` (the boot-time resume included) and
-  `persist_marks_upload` still hold over every interleaving.
-  `open_pull_resurrects_reset_save` was already fixed by 6dd57564 (the pull
-  checks the delete queue); it is now `regress_pull_resurrects_reset_save`.
-  On the fixed code it also proves, for every reachable state, that the
-  stored session is the newest snapshot ever stored for its game and was
-  taken since the session was last deleted (`session_newest_and_current`,
-  which C2 broke), and, for every state, that a quota retry writes only if
-  nothing took a later number for the save (`retry_gives_way`, with
-  `persistCall_seq_mono` and the `*_takes_number` lemmas; C1) and that a pull skips a
-  save whose delete is queued, both Resets queue it as they wipe, and the
-  queue is not sent mid-pull (`pull_respects_queue`, `reset_queues_at_once`,
-  `flush_waits_for_pulls`; C3). `NoResurrect` is not claimed for every
-  state: the model stamps a pull's bytes when it starts, so a pull begun
-  after a Drive flush sent a Delete's queued delete looks like a
-  resurrection when it lands, where in the JS it is another device's newer
-  save.
+  own path, and the Drive pull's delete-queue check.
+  - Still holding over every interleaving: `provenance`,
+    `resume_only_on_sig_match` (the boot-time resume included) and
+    `persist_marks_upload`.
+  - `open_pull_resurrects_reset_save` was already fixed by 6dd57564 (the
+    pull checks the delete queue); it is now
+    `regress_pull_resurrects_reset_save`.
+  - New on the fixed code, for every reachable state: the stored session is
+    the newest snapshot ever stored for its game and was taken since the
+    session was last deleted (`session_newest_and_current`, which C2 broke).
+  - New, for every state: a quota retry writes only if nothing took a later
+    number for the save (`retry_gives_way`, with `persistCall_seq_mono` and
+    the `*_takes_number` lemmas; C1).
+  - New, for every state: a pull skips a save whose delete is queued, both
+    Resets queue it as they wipe, and the queue is not sent mid-pull
+    (`pull_respects_queue`, `reset_queues_at_once`, `flush_waits_for_pulls`;
+    C3).
+  - `NoResurrect` is not claimed for every state. The model stamps a pull's
+    bytes when it starts, so a pull begun after a Drive flush sent a
+    Delete's queued delete looks like a resurrection when it lands, where in
+    the JS it is another device's newer save.
 - **ServiceWorker** adds the update a save state from a newer build asks for
   (`updateForNewerState`: `applyUpdate` with the game loaded and no
   confirm). `no_forced_midgame` and `no_reload_without_a_click` still hold,
@@ -486,18 +505,19 @@ The three models follow 03f88d6c again; SavePersistence follows the fix of its t
 
 | # | What happened | Trace (now `regress_*`) | Fix (87eea59f) | Tests |
 |---|---|---|---|---|
-| C1 | **A quota retry after a checkpoint eviction puts the old save back.** `dbPutRoomy` frees other games' checkpoints first and retries at once, but asks `superseded()` only `if (freed && …)`, and `freed` counts ROMs. A newer persist, a Reset, a Delete or an Import landing while the checkpoints are deleted is overwritten; after Reset or Import the reboot boots on the old save, after Delete the deleted save is back and queued for Drive. | `SavePersistence.bug_ckpt_evict_retry_writes_older_save`, `bug_ckpt_evict_retry_undoes_reset`, `bug_ckpt_evict_retry_resurrects_deleted_save`, `bug_ckpt_evict_retry_over_import` | `retried`, set in the `catch` before either eviction, replaces `freed` in the `superseded()` check. | web/tests/ckpt-evict.test.mjs |
-| C2 | **A checkpoint's session lands over a newer one, or after a Reset.** `storeCheckpoint` checks `sessionSnapTs`/the epoch, then (battery not yet stored) `await persistSave`, then puts the session without checking again. Main Menu, a hide, a close or a switch in that await is replaced by the older moment; a Reset or Delete gets the pre-reset session back (carrying the wiped battery's signature; `addCheckpoint` re-checks, so the moment itself stays out). | `bug_ckpt_store_over_newer_session`, `bug_ckpt_store_undoes_session_reset` | `stale()` (ts, epoch, `sessionHeldFor`) checked at entry and again right after `await persistSave`. | web/tests/ckpt-store.test.mjs |
-| C3 | **The Saves panel's Reset is undone by a pull landing in it.** `resetCurrentSaveFile` detaches and deletes, but queues its Drive deletes (`markDelete`) only after its awaits; a pull that started downloading the save before the game was tapped passes all three of its checks (not loaded, not loading, not queued), writes it back, and the reboot boots on it. `resetGameAction` queues first and is safe (`reset_game_action_holds_off_pull`). | `bug_file_reset_undone_by_pull` | The three `markDelete`s run right after `retireSavePuts`, before the first await. | web/tests/reset-pull.test.mjs |
+| C1 | **A quota retry after a checkpoint eviction puts the old save back.** `dbPutRoomy` frees other games' checkpoints first and retries at once, but asked `superseded()` only `if (freed && …)`, and `freed` counts ROMs. A newer persist, a Reset, a Delete or an Import landing while the checkpoints are deleted is overwritten. After Reset or Import the reboot boots on the old save; after Delete the deleted save is back and queued for Drive. | `SavePersistence.bug_ckpt_evict_retry_writes_older_save`, `bug_ckpt_evict_retry_undoes_reset`, `bug_ckpt_evict_retry_resurrects_deleted_save`, `bug_ckpt_evict_retry_over_import` | `retried`, set in the `catch` before either eviction, replaces `freed` in the `superseded()` check. | web/tests/ckpt-evict.test.mjs |
+| C2 | **A checkpoint's session lands over a newer one, or after a Reset.** `storeCheckpoint` checked `sessionSnapTs`/the epoch, then (battery not yet stored) `await persistSave`, then put the session without checking again. A session stored by Main Menu, a hide, a close or a switch in that await is replaced by the older moment. A Reset or Delete gets the pre-reset session back (carrying the wiped battery's signature; `addCheckpoint` re-checks, so the moment itself stays out). | `bug_ckpt_store_over_newer_session`, `bug_ckpt_store_undoes_session_reset` | `stale()` (ts, epoch, `sessionHeldFor`) checked at entry and again right after `await persistSave`. | web/tests/ckpt-store.test.mjs |
+| C3 | **The Saves panel's Reset is undone by a pull landing in it.** `resetCurrentSaveFile` detaches and deletes, but queued its Drive deletes (`markDelete`) only after its awaits. A pull that started downloading the save before the game was tapped passes all three of its checks (not loaded, not loading, not queued), writes it back, and the reboot boots on it. `resetGameAction` queues first and is safe (`reset_game_action_holds_off_pull`). | `bug_file_reset_undone_by_pull` | The three `markDelete`s run right after `retireSavePuts`, before the first await. | web/tests/reset-pull.test.mjs |
 
 ## Re-audit at 03f88d6c (2026-10-05): `Handoff` and `Thumbnails`
 
 **Handoff.** The crash checkpoints (6ee01e88..096edd3e) made a second writer
-of the session: while a game runs, every 60 s of play `takeCheckpoint`
+of the session. While a game runs, every 60 s of play `takeCheckpoint`
 copies the moment and `storeCheckpoint` writes it from the worker's
-callback, giving way only to a newer snapshot or a delete (`sessionSnapTs`,
-the session epoch), asked once, before its `await persistSave`. The model
-now has the checkpoint segment by segment, `sessionUnsent`, the
+callback. It gave way only to a newer snapshot or a delete (`sessionSnapTs`,
+the session epoch), asked once, before its `await persistSave`.
+
+The model now has the checkpoint segment by segment, `sessionUnsent`, the
 `ckptInFlight` gate in `persistAutoState`, the `playing` mark and
 `noteCrashedRuns`' re-queue at boot. Every earlier theorem still holds on
 the code at 03f88d6c (`Code.audited`), including both convergence checks
@@ -507,8 +527,8 @@ holds and each trace is a `regress_*`:
 
 | # | Severity | What happened | Fix | Fixed in, test |
 |---|---|---|---|---|
-| H4 | Medium | **Switch tapped while a checkpoint packs** (`bug_checkpoint_after_switch`). `takeHandoff` moves neither `sessionSnapTs` nor the epoch, so the checkpoint, still "the newest", lands after the hand-off and writes the turned-down moment over the chosen session; Switch's own re-send (the key queued again, its `sigs` forgotten) then sends it to Drive. Both devices resume the moment the player turned down. Needs the tap within the pack (tens to hundreds of ms after a checkpoint, once per minute of play). | `takeHandoff` moves the session epoch (`sessionEpochs.set(game, sessionEpoch(game) + 1)`, as `deleteKeys` does) before its first await; with H5's re-check, which catches a checkpoint already past its first check. | bfe5d5c5; web/tests/handoff-ckpt.test.mjs |
-| H5 | Low | **Main Menu (or a hide, or Close) while a checkpoint awaits `persistSave`** (`bug_checkpoint_over_main_menu`). The checkpoint asked before that await and writes its older moment over the snapshot just taken; the game, unmoved, never takes the newer one again, so that moment goes to Drive, the other device and the next Resume. The lost play is what ran between the checkpoint and the tap (well under a second), and only when the game had saved in game within about a second before the checkpoint. | `storeCheckpoint` asks again (`sessionSnapTs`, epoch, `sessionHeldFor`) after `await persistSave`, right before its session put. | 87eea59f; web/tests/ckpt-store.test.mjs |
+| H4 | Medium | **Switch tapped while a checkpoint packs** (`bug_checkpoint_after_switch`). `takeHandoff` moved neither `sessionSnapTs` nor the epoch, so the checkpoint, still "the newest", landed after the hand-off and wrote the turned-down moment over the chosen session. Switch's own re-send (the key queued again, its `sigs` forgotten) then sent it to Drive. Both devices resume the moment the player turned down. Needs the tap within the pack (tens to hundreds of ms after a checkpoint, once per minute of play). | `takeHandoff` moves the session epoch (`sessionEpochs.set(game, sessionEpoch(game) + 1)`, as `deleteKeys` does) before its first await; with H5's re-check, which catches a checkpoint already past its first check. | bfe5d5c5; web/tests/handoff-ckpt.test.mjs |
+| H5 | Low | **Main Menu (or a hide, or Close) while a checkpoint awaits `persistSave`** (`bug_checkpoint_over_main_menu`). The checkpoint asked before that await and wrote its older moment over the snapshot just taken. The game, unmoved, never takes the newer one again, so that moment goes to Drive, the other device and the next Resume. The lost play is what ran between the checkpoint and the tap (well under a second), and only when the game had saved in game within about a second before the checkpoint. | `storeCheckpoint` asks again (`sessionSnapTs`, epoch, `sessionHeldFor`) after `await persistSave`, right before its session put. | 87eea59f; web/tests/ckpt-store.test.mjs |
 
 In the fixed code the two traces end safely (`regress_checkpoint_after_switch`,
 `regress_checkpoint_over_main_menu`), Matt's fourteen steps and the 686
@@ -531,7 +551,7 @@ delete is queued (6dd57564, which the model had not followed).
 - New, low, fixed in bfe5d5c5: **a pull racing a rename**
   (`bug_pull_after_rename_orphans_frame`, now
   `regress_pull_after_rename_orphans_frame`). The pull's write segment asked
-  about the delete queue and the game in memory, not a rename, so a frame
+  about the delete queue and the game in memory, not a rename. A frame
   (or a save, or a session) downloading while its game was renamed landed
   under the old name: an orphan that made a later rename to that name fail.
   renameGame now puts the old name in `renamedAway` right after its
@@ -548,67 +568,79 @@ driveFetch's 429/5xx retries (fdc02cf1), the unchanged library left unwritten
 (`libraryUnchanged`), `runFullSync` saving the game in memory first, and the
 Drive-only tile download (`fetchTileGame`). Every earlier theorem still
 holds, re-proved over the new events, except the cross-account guarantee,
-which now has an assumption and two counterexamples. (All three fixed since: see below.)
+which at 03f88d6c had an assumption and two counterexamples. (D1-D3 below are all fixed since.)
 
 **DriveLibrary.** New: `seen` (the library a sync read) and the `flushKeep` /
-`pullKeep` paths that skip the write. A skip never changes Drive and, when
-Drive still holds what was read, is the write (`keep_leaves_drive`,
-`keep_eq_write`); in `race_delays_tomb`'s lost update a flush whose merge
-added nothing now leaves the other device's tombstone in place
-(`keep_spares_newer_write`). The parallel upload pass, the ROM skip and the
-download prefetch change no library behaviour (header).
+`pullKeep` paths that skip the write.
+- A skip never changes Drive and, when Drive still holds what was read, is
+  the write (`keep_leaves_drive`, `keep_eq_write`).
+- In `race_delays_tomb`'s lost update, a flush whose merge added nothing now
+  leaves the other device's tombstone in place (`keep_spares_newer_write`).
+- The parallel upload pass, the ROM skip and the download prefetch change no
+  library behaviour (header).
 
 **DriveSession.** The `Session` model now has the refresh token, the broker's
 shared refresh, the consent screen (as a renewal's upgrade, a sign-in, and
 driveFetch's 401 re-grant), armDriveRenewOnGesture's broker path and
-armDriveRenewListener, and the retries. Proved: a signed-out tab sends
-nothing, now with no assumption (`send_only_signed_in`); popup renewals never
-outnumber gestures, every broker renewal is paid for by an
-armDriveRenewOnGesture call that no renewal, refresh or grant makes
-(`silent_le_arms`, `renewal_never_arms`); one GIS request and one refresh,
-no orphaned waiter. `no_cross_account` and `active_is_own_account` hold in
-every reachable state where no grant a sign-in did not ask for was adopted
-for another account (the ghost `stray`); both ways one can be are reachable:
+armDriveRenewListener, and the retries. Proved:
+- A signed-out tab sends nothing, now with no assumption
+  (`send_only_signed_in`).
+- Popup renewals never outnumber gestures. Every broker renewal is paid for
+  by an armDriveRenewOnGesture call that no renewal, refresh or grant makes
+  (`silent_le_arms`, `renewal_never_arms`).
+- One GIS request and one refresh, no orphaned waiter.
+- `no_cross_account` and `active_is_own_account` hold in every reachable
+  state where no grant a sign-in did not ask for was adopted for another
+  account (the ghost `stray`).
+
+Both ways such a grant could be adopted were reachable:
 
 | # | Severity | Finding | Fix |
 |---|---|---|---|
-| D1 | Medium (real, needs the person to pick another account); **fixed in 6367e296** | **A consent re-grant can bring another account's token into the running session** (`bug_consent_regrant_crosses_accounts`, `bug_consent_renewal_crosses_accounts`). A popup-flow device (no refresh token) once the broker answers: an upload's 401 with activation, or the first tap (the upgrade), opens Google's consent screen through `driveRegrantPopup` -> `driveCodeGrant`, hinted with the loaded account. If the person ends up granting another account (the hinted one is not signed in to Google in this browser and they sign in with another), `driveCodeGrant` checks only that the session is the one that asked (2519-2522) and adopts that account's token and refresh token without a new session or an account check. The running flush replays and writes on with it; on driveFetch's path nothing ever calls gdriveFetchEmail, so the loaded account's queues, tombstones and library keep syncing into the other account's Drive, and renewals keep refreshing the other grant. | In `driveCodeGrant`, for a re-grant (`connect` false), learn the granted account (tokeninfo on `j.access_token`) before adopting anything, re-check the session after that await, and refuse (no token, no refresh token stored) when its `sub` is not `syncState.acct`. |
-| D2 | Very low; **fixed in 6367e296** | **A broker refresh started during a sign-in that is then refused adopts that sign-in's account** (`bug_refresh_of_refused_signin`). Two sign-ins at once (the first finishes as account 1; the second's grant, account 2, lands and stores its refresh token); a refresh starts in that session (a Drive-only tile's ensureDriveSignedIn); the second sign-in's tokeninfo fails and it is refused (5224-5228) without a new session, so the refresh lands as current and account 2's token is adopted with account 1 loaded and nothing identifying. | `driveSession++` in gdriveConnect's refusal branch, so anything that started during the refused sign-in is stale when it answers. |
-| D3 | Very low; **fixed in 3bbe0d7f** | **A broker sign-in can keep a refresh token for an account other than the one it confirms** (`bug_refresh_token_outlives_its_account`, found modelling the fix). Two sign-ins at once (the token flow's finishes as account 1; the broker's grant, account 2, lands with its refresh token); in that window a flush from before the sign-out gets 401, the forced refresh fails (broker down) and, with activation, the token flow re-grants account 1 in the current session. The broker sign-in's tokeninfo then confirms the token the tab holds now (account 1's), so it completes as account 1 keeping account 2's refresh token (gdriveConnect clears `syncState.refresh` only on the token flow, 5260, or on refusal). Every later broker renewal adopts account 2's token with account 1 loaded, and the next sync crosses. | Tie the refresh token to the account it was granted for: in gdriveConnect's broker path, keep `syncState.refresh` only if the token tokeninfo confirmed is the one `driveCodeGrant` adopted (else null it); or store the grant's `sub` beside the refresh token and have `driveRefreshSilently` use it only when it equals `syncState.acct`. |
+| D1 | Medium (real, needs the person to pick another account); **fixed in 6367e296** | **A consent re-grant can bring another account's token into the running session** (`bug_consent_regrant_crosses_accounts`, `bug_consent_renewal_crosses_accounts`). On a popup-flow device (no refresh token), once the broker answers, an upload's 401 with activation, or the first tap (the upgrade), opens Google's consent screen through `driveRegrantPopup` -> `driveCodeGrant`, hinted with the loaded account. If the person grants another account (the hinted one is not signed in to Google in this browser and they sign in with another), `driveCodeGrant` checked only that the session was the one that asked, and adopted that account's token and refresh token. The running flush replays and writes on with it. On driveFetch's path nothing ever calls gdriveFetchEmail, so the loaded account's queues, tombstones and library keep syncing into the other account's Drive, and renewals keep refreshing the other grant. | In `driveCodeGrant`, for a re-grant (`connect` false), learn the granted account (tokeninfo on `j.access_token`) before adopting anything, re-check the session after that await, and refuse (no token, no refresh token stored) when its `sub` is not `syncState.acct`. |
+| D2 | Very low; **fixed in 6367e296** | **A broker refresh started during a sign-in that is then refused adopts that sign-in's account** (`bug_refresh_of_refused_signin`). Two sign-ins at once: the first finishes as account 1; the second's grant, account 2, lands and stores its refresh token. A refresh starts in that session (a Drive-only tile's ensureDriveSignedIn). The second sign-in's tokeninfo then fails and it is refused without a new session, so the refresh lands as current: account 2's token is adopted with account 1 loaded and nothing identifying. | `driveSession++` in gdriveConnect's refusal branch, so anything that started during the refused sign-in is stale when it answers. |
+| D3 | Very low; **fixed in 3bbe0d7f** | **A broker sign-in can keep a refresh token for an account other than the one it confirms** (`bug_refresh_token_outlives_its_account`, found modelling the fix). Two sign-ins at once: the token flow's finishes as account 1; the broker's grant, account 2, lands with its refresh token. In that window a flush from before the sign-out gets 401, the forced refresh fails (broker down) and, with activation, the token flow re-grants account 1 in the current session. The broker sign-in's tokeninfo then confirms the token the tab holds now (account 1's), so it completes as account 1 keeping account 2's refresh token (gdriveConnect clears `syncState.refresh` only on the token flow or on refusal). Every later broker renewal adopts account 2's token with account 1 loaded, and the next sync crosses. | Tie the refresh token to the account it was granted for: in gdriveConnect's broker path, keep `syncState.refresh` only if the token tokeninfo confirmed is the one `driveCodeGrant` adopted (else null it); or store the grant's `sub` beside the refresh token and have `driveRefreshSilently` use it only when it equals `syncState.acct`. |
 
-**After 6367e296** (`DriveSession` follows it; line numbers there are at
-6367e296): D1 and D2 are `regress_consent_regrant_refused`,
-`regress_consent_renewal_refused` (+ `consent_regrant_same_account`, the
-upgrade for the linked account still adopted) and
-`regress_refresh_of_refused_signin`; `codeAccept_stray_same` proves a consent
-re-grant can no longer be stray. Regression tests in
-web/tests/drive-session.test.mjs ("a consent re-grant that comes back as
-another account is refused...", "a consent re-grant for the linked account
-is adopted...") fail on the code before 6367e296 and pass on it.
+**After 6367e296** (`DriveSession` follows it):
+- D1 is `regress_consent_regrant_refused` and
+  `regress_consent_renewal_refused` (+ `consent_regrant_same_account`: the
+  upgrade for the linked account is still adopted). D2 is
+  `regress_refresh_of_refused_signin`.
+- `codeAccept_stray_same` proves a consent re-grant can no longer be stray.
+- Regression tests in web/tests/drive-session.test.mjs ("a consent re-grant
+  that comes back as another account is refused...", "a consent re-grant for
+  the linked account is adopted...") fail on the code before 6367e296 and
+  pass on it.
 
-**After 3bbe0d7f** (`DriveSession` follows it; its line numbers are now at
-3bbe0d7f): D3 is `regress_refresh_token_outlives_its_account`. A refresh
-token is sent only when granted for the loaded account (`usable`), and an
-account change always takes a new session, so a current refresh answer is
-for the loaded account: `NoStray` / `never_stray` prove no stray grant is
-ever adopted, and `no_cross_account` / `active_is_own_account` hold again
-with no assumption. That proof does not use D2's new session (a refused
-sign-in's refresh token is another account's, or the loaded one's own), so
-since 3bbe0d7f the D2 line is defence in depth. Tests (drive-session):
-"a broker sign-in confirmed as another account keeps no refresh token for
-the first" and "a refresh token granted for another account than the loaded
-one is never used" fail with 3bbe0d7f reverted; "a broker refresh started
-during a sign-in that is then refused lands in a session that is over" (the
-second sign-in being account 1 again) fails with only D2's `driveSession++`
-reverted; "...does not adopt that account" (the second sign-in account 2)
-fails only with both D2 and 3bbe0d7f reverted. Left as it was: a refresh
-token stored before 3bbe0d7f has no `refreshAcct` and is trusted, so a device
-that hit D3 earlier keeps that token until it signs out; and
-`driveWantsUpgrade` asks `!syncState.refresh`, not `driveRefreshUsable()`, so
-a device holding an unusable refresh token is never offered the consent
-screen again and renews by popup (reachable only where no account is
-recorded, an old build's device: a sign-in drops a mismatched token, and a
-re-grant for another or an unknown account is refused).
+**After 3bbe0d7f** (`DriveSession` follows it): D3 is
+`regress_refresh_token_outlives_its_account`.
+- A refresh token is sent only when granted for the loaded account
+  (`usable`), and an account change always takes a new session, so a current
+  refresh answer is for the loaded account. `NoStray` / `never_stray` prove
+  no stray grant is ever adopted, and `no_cross_account` /
+  `active_is_own_account` hold again with no assumption.
+- That proof does not use D2's new session (a refused sign-in's refresh
+  token is another account's, or the loaded one's own), so since 3bbe0d7f
+  the D2 line is defence in depth.
+- Tests (drive-session):
+  - "a broker sign-in confirmed as another account keeps no refresh token
+    for the first" and "a refresh token granted for another account than the
+    loaded one is never used" fail with 3bbe0d7f reverted.
+  - "a broker refresh started during a sign-in that is then refused lands in
+    a session that is over" (the second sign-in being account 1 again) fails
+    with only D2's `driveSession++` reverted.
+  - "...does not adopt that account" (the second sign-in account 2) fails
+    only with both D2 and 3bbe0d7f reverted.
+- Left as it was:
+  - A refresh token stored before 3bbe0d7f has no `refreshAcct` and is
+    trusted, so a device that hit D3 earlier keeps that token until it signs
+    out.
+  - `driveWantsUpgrade` asks `!syncState.refresh`, not
+    `driveRefreshUsable()`, so a device holding an unusable refresh token is
+    never offered the consent screen again and renews by popup. Reachable
+    only where no account is recorded (an old build's device): a sign-in
+    drops a mismatched token, and a re-grant for another or an unknown
+    account is refused. Closed by 0865de24 (next section).
 
 Still open from before: `bug_spinner_without_work` /
 `bug_spinner_after_renewal` (now only without a refresh token or with the
@@ -619,27 +651,28 @@ broker down) and `bug_one_popup_two_strikes` (popup flow only).
 Each model now cites web/index.js (and web/netplay.js, src/dingbat_wasm.nim)
 at 5ea4d552.
 
-- **GameLifecycle** (from 03f88d6c). `dbPutRoomy`'s retry check (87eea59f),
-  the drop refused while a clip records (fbdb7975), the pull's `renamedAway`
-  skip (bfe5d5c5), `storeCheckpoint`'s second `stale()` check and
-  `takeHandoff`'s epoch bump (87eea59f, bfe5d5c5) each only drop a write or
-  an `openFile`, or touch state the model does not have (the quota path,
-  clips, renames, the session epoch). No state, event or step changed;
-  every property holds as before.
-- **Modals** (from fbdb7975). `renameGame`'s `renamedAway` bookkeeping
-  touches no modal state; citations only.
-- **Netplay** (from 03f88d6c). `dbPutRoomy`'s retry (quota errors are not
-  modelled) and `openNetConnect`'s `netFrozeGame = !!currentRomName &&
-  !takePlayerPause()` (no pause state here; RunPause has it). Citations only.
+- **Re-checked, no change** (citations only; no state, event or step
+  changed, every property holds as before): **GameLifecycle** (from
+  03f88d6c), **Modals** (from fbdb7975), **Netplay** (from 03f88d6c). The
+  fixes in between only drop a write or an `openFile`, or touch state these
+  models do not have:
+  - `dbPutRoomy`'s retry check (87eea59f): quota errors.
+  - The drop refused while a clip records (fbdb7975): clips.
+  - The pull's `renamedAway` skip and `renameGame`'s bookkeeping (bfe5d5c5):
+    renames.
+  - `storeCheckpoint`'s second `stale()` check and `takeHandoff`'s epoch
+    bump (87eea59f, bfe5d5c5): the session epoch.
+  - `openNetConnect`'s `netFrozeGame = !!currentRomName &&
+    !takePlayerPause()`: pause state, which RunPause has.
 - **DriveSession** (from 3bbe0d7f). `wantsUpgrade` follows 0865de24: a linked
   device whose refresh token it may not use is offered the consent screen
   (`upgrade_offered_unusable_refresh`), which closes the `driveWantsUpgrade`
   item above. 5ea4d552 trusts a refresh token on a device with no account
-  recorded (`!syncState.acct`); the model's `acct` is always an account, so
+  recorded (`!syncState.acct`). The model's `acct` is always an account, so
   `usable` is unchanged and `no_cross_account`, `active_is_own_account` and
   `never_stray` still hold with no assumption. Outside the model, as before:
   a device with no account recorded adopts a re-grant for whichever account
-  it is (2540 checks only a known `acct`), so it has no loaded account to
+  it is (the re-grant check tests only a known `acct`), so it has no loaded account to
   cross from.
 - **DriveLibrary** (from 03f88d6c). New: the pull's save writes (`pullScan`,
   `pullSave`) and `renamedAway` (field `away`). `pullSave_skips_away`; the
@@ -651,27 +684,28 @@ at 5ea4d552.
 
 | # | Severity | Finding | Fix |
 |---|---|---|---|
-| L1 | Low-medium (needs a name reused within one page session; loses another device's save) | **A name renamed away stays skipped after a game comes back under it** (`bug_remote_rename_into_away_name_skips_saves`, `bug_download_into_away_name_skips_saves`, `bug_away_not_vacant`). `renamedAway` is cleared only by `renameGame` into the name and by a fresh import (`bumpRecentIndex`'s `fresh`), but two other paths land a game under a name: another device's rename into it, applied by the pull (`applyRemoteRename` 4048), and a Drive-only tile's download (`downloadGame` 4616, `bumpRecentIndex(game, { gen })`, not fresh). Trace: device 0 renames A to B; device 1 renames X into the freed A (or imports another game as A, which device 0 then downloads); device 0 now holds that game under A with A still in `renamedAway`, and every pull for the rest of the session skips its save, session and picture (the skip records no `rmt`). Device 1 plays it and syncs; device 0 never gets that save, and a play there starts from its own (none, or older) and its flush, blind for saves, puts it over device 1's on Drive. A reload clears the set. | Claim the name wherever a game lands under it: `renamedAway.delete(to)` in `applyRemoteRename` once its move commits, and `renamedAway.delete(game)` in `downloadGame` (or in `bumpRecentIndex` whatever `fresh` is: every caller's game is under that name by then); or have the write segment skip only while nothing is held under the name. **Fixed in be44ad4c:** `applyRemoteRename` releases its target as it starts and `bumpRecentIndex` releases its name on every call. The traces are `regress_remote_rename_into_away_name_skips_saves`, `regress_download_into_away_name_skips_saves`, `regress_away_not_vacant`; proved for every reachable state: no name renamed away from holds a record here (`away_vacant`), so every save a pull lists for a game held here is written unless its delete is queued (`pullSave_writes_held`). Thumbnails needs no change (a name enters its library only by an import or as a rename's target, both already released). Tests in web/tests/rename-pull.test.mjs, "a name another device's rename brings back is written by the pull again" and "a Drive-only game downloaded under a name renamed away from is written by the pull again": both fail on 5ea4d552, and each fails with only its own half of be44ad4c reverted. |
+| L1 | Low-medium (needs a name reused within one page session; loses another device's save) | **A name renamed away stays skipped after a game comes back under it** (`bug_remote_rename_into_away_name_skips_saves`, `bug_download_into_away_name_skips_saves`, `bug_away_not_vacant`). `renamedAway` was cleared only by `renameGame` into the name and by a fresh import (`bumpRecentIndex`'s `fresh`). Two other paths land a game under a name: another device's rename into it, applied by the pull (`applyRemoteRename`), and a Drive-only tile's download (`downloadGame`, `bumpRecentIndex(game, { gen })`, not fresh). Trace: device 0 renames A to B; device 1 renames X into the freed A (or imports another game as A, which device 0 then downloads). A is still in device 0's `renamedAway`, so every pull for the rest of the session skips that game's save, session and picture (the skip records no `rmt`). Device 0 never gets device 1's save. A play on device 0 starts from its own save (none, or older), and its flush, blind for saves, puts it over device 1's on Drive. A reload clears the set. | **Fixed in be44ad4c:** the name is claimed wherever a game lands under it. `applyRemoteRename` releases its target as it starts and `bumpRecentIndex` releases its name on every call (every caller's game is under that name by then). The traces are `regress_remote_rename_into_away_name_skips_saves`, `regress_download_into_away_name_skips_saves`, `regress_away_not_vacant`. Proved for every reachable state: no name renamed away from holds a record here (`away_vacant`), so every save a pull lists for a game held here is written unless its delete is queued (`pullSave_writes_held`). Thumbnails needs no change (a name enters its library only by an import or as a rename's target, both already released). Tests in web/tests/rename-pull.test.mjs, "a name another device's rename brings back is written by the pull again" and "a Drive-only game downloaded under a name renamed away from is written by the pull again": both fail on 5ea4d552, and each fails with only its own half of be44ad4c reverted. |
 
 ## Two players on one code (2026-10-05, 29172ad4, `WebState/LinkPairing`)
 
 Matt: linking with friends "fails on the first try consistently, but we can
 connect the second or third time". `Netplay` folds the server into "a reply
-arrives"; `LinkPairing` models both browsers, the signaling server and the
+arrives". `LinkPairing` models both browsers, the signaling server and the
 network between them (FIFO sockets, sockets that die without the server
-hearing, iOS suspending a page, the timers). Four traces from a fresh start
-with an open peer-to-peer path each fail the first pairing on both sides and
-leave a retry, with both players now in the foreground, to succeed. Which of
-them bit is not known (the device log's `netplay:` lines would say); the
-first needs no fault at all, the next two need only a player who switches
-apps (to text the code) while waiting.
+hearing, iOS suspending a page, the timers).
+
+Four traces from a fresh start with an open peer-to-peer path each fail the
+first pairing on both sides and leave a retry, with both players now in the
+foreground, to succeed. Which of them bit is not known (the device log's
+`netplay:` lines would say). The first needs no fault at all. The next two
+need only a player who switches apps (to text the code) while waiting.
 
 | # | Severity | Finding | Fix |
 |---|---|---|---|
-| P1 | High (no fault needed; depends on the geometry of the three paths) | **The friend's channel opening first fails ours** (`bug_linked_close_fails_both`). When a DataChannel opens, that side closes its signaling socket; the server tells the other `peer-closed`, and `onSigMessage` failed "The other side left" unless `rtcConnected`. The creator's channel opens about half a round trip before the answerer's, so whenever the path through the server is shorter than the direct one the guest fails, closes its pc, and the host's freshly open channel drops: "Connection lost during setup". | With the friend's description in hand (`sdpIn`), `peer-closed` is ignored and the channel (or the deadline) decides. `regress_linked_close` (with either server); test "a friend whose channel opened first and left the server doesn't fail ours". |
-| P2 | High (a phone that suspends the page while waiting) | **Paired with its own ghost** (`bug_paired_with_own_ghost`). A waits; iOS suspends the page and the socket dies without the server hearing (the reaper takes 90 s). Back in the foreground A's `onclose` redials, and the server pairs the new socket as guest of A's own dead seat; A waits 20 s for an offer from itself and blames a strict NAT, while B is told "that code is already in use". | The rendezvous carries a per-page id (`NET_PAGE_ID`); both servers drop a seat held by the same id (`evict`) and seat the arrival, telling a friend paired with the stale socket `peer-closed`. server.js now funnels every close through `leave`, which ignores a socket that no longer holds a seat. `regress_paired_with_own_ghost`; proved: the fixed server never says "in use" to two players (`no_in_use`) nor seats one page twice (`seats_distinct`). The client half alone recovers when B arrives after A's deadline (`regress_own_ghost_client_only`) but not during it (`client_only_ghost_still_in_use`): **deploy the server.** Tests in web/signaling/server.test.mjs (Node and Nim), which fail on the old server. |
+| P1 | High (no fault needed; depends on the geometry of the three paths) | **The friend's channel opening first fails ours** (`bug_linked_close_fails_both`). When a DataChannel opens, that side closes its signaling socket; the server tells the other `peer-closed`, and `onSigMessage` failed "The other side left" unless `rtcConnected`. The creator's channel opens about half a round trip before the answerer's. So whenever the path through the server is shorter than the direct one, the guest fails and closes its pc, and the host's freshly open channel drops: "Connection lost during setup". | With the friend's description in hand (`sdpIn`), `peer-closed` is ignored and the channel (or the deadline) decides. `regress_linked_close` (with either server); test "a friend whose channel opened first and left the server doesn't fail ours". |
+| P2 | High (a phone that suspends the page while waiting) | **Paired with its own ghost** (`bug_paired_with_own_ghost`). A waits; iOS suspends the page and the socket dies without the server hearing (the reaper takes 90 s). Back in the foreground A's `onclose` redials, and the server pairs the new socket as guest of A's own dead seat. A waits 20 s for an offer from itself and blames a strict NAT, while B is told "that code is already in use". | The rendezvous carries a per-page id (`NET_PAGE_ID`). Both servers drop a seat held by the same id (`evict`) and seat the arrival, telling a friend paired with the stale socket `peer-closed`. server.js now funnels every close through `leave`, which ignores a socket that no longer holds a seat. `regress_paired_with_own_ghost`; proved: the fixed server never says "in use" to two players (`no_in_use`) nor seats one page twice (`seats_distinct`). The client half alone recovers when B arrives after A's deadline (`regress_own_ghost_client_only`) but not during it (`client_only_ghost_still_in_use`): **deploy the server.** Tests in web/signaling/server.test.mjs (Node and Nim), which fail on the old server. |
 | P3 | High (same trigger, socket survives) | **A frozen host fails both** (`bug_frozen_host_fails_both`). A waits, the page is suspended with the socket alive; B pairs and waits for an offer A cannot make; B's 20 s deadline says "strict NAT"; A wakes to `paired` then `peer-closed`: "The other side left". | `rtcGaveUp`: a deadline (or ICE `failed`) with no description from the friend sends us back to waiting on the code (`sigRewait`: close pc and socket, rendezvous again, one redial-ladder step); `peer-closed` with no description does the same. The NAT verdict needs two pairings in a row that exchanged descriptions and still never opened (`nat_after_two_strikes`). `regress_frozen_host`; tests "a friend gone before the descriptions crossed sends us back to waiting", "a friend who never answers sends us back to waiting at 20 s", "two pairings that exchanged descriptions and never opened are the NAT verdict". |
-| P4 | Medium (a slow first dial) | **The fallback strands the friend** (`bug_fallback_after_pairing_fails_friend`). The 2 s "server didn't respond" timer was armed at the click and so covered DNS + TCP + TLS + upgrade + reply; when it fired after the rendezvous reached the server, B left for the manual exchange and A failed "The other side left". | A goes back to waiting instead (`regress_fallback_after_pairing`), and the fallback now gives the dial 4 s (the probe's verdict) and the reply 2 s from the socket opening, which the model cannot see (its timers fire whenever armed). |
+| P4 | Medium (a slow first dial) | **The fallback strands the friend** (`bug_fallback_after_pairing_fails_friend`). The 2 s "server didn't respond" timer was armed at the click and so covered DNS + TCP + TLS + upgrade + reply. When it fired after the rendezvous reached the server, B left for the manual exchange and A failed "The other side left". | A goes back to waiting instead (`regress_fallback_after_pairing`). The fallback now gives the dial 4 s (the probe's verdict) and the reply 2 s from the socket opening, which the model cannot see (its timers fire whenever armed). |
 
 Also proved for the fixed client: it never shows "The other side left"
 (`no_peer_left`). Not proved: that a link which opened only drops on a
@@ -685,25 +719,27 @@ description is `peerLeft`, and a failed reconnect dial lands in the ladder,
 not `netFail`. Its socket, timer, ladder (`redial_bounded`: the rewait dial
 counts as a ladder step), channel-race and save theorems all still hold;
 `rewait_on_deadline`, `rewait_on_peer_left`, `rewait_dial_failure_redials`
-and `nat_verdict_fails` witness the new paths. Real browsers:
-web/e2e/link-pairing.e2e.mjs (two Chromium contexts, real WebRTC, server.js)
-links two players, and links them again with no press after a first pairing
-that can never open; the second case fails on 29172ad4. It is not in CI's
-e2e shards, which run WebKit only, and WebKit never pairs two of its own
-contexts (it filters host candidates).
+and `nat_verdict_fails` witness the new paths.
+
+Real browsers: web/e2e/link-pairing.e2e.mjs (two Chromium contexts, real
+WebRTC, server.js) links two players, and links them again with no press
+after a first pairing that can never open; the second case fails on
+29172ad4. It is not in CI's e2e shards, which run WebKit only, and WebKit
+never pairs two of its own contexts (it filters host candidates).
 
 ## Resuming a dropped link (2026-10-19, d22e0527, `WebState/LinkResume`, `WebState/LinkRedial`)
 
 Matt: "Verify this formally with Lean. This behavior is complicated and even
 the happy case has design tradeoffs that might confuse users." Two models:
-`LinkResume` is the data plane (inputs, RESUME, pause, BYE, the give-up
-clock, what each screen shows; any redial failure is one `restart` event),
-`LinkRedial` the control plane (the retry-code rendezvous on the server,
-sockets, the pairing/answer/re-rendezvous timers, suspension). Both have a
-`Cfg` for the prototype (fd7b0432) where the review changed things, and
-reproduce the review's bugs there (`bug_dead_end`, `bug_linked_close`,
-`bug_early_resume_lost`), which is some evidence the models can see what
-matters.
+- `LinkResume` is the data plane: inputs, RESUME, pause, BYE, the give-up
+  clock, what each screen shows. Any redial failure is one `restart` event.
+- `LinkRedial` is the control plane: the retry-code rendezvous on the
+  server, sockets, the pairing/answer/re-rendezvous timers, suspension.
+
+Both have a `Cfg` for the prototype (fd7b0432) where the review changed
+things, and reproduce the review's bugs there (`bug_dead_end`,
+`bug_linked_close`, `bug_early_resume_lost`), which is some evidence the
+models can see what matters.
 
 **Proved** (every reachable state):
 - `inputs_exact`: an input a side reads is exactly the next frame it needs,
@@ -734,12 +770,12 @@ matters.
 
 | # | Severity | Finding | Fix |
 |---|---|---|---|
-| R1 | Medium (a drop while the iPhone is in the background, or a Pause press in the round trip after a channel opens) | **Pause swaps across a resume** (`bug_resume_pause_swap_ios`, `bug_resume_pause_swap_web`). Each side answered the friend's RESUME by sending its own pause state, and the friend applied it, so two answers that differ cross and swap. On the iPhone path, its background pause is lost with the connection; the app won't unpause in the background, says paused; the browser, told the app is paused, keeps running and says running: the browser ends paused, the app running (in the background, and still after it returns). One sees the pause screen, the other a stall, until someone presses Pause twice. | Both sides keep the flags their RESUME carried and set pause and 2x from the two RESUMEs (`rbResumeState` / `NetLink.resumeState`, Lean `finalPause`), sending nothing more. Running wins, except that a side paused and away (hidden tab, app in the background) keeps both paused; slow wins for 2x. A pause change after a side's own RESUME went out (a press, the app going to or coming back from the background) is newer than that decision: it holds and is relayed as an ordinary press (`bug_bg_after_open_ios` → `regress_bg_after_open_ios`: on d22e0527 an app backgrounded in that window ended unpaused in the background). `regress_resume_pause_swap_*`, `resume_agrees`; web/tests/link-resume-pause.test.mjs (6 of its 10 fail on d22e0527); ios/e2e/link-resume.mjs "the app paused in the background across a drop". Builds without the fix still converge with ones with it: only the old side answers, after its RESUME, and the new side takes its answer. |
-| R3 | Medium (paused together, or stalled, for 3 minutes, then a network blip) | **A long quiet link reads as given up** (`bug_long_quiet_then_drop_ends`). `rbBeginResume` ends at once when the friend has been silent longer than its 180 s give-up, but nothing crosses a link while both are paused: a drop after a 3-minute pause (the trade lobby, a snack) ended both sessions with no redial. | A keepalive: `RB_PING` (15) every 20 s while started and not redialing, on both platforms; older builds ignore the kind. `regress_long_quiet_keepalive`; unit test "a ping keeps the friend's silence clock fresh". |
-| R4 | Low (a close or BYE arriving in a few milliseconds) | **The friend's close during our own Disconnect redialed** (found by the review, not the model: `finish` is atomic there). `netShutdown` puts `net` back for `await rbTeardown()` with the channel still open; its `onclose` (or a BYE) then ran `rbDropped`: a rendezvous socket on the retry code nothing closed, and "Reconnecting…" over a game that had just left the link. iOS clears its session first. | The ending session is marked (`s.ending`); `rbDropped` and `rbMessage` ignore it. Unit test "the friend's close during our own Disconnect's teardown doesn't redial" (fails on d22e0527). |
+| R1 | Medium (a drop while the iPhone is in the background, or a Pause press in the round trip after a channel opens) | **Pause swaps across a resume** (`bug_resume_pause_swap_ios`, `bug_resume_pause_swap_web`). Each side answered the friend's RESUME by sending its own pause state, and the friend applied it, so two answers that differ cross and swap. On the iPhone path, its background pause is lost with the connection. The app, which won't unpause in the background, says paused; the browser says running. They swap: the browser ends paused, the app running (in the background, and still after it returns). One sees the pause screen, the other a stall, until someone presses Pause twice. | Both sides keep the flags their RESUME carried and set pause and 2x from the two RESUMEs (`rbResumeState` / `NetLink.resumeState`, Lean `finalPause`), sending nothing more. Running wins, except that a side paused and away (hidden tab, app in the background) keeps both paused; slow wins for 2x. A pause change after a side's own RESUME went out (a press, the app going to or coming back from the background) is newer than that decision: it holds and is relayed as an ordinary press (`bug_bg_after_open_ios` → `regress_bg_after_open_ios`: on d22e0527 an app backgrounded in that window ended unpaused in the background). `regress_resume_pause_swap_*`, `resume_agrees`; web/tests/link-resume-pause.test.mjs (6 of its 10 fail on d22e0527); ios/e2e/link-resume.mjs "the app paused in the background across a drop". Builds without the fix still converge with ones with it: only the old side answers, after its RESUME, and the new side takes its answer. |
+| R3 | Medium (paused together, or stalled, for 3 minutes, then a network blip) | **A long quiet link reads as given up** (`bug_long_quiet_then_drop_ends`). `rbBeginResume` ends at once when the friend has been silent longer than its 180 s give-up, but nothing crosses a link while both are paused. A drop after a 3-minute pause (the trade lobby, a snack) ended both sessions with no redial. | A keepalive: `RB_PING` (15) every 20 s while started and not redialing, on both platforms; older builds ignore the kind. `regress_long_quiet_keepalive`; unit test "a ping keeps the friend's silence clock fresh". |
+| R4 | Low (a close or BYE arriving in a few milliseconds) | **The friend's close during our own Disconnect redialed** (found by the review, not the model: `finish` is atomic there). `netShutdown` puts `net` back for `await rbTeardown()` with the channel still open. Its `onclose` (or a BYE) then ran `rbDropped`: a rendezvous socket on the retry code nothing closed, and "Reconnecting…" over a game that had just left the link. iOS clears its session first. | The ending session is marked (`s.ending`); `rbDropped` and `rbMessage` ignore it. Unit test "the friend's close during our own Disconnect's teardown doesn't redial" (fails on d22e0527). |
 | R5 | Hardening | The first channel's `onmessage` (`wireChannel`) had no `net.dc === dc` guard; it relied on browsers dropping messages after `close()`. | Guarded. |
-| R6 | Medium (the moment people give up: Disconnect, or closing the tab, while "Reconnecting…") | **Disconnect while redialing wasn't heard** (`bug_quit_while_redialing_unheard`, `bug_quit_unheard`; trade-off 1 below, before 2026-10-20). With no channel open there was nothing to say BYE on: the friend's card said "Both games are paused and pick up where they left off" for up to 3 minutes, then "Couldn't reconnect", which reads as a network failure. | **A goodbye note** (Matt chose the server change). Every session end of a side that holds the retry code, other than on the friend's own goodbye, posts `POST /bye {code, id, why}` to the signaling server: a beacon on the web (it survives the tab closing), a background-task request on iOS, waited on briefly at app termination. Both servers (server.js and server.nim) keep the note for 10 minutes, on retry codes only (16 characters, never a typed code). A friend waiting on the code is told `{"t":"bye"}` at once, and its later rendezvous gets the same. Seats held by the leaver's page id are dropped silently, and the leaver's own late rendezvous isn't turned away. An empty page id never counts as the leaver's (the model showed that would leave the friend waiting). The friend ends with "Peer disconnected", or "Couldn't reconnect" for a give-up. `regress_quit_while_redialing_heard`, `regress_quit_heard` (the waiting friend, a later rendezvous, the note beating the leaver's own socket close), `witness_quit_mid_pairing`, `quit_heard`, `heard_only_after_end`. web/signaling/server.test.mjs "goodbye notes" (both servers), web/tests/link-bye-note.test.mjs, the e2e cases. Older clients ignore `bye` (they redial until their give-up, as before); an older server answers the POST with its health line. |
-| R7 | Low (two presses within a round trip) | **Crossing presses split the pause** (`bug_pause_presses_cross`; trade-off 7 below, before 2026-10-20). Pause and 2x went as "now" messages and each side took whichever arrived last: two quick presses on one side and one on the other, within a round trip, crossed, and each side's last message was the other's. One side showed the pause screen, the other stalled on "waiting for friend" until someone pressed again. Game inputs never had this: they are tagged with their frame. | **Numbered presses** (Matt chose them over tying pause to a frame: frames stand still while paused, so an unpause can't be tied to one). Each press carries a number one past the highest its side has seen; both sides keep the highest, the host's on a tie (`rbPress`/`rbPressIn`, iOS `NetLink.press`/`pressIn`), so they end on the same press whatever order the messages arrive in. A press that loses a crossing is dropped, as if the winner had come a moment later. A resume restarts both counters from the shared decision as the host's press 0. 2x has its own counter. `regress_pause_presses_cross`, `presses_agree`; web/tests/link-press-seq.test.mjs (6 of its 7 fail on 8362053b). Wire: `[kind][on][n u32]`; an older build reads byte 1 only, and its 2-byte messages are applied as before. |
+| R6 | Medium (the moment people give up: Disconnect, or closing the tab, while "Reconnecting…") | **Disconnect while redialing wasn't heard** (`bug_quit_while_redialing_unheard`, `bug_quit_unheard`; trade-off 1 below, before 2026-10-20). With no channel open there was nothing to say BYE on. The friend's card said "Both games are paused and pick up where they left off" for up to 3 minutes, then "Couldn't reconnect", which reads as a network failure. | **A goodbye note** (Matt chose the server change). Every session end of a side that holds the retry code, other than on the friend's own goodbye, posts `POST /bye {code, id, why}` to the signaling server: a beacon on the web (it survives the tab closing), a background-task request on iOS, waited on briefly at app termination. Both servers (server.js and server.nim) keep the note for 10 minutes, on retry codes only (16 characters, never a typed code). A friend waiting on the code is told `{"t":"bye"}` at once, and its later rendezvous gets the same. Seats held by the leaver's page id are dropped silently, and the leaver's own late rendezvous isn't turned away. An empty page id never counts as the leaver's (the model showed that would leave the friend waiting). The friend ends with "Peer disconnected", or "Couldn't reconnect" for a give-up. `regress_quit_while_redialing_heard`, `regress_quit_heard` (the waiting friend, a later rendezvous, the note beating the leaver's own socket close), `witness_quit_mid_pairing`, `quit_heard`, `heard_only_after_end`. web/signaling/server.test.mjs "goodbye notes" (both servers), web/tests/link-bye-note.test.mjs, the e2e cases. Older clients ignore `bye` (they redial until their give-up, as before); an older server answers the POST with its health line. |
+| R7 | Low (two presses within a round trip) | **Crossing presses split the pause** (`bug_pause_presses_cross`; trade-off 7 below, before 2026-10-20). Pause and 2x went as "now" messages and each side took whichever arrived last. Two quick presses on one side and one on the other, within a round trip, crossed, and each side's last message was the other's. One side showed the pause screen, the other stalled on "waiting for friend" until someone pressed again. Game inputs never had this: they are tagged with their frame. | **Numbered presses** (Matt chose them over tying pause to a frame: frames stand still while paused, so an unpause can't be tied to one). Each press carries a number one past the highest its side has seen. Both sides keep the highest, the host's on a tie (`rbPress`/`rbPressIn`, iOS `NetLink.press`/`pressIn`), so they end on the same press whatever order the messages arrive in. A press that loses a crossing is dropped, as if the winner had come a moment later. A resume restarts both counters from the shared decision as the host's press 0. 2x has its own counter. `regress_pause_presses_cross`, `presses_agree`; web/tests/link-press-seq.test.mjs (6 of its 7 fail on 8362053b). Wire: `[kind][on][n u32]`; an older build reads byte 1 only, and its 2-byte messages are applied as before. |
 | R8 | Low (a give-up in the instant after a new channel opens) | **A give-up read as a Disconnect** (`bug_give_up_reads_as_disconnect`; trade-off 5). The BYE carried no reason, so a friend that had just resumed showed "Peer disconnected" for a session that had failed. | **The BYE says why** (Matt, 2026-10-20): `[14][0 left / 1 gave up]` from `netShutdown`'s `why` (iOS `shutdown(why:)`), the same split as the goodbye note; a gave-up BYE ends the friend with "Couldn't reconnect". `bye_reason_heard` (`QInv.byeWhy`: every BYE in flight says how its sender ended), `regress_give_up_reads_as_gave_up`. An old build's bare `[14]` reads as left; an old build ignores the byte. |
 | R9 | Medium (a killed app, e.g. swiped away while suspended) | **A killed side strands its friend for 3 minutes** (`kill_strands_friend`, the leftover of R6), behind a card that read like a network fault. | **The goodbye on relaunch, and an honest card.** Each side keeps its session's retry code and page id (the tab's sessionStorage; iOS UserDefaults), refreshed when it goes to the background, a reconnect starts or a resume completes, and dropped at any end its own code runs. Started again within 10 minutes with one left over, it posts the "left" goodbye note; on the web only if no live tab answers for that code and id (a duplicated tab copies sessionStorage). `Event.relaunch`, `relaunch_heard_next`, `regress_kill_heard_on_relaunch`. A friend who was away (hidden tab, app in the background) when the link dropped shows "Friend switched away … Waiting for m:ss" instead of "Reconnecting… Trying for m:ss" (display only). Never started again, the friend still waits its 180 s. |
 | R2 | Low (inefficiency) | **iOS: back in the foreground mid-pairing restarts it** (`LinkRedial` iOS note). `redialNowIfWaiting` restarted whenever the channel wasn't open, tearing down a pairing about to open (the friend then restarts too). | Only with no pairing (`rsPeer == nil`); a stale pairing is left to its 20 s deadline. |
@@ -749,12 +785,11 @@ how confusing they are):
 
 1. *Disconnect while "Reconnecting…" isn't heard*: **fixed** by the goodbye
    note (R6). What is left: a page or app killed outright runs nothing and
-   leaves no note (`kill_strands_friend`), so the friend still redials for
-   its 180 s. On iOS, swiping away a suspended app is such a kill. Since R9
-   the goodbye goes out as soon as it starts again
-   (`regress_kill_heard_on_relaunch`), and a friend who was away when the
-   link dropped is shown as away, not as a network fault; never started
-   again, the friend still waits its 180 s.
+   leaves no note (`kill_strands_friend`). On iOS, swiping away a suspended
+   app is such a kill. Since R9 the goodbye goes out as soon as the killed
+   side starts again (`regress_kill_heard_on_relaunch`), and a friend who
+   was away when the link dropped is shown as away, not as a network fault.
+   Never started again, the friend still waits its 180 s.
 2. *The two give-up clocks drift* (`give_up_clocks_drift`). If a side
    resumes and the new channel dies before its own RESUME lands, that side
    starts a fresh 180 s while the friend's runs on. Since R6 the friend's
@@ -763,14 +798,14 @@ how confusing they are):
    more minutes (`regress_give_up_clocks_drift`).
 3. *A Pause pressed during the drop is undone*: **fixed** (2026-10-20,
    Matt: "Should we even allow users to press Pause or other buttons during
-   the link-dropped period?"). Link setup already held the game behind a
-   full-screen modal (web) / sheet (iOS); the drop didn't: the
-   "Reconnecting…" card covers only the picture, so Pause, 2x and the
-   game's buttons worked, and a Pause pressed then was undone at the
-   reconnect if the friend kept running (`pause_in_drop_undone`). Now the
-   game is held while redialing, as at setup: the frame loop doesn't tick
-   and Pause and 2x are off (greyed; Space and Shift+Tab do nothing, the
-   pad's menu opens without pausing). Disconnect, Menu and Home stay usable. `no_press_in_drop`,
+   the link-dropped period?"). The "Reconnecting…" card covers only the
+   picture, so Pause, 2x and the game's buttons worked during the drop, and
+   a Pause pressed then was undone at the reconnect if the friend kept
+   running (`pause_in_drop_undone`). Now the game is held while redialing,
+   as link setup already held it behind a full-screen modal (web) / sheet
+   (iOS): the frame loop doesn't tick and Pause and 2x are off (greyed;
+   Space and Shift+Tab do nothing, the pad's menu opens without pausing).
+   Disconnect, Menu and Home stay usable. `no_press_in_drop`,
    `regress_no_press_in_drop` (`Cfg.freeze`). The reconnect still decides
    pause from both RESUMEs, for what isn't a press: the iPhone's own pause
    for the background, a hidden tab, a pause message lost with the
@@ -782,22 +817,22 @@ how confusing they are):
    guest's first rendezvous ends it ("Couldn't reconnect") instead of 180 s
    alone (`regress_start_window_heard`).
 5. *Giving up after the new channel opened reads as a Disconnect*:
-   **fixed** by the BYE's reason byte (R8). Its BYE told a friend that just
-   resumed "Peer disconnected" (`bug_give_up_reads_as_disconnect`).
+   **fixed** by the BYE's reason byte (R8;
+   `bug_give_up_reads_as_disconnect`).
 6. *The "Trying for m:ss" clocks differ* (`reconnect_clocks_differ`): each
    counts from its own side's notice of the drop, up to ~16 s apart (WebRTC's
    disconnected → failed).
-7. *Crossing presses split the pause*: **fixed** by numbered presses (R7).
-   Two quick Pause presses on one side and one on the other, within a round
-   trip, crossed on a live link and split the pause
-   (`bug_pause_presses_cross`). Now both sides end on the highest-numbered
+7. *Crossing presses split the pause*: **fixed** by numbered presses (R7;
+   `bug_pause_presses_cross`). Both sides now end on the highest-numbered
    press; the press that lost is dropped (`presses_agree`).
 
-Also from the review, left as they are: `paused` includes holds (the picture
-flight, Report a Bug), so a remote unpause during a hold flips the player's
-own choice; that predates the resume and affects a live link too. One run in
-four of the iOS "roles swapped" case still took a 10 s answer-timer detour
-before resuming (liveness, not safety; `no_dead_end` covers it).
+Also from the review, left as they are:
+- `paused` includes holds (the picture flight, Report a Bug), so a remote
+  unpause during a hold flips the player's own choice. That predates the
+  resume and affects a live link too.
+- One run in four of the iOS "roles swapped" case still took a 10 s
+  answer-timer detour before resuming (liveness, not safety; `no_dead_end`
+  covers it).
 
 Not modelled: real-device iOS suspension timing, the server's rendezvous
 rate limits, the away card's own clock, and liveness in general (the
