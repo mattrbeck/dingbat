@@ -93,16 +93,10 @@ LYC and mode-1 sources on it, and dispatches the timer one M-cycle ahead of
 its IF bit (`TIMER_IRQ_RUN_LEAD`): the retrigger rows say the timer, LYC and
 mode-1 sources need one M-cycle more between rise and dispatch than that,
 or the mode-2 source one less, without moving where any of them is read
-back (the absolute `m2int_*`, `lycint_*`, `tima/*` rows are green). Second-
-emulator cross-check (gambatte-core `video.cpp`, `lyc_irq.cpp`, `tima.cpp`,
-`interrupter.cpp`, read for facts): it flags the mode-2 source 4 cycles
-before the LY increment, LYC and mode 1 2 cycles before it, LYC = 0 6
-cycles into line 153, the timer 3 cycles after its tap edge, dispatches at
-the first instruction boundary at or after the flag, and clears IF 16
-cycles into the dispatch — the same shape, the sources' phases differing,
-not the clear. The instrument is `-d:gb_stat_src_trace` against these
-seven families (A3's per-source table); `tools/gbppu/gam_dispatch.py`
-already reads the mode-0 side.
+back (the absolute `m2int_*`, `lycint_*`, `tima/*` rows are green). The
+instrument is `-d:gb_stat_src_trace` against these seven families (A3's
+per-source table); `tools/gbppu/gam_dispatch.py` already reads the mode-0
+side.
 
 ### A3. A STAT source enabled, disabled or handed over across a line edge
 
@@ -226,9 +220,8 @@ the full 5157-row list:
   `m1/ly143_late_m0enable_lcdoffset1_1`, `oam_access/pre{read,write}_
   lcdoffset1_1`, `vram_m3/pre{read,write}_lcdoffset2_1`) plus the LYC-held
   enables (`m2enable/late_enable_after_lycint{,_disable}_2`, `lyc1_late_
-  m2enable_lycdisable_1`, `m1/m1irq_m2enable_lyc_2`). gambatte-core's LYC
-  event sits at line cycle 454 (`lyc_irq.cpp`, `lycReg * 456 - 2`), the same
-  dot. The six it loses (`m1/lyc143_late_m{0,2}enable_lycdisable_2`,
+  m2enable_lycdisable_1`, `m1/m1irq_m2enable_lyc_2`). The six it loses
+  (`m1/lyc143_late_m{0,2}enable_lycdisable_2`,
   `offset2_lyc8fint_m1irq_2`, `m2enable/late_enable_lcdoffset2_2`, `vram_m3/
   pre{read,write}_lcdoffset1_2`) are rows where the ending line's match must
   NOT dip before a same-M-cycle enable lands (closed 2026-11-12 by the
@@ -262,14 +255,12 @@ each loses 26..34 `speedchange*_ly44_m3*` ladder rows and takes no
 `lcd_offset` row).
 
 **Closed (A3), 2026-09-22.** The last row, `m1/ly143_late_m2enable_ds_
-lcdoffset1_1`, closed with `M2_144_EARLY_DOT_DS = 455` (gambatte-core raises
-the line-144 pulse 8 CPU cycles before the line ends) plus
-`IF_READ_M2_144_TIE_DS` (an IF read starting on that dot sees it: the event
-and the read tie on a whole dot and gambatte resolves the event first). The
-earlier suspicion that the double-speed LCD-on seed sat a dot off was a
+lcdoffset1_1`, closed with `M2_144_EARLY_DOT_DS = 455` (the line-144 pulse
+8 CPU cycles before the line ends) plus `IF_READ_M2_144_TIE_DS` (an IF read
+starting on that dot sees it: `enable_display/frame{0,1}_m2irq_count_ds_2`).
+The earlier suspicion that the double-speed LCD-on seed sat a dot off was a
 tracing artefact: IF writes log one dot into their M-cycle
-(`IF_WRITE_LAND_DOTS_DS`); every other write sits at gambatte + 3 on both
-LCD-on and switch-reached grids.
+(`IF_WRITE_LAND_DOTS_DS`).
 
 The knob sweep of 2026-09-22 (`+-1` of every GB `{.intdefine.}`, 206 knobs,
 red rows first and every hit validated on the full 5157-row list from a
@@ -500,9 +491,7 @@ the window start on the last pixel too, where the DMG charges it first
 `gambatte_row_reads_powerup_objpal`). The seven `scx_0761c0` rows closed
 2026-09-22 with `SCX_BORROW_DISCARD_END`: after a mid-discard store wraps the
 discard, the map column borrows against where the discard ended, one tile
-back per wrap (gambatte-core restarts its pixel position at the discard's
-end; a side-by-side trace of its map reads against dingbat's FTILE lines put
-the `$C0` store's first tile one column apart).
+back per wrap.
 
 **Behaviour.** The BG fetcher's map column is a live sum
 `((SCX + 8k - F) shr 3) and 31` — a store that lowers `SCX and 7` below the
@@ -523,10 +512,9 @@ fetch under a store.
 
 The three `spx2` rows are not timing: pixel 0 is the object's column 6
 drawn in OBJ palette 0 colour 2, which the ROM never writes. Pan Docs leaves
-CGB OBJ palette RAM unspecified after boot; dingbat fills `$FF`, and
-gambatte-core seeds it from one console's power-on dump, so the reference
-encodes that unit's garbage (the same class as the `oamdma_src{FE00,FF00}`
-WRAM rows in NotScored).
+CGB OBJ palette RAM unspecified after boot; dingbat fills `$FF`, and the
+reference's colour there is a word no ROM write sets (the same class as the
+`oamdma_src{FE00,FF00}` WRAM rows in NotScored).
 
 Verified link by link 2026-10-14:
 - *ROM.* Source and binary agree: one object (OAM 0: Y `$10`, X `$02`,
@@ -538,11 +526,8 @@ Verified link by link 2026-10-14:
   (column 7, transparent) and `spx0` show no object pixel and pass. The
   `attrib` twin leaves VBK = 1, which moves the BG map writes, not the object.
 - *Frames.* The 8 differing pixels are exactly x = 0, y = 0..7. The
-  reference has (33,146,108), which is `$4261` (r1 g19 b16) through
-  gambatte's test-runner colour LUT and is no BG colour (all four are grey).
-  `$4261` is the word gambatte-core's power-on table holds at OBJ palette 0
-  colour 2 (bytes 4-5, `$61 $C2`); that table is copied in regardless of
-  whether its runner executes a boot ROM.
+  reference has (33,146,108), which is `$4261` (r1 g19 b16) through the
+  suite's CGB colour conversion and is no BG colour (all four are grey).
 - *Geometry.* A scratch build that put `$4261` in that one word passes all
   three rows (9/9 of the spx family), so dingbat's object/SCX timing already
   matches the reference pixel for pixel. SameBoy (CGB C, its own boot ROM)
@@ -632,9 +617,8 @@ still misses.
 **Closed 2026-09-22, second pass** (`WIN_LATCH_END_DMG = 451`,
 `WIN_LATCH_END_CGB = 454`, `WIN_CHECK_DEFER_DMG = 1`): a WY == LY match seen
 at or after that dot no longer latches the window, because the per-line check
-that carries it has already run (gambatte-core checks LY == WY at line cycle
-450 and LY + 1 == WY at 454); the DMG's comparator samples one dot after the
-write (its WY copy lags 2 cycles there). +14: the `_3` DMG arms of
+that carries it has already run; the DMG's comparator samples one dot after
+the write. +14: the `_3` DMG arms of
 `late_wy_{10to0_ly1,FFto0_ly2,FFto1_ly2,FFto2_ly2_scx3}` and
 `late_enable_afterVblank`, the CGB `_2` arms and `_ds_2`/`ds_lcdoffset1_2`
 members of the same families. Each constant is bracketed at its declaration.
@@ -710,7 +694,7 @@ writes there are OR = new, so they show nothing.
 * Provenance (T4): no DMG reference here is a capture. gambatte's
   `_dmg08.png` were committed in svn r246 (git 9dc2f7ec, 2011-07-23), a
   commit whose own log says gambatte then passed all 2755 tests. They are
-  framebuffer dumps compared exactly by `testrunner.cpp`. mealybug's
+  framebuffer dumps, compared exactly. mealybug's
   `expected/` are "screenshots from my Game Boy emulator", with blurry
   photos of a DMG-blob alongside. AGE's are its own renders, checked
   against a photo of a DMG-CPU-08 with a CPU C. daid's `_0`/`_1`/`_2` are
@@ -802,8 +786,7 @@ at the declaration in `gb.nim`.
 pushes the PC after the HALT and 12 dots later than dingbat's; `7fffstop`
 wants the stall's prefetched operand read from VRAM before the block, as
 `7fffhalt` does; the `pc_7ffe` pair is the CPU's fetch from locked VRAM
-during a transfer. How the rules were read: the gambatte oracle trace in
-`tools/gbppu/README.md` ("Side-by-side event traces").
+during a transfer.
 
 ### D2. OAM DMA against the mode-2 scan and the CPU
 
@@ -943,7 +926,7 @@ the C/D placement of `ly_lyc*`, and the fork's CGB E score does not ask.
 
 ## H. The APU as heard: gambatte's `_outaudio` rows
 
-gambatte scores 220 of its ROMs on sound, not pixels (`test/testrunner.cpp`):
+gambatte scores 220 of its ROMs on sound, not pixels:
 after the run, `audio0` iff all 35,112 samples of the final frame are equal,
 `audio1` otherwise, on the raw 2 MHz mix with no output filter. The harness
 reproduces the rule with a probe on the mixer (`GbApu.probe_*`, armed by
@@ -1030,9 +1013,8 @@ model (refuted, shipped compiled out) greened all 13 and turned
 `freq_change_timing-cgb0BC` red, one NOP early in BOTH halves, by charging
 the re-phase's 3 T to the first trigger after a single-speed power-on
 instead of to the switch; it was removed 2026-11-12 pending a clean-room
-re-derivation. gambatte-core itself (built 2026-10-14 from
-pokemon-speedrunning/gambatte-core master, headless driver over
-libgambatte) passes all 36 `speedchange` audio rows and FAILS the SameSuite
+re-derivation. Stock gambatte (built 2026-10-14 from upstream master, run
+headless) passes all 36 `speedchange` audio rows and FAILS the SameSuite
 row: `00 00 0F 0F FF FF F0 F0` / `0F 0F 0F 0F 0F FF FF FF` against
 `00 00 00 0F 0F FF FF F0` / `00 00 0F 0F 0F 0F 0F 0F`, with the real CGB
 boot ROM and from its post-boot state alike. The boot hand-off is not a
@@ -1998,8 +1980,9 @@ One line each; the knob's own comment carries the derivation.
   `HDMA_START_GRANT_FETCH`, `GDMA_AFTER_FETCH` (DMA hand-over at the next
   opcode fetch); `OAMDMA_SRCCHANGE_BUS` (D2); `SCX_LATCH_LCDON_EXTRA{,_CGB}`
   (enable_display 184/184). Still open from that pass: `oamdma_src0000_
-  busyint0002` (the dispatch's pushes land 3 M-cycles ahead of gambatte's
-  against the DMA; `IRQ_PUSH_T` 12 fixes it and loses 19 IF-clear rows),
+  busyint0002` (the dispatch's pushes land 3 M-cycles ahead of the DMA
+  slots the row reads them from; `IRQ_PUSH_T` 12 fixes it and loses 19
+  IF-clear rows),
   `tima/tc00_late_tc01_{5,7}` (a TAC-glitch overflow's $00 window, A6),
   the `lcd_offset` phase rows, the serial `*_wait_read_if_2`
   rows (closed 2026-09-23, F1), `window/late_disable_scx5_ds_1` (a sixth revocable dot

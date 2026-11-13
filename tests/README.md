@@ -392,7 +392,7 @@ scores them INFO).
 ## The gambatte suite
 
 3,524 ROMs in the game-boy-test-roms bundle, expanding to 5,005 scored rows. Verdict
-mechanism per the bundle's howto and gambatte-core's `test/testrunner.cpp`:
+mechanism per the bundle's howto and gambatte's own test runner:
 
 - Every ROM runs exactly 15 LCD frames from the post-boot state, then the frame is read
   (14, 16 and 30 score identically; every ROM has settled).
@@ -413,7 +413,7 @@ mechanism per the bundle's howto and gambatte-core's `test/testrunner.cpp`:
 prints the top-row tiles, and a few hundred ROMs whose names state their digits resolve
 all 16 shapes by majority vote.
 
-The 220 `_outaudio0/1` rows use gambatte's own rule (`test/testrunner.cpp`): after the run,
+The 220 `_outaudio0/1` rows use gambatte's own rule: after the run,
 `audio0` iff all 35,112 samples of the final frame are identical, `audio1` otherwise. Its
 stream is the raw mix at 2 MHz with no output filter, so `--mode=gambatte` arms a probe on
 the mixer (`GbApu.probe_*`) that runs the sample event every 2 T-cycles over the final frame

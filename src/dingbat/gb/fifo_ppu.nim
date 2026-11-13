@@ -237,8 +237,7 @@ const OBJ_SCAN_DOT_ADJ* {.intdefine.} = 0'i32
 const OAM_SCAN_DMA_EDGE_DS* {.intdefine.} = 2
   ## Dots the OAM DMA's take/give edge sits earlier against the mode-2 scan at
   ## double speed: object N is read on dot 2N + 2 there, the CPU's bus half
-  ## landing two dots later against the PPU than at single speed (a write is
-  ## gambatte's cycle + 3 at double speed, + 1 at single). The six
+  ## landing two dots later against the PPU than at single speed. The six
   ## oamdma/late_sp*_ds rows, with CGB_OBJ_FETCH_OFF; 0 loses three of them,
   ## 3 four `_ds_2` twins.
 const LCDON_NO_OAM_SCAN* {.intdefine.} = 1

@@ -41,11 +41,6 @@ a reference PNG, `mGBA suite <section>` a section of mGBA's test ROM.
   the `m2int_*` families, whose DMG and CGB twins expect the same value, all
   missed by one M-cycle on CGB at 160. 161 shipped 2026-08..09 on the `_1`
   rows alone (the `_2` rows were red from the day the suite was scored).
-- Cross-check (gambatte-core `initstate.cpp`, read for facts): its post-boot
-  state puts the CGB at frame cycle `144 * 456 + 164` and the DMG at
-  `153 * 456 + 396`, both on the M-cycle grid; dingbat's dot index is one
-  ahead of gambatte's line cycle on both machines (165 / 397), which 161 was
-  not.
 
 ### A CPU write commits at the start of its M-cycle
 - Site: `mem_write` (`memory.nim`) runs the bus tick, lands the byte, then runs
@@ -485,17 +480,16 @@ a reference PNG, `mGBA suite <section>` a section of mGBA's test ROM.
 
 ### The comparator steps two dots before the line boundary
 
-gambatte-core schedules its LYC interrupt event at frame cycle
-`LYC * 456 - 2` (`lyc_irq.cpp`) and its mode-1 event at `144 * 456 - 2`:
-both sources rise two dots before the LY increment. dingbat's LY steps on
-the boundary and its STAT sources rose there too, which the ordinary CPU
-grid cannot tell apart (the boundary is the last dot of an M-cycle, both
-are seen at the same instruction end). A KEY1 speed-switch round trip
-leaves the CPU grid three dots behind the PPU's (E1), and there the two
-differ by a whole M-cycle: every gambatte `*_lcdoffset1_1` row on the LYC
-and mode-1 sources is one dispatch late until the comparator's LY steps at
-dot 454 (`STAT_LYC_LY_LEAD_DOTS`). Single speed only; the double-speed
-grid's constants are a coupled set and move together or not at all.
+The LYC and mode-1 sources rise two dots before the LY increment. dingbat's
+LY steps on the boundary and its STAT sources rose there too, which the
+ordinary CPU grid cannot tell apart (the boundary is the last dot of an
+M-cycle, both are seen at the same instruction end). A KEY1 speed-switch
+round trip leaves the CPU grid three dots behind the PPU's (E1), and there
+the two differ by a whole M-cycle: every gambatte `*_lcdoffset1_1` row on
+the LYC and mode-1 sources is one dispatch late until the comparator's LY
+steps at dot 454 (`STAT_LYC_LY_LEAD_DOTS`). Single speed only; the
+double-speed grid's constants are a coupled set and move together or not at
+all.
 
 ### ... and the mode-1 source and the vblank request rise with it
 - Claim: entering vblank is the same event: at dot 454 of line 143 the
@@ -774,8 +768,7 @@ grid's constants are a coupled set and move together or not at all.
   overwritten by the write (single speed). The LYC = 0 match on line 153
   rises on dot 6, one later than the source relatch had it.
 - Evidence: gambatte `m2int_m0irq/m2int_m0irq_scx3_ifw_{2,4}` (both
-  devices) against `ly0/lycint152_lyc0irq_ifw_1`; gambatte-core stores IF
-  after catching its sources up to the write's cycle + 1.
+  devices) against `ly0/lycint152_lyc0irq_ifw_1`.
 - Site: `IF_WRITE_LAND_DOTS` (memory.nim), `LYC_SRC_RELATCH_ADJ` (ppu.nim).
 
 ### A CGB dispatch clears a timer or serial request 2 T later
@@ -783,9 +776,7 @@ grid's constants are a coupled set and move together or not at all.
   serial lines later on CGB, so a timer or serial request rising in the
   dispatch's last T-cycles is still taken back there.
 - Evidence: gambatte `tima/tc00_irq_late_retrigger_3` [cgb],
-  `serial/start_wait_trigger_int8_read_if_2` [cgb]; gambatte-core's
-  acknowledge looks ahead 2 T for the LCD, 2 + CGB for the timer and 3 + CGB
-  for serial (`Memory::ackIrq`).
+  `serial/start_wait_trigger_int8_read_if_2` [cgb].
 - Site: `IRQ_SAMPLE_CGB_TIMER_SERIAL_ADD` (cpu.nim).
 
 ### The window's WY comparator samples five dots after a CGB write

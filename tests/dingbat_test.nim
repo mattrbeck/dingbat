@@ -1374,12 +1374,11 @@ proc gambatte_digit(t: array[8, uint8]): char =
       return "0123456789ABCDEF"[i]
   '?'
 
-# gambatte's `_outaudio0/1` verdict (test/testrunner.cpp,
-# evaluateStrTestResults): after the run, "audio0" iff every one of the final
-# frame's 35,112 samples equals the first, "audio1" otherwise. Its sample
-# stream is the raw mix at 2 MHz (one sample per two T-cycles) with no output
-# filter, so the probe runs the mixer at that cadence (GbApu.probe_period = 2)
-# and compares the pre-DC-blocker mix.
+# gambatte's `_outaudio0/1` verdict: after the run, "audio0" iff every one of
+# the final frame's 35,112 samples equals the first, "audio1" otherwise. Its
+# sample stream is the raw mix at 2 MHz (one sample per two T-cycles) with no
+# output filter, so the probe runs the mixer at that cadence
+# (GbApu.probe_period = 2) and compares the pre-DC-blocker mix.
 const GambatteAudioProbePeriod = 2
 
 proc gambatte_run(rom: string; cgb: bool; frames: int; audio = false): GB =

@@ -161,7 +161,7 @@ const HALT_IME_PENDING_REDO* {.intdefine.} = 1
   ## A HALT that finds IME on and IF & IE != 0 does not halt: the opcode after
   ## it was fetched without moving PC, the dispatch undoes that fetch and
   ## pushes the HALT's own address, and RETI runs the HALT again (the halt
-  ## bug's IME-on shape; gambatte-core models it as the prefetch undo).
+  ## bug's IME-on shape).
   ## gambatte `halt/late_m0int_halt_m0stat_scx{2,3}_3a` (both devices) and
   ## `scx3_3b` [dmg] halt again after the handler; 0 returns past the HALT.
 const DMG_HALT_MIN_MCYCLES* {.intdefine.} = 2
@@ -244,7 +244,7 @@ proc cpu_lock*(cpu: GbCpu) =
 const IRQ_PUSH_T* {.intdefine.} = 12
   ## T-cycles of internal wait charged before the dispatch's two push
   ## M-cycles. Ships 12 with IRQ_PUSH_LATE: three waits, then the pushes, the
-  ## low one being the dispatch's last M-cycle (gambatte-core's order). 0
+  ## low one being the dispatch's last M-cycle. 0
   ## (pushes first) and 8 (Pan Docs' wait-wait-push-push-jump) score alike
   ## everywhere but on an OAM DMA's bus: gambatte `oamdma/oamdma_src0000_
   ## busyint0002` (both devices) reads the pushed PC back from DMA slots
@@ -300,10 +300,10 @@ when HDMA_EDGE_BEATS_DISPATCH != 0:
 
 const IRQ_VECTOR_T* {.intdefine.} = 16
   ## T-cycles into the dispatch at which the vector is chosen: after the high
-  ## push, inside the fifth M-cycle's lead-in (gambatte-core picks it at the
-  ## low push's cycle, 16 in), so a request rising in the dispatch's fourth
-  ## M-cycle still wins on priority. IE is the value the high push left, and
-  ## a low push aimed at IF decides ahead of its own byte. gambatte
+  ## push, inside the fifth M-cycle's lead-in, so a request rising in the
+  ## dispatch's fourth M-cycle still wins on priority. IE is the value the
+  ## high push left, and a low push aimed at IF decides ahead of its own
+  ## byte. gambatte
   ## `irq_precedence/late_m0irq_vs_tima_scx{2,3}{,_halt}_1` (both devices: the
   ## mode-0 request rises 16 T in, beats the timer, and the handler reads the
   ## timer bit still set); 14 and 18 lose four, 4 (the old choice after the

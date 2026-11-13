@@ -6,8 +6,8 @@ const LCD_ON_HEAD_START* {.intdefine.} = 5'i32
 const LYC_JUST_CHANGED_HOLD_DS* {.intdefine.} = 2
   ## At double speed a STAT read whose M-cycle stepped LY still reports the
   ## comparison against the line being left while the dot counter is below
-  ## this: gambatte reads the bit set 4 dots before its line end and clear 3
-  ## before (`enable_display/frame{0,1}_m2stat_count_ds_1`, `lycint_lycflag_
+  ## this: the bit reads set 4 dots before the line end and clear 3 before
+  ## (`enable_display/frame{0,1}_m2stat_count_ds_1`, `lycint_lycflag_
   ## ds_3`, `ly0/lycint152_lyc0flag_ds_3`; +4, none lost). 3 loses
   ## `lcd_offset/offset1_lyc8fint_m1stat_ds_1`, 0 is the old clear-always.
 
@@ -994,8 +994,8 @@ const STAT_READ_M23_LEAD_DS* {.intdefine.} = 1
   ## its rise than STAT_READ_SAMPLE + _DS_ADD gives (modes 0 and 1 keep the
   ## full hold: `_DS_ADD` 0 for every mode loses 136 rows). Reachable only on
   ## the grid a speed-switch round trip leaves: gambatte `lcd_offset/
-  ## offset1_lyc99int_m{2,3}stat_count_ds_2` read line cycle 453/77 as the
-  ## new mode. 2 (mode 2 alone) loses sixteen `_ds_` rows.
+  ## offset1_lyc99int_m{2,3}stat_count_ds_2` read the new mode there.
+  ## 2 (mode 2 alone) loses sixteen `_ds_` rows.
 const STAT_M2_DMA_READS_0* {.intdefine.} = 1
   ## Whether a STAT read reports mode 0 for the OAM scan while an OAM DMA
   ## holds OAM (`dma_busy`, the same window the CPU's bus conflict uses; 1
@@ -1036,9 +1036,9 @@ proc stat_read_mode*(ppu: GbPpu; gb: GB): uint8 {.inline.} =
 # See m2_line144 below: 456 - 4 dots, i.e. one M-cycle before the line ends.
 const M2_144_EARLY_DOT_SS* = 452'i32
 const M2_144_EARLY_DOT_DS_D {.intdefine: "M2_144_EARLY_DOT_DS".} = 455
-  ## In double speed the line-144 pulse rises 8 CPU cycles (4 dots of
-  ## gambatte-core's line clock, dingbat's 455 on its +3 offset) before the
-  ## line ends. A STAT write landing on 454 is ahead of it (gambatte `m1/
+  ## In double speed the line-144 pulse rises 8 CPU cycles (4 dots; 455 on
+  ## dingbat's +3 offset) before the line ends. A STAT write landing on 454
+  ## is ahead of it (gambatte `m1/
   ## ly143_late_m2enable_ds_lcdoffset1_1`), and an IF read whose M-cycle
   ## starts on 455 sees it (IF_READ_M2_144_TIE_DS: `enable_display/
   ## frame{0,1}_m2irq_count_ds_2`, which alone held this at 454). 453 loses
@@ -1102,9 +1102,9 @@ const STAT_M2_EARLY_LY0* {.booldefine.} = false
 const STAT_M2_LY0_LEAD* {.intdefine.} = 1
   ## Line 0's OAM pulse rises with the comparator's lead instead
   ## (STAT_LYC_LY_LEAD_DOTS: dot 454 of line 153 at single speed, none in
-  ## double), where gambatte-core raises line 0's mode-2 event; the mode 1 -> 2
-  ## hand-over at the boundary is then no dip, and a STAT write in flight that
-  ## clears the enable is the enable the rise sees. gambatte
+  ## double); the mode 1 -> 2 hand-over at the boundary is then no dip, and
+  ## a STAT write in flight that clears the enable is the enable the rise
+  ## sees. gambatte
   ## `lyc153int_m2irq/lyc153int_m2irq_late_retrigger_2` (both devices),
   ## `m2enable/late_m1disable_ly0_2`, `lyc0_late_m2enable_lycdisable_2`,
   ## `m1/m1irq_late_enable_2`, `lcd_offset/offset{1,2}_lyc99int_m2irq_count_2`,
@@ -1354,8 +1354,8 @@ proc lyc_settling*(ppu: GbPpu): bool {.noinline.} =
 # the M-cycle a flat four overshoots them by.
 const LYC_SRC_RELATCH_LEAD* {.intdefine.} = 1
 const LYC_SRC_RELATCH_ADJ* {.intdefine.} = 1
-  ## Dots added to that source relatch: dot 6 of line 153 at single speed,
-  ## where gambatte-core raises its LYC = 0 event (dot 8 in double speed).
+  ## Dots added to that source relatch: dot 6 of line 153 at single speed
+  ## (dot 8 in double speed).
   ## Found with IF_WRITE_LAND_DOTS: gambatte `ly0/lycint152_lyc0irq_ifw_1`
   ## clears IF on dot 5 and must still see the request, and on its own it
   ## takes `lycEnable/lyc0_ff41_disable_ds_1`, `lyc0_m1disable_ds_1`. 2 loses

@@ -1942,8 +1942,8 @@ const NotScored: seq[(string, string)] = @[
     "object's column 6 in OBJ palette 0 colour 2, which the ROM never " &
     "writes (no OCPS/OCPD store in any of the three). Pan Docs: in CGB mode " &
     "the boot ROM leaves object colours uninitialised apart from byte 0, " &
-    "and the CGB boot ROM disassembly agrees. The reference colour is the " &
-    "word gambatte-core's power-on table holds there; with that one word " &
+    "and the CGB boot ROM disassembly agrees. The reference colour is a " &
+    "word no ROM write sets; with that one word " &
     "in place dingbat matches all three frames, and SameBoy draws the same " &
     "pixel in its own random word. The DMG halves, `spx0`/`spx1` and the " &
     "other scx_during_m3 rows ARE scored. " &

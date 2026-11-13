@@ -25,9 +25,10 @@ const IF_READ_SAMPLE_T* {.intdefine.} = 0
 const IF_READ_M2_144_TIE_DS* {.intdefine.} = 1
   ## Double speed: an IF read whose M-cycle starts on the line-144 OAM pulse's
   ## dot (M2_144_EARLY_DOT_DS) latches after that dot. The pulse sits on a
-  ## whole dot of gambatte-core's line clock and ties with the read, which it
-  ## resolves event-first; the other sources land on half dots at double
-  ## speed, and a one-dot sample for every read loses seven of their rows.
+  ## whole dot and ties with the read, which sees it (gambatte
+  ## `enable_display/frame{0,1}_m2irq_count_ds_2`); the other sources land on
+  ## half dots at double speed, and a one-dot sample for every read loses
+  ## seven of their rows.
 
 const TIMER_IRQ_RUN_LEAD* {.intdefine.} = 1
   ## M-cycles by which a TIMA overflow reaches a running CPU's interrupt
@@ -272,12 +273,12 @@ const STAT_M0_LEAD_FIRST_LINE* {.booldefine.} = false
 const STAT_LYC_LY_LEAD_DOTS* {.intdefine.} = 2
   ## Dots before a line's boundary at which the LYC comparator's LY (irq_ly)
   ## steps to the next line in SINGLE speed, so its STAT source rises and
-  ## falls ahead of the readable LY (fifo_lyc_ly_lead). gambatte-core's LYC
-  ## and mode-1 events sit at line cycle 454, and after a KEY1 round trip
-  ## (the CPU grid 3 dots behind the PPU's) a source rising on the boundary
-  ## is dispatched one M-cycle late: every gambatte `*_lcdoffset1_1` row on
-  ## the LYC/mode-1 sources. Bracketed on the 5157-row list: 1 is +8/-3, 2
-  ## +15/-6, 3 +15/-9 (docs/gb-failure-triage.md A3). 0 compiles it out.
+  ## falls ahead of the readable LY (fifo_lyc_ly_lead). After a KEY1 round
+  ## trip (the CPU grid 3 dots behind the PPU's) a source rising on the
+  ## boundary is dispatched one M-cycle late: every gambatte `*_lcdoffset1_1`
+  ## row on the LYC/mode-1 sources. Bracketed on the 5157-row list: 1 is
+  ## +8/-3, 2 +15/-6, 3 +15/-9 (docs/gb-failure-triage.md A3). 0 compiles it
+  ## out.
 const STAT_LYC_LY_LEAD_DS* {.intdefine.} = 0
   ## The same in double speed. 0: a lead there (1..3 were tried with the
   ## single-speed one) loses every `_ds_` sibling; the double-speed constants
@@ -286,8 +287,8 @@ const STAT_LYC_LY_LEAD_DS* {.intdefine.} = 0
 const VBLANK_IRQ_LEAD* {.intdefine.} = 1
   ## The vblank request goes up with STAT_M1_LEAD's mode-1 source, the
   ## comparator's lead before line 144 (2 dots at single speed), not on the
-  ## boundary: gambatte-core flags both in its line-cycle-454 event. The
-  ## retriggering dispatch of `m1/lycint_vblankirq_late_retrigger_2` (both
+  ## boundary. The retriggering dispatch of
+  ## `m1/lycint_vblankirq_late_retrigger_2` (both
   ## devices) clears a request raised then; `lcd_offset/
   ## offset2_lyc8fint_m1irq_2` [cgb] sees it an M-cycle earlier. 0 loses the
   ## three and takes nothing.
@@ -335,8 +336,7 @@ const LCDOFF_STAT_LYC_IRQ* {.intdefine.} = 1
 const M0_IRQ_EDGE_X* {.intdefine.} = 1
   ## The mode-0 STAT request rises where the line's pixels end even when an
   ## object at X = 167 or a window started at WX = 166 keeps the fetcher (and
-  ## the STAT mode, which still reads 3) busy past it: gambatte-core raises
-  ## it when its pixel position reaches 166, and those fetches come after.
+  ## the STAT mode, which still reads 3) busy past it.
   ## Raised as the X = 167 object's fetch or the WX = 166 window's start
   ## begins, unless a WX = 166 window is still to start. gambatte
   ## `sprites/10spritesPrLine_10xposA7_m0irq_2` (both devices),
@@ -361,8 +361,7 @@ const STAT_GLITCH_M0_LEAD* {.intdefine.} = 1
 const STAT_M1_LEAD* {.intdefine.} = 1
   ## The mode-1 STAT source rises with the LYC comparator's lead
   ## (STAT_LYC_LY_LEAD_DOTS, 2 dots at single speed) at the end of line 143,
-  ## ahead of the mode flag and the vblank interrupt: gambatte-core raises its
-  ## mode-1 event at line cycle 454 with its LYC event. Line 143's LYC match
+  ## ahead of the mode flag and the vblank interrupt. Line 143's LYC match
   ## lets go first and the mode-1 source rises after it, so a match on 143
   ## still leaves the edge detector an edge (0 of that order loses 15 rows,
   ## `m1/lycint143_m1irq_*` and `lcdirq_precedence/m1irq_lcdstat50_lyc8f`); a
@@ -709,8 +708,7 @@ const HDMA_HALT_REQ_BUG_IME* {.intdefine.} = 1
   ## then carries the PC after it; the block's release M-cycle is refunded
   ## as with IME off. gambatte `dma/hdma_transition_ei_halt_late_unhalt_
   ## ldaaimm_hdma_scx1_1` (`LD (a16),A` reads its low operand as its own
-  ## opcode $EA and stores to $80EA before the dispatch; gambatte-core holds
-  ## its interrupt for one instruction after such a block). Without the
+  ## opcode $EA and stores to $80EA before the dispatch). Without the
   ## refund it loses `hdma_late_ei_m3halt_m2unhalt_ly_scx1_3` and the `_2`
   ## twin; 0 = the dispatch comes first.
 const HDMA_BLOCK_SWALLOW* {.intdefine.} = 1
@@ -849,8 +847,8 @@ const SCX_BORROW_DISCARD_END* {.intdefine.} = 1
   ## (SCX_FINE_LATCH_WRAP), the fetcher's map column borrows against where the
   ## discard ENDED (`scx_live_fine`), one tile back per wrap, instead of the
   ## line's latched fine scroll: the tiles after the discard are counted from
-  ## its end (gambatte-core restarts its pixel position there, so the column
-  ## is `(SCX + 8 - F_end + 8j) / 8`). gambatte `scx_during_m3/scx_0761c0/
+  ## its end (the column is `(SCX + 8 - F_end + 8j) / 8`). gambatte
+  ## `scx_during_m3/scx_0761c0/
   ## scx_during_m3_{2,3,4,ds_2..ds_5}` [cgb] (a $61 store in the discard of a
   ## line latched at 7 wraps it; the later $C0 store then borrows one tile
   ## more). Without the wrap term the reference change breaks every frame;
@@ -867,14 +865,13 @@ const WIN_REVOKE_DS_PUSH* {.intdefine.} = 1
 const WIN_CARRY_CANCEL_OFF* {.intdefine.} = 1
   ## A carried DMG window start (DMG_WIN_LAST_PX_CARRY) that meets LCDC.5 low
   ## at the head of mode 3 is dropped rather than held for a later head: the
-  ## window-started state is decided there, and gambatte-core clears its
-  ## pending start at that point. gambatte `window/on_screen/
+  ## window-started state is decided there. gambatte `window/on_screen/
   ## wxA6_late_we_reenable_3` [dmg] (the start owed from line 143 meets LY 0
   ## with the bit still low; held, it draws line 1). 0 loses it, nothing else.
 const CGB_WE_DISABLE_LATE* {.intdefine.} = 2
   ## Dots a CGB LCDC.5 fall takes to reach the fetcher's window abort
   ## (WIN_EN_ABORT): a map read inside them still fetches a window tile.
-  ## gambatte-core lands a CGB LCDC write two cycles late. gambatte
+  ## gambatte
   ## `window/on_screen/wx17_weoff_wxA5_weon` [cgb] (the fall a dot before a
   ## map read keeps one more window tile); 1 is inert, 3 and 4 lose
   ## `weon_wx18_weoff_weon_wx80` [cgb]. Double speed is unpinned: the
@@ -924,8 +921,8 @@ const GDMA_AFTER_FETCH* {.intdefine.} = 1
   ## dma/late_gdma_pc_7ffe_1: the opcode at $8000 is fetched in mode 2 before
   ## the burst, the operands after it in mode 3 (+1, none lost).
   ## Whether switching the LCD off with an HBlank DMA armed requests a block,
-  ## as the LCD-off PPU sits in mode 0 (gambatte-core requests one on the
-  ## disable). gambatte dma/hdma_disable_display_1 (+1, none lost).
+  ## as the LCD-off PPU sits in mode 0. gambatte
+  ## dma/hdma_disable_display_1 (+1, none lost).
 const VDMA_OVERHEAD_FREES_BUS* {.intdefine.} = 1
   ## HDMA_BLOCK_OVERHEAD_BUS's M-cycle (the acquire before, or the release
   ## after, a block's bytes) does not drive the external bus: an OAM DMA slot
@@ -1007,9 +1004,9 @@ const HDMA_LCDON_LINE0_LAG* {.intdefine.} = 1
   ## (edge 255) <= 2. 0 loses `_scx{0,1}_round1`; SameBoy passes both.
 const TIMER_ACK_LOOKAHEAD* {.intdefine.} = 4
   ## T-cycles past its IF clear within which a timer request still to rise is
-  ## acknowledged by the same dispatch (gambatte-core acks a flag whose event
-  ## is due a few cycles on; dingbat's clear cannot move later without
-  ## lengthening the dispatch). One M-cycle: gambatte tima/tc00_irq_late_
+  ## acknowledged by the same dispatch (dingbat's clear cannot move later
+  ## without lengthening the dispatch). One M-cycle: gambatte
+  ## tima/tc00_irq_late_
   ## retrigger_{2 [cgb],3 [dmg],ds_2}; the DMG takes 2..5, the CGB 4..7, and
   ## 6/8 lose `_2` [dmg] and the `_1` rows. 0 compiles it out.
   ## Whether every CGB takes the WX store CGB_WX_LATENCY dots late at single
@@ -1102,8 +1099,7 @@ const WIN_LATCH_END_CGB*      {.intdefine.} = 454
   ## latch on DMG, the deferred check on CGB) no longer latches the window
   ## for the frame (0 = never): the per-line check that would carry it has
   ## already run, and a match on the next line's LY is the boundary's check.
-  ## gambatte-core runs that check at line cycle 450 (LY == WY) and 454
-  ## (LY + 1 == WY). DMG (the check lands WIN_CHECK_DEFER_DMG after the
+  ## DMG (the check lands WIN_CHECK_DEFER_DMG after the
   ## write): 451..454 take `window/arg/late_wy_{10to0_ly1,FFto0_ly2,
   ## FFto1_ly2}_3` and `late_enable_afterVblank_{3,5}`, 450 loses five `_2`s,
   ## 455 the five it takes.
@@ -1119,8 +1115,8 @@ const WIN_CHECK_DEFER_CGB_DS* {.intdefine.} = 1
 const WIN_LATCH_END_CGB_DS* {.intdefine.} = 453
   ## WIN_LATCH_END_CGB at double speed (0 = the same 454).
 const WIN_CHECK_DEFER_DMG*    {.intdefine.} = 1
-  ## The same on a DMG (its writes land at the commit): one dot, gambatte-core's
-  ## DMG WY copy lagging its write by 2 cycles. With WIN_LATCH_END_DMG: 1 takes
+  ## The same on a DMG (its writes land at the commit): one dot. With
+  ## WIN_LATCH_END_DMG: 1 takes
   ## `window/arg/late_enable_afterVblank_5`, `late_wy_FFto2_ly2_scx3_3`,
   ## `late_enable_afterVblank_3` [dmg]; 0 takes none, 2 loses 11
   ## (`late_wy_FFto2_ly2_*_2`, `late_wy_10to1_ly1_2`, ...).
@@ -1137,7 +1133,7 @@ const WIN_LINE0_CHECK_DOT_CGB_DS* {.intdefine.} = 4
 const WIN_NEXT_LINE_CHECK*    {.intdefine.} = 1
   ## The window's next-line check (LY + 1 == WY latches it for the frame)
   ## also runs at dot 454 of lines 0..142, with the LYC comparator's lead,
-  ## where gambatte-core runs it, besides the boundary's. A CGB WY write in
+  ## besides the boundary's. A CGB WY write in
   ## the line's last M-cycle is not yet visible there, so the window still
   ## starts: gambatte `window/arg/late_wy_{1,2}toFF_2` [cgb].
 const WIN_NEXT_LINE_WY_SEEN*  {.intdefine.} = 2
@@ -1252,8 +1248,8 @@ const CGB_WIN_REVOKE_KEEP*    {.intdefine.} = 1
   ## `window/late_disable*` rows (length only) are unmoved. DocBoy
   ## `cgb_dmg_mode/ppu/m3_lcdc_win_en_change_multiple_wx_timing_ly{33..37}_*`
   ## time the HBlank interrupt with an object at X = 79..88 behind a start
-  ## revoked at k = 5..1: the counts fit exactly one charge per line, W = k
-  ## (gambatte's rule), and only with the object's penalty on the window's
+  ## revoked at k = 5..1: the counts fit exactly one charge per line, W = k,
+  ## and only with the object's penalty on the window's
   ## tile grid (`11 - min(5, (x - (WX - 7)) mod 8)`), never on the
   ## background's (+38). SameBoy (CGB E) also keeps the window grid but
   ## charges 6 at every k; both draw the window tile at WX - 7 in the
@@ -2676,10 +2672,9 @@ type
     # event runs every probe_period scheduler cycles instead of
     # GB_SAMPLE_PERIOD and each pre-DC-blocker mix is compared with the first
     # one seen since probe_reset. gambatte's `_outaudio0/1` verdict is "every
-    # sample of the final frame, at 2 MHz, equals the first" (test/
-    # testrunner.cpp, evaluateStrTestResults); probe_period = 2 is that
-    # stream. Observation only: the channels' closed-form catch-up gives the
-    # same amplitudes at any cadence. Not serialized.
+    # sample of the final frame, at 2 MHz, equals the first"; probe_period = 2
+    # is that stream. Observation only: the channels' closed-form catch-up
+    # gives the same amplitudes at any cadence. Not serialized.
     probe_period*:        uint32
     probe_armed*:         bool      # first sample since the reset recorded
     probe_left*:          float32
