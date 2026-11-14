@@ -232,7 +232,7 @@ const OBJ_SCAN_DOT_ADJ* {.intdefine.} = 0'i32
 
 const OAM_SCAN_DMA_HOLD* {.intdefine.} = 1
   ## What the mode-2 comparator compares for an entry whose slot falls inside
-  ## an OAM DMA's span. 1 (ships): the word its input latches last loaded,
+  ## an OAM DMA's span. 1 (default): the word its input latches last loaded,
   ## `scan_y_latch`/`scan_x_latch`. 0: nothing, the entry is dropped.
   ##
   ## The latches load an entry's Y and X in its scan slot, until the line has
@@ -246,7 +246,7 @@ const OAM_SCAN_DMA_HOLD* {.intdefine.} = 1
   ## nops 101..105 and 116..120): the k objects read, each on its own tile
   ## (11 dots), and 10 - k more objects at the X of the last one read (6 dots
   ## each, same tile). Dropping the entries instead gives 11k and loses those
-  ## ten `_round1` rows; it also loses strikethrough (both frames) and mooneye
+  ## ten `_round1` tests; it also loses strikethrough (both frames) and mooneye
   ## madness/mgb_oam_dma_halt_sprites (both copies), whose frozen-bus word
   ## (OAMDMA_FREEZE_BUS) reaches the comparator through this path.
   ## What the latches hold when a transfer takes the bus before a line's
@@ -257,10 +257,10 @@ const OAM_SCAN_DMA_HOLD* {.intdefine.} = 1
   ## fetch and still finds none, so the fetch replaces it under a transfer
   ## too.
   ##
-  ## Pinned: the hold itself and which X the copies take (the DocBoy rows);
+  ## Pinned: the hold itself and which X the copies take (the DocBoy tests);
   ## that a fetch replaces the Y latch, with or without a transfer running
-  ## (the two late_sp39y rows; both only need a Y off the line, and the tile
-  ## byte, $A0 in both, is one). Chosen, no row sees it: that the byte is the
+  ## (the two late_sp39y tests; both only need a Y off the line, and the tile
+  ## byte, $A0 in both, is one). Chosen, no test sees it: that the byte is the
   ## tile and not some other off-line value; that the fetch leaves the X
   ## latch alone (loading the flags byte into it scores the same); that the
   ## latches stop loading once the line has ten objects (loading through
@@ -269,19 +269,19 @@ const OAM_SCAN_DMA_HOLD* {.intdefine.} = 1
 const OAM_SCAN_DMA_EDGE_DS* {.intdefine.} = 1
   ## Dots the OAM DMA's take/give edge sits earlier against the mode-2 scan at
   ## double speed (0 = as at single speed, the dot the edge's M-cycle starts
-  ## on). 1 ships. gambatte oamdma/late_sp{00,01,39}{x,y}_ds_{1,2} [cgb], six
-  ## one-M-cycle pairs: 0 loses the six `_ds_1` rows (a take on dot 2N + 1
+  ## on). Default 1. gambatte oamdma/late_sp{00,01,39}{x,y}_ds_{1,2} [cgb], six
+  ## one-M-cycle pairs: 0 loses the six `_ds_1` tests (a take on dot 2N + 1
   ## must still hide object N, a give on it must show it) and 3 loses
   ## `late_sp{00,01}{x,y}_ds_2`; 1 and 2 score the same, since slots are on
   ## even dots and these edges on odd ones. The value is relative to
-  ## OBJ_SCAN_DOT_ADJ = 0: at -1 the same rows want 2..3.
-  ## By their traced edge dots the single-speed rows would accept -1..2 on a
-  ## CGB and DocBoy's DMG rows (OAM_SCAN_DMA_HOLD) only -1..0, so the term is
+  ## OBJ_SCAN_DOT_ADJ = 0: at -1 the same tests want 2..3.
+  ## By their traced edge dots the single-speed tests would accept -1..2 on a
+  ## CGB and DocBoy's DMG tests (OAM_SCAN_DMA_HOLD) only -1..0, so the term is
   ## not applied there.
 const SCX_LATCH_LCDON_EXTRA* {.intdefine.} = 1
 const SCX_LATCH_LCDON_EXTRA_CGB* {.intdefine.} = 2
   ## Dots the LCD-on line's fine-scroll discard keeps taking an SCX store past
-  ## its own length (SCX_FINE_LATCH_LIVE's window), DMG / CGB. 1 and 2 ship,
+  ## its own length (SCX_FINE_LATCH_LIVE's window), DMG / CGB. Default 1 and 2,
   ## each a strict optimum on gambatte enable_display/ly0_late_scx7_m3stat_*
   ## (SCX 0, 1 or 3 replaced by 7 one M-cycle apart, mode 3's end read back):
   ## DMG 0 loses `scx0_2` [dmg] and 2 loses `scx3_2` [dmg]; CGB 1 loses
@@ -294,25 +294,25 @@ const CGB_OBJ_LAST_PX_YIELDS* {.intdefine.} = 1
 
 const CGB_OBJ_FETCH_OFF* {.intdefine.} = 1
   ## Whether a CGB's fetcher still stops for this line's objects with LCDC.1
-  ## clear (1, ships) or, like the DMG's, does not (0). LCDC.1 only keeps the
+  ## clear (1, default) or, like the DMG's, does not (0). LCDC.1 only keeps the
   ## object pixels out of the mixer there (sprite_wins). gambatte
   ## sprites/late_disable_ds_1 [cgb] never sets LCDC.1 and reads mode 3 as
   ## long as ten objects make it; sprites/enable/late_disable_ds_{3,4} clear
   ## the bit on the line before and bracket the same length to one
   ## double-speed M-cycle; oamdma/late_sp39x_{3,4} and the six
   ## oamdma/late_sp*_ds pairs run with LCDC = $91 throughout. 0 loses nine
-  ## rows. The DMG stops fetching with the bit (gambatte
-  ## sprites/sprite_late_disable_*, sixteen DMG rows, pass either way).
+  ## tests. The DMG stops fetching with the bit (gambatte
+  ## sprites/sprite_late_disable_*, sixteen DMG tests, pass either way).
 
 const LCD_ON_LINE_NO_SCAN* {.intdefine.} = 1
   ## The line the LCD is switched on with has no mode 2 (STAT reads mode 0
   ## until mode 3 begins) and no OAM scan runs on it: it has no objects (1,
-  ## ships). 0 scans it like any other line. DocBoy dmg/ppu
+  ## default). 0 scans it like any other line. DocBoy dmg/ppu
   ## `turn_on_ly0_sprites_round{1,2}` (an object at X = $10 on line 0, STAT
   ## read 59 and 60 M-cycles after the LCDC write: mode 3, then mode 0) and
   ## gambatte enable_display/enable_display_ly0_sprites_m0stat_{1,2} (objects
   ## at X = 8 and $18, both devices) time mode 3 on that line to one M-cycle
-  ## at its object-free length; 0 loses the three `_2` rows.
+  ## at its object-free length; 0 loses the three `_2` tests.
 
 template obj_fetch_on(ppu: GbFifoPpu): bool =
   ## Whether the fetcher stops for this line's objects: LCDC.1, and on a CGB
@@ -430,7 +430,7 @@ const OAMDMA_FREEZE_DEST_LEAD {.intdefine.} = 1 - OAMDMA_HALT_GRACE
   ## Checked with the scan's held latches (OAM_SCAN_DMA_HOLD) in place: -1
   ## loses mooneye madness/mgb_oam_dma_halt_sprites (both copies); 0 and 1
   ## pass everything (the bus carries the destination WORD, address bit 0
-  ## ignored, so the two name one word where the row freezes). The rows do
+  ## ignored, so the two name one word where the test freezes). The tests do
   ## not choose between them; 0 is what the grace cycle implies.
 
 proc oam_dma_frozen*(gb: GB): bool {.inline.} =
@@ -485,7 +485,7 @@ proc oam_scan_advance*(ppu: GbFifoPpu; gb: GB; upto: int32; blocked = sbScan) =
   ## bus for those entries (an OAM DMA, or the CPU for one M-cycle). Called on
   ## the dot a transfer takes OAM, the dot it gives it back and at the mode
   ## 2 -> 3 edge; between those dots neither input moves. Compiled in only
-  ## with OAM_SCAN_DMA_LOCK; the shipping scan is fifo_get_sprites.
+  ## with OAM_SCAN_DMA_LOCK; the default scan is fifo_get_sprites.
   if ppu.scan_line != int32(ppu.ly):
     # A fresh line: the partial result belongs to some earlier one.
     ppu.sprites.setLen(0)
@@ -608,7 +608,7 @@ const SCX_FINE_BORROW_DMG_LEAD* {.intdefine.} = 1
 # scx_0360c0, scx_0761c0); a capped `min(N, F)` saturates only at N = 7.
 # How much longer the LCD-on line keeps the window open is
 # SCX_LATCH_LCDON_EXTRA{,_CGB}; widening it on line 0 of every frame instead
-# loses eleven scx_during_m3 rows.
+# loses eleven scx_during_m3 tests.
 
 # SCX_FINE_LATCH_WRAP (gb.nim): the discard is a three-bit SLOT COUNTER that
 # compares its slot against the live SCX & 7 every dot. A store that puts the
@@ -657,7 +657,7 @@ proc fifo_arm_scx*(ppu: GbFifoPpu) =
     # while `SCX and 7` reaches the reference, one below a reference of up
     # to 8, one more per further eight. Clamped at none: a DMG's reference is
     # one less (-1 on an unscrolled line) and the plain floor would ADD a
-    # tile at `SCX and 7` = 7 there, which no row asks for and the rule
+    # tile at `SCX and 7` = 7 there, which no test asks for and the rule
     # before the wrap term never did.
     ppu.scx_tile = (int(ppu.scx) shr 3) -
                    SCX_FINE_BORROW * max(0, (ppu.scx_fine - (int(ppu.scx) and 7) + 7) shr 3)
@@ -1302,7 +1302,7 @@ proc sprite_fetch_merge*(ppu: GbFifoPpu; gb: GB) =
   when OAM_SCAN_DMA_HOLD != 0:
     # The fetch's read replaces what the Y latch held from the scan with the
     # object's tile byte; under a transfer that is the unit's byte
-    # (obj_oam_dma_read). The X latch is left alone: no row sees it after a
+    # (obj_oam_dma_read). The X latch is left alone: no test sees it after a
     # fetch (OAM_SCAN_DMA_HOLD, "pinned" and "chosen").
     ppu.scan_y_latch = s.tile_num
   ppu.sprites.delete(0)
@@ -3051,7 +3051,7 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
           # fetcher_retired, opened up: the tail of the line (the last
           # m3_lead pixels and whatever holds mode 3 open on them) is the
           # only place the mode-0 request can part from the mode flag
-          # (fifo_tail_m0_request), and this spelling keeps that question
+          # (fifo_tail_m0_request), and this form keeps that question
           # off every other dot.
           when M3_PIPE_LEAD_ANY and M0_REQ_LAST_PX != 0 and STAT_IRQ_SPLIT:
             if ppu.lx >= ppu.m3_retire_lx:

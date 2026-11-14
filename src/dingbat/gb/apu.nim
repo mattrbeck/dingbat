@@ -10,8 +10,8 @@ const APU_POWERON_TAP_LEAD* {.intdefine.} = 4
   ## edge later (`_5`/`_6` [dmg], `_7`/`_8` [cgb]). ch2_late_reset_nr52_2b
   ## [dmg, cgb] and `_ds_2b` [cgb] (the length counter's side of the same
   ## skip) agree, the last at double speed. 4..7 pass; 0..3 lose `_5` [dmg],
-  ## `_7` [cgb] and the three `2b` rows; 8 loses `_2` [dmg], `_4` [cgb] and
-  ## the `2b` rows' `1a` siblings.
+  ## `_7` [cgb] and the three `2b` tests; 8 loses `_2` [dmg], `_4` [cgb] and
+  ## the `2b` tests' `1a` siblings.
 
 const APU_SPSW_TAP_LAG_T* {.intdefine.} = 4
   ## Divider counts added to every etAPUFrameSeq re-aim while

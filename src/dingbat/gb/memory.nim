@@ -10,7 +10,7 @@ const SVBK_READS_WRITTEN* {.booldefine.} = true
   ## and $F8 at hand-off) rather than the bank mapped at $D000 ($F9 for
   ## both). true: DocBoy cgb/boot/boot_regs_cgb passes and matches the AGS
   ## read of gbedge p00 (SVBK = $F8, docs/flashcart-runbook.md). false: that
-  ## row fails ($F9). docs/gb-derivations.md, "SVBK readback".
+  ## test fails ($F9). docs/gb-derivations.md, "SVBK readback".
 
 proc new_gb_memory*(gb: GB): GbMemory =
   # DMA (FF46) reads back the last written value; post-boot it's 0xFF on
@@ -727,7 +727,7 @@ proc write_byte*(mem: GbMemory; gb: GB; idx: int; val: uint8) =
       # A write under a running transfer hands the unit's bus to the new
       # source page at once (OAMDMA_RESTART_HANDOVER, gb.nim); the bytes the
       # old transfer still moves before the restart are left as they were,
-      # no row saying where they come from. The restart follows on its
+      # no test saying where they come from. The restart follows on its
       # usual delay.
       if mem.dma_busy:
         let old_src  = mem.current_dma_source
@@ -826,7 +826,7 @@ proc mem_write_tail(mem: GbMemory; gb: GB) {.noinline.} =
 const IF_WRITE_LAND_DOTS* {.intdefine.} = 1
   ## Dots into its M-cycle at which a CPU write to IF lands: an interrupt
   ## request the PPU raises in those dots is overwritten by the write rather
-  ## than surviving it (0 = at the top of the M-cycle). 1 ships: a request
+  ## than surviving it (0 = at the top of the M-cycle). Default 1: a request
   ## rising on the write's first dot is lost, one rising on its second
   ## survives. 0 loses gambatte `m2int_m0irq/m2int_m0irq_scx3_ifw_{2,4}`
   ## (both devices; IF cleared on the dot the mode-0 source rises, read back
@@ -837,9 +837,9 @@ const IF_WRITE_LAND_DOTS* {.intdefine.} = 1
   ## DocBoy `hblank_stat_interrupt_reset_if_scx0_round1`, `_scx4_round2`,
   ## `vblank_interrupt_reset_if_round2`; 3 and 4 lose 23.
 const IF_WRITE_LAND_DOTS_DS* {.intdefine.} = 1
-  ## The same in double speed, in dots. 1 ships (half the M-cycle): 0 loses
+  ## The same in double speed, in dots. Default 1 (half the M-cycle): 0 loses
   ## `m2int_m0irq/m2int_m0irq_scx3_ifw_ds_2` [cgb]; 2 (the whole M-cycle)
-  ## loses eight `*_ifw_ds_1` rows (`ly0/lycint152_lyc{0,153}irq_ifw_ds_1`,
+  ## loses eight `*_ifw_ds_1` tests (`ly0/lycint152_lyc{0,153}irq_ifw_ds_1`,
   ## `lyc153int_m2irq_ifw_ds_1`, `m1/lycint143_m1irq_ifw_ds_1`, `m1/
   ## m2m1irq_ifw_ds_{1,2}`, `m2int_m0irq_scx4_ifw_ds_1`,
   ## `m2int_m2irq_ifw_ds_1`).
@@ -848,12 +848,12 @@ const IF_WRITE_LAND_DOTS_DS* {.intdefine.} = 1
 const VRAM_WRITE_M3_END_DOTS* {.intdefine.} = 3
   ## Dots into its M-cycle at which a VRAM write issued in mode 3 asks the
   ## lock: a mode 3 that ends in those dots lets it through (0 = off, the
-  ## write asks at the top of its M-cycle). 3 ships, a strict optimum on
+  ## write asks at the top of its M-cycle). Default 3, a strict optimum on
   ## gambatte vramw_m3end/* (a write one M-cycle later per ROM across the end
   ## of mode 3, at SCX 0 and 3): 0..2 lose `vramw_m3end_scx3_5` (both devices)
   ## and 4 loses `vramw_m3end_4` (both devices).
 const VRAM_WRITE_M3_END_DOTS_DS* {.intdefine.} = 0
-  ## The same at double speed, in dots. 0 ships: 1 loses
+  ## The same at double speed, in dots. Default 0: 1 loses
   ## `vramw_m3end_scx5_ds_4` [cgb] and 2 `vramw_m3end_ds_4` as well.
 proc mem_write_vram_m3(mem: GbMemory; gb: GB; idx: int; val: uint8) {.noinline.} =
   ## A VRAM write issued in mode 3 asks the lock VRAM_WRITE_M3_END_DOTS into

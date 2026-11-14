@@ -80,7 +80,7 @@ const TAC_SELECT_LEAD_T* {.intdefine.} = 0
   ## T-cycles before the end of a TAC write's M-cycle at which the newly
   ## selected divider bit is sampled; the bit being left stays the latched
   ## `previous_bit`. A select change can tick TIMA by itself (Pan Docs, "Timer
-  ## Obscure Behaviour"). 0 ships (compiled out): both taps are judged at
+  ## Obscure Behaviour"). Default 0 (compiled out): both taps are judged at
   ## the end of the write's M-cycle, the divider as the write leaves it.
   ## gambatte `tima/tc00_late_tc01_{1..8}` (both devices) switch the tap from
   ## bit 9 to bit 3 one M-cycle apart around a TIMA tick and read TIMA; 1, 2,
@@ -89,7 +89,7 @@ const TAC_SELECT_LEAD_T* {.intdefine.} = 0
   ## switch makes, or swallows, a tick hardware does not). A $FF05 read DOES
   ## see an increment or reload that landed in its own M-cycle (unlike
   ## SB/SC/IF, see SERIAL_CPU_SAMPLE_T); a pre-edge latch for TIMA loses 18+
-  ## tima rows. Clean-room: derived from test ROM sources/outputs and
+  ## tima tests. Clean-room: derived from test ROM sources/outputs and
   ## dingbat's own trace runs; no emulator source consulted.
 
 const SPEED_SWITCH_IRQ_LEAF_HOLD_T* {.intdefine.} = 8

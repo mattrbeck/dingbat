@@ -9,15 +9,10 @@ updated when they move.
 
 Buckets A to H are all closed: every test they name passes or is in the
 not-scored ledger. They keep their derivation record, because knob comments
-cite them by ID. The tests that still fail are DocBoy's (section I). Other
-closed buckets are one line each at the end. "Not recorded" below means the
-test passes and this file does not say which change closed it.
-
-Status 2026-11-13 (rules and brackets: docs/gb-derivations.md): gambatte, AGE, mooneye, wilbertpol, mealybug,
-GBMicrotest and SameSuite score every row; what is red is DocBoy's (bucket
-I). The gambatte and AGE row lists in buckets A to H are kept as the record
-of what each bucket measures and which knob answered it; a "Rows (n)" count
-there is the bucket's size when it was open, not a current tally.
+cite them by ID; the rules and the values tried on each side are in
+docs/gb-derivations.md. The tests that still fail are DocBoy's (section I).
+Other closed buckets are one line each at the end. "Not recorded" below
+means the test passes and this file does not say which change closed it.
 
 Conventions: a knob is a `{.intdefine.}` in `src/dingbat/gb/` and its own
 comment carries the derivation; `[dmg]`/`[cgb]` is the device a gambatte test
@@ -50,38 +45,36 @@ test whose ROM names several machines.
 
 ### A1. The mode-0 dispatch grid at double speed
 
-**Closed 2026-09-21.** AGE `stat-interrupt/stat-int-dmgC-cgbBCE@{cgbab,
-cgbc,cgbe}`, gambatte `m0int_m0stat/m0int_m0stat_scx5_ds_2` and
-`m0enable/disable_scx5_ds_2` (the whole `m0int_m0stat` directory is green).
-The `-d:gb_dispatch_trace` dots said it outright: the double-speed dispatch
-grid sits on odd dots, the mode-0 source rises ahead of the flag
-(`STAT_M0_LEAD_DS`; re-fitted 2026-11-13 to 0, which leaves
-`STAT_DISPATCH_MIN_AGE_DS` at 0 with the three AGE rows green), so for an odd SCX it rose one dot before a
-boundary and was taken there, while for an even SCX it rose two dots before
-one. AGE's staircase pairs SCX (1,2), (3,4), (5,6): a mode-0 rise one dot old
-at the boundary waits for the next. `STAT_DISPATCH_MIN_AGE_DS = 2` (gb.nim),
-gated to the mode-0 source's own edge: applied to every STAT rise it breaks
-the same ROM's mode 2 and mode 1 cells (those sources rise on the boundary
-dot and are taken), and to CPU-written enables gambatte `m2int_m0irq/*_ds_1`.
-The remaining `_ds_` rows (`m2int_m0irq_scx5_ds_1`, `enable_display/*_ds_1`)
-did not move either way.
+**Closed.** At double speed the mode-0 source rises with the mode flag
+(`STAT_M0_LEAD_DS = 0`, ppu.nim), so no rise is ever one dot old at a
+dispatch boundary and `STAT_DISPATCH_MIN_AGE_DS` stays 0 (gb.nim;
+docs/gb-derivations.md, "Double speed: the mode-0 source, the line-144
+pulse, the LCD-on line").
+
+Tests: AGE `stat-interrupt/stat-int-dmgC-cgbBCE@{cgbab,cgbc,cgbe}`, gambatte
+`m0int_m0stat/m0int_m0stat_scx5_ds_2` and `m0enable/disable_scx5_ds_2`.
+
+The `-d:gb_dispatch_trace` dots show what the tests measure. The
+double-speed dispatch grid sits on odd dots; a source rising ahead of the
+flag rose, for an odd SCX, one dot before a boundary and was taken there,
+and for an even SCX two dots before one. AGE's staircase pairs SCX (1,2),
+(3,4), (5,6). `m2int_m0irq_scx5_ds_1` and `enable_display/*_ds_1` did not move
+either way.
 
 ### A2. The dispatch's IF clear against a source rising inside it
 
-**Rows (0).** `tima/tc00_irq_late_retrigger_{2 [cgb],ds_2}` closed 2026-11-13
-(the CGB's later clear of its timer and serial lines,
-`IRQ_SAMPLE_CGB_TIMER_SERIAL_ADD`, with `IRQ_SAMPLE_T_DS = 18`). Closed
-2026-09-22: `ly0/lycint152_lyc153irq_late_retrigger_2` and
+**Closed.** The dispatch clears IF 18 T in at both speeds, and the sources
+reach it at different leads (`IRQ_SAMPLE_T`, `IRQ_SAMPLE_T_DS`, cpu.nim,
+plus the per-source knobs below).
+
+Tests: `ly0/lycint152_lyc153irq_late_retrigger_2` and
 `lyc153int_m2irq_late_retrigger_2` (both devices),
-`ly0/lycint152_lyc0irq_late_retrigger_2`, `irq_precedence/
-late_m0irq_retrigger_2`, then `m1/lycint143_m1irq_late_retrigger_2` and
+`ly0/lycint152_lyc0irq_late_retrigger_2`,
+`irq_precedence/late_m0irq_retrigger_2`,
+`m1/lycint143_m1irq_late_retrigger_2` and
 `m1/lycint_vblankirq_late_retrigger_2` (both devices),
-`tc00_irq_late_retrigger_3` [cgb] and
-`serial/start_wait_trigger_int8_read_if_2` [cgb]. The knobs these rows rest on were
-re-fitted clean-room on 2026-11-13 (`STAT_M2_LY0_LEAD`, `STAT_M1_LEAD`,
-`VBLANK_IRQ_LEAD` = 1, `IRQ_SAMPLE_CGB_TIMER_SERIAL_ADD` = 2) and the
-vblank-line rule rewritten (`LYC_STEPPED_VBLANK_SHUT`); all are green
-(docs/gb-derivations.md, section 7).
+`tima/tc00_irq_late_retrigger_{2 [cgb],3 [cgb],ds_2}` and
+`serial/start_wait_trigger_int8_read_if_2` [cgb].
 
 **Behaviour.** Each ROM's handler re-requests its own interrupt with an
 `LDH ($0F),A` that moves one M-cycle per member, `EI`s, and reads IF inside
@@ -100,7 +93,7 @@ M-cycles, the fifth setting PC.
 **Modelled.** `IRQ_SAMPLE_T = 18` (cpu.nim; the bracket is at the constant:
 16 loses the two mid-M-cycle sources, 19 loses
 `late_m0irq_retrigger_scx1_1`, 20 also `m2int_m2irq_late_retrigger_1`).
-`IRQ_SAMPLE_T_DS = 18` (re-fitted 2026-11-13; bracket at the constant).
+`IRQ_SAMPLE_T_DS = 18` (the values on each side fail; at the constant).
 
 One clear cannot sit in both windows. So the two groups of sources reach the
 dispatch one M-cycle apart, relative to the instant their IF bit rises, with
@@ -112,69 +105,22 @@ rise and dispatch for the timer, LYC and mode-1 sources, or one less for the
 mode-2 source, without moving where any of them is read back (the absolute
 `m2int_*`, `lycint_*`, `tima/*` tests were already green).
 
-What closed each test:
-
-* `ly0/lycint152_lyc153irq_late_retrigger_2` and
-  `lyc153int_m2irq_late_retrigger_2` (both devices): `LY_BLIND_SKIP_LED`,
-  `STAT_M2_LY0_LEAD`.
-* `ly0/lycint152_lyc0irq_late_retrigger_2`,
-  `irq_precedence/late_m0irq_retrigger_2`.
-* `m1/lycint143_m1irq_late_retrigger_2` and
-  `m1/lycint_vblankirq_late_retrigger_2` (both devices): the mode-1 source
-  and the vblank request rise with the comparator's 2-dot lead
-  (`STAT_M1_LEAD`, `VBLANK_IRQ_LEAD`).
-* `tc00_irq_late_retrigger_3` [cgb] and
-  `serial/start_wait_trigger_int8_read_if_2` [cgb]: a CGB dispatch clears a
-  timer or serial request 2 T later (`IRQ_SAMPLE_CGB_TIMER_SERIAL_ADD`).
-* `tima/tc00_irq_late_retrigger_{2 [cgb],ds_2}`, the last two: not
-  recorded.
+The per-source knobs: `STAT_M2_LY0_LEAD`, `STAT_M1_LEAD` and
+`VBLANK_IRQ_LEAD` = 1, the vblank-line rule `LYC_STEPPED_VBLANK_SHUT`
+(docs/gb-derivations.md, "The comparator's LY steps two dots before the
+line boundary"), and the CGB's later clear of its timer and serial lines,
+`IRQ_SAMPLE_CGB_TIMER_SERIAL_ADD` = 2 (ibid., "A CGB clears a timer or
+serial request at the end of the dispatch").
 
 ### A3. A STAT source enabled, disabled or handed over across a line edge
 
 **Closed.** The STAT line is a level OR of four sources into one edge
 detector, and a disable, an LYC write and each source's rise and fall are
 evaluated on their own dots (`stat_drop_arm`, `STAT_LYC_LY_LEAD_DOTS`,
-`STAT_M2_PULSE_END_EVAL`, `CGB_LINE_END_STEPS`, `M2_144_EARLY_DOT_DS`;
-ppu.nim, gb.nim).
+`M2_PULSE_END_EDGE`, `CGB_LINE_END_STEPS`, `M2_144_EARLY_DOT_DS`; ppu.nim,
+gb.nim; docs/gb-derivations.md sections 1 and 7).
 
-**Closed 2026-09-22: the coincidence bit's readback at a double-speed line
-edge (+4).** `lycint_lycflag_ds_3`, `ly0/lycint152_lyc0flag_ds_3` and
-`enable_display/frame{0,1}_m2stat_count_ds_1` read STAT in the M-cycle LY
-steps in. At double speed how long the bit still compares against the line
-being left is `LYC_JUST_CHANGED_HOLD_DS` (dots, ppu.nim; 2, re-fitted
-2026-11-13). `lycint152_lyc153flag_ds_3` is `LYC153_HOLD_DS = 1`.
-
-**Closed 2026-09-22: a disable is an edge's other half (+20).** The STAT
-line is a level OR into an edge detector, and dingbat only re-evaluated it
-at source changes and at the M-cycle boundary a STAT write's byte waits
-for. A write whose cleared enable bits took the line low inside its own
-M-cycle, followed by another source rising before the boundary, was a
-handover with no edge: the detector still held the old level.
-`-d:gb_stat_read_trace` on `m2enable/m2_late_m0disable_1` shows the $28 ->
-$20 write committing on dot 449 and the mode-2 rise at 452 with no
-interrupt. Now a STAT write samples the line under its new enables at the
-commit, plus the CGB's 2-dot latency, and lets it fall there
-(`stat_drop_arm`, ppu.nim); a rise inside the latency window refreshes the
-sample. Took `m2enable/{m2_late_m0disable, late_enable_m0disable,
-late_enable_after_lycint_disable, lyc1_m2irq_late_lycdisable}_1` and their
-`_ds_1` twins, `m0enable/lycdisable_ff41_*` (7), `lycEnable/lyc{0,153}_
-late_{enable_,}m1disable_2 [dmg]`, `lyc153_m1disable_ds_1`; lost
-`lycEnable/lyc153_late_{enable_,}m1disable_2 [cgb]`, whose LYC = 153 rise
-meets a mode-1 disable landing on the latency's last dot and still blocks
-(a strict `>` loses six other CGB rows instead: that source's latency is
-one dot longer than the mode-0/2 sources', not the rule's edge).
-
-**Closed 2026-09-22: the same for LYC writes (+7).** An LYC write that
-breaks the match is the same disable through the comparator
-(`LYC_DROP_LATENCY_DMG` = 1 dot and `LYC_DROP_BOUNDARY_SKIP` = 1, ppu.nim,
-re-fitted 2026-11-13; the CGB's drop is the comparator's sample since
-2026-11-12). Rows: `m0enable/lycdisable_ff45_{3, scx1_2, scx2_2}
-[dmg]`, `lycdisable_ff45_scx{1,2}_1 [cgb]`, `m2enable/lyc1_m2irq_late_lyc255_{1
-[cgb], 2 [dmg]}`. `lycdisable_ff45_scx1_ds_1` [cgb] is the family's
-residue.
-
-**Behaviour.** The STAT interrupt line is a level OR of four sources into
-one edge detector, so an interrupt fires only when the OR rises from zero
+**Behaviour.** An interrupt fires only when the OR rises from zero
 (Pan Docs, "LCD Status Register", STAT blocking; mooneye
 `acceptance/gpu/stat_irq_blocking` is green). These families write STAT or
 LYC one M-cycle per member across a line boundary and ask whether the
@@ -193,28 +139,16 @@ blind window is leaving); `STAT_ENABLE_LATENCY = 0` and
 
 The families, each a separate rule:
 
-* `m0enable/lycdisable_ff45_scx1_ds_1` (1; the rest closed above): the
-  LYC-write drop at double speed. (The CGB's drop is the comparator's
-  sample since 2026-11-12: docs/gb-derivations.md, "CGB LYC write: a
-  sampled comparator".)
 * `m2enable/late_enable_*_2`, `lyc1_m2irq_late_lyc255_*`,
   `late_{enable_,}m1disable_ly0_2`, `lyc0_late_m2enable_lycdisable_2` (9):
   the OAM source enabled one M-cycle across the line boundary it rises on.
   `STAT_M2_LEAD = 1` puts the rise one CPU M-cycle before the boundary.
 * `m1/ly143_late_m{0,2}enable_*`, `m1irq_late_enable_*`,
-  `m1irq_m0disable_2`, `m1irq_enable_after_lyc144_2`, `lycint143_m1irq_
-  late_retrigger_2`, `lycint_vblankirq_late_retrigger_2`, and the CGB arms
-  `m1irq_m2enable_lyc_2`, `lyc143_late_m2enable_lycdisable_ds_1`,
-  `m2m1irq_ifw_ds_1` (13): the mode-1 / mode-2 / LYC hand-over at the top of
-  line 144. **Closed 2026-09-22 (+10):** the line-144 OAM pulse went low for
-  the instant between the LY advance and the mode-1 set inside
-  `ly_advance_vblank_entry`, so the comparator's drop there was a dip and
-  the mode-1 rise a false edge whenever LYC = 143 had held the line
-  (`m1irq_m2enable_lyc_1`, `m2m1irq_ifw_2`, `m1irq_m2disable_lycdisable_3`,
-  `lyc143_late_m2enable_lycdisable_2` and `_ds_2` twins, both devices);
-  `m2_line144` now holds through the boundary. The three CGB arms left are
-  the same rows one M-cycle later: the CGB write's enable lands 2 dots after
-  its commit (`CGB_STAT_ENABLE_LATENCY`).
+  `m1irq_m0disable_2`, `m1irq_enable_after_lyc144_2`,
+  `lycint143_m1irq_late_retrigger_2`, `lycint_vblankirq_late_retrigger_2`,
+  and the CGB cases `m1irq_m2enable_lyc_2`,
+  `lyc143_late_m2enable_lycdisable_ds_1`, `m2m1irq_ifw_ds_1` (13): the
+  mode-1 / mode-2 / LYC hand-over at the top of line 144 (rule 4 below).
 * `lycEnable/lyc153_late_*`, `lyc0_m1disable_*`, `lcdoff_lycirqen_*` (15):
   the LYC = 153 and LYC = 0 sources around the LY 153 -> 0 snapback
   (`LYC_SRC_RELATCH_LEAD = 1`, `LYC_SETTLE_DOTS`), and LYC armed while the
@@ -235,39 +169,82 @@ The families, each a separate rule:
 
 The rules that closed it:
 
-**To close.** Read each sub-shape at cell resolution with `famflip.py` and
-`-d:gb_stat_src_trace` (which names the source on every rising edge; the
-`STATW` line is each STAT write's commit dot) against one statement of when
-each source's level rises and falls relative to the line boundary. No Pan
-Docs sentence gives these dots; the evidence is the families themselves.
-Closed 2026-09-22 (second round) and since 2026-11-13 partly open again:
+1. *The coincidence bit's readback at a double-speed line edge.*
+   `lycint_lycflag_ds_3`, `ly0/lycint152_lyc0flag_ds_3` and
+   `enable_display/frame{0,1}_m2stat_count_ds_1` read STAT in the M-cycle LY
+   steps in. At double speed how long the bit still compares against the
+   line being left is `LYC_JUST_CHANGED_HOLD_DS` (dots, ppu.nim; 2).
+   `lycint152_lyc153flag_ds_3` is `LYC153_HOLD_DS = 1`.
 
-* *The comparator's LY steps before the boundary* (`STAT_LYC_LY_LEAD_DOTS`
-  = 2, `STAT_LYC_LY_LEAD_DS` = 0, `fifo_lyc_ly_lead`): re-fitted clean-room
-  2026-11-13 (docs/gb-derivations.md, "The comparator's LY steps two dots
-  before the line boundary"). The clean-room CGB line end
-  (`CGB_LINE_END_STEPS`, "A CGB STAT write across a line's end") runs at the
-  comparator's step.
-* The OAM pulse's falling edge: `M2_PULSE_END_EDGE` (docs/gb-derivations.md,
-  "The STAT line falls where a line's OAM pulse ends"), taken lazily at the
-  next CPU write that looks at the line.
-* *The CGB's last-M-cycle mode-2 enable* (`m2enable/late_enable_m0disable_2
-  [cgb]`): closed 2026-11-12, step 4 of the CGB line end
-  (`CGB_LINE_END_STEPS`; docs/gb-derivations.md, "A CGB STAT write across a
-  line's end").
+2. *A disable is an edge's other half.* The line used to be re-evaluated
+   only at source changes and at the M-cycle boundary a STAT write's byte
+   waits for. So a write whose cleared enable bits took the line low inside
+   its own M-cycle, followed by another source rising before the boundary,
+   gave no edge. `-d:gb_stat_read_trace` on `m2enable/m2_late_m0disable_1` shows the $28 ->
+   $20 write committing on dot 449 and the mode-2 rise at 452 with no
+   interrupt. Now a STAT write samples the line under its new enables at the
+   commit, plus the CGB's 2-dot latency, and lets it fall there
+   (`stat_drop_arm`, ppu.nim). A rise inside the latency window refreshes
+   the sample. It took `m2enable/{m2_late_m0disable, late_enable_m0disable,
+   late_enable_after_lycint_disable, lyc1_m2irq_late_lycdisable}_1` and
+   their `_ds_1` twins, `m0enable/lycdisable_ff41_*` (7),
+   `lycEnable/lyc{0,153}_late_{enable_,}m1disable_2 [dmg]` and
+   `lyc153_m1disable_ds_1`. On its own it lost
+   `lycEnable/lyc153_late_{enable_,}m1disable_2 [cgb]`: their LYC = 153 rise
+   meets a mode-1 disable landing on the latency's last dot and still
+   blocks. A strict `>` loses six other CGB tests instead, so that source's
+   latency is one dot longer than the mode-0/2 sources', not the rule's
+   edge. Both pass now.
 
-Measured and refused the same day: the whole-suite
-joint moves of the double-speed grid (`SPEED_SWITCH_PPU_EXTRA_DOTS` 7/9
-with `STAT_READ_SAMPLE_DS_ADD` 0/2: -86 to -280) and of the to-single
-switch residual (`SPEED_SWITCH_PPU_EXTRA_DOTS_SINGLE` -1, 0, 1, 2, 4, 5, 7:
-each loses 26..34 `speedchange*_ly44_m3*` ladder rows and takes no
-`lcd_offset` row).
+3. *The same for LYC writes.* An LYC write that breaks the match is the same
+   disable through the comparator (`LYC_DROP_LATENCY_DMG` = 1 dot and
+   `LYC_DROP_BOUNDARY_SKIP` = 1, ppu.nim). The CGB's drop is the
+   comparator's sample since 2026-11-12 (docs/gb-derivations.md, "CGB LYC
+   write: a sampled comparator"). Tests:
+   `m0enable/lycdisable_ff45_{3, scx1_2, scx2_2} [dmg]`,
+   `lycdisable_ff45_scx{1,2}_1 [cgb]`, `lycdisable_ff45_scx1_ds_1` [cgb],
+   `m2enable/lyc1_m2irq_late_lyc255_{1 [cgb], 2 [dmg]}`.
 
-**Closed (A3), 2026-09-22.** The last row, `m1/ly143_late_m2enable_ds_
-lcdoffset1_1`, rests on the double-speed line-144 pulse's rise dot
-(`M2_144_EARLY_DOT_DS` = 454, re-fitted 2026-11-13: one double-speed M-cycle
-before the line ends) and an IF read's tie with it (`IF_READ_M2_144_TIE_DS`,
-0: `enable_display/frame{0,1}_m2irq_count_ds_2` pass without it).
+4. *The line-144 OAM pulse holds through the boundary.* The pulse used to
+   go low for the instant between the LY advance and the mode-1 set inside
+   `ly_advance_vblank_entry`. The comparator's drop there was then a dip,
+   and the mode-1 rise a false edge whenever LYC = 143 had held the line
+   (`m1irq_m2enable_lyc_1`, `m2m1irq_ifw_2`, `m1irq_m2disable_lycdisable_3`,
+   `lyc143_late_m2enable_lycdisable_2` and `_ds_2` twins, both devices).
+   `m2_line144` now holds through the boundary. The three CGB cases left
+   after it are the same tests one M-cycle later: the CGB write's enable
+   lands 2 dots after its commit (`CGB_STAT_ENABLE_LATENCY`). They pass.
+
+5. *The comparator's LY steps before the boundary*
+   (`STAT_LYC_LY_LEAD_DOTS` = 2, `STAT_LYC_LY_LEAD_DS` = 0,
+   `fifo_lyc_ly_lead`; docs/gb-derivations.md, "The comparator's LY steps
+   two dots before the line boundary", which lists the tests on each side).
+   The CGB line end (`CGB_LINE_END_STEPS`, ibid., "A CGB STAT write across
+   a line's end") runs at the comparator's step.
+
+6. *The OAM pulse's falling edge* (`M2_PULSE_END_EDGE`; docs/gb-derivations.md,
+   "The STAT line falls where a line's OAM pulse ends"), taken at the next
+   CPU write that looks at the line: `lycEnable/late_ff41_enable_after_m2int`
+   and `_after_m2int_disable` (both devices).
+
+7. *The CGB's last-M-cycle mode-2 enable*
+   (`m2enable/late_enable_m0disable_2 [cgb]`): step 4 of the CGB line end
+   (`CGB_LINE_END_STEPS`; docs/gb-derivations.md, "A CGB STAT write across a
+   line's end"). Closed 2026-11-12.
+
+8. *The line-144 pulse at double speed.* The last test,
+   `m1/ly143_late_m2enable_ds_lcdoffset1_1`, rests on the double-speed
+   line-144 pulse's rise dot (`M2_144_EARLY_DOT_DS` = 454: one double-speed
+   M-cycle before the line ends) and an IF read's tie with it
+   (`IF_READ_M2_144_TIE_DS` = 0: `enable_display/frame{0,1}_m2irq_count_ds_2`
+   pass without it).
+
+Tried and rejected: the whole-suite joint moves of the double-speed grid
+(`SPEED_SWITCH_PPU_EXTRA_DOTS` 7/9 with `STAT_READ_SAMPLE_DS_ADD` 0/2: -86
+to -280) and of the to-single switch residual
+(`SPEED_SWITCH_PPU_EXTRA_DOTS_SINGLE` -1, 0, 1, 2, 4, 5, 7: each loses
+26..34 `speedchange*_ly44_m3*` ladder tests and takes no `lcd_offset`
+test).
 
 The knob sweep of 2026-09-22 tried `+-1` of every GB `{.intdefine.}` (206
 knobs), failing tests first, with every hit validated on the full 5157-test
@@ -277,37 +254,27 @@ positive.
 
 ### A4. Mode-0 STAT interrupt against a timer interrupt
 
-Closed: the dispatch writes PC in its fourth and fifth M-cycles and picks
-the vector between the two (`DISPATCH_PUSH_MCYCLE`, clean-room 2026-11-13;
+**Closed.** The dispatch writes PC in its fourth and fifth M-cycles and
+picks the vector between the two (`DISPATCH_PUSH_MCYCLE`, cpu.nim;
 docs/gb-derivations.md, "The dispatch pushes in its fourth and fifth
-M-cycles"). Rows `irq_precedence/late_m0irq_vs_tima_*`, both devices.
+M-cycles"). Tests: `irq_precedence/late_m0irq_vs_tima_*`, both devices.
 
 ### A5. Halt-woken readers of the mode-0 edge
 
-**Rows (0).** `oamdma/oamdma_late_speedchange_stat_2` closed 2026-11-13 by
-two rules together: the OAM DMA unit is released under the stall
-(`OAMDMA_FROZEN_RELEASE`) and the CGB fetches objects with LCDC.1 clear
-(`CGB_OBJ_FETCH_OFF`, `obj_fetch_on`, fifo_ppu.nim). `oamdma_late_halt_stat_2` (both
-devices) and the eight `halt/` rows are green again: HALT with IME on and an
-interrupt already pending pushes the HALT's own address
-(`HALT_IME_PENDING_REDO`, the `_3a`/`_3b` rows), `DMG_HALT_MIN_MCYCLES = 2`
-(`_2b`) and `M2_LEAD_HALT_BLIND_DMG_ONLY = 1` (`noime_m2irq_m0stat_1 [cgb]`);
-docs/gb-derivations.md §7.
+**Closed.** A halted CPU latches the interrupt line at a different point of
+its M-cycle from a running one; the rules are below (cpu.nim;
+docs/gb-derivations.md section 7).
+
+Tests: `oamdma/oamdma_late_halt_stat_2` (both devices),
+`oamdma_late_speedchange_stat_2`, the eight `halt/` tests
+(`late_m0{int,irq}_halt_m0stat_scx{2,3}_*`) and `noime_m2irq_m0stat_1 [cgb]`.
 
 **Behaviour.** The mode-0 source's rise sits mid-M-cycle at some SCX.
 GBMicrotest's `int_hblank_{nops,halt}_scx*` pairs put the halt one M-cycle
 after the sled for the two sources that do not rise on a line boundary (OAM,
 hblank) and level for the two that do (LYC, vblank).
 
-**Modelled.** `HALT_IF_SAMPLE_T = 4` (the running CPU's point; 2 was
-measured and ships off — its cost is +4.8% of retired instructions on a
-halting main loop, cpu.nim), `M0_HALT_BLIND_DOTS = 2` (DMG: the last 2
-T-cycles of a halted M-cycle cannot see the mode-0 rise; wilbertpol
-`hblank_ly_scx_timing-GS` vs `-C`), `CGB_HALT_PPU_LEAD = 1` (a halted CGB's
-PPU runs one M-cycle behind and gets it back at the wake; gambatte
-`halt/lycirq_m2stat_{1,2,3}`, `halt/m1int_ly_{1,2,3}`, `cgb-acid-hell`),
-`M2_LEAD_HALT_BLIND` (a halted CPU is blind to `STAT_M2_LEAD`; mooneye
-`intr_2_*` vs wilbertpol `*_nops`).
+**Modelled.**
 
 * `HALT_IF_SAMPLE_T = 4`: the running CPU's point. 2 was measured and is off
   by default; its cost is +4.8% of retired instructions on a halting main
@@ -318,18 +285,17 @@ PPU runs one M-cycle behind and gets it back at the wake; gambatte
   gets it back at the wake (gambatte `halt/lycirq_m2stat_{1,2,3}`,
   `halt/m1int_ly_{1,2,3}`, `cgb-acid-hell`).
 * `M2_LEAD_HALT_BLIND`: a halted CPU is blind to `STAT_M2_LEAD` (mooneye
-  `intr_2_*` vs wilbertpol `*_nops`). It is DMG-only:
-  `noime_m2irq_m0stat_1 [cgb]` is the one test it cost when applied to both
-  devices, and with it DMG-only mooneye `intr_2_*` pass on CGB C and E too.
+  `intr_2_*` vs wilbertpol `*_nops`).
 * `HALT_IME_PENDING_REDO`: a HALT with IME on and an interrupt already
-  pending re-runs after the handler. This closed the `halt/` `_3a`/`_3b`
-  tests, which were never an SCX question.
-* `DMG_HALT_MIN_MCYCLES`: a DMG HALT answers no earlier than its second
-  M-cycle (`_2b`).
-
-The last three rules closed the eight `halt/` tests.
-`oamdma/oamdma_late_halt_stat_2` (both devices) and
-`oamdma_late_speedchange_stat_2`: not recorded.
+  pending pushes the HALT's own address (the `halt/` `_3a`/`_3b` tests).
+* `DMG_HALT_MIN_MCYCLES = 2`: the halted M-cycles a DMG spends before a
+  pending interrupt can end the HALT (`_2b`).
+* `M2_LEAD_HALT_BLIND_DMG_ONLY = 1`: the `M2_LEAD_HALT_BLIND` blindness is
+  the DMG's alone (`noime_m2irq_m0stat_1 [cgb]`).
+* `oamdma_late_speedchange_stat_2` takes two rules together: the OAM DMA
+  unit is released under the stall (`OAMDMA_FROZEN_RELEASE`) and the CGB
+  fetches objects with LCDC.1 clear (`CGB_OBJ_FETCH_OFF`, `obj_fetch_on`,
+  fifo_ppu.nim). `oamdma_late_halt_stat_2`: not recorded.
 
 Values tried: `CGB_HALT_PPU_LEAD_DOTS` 1..4, `CGB_HALT_EXIT_MCYCLES` and
 `HALT_IF_SAMPLE_T` were swept, and none separates `scx2_3a` from `scx3_2b`.
@@ -348,23 +314,10 @@ questions for it are hwprobe rows 2 and 10 (`docs/hwprobe-questions.md`).
 
 ### B1. Line 0's mode edges are 2 dots later than the counter says
 
-**Rows (45).** AGE `oam/oam-read-dmgC-cgbBC@dmgC`, `oam-read-cgbE`,
-`oam/oam-write-dmgC`, `vram/vram-read-{dmgC, cgbBCE@*}` (7 arms;
-`oam-write-cgbBCE@*` and `oam-read-dmgC-cgbBC@{cgbab,cgbc}` closed
-2026-09-21, below); gambatte `enable_display` 15 (`ly0_late_vram{r,w}_*`,
-`ly0_late_scx7_m3stat_*`, `frame{0,1}_m{0,2}{irq,stat}_count_*_ds_1`,
-`enable_display_ly0_sprites_m0stat_2`, `ly0_oambusy_read_ds_1`),
-`lcd_offset` 19 (all CGB). `display_startstate/stat_*_2 [cgb]` (4) closed
-2026-09-22: `CGB_BOOT_PHASE` 161 -> 165, which no other row felt.
-`enable_display_ly0_sprites_m0stat_2` (both devices) closed 2026-11-13: the
-LCD-on line has no OAM scan and no objects (`LCD_ON_LINE_NO_SCAN`,
-docs/gb-derivations.md section 3). `ly0_late_scx7_m3stat_scx0_2` [dmg] and
-`_scx1_1` [cgb] closed with `SCX_LATCH_LCDON_EXTRA{,_CGB}` = 1 / 2,
-`ly0_late_vramw_2` [cgb] with `VRAM_WRITE_LINE0_CGB_GRACE` = 1.
-`ly0_m0irq_scx{0,1}_ds_1` and `frame0_m0irq_count_scx{2,3}_ds_1`: at double
-speed the LCD-on line's mode-0 source lag behind its flag is
-`LCDON_M0_LAG_DS` (gb.nim; 8 scheduler cycles = one double-speed M-cycle,
-re-fitted 2026-11-13).
+**Closed.** After an LCD enable, line 0's mode-3 edges sit 2 dots later
+against the CPU's grid than on any later line (`LCD_ON_LINE0_LOCK_LEAD = 2`,
+`LCD_ON_STAT_READ_LAG = 2`; ppu.nim). AGE `oam/oam-write-dmgC` is not
+scored.
 
 Tests: AGE `oam/oam-read-dmgC-cgbBC@dmgC`,
 `oam-read-cgbE`, `vram/vram-read-{dmgC, cgbBCE@*}`; gambatte
@@ -400,12 +353,16 @@ demand opposite parities.
   `OAM_READ_M0_OPEN_DOTS = 2`, `OAM_READ_M3_CLOSE_DOTS = 5`, and
   `oam_read_open_late` (CGB-E's OAM lock reopens a dot later; AGE
   `oam-read-cgbE` vs `-dmgC-cgbBC`).
-* `LCDON_NO_OAM_SCAN`: the LCD-on line has no OAM scan and finds no objects
-  (`enable_display_ly0_sprites_m0stat_2`, both devices).
-* `LCDON_M0_LAG_DS` (gb.nim): at double speed the LCD-on line's mode-0
-  source trails its flag by the same 2 dots the single-speed source spends
-  as a lost lead (`ly0_m0irq_scx{0,1}_ds_1`,
-  `frame0_m0irq_count_scx{2,3}_ds_1`).
+* `LCD_ON_LINE_NO_SCAN`: the LCD-on line has no OAM scan and no objects
+  (`enable_display_ly0_sprites_m0stat_2`, both devices;
+  docs/gb-derivations.md section 3).
+* `SCX_LATCH_LCDON_EXTRA{,_CGB}` = 1 / 2: the LCD-on line takes an SCX store
+  for longer (`ly0_late_scx7_m3stat_scx0_2` [dmg], `_scx1_1` [cgb]).
+* `VRAM_WRITE_LINE0_CGB_GRACE = 1`: the CGB's VRAM write lock closes late on
+  the LCD-on line (`ly0_late_vramw_2` [cgb]).
+* `LCDON_M0_LAG_DS` (gb.nim) = 8 scheduler cycles, one double-speed M-cycle:
+  at double speed the LCD-on line's mode-0 source trails its flag
+  (`ly0_m0irq_scx{0,1}_ds_1`, `frame0_m0irq_count_scx{2,3}_ds_1`).
 
 **The OAM write lock.** AGE `oam-write-cgbBCE@*` (3 cases) and gambatte
 `oam_access/{mid,pre,post}write*` (5 tests) were not line 0 at all. A CPU
@@ -442,10 +399,14 @@ revision split as `oam_read_open_late`. 3 loses gambatte
 
 ### B2. The CGB palette-RAM lock's edges
 
-**Rows (0).** Closed 2026-11-13 by the dot-window lock below (13 rows, and
-`cgbpal_read_m3start_lcdoffset1_1` with the close edge at 1 dot): `cgbpal_m3/cgbpal_m3end_{1,3}`,
-`_ds_{1,3}`, `_scx5_ds_{1,3}`, `cgbpal_m3start_ds_1`,
-`cgbpal_{read,write}_m3start_ds_1`; `enable_display/ly0_late_cgbp{r,w}{,_ds}_2`.
+**Closed.** The palette-RAM lock is a dot window around the mode-3 and
+mode-0 edges (`CRAM_LOCK_DOTS`, `cpu_cram_open_dots`; ppu.nim;
+docs/gb-derivations.md, "The CGB palette RAM lock around the mode-3
+edges").
+
+Tests: `cgbpal_m3/cgbpal_m3end_{1,3}`, `_ds_{1,3}`, `_scx5_ds_{1,3}`,
+`cgbpal_m3start_ds_1`, `cgbpal_{read,write}_m3start_{ds,lcdoffset1}_1`;
+`enable_display/ly0_late_cgbp{r,w}{,_ds}_2`.
 
 **Behaviour.** BCPD/OCPD belong to the PPU during mode 3: reads answer
 `$FF`, writes are dropped with the auto-increment still taken (Pan Docs,
@@ -453,7 +414,7 @@ revision split as `oam_read_open_late`. 3 loses gambatte
 VRAM lock's on the read side. The `_ds_`/`lcdoffset1` members and the
 `m3end_1/_3` pairs ask for the edge in dots, as C1 does for VRAM.
 
-**Modelled (re-fit 2026-11-13).** `CRAM_LOCK_DOTS = true`
+**Modelled.** `CRAM_LOCK_DOTS = true`
 (`cpu_cram_open_dots`): the lock is a dot window, closed from
 `CRAM_LOCK_ON_LAT{,_DS}` = 1 / 2 dots after the mode-3 edge until
 `CRAM_LOCK_OFF_LAT{,_DS}` = 2 / 3 dots after the mode-0 edge (the VRAM read
@@ -470,31 +431,41 @@ starts on mode 3's first dot still reads the palette
 
 ### C1. The VRAM and OAM locks at mode 3's two ends
 
-**Rows (27).** `oam_access/{postread_scx{2,3,5}_2, 10spritesprline_postread_2,
-postwrite_2_scx3, midwrite_2, prewrite_{2,ds_2,ds_lcdoffset1_2},
-preread_{ds,lcdoffset1}_1}`, `vram_m3/{postread_scx{2,3}_2,
-10spritesprline_postread_2, preread_lcdoffset2_1, prewrite_lcdoffset2_1}`.
-`vramw_m3end_scx3_5` (both devices) closed 2026-11-13: a VRAM write issued
-in mode 3 asks the lock `VRAM_WRITE_M3_END_DOTS` = 3 dots into its M-cycle
-(`_DS` = 0; memory.nim, both strict optima on `vramw_m3end/*`).
+**Closed.** The CPU's VRAM and OAM access windows open and close on PPU
+dots, not on the CPU's M-cycle boundaries (the knobs under "Modelled";
+memory.nim, ppu.nim).
 
 Tests: `oam_access/{postread_scx{2,3,5}_2,
 10spritesprline_postread_2, postwrite_2_scx3, midwrite_2,
 prewrite_{2,ds_2,ds_lcdoffset1_2}, preread_{ds,lcdoffset1}_1}` and
 `vram_m3/{postread_scx{2,3}_2, 10spritesprline_postread_2,
-preread_lcdoffset2_1, prewrite_lcdoffset2_1}`. Some are named under A3
-rule 5 and B1; the rest: not recorded.
+preread_lcdoffset2_1, prewrite_lcdoffset2_1}`. Some are named under B1 and
+in docs/gb-derivations.md, "The comparator's LY steps two dots before the
+line boundary"; the rest: not recorded.
 
 **Behaviour.** Pan Docs, "Accessing VRAM and OAM". The `postread_*_2` tests
 read one M-cycle after the mode 3 -> 0 edge at SCX 2/3/5 or with ten objects
 and want the lock open. `prewrite`/`preread` ask the close edge at mode 3's
 start on CGB and in double speed.
 
-**Closed 2026-11-13.** The close edge on a CGB at single speed is in dots
-too: an M-cycle that starts on mode 3's first dot is locked for a read and
-for a write (`VRAM_READ_CGB_M3_EDGE_SS = 4`, `VRAM_WRITE_CGB_M3_EDGE_SS =
-80`, ppu.nim; `vram_m3/{preread,prewrite}_lcdoffset{1,2}_{1,2}` bracket
-both to the dot). docs/gb-derivations.md section 1.
+**Modelled.**
+
+* Open edge: `VRAM_READ_M0_OPEN_DOTS = 2` / `_DS = 3`,
+  `OAM_READ_M0_OPEN_DOTS = 2` / `_DS = 3` (from AGE, B1).
+* Close edge: `VRAM_READ_LIVE_LOCK = 2` (the DMG's read lock asks the live
+  mode, the CGB's the latched one; gambatte
+  `vram_m3/preread_2_dmg08_out3_cgb04c_out0`), `OAM_READ_M3_CLOSE_DOTS = 5`.
+* Writes ask the live mode at their commit point (`OAM_WRITE_M2_TAIL = 1`:
+  the last M-cycle of mode 2 still takes an OAM write; mooneye
+  `lcdon_write_timing-GS`).
+* A VRAM write issued in mode 3 asks the lock `VRAM_WRITE_M3_END_DOTS` = 3
+  dots into its M-cycle (`_DS` = 0; memory.nim, both strict optima on
+  `vramw_m3end/*`): `vramw_m3end_scx3_5` (both devices).
+* On a CGB at single speed the close edge is in dots too: an M-cycle that
+  starts on mode 3's first dot is locked for a read and for a write
+  (`VRAM_READ_CGB_M3_EDGE_SS = 4`, `VRAM_WRITE_CGB_M3_EDGE_SS = 80`, ppu.nim;
+  `vram_m3/{preread,prewrite}_lcdoffset{1,2}_{1,2}` pin both to the dot;
+  docs/gb-derivations.md section 1).
 
 ### C2. The window's mode-3 penalty near the right edge
 
@@ -503,29 +474,44 @@ the shifter, and a window restart delays that pixel by a fetch, so the flag
 falls at hit + 5 + (159 - lx) wherever the match lands — a flat six dots
 (`WIN_TAIL_FLAG_LEAD`, gb.nim).
 
-**Closed later the same day (DMG WX 166).** `stat-mode-window-dmgC` read
-the DMG's carried WX = 166 line (`DMG_WIN_LAST_PX_CARRY`) as 173 against
-AGE's 172, the same row as WX 167. `fetch_work_pending` held mode 3 for
-the carried line's own match, citing gambatte `m2int_wxA6_m3stat_1` [dmg]
-as wanting "174, not 172"; with the term deleted that row still passes,
-`m2int_wxA6_scx3_m3stat_2` [dmg] joins it, and nothing in `window/`,
-mealybug or the `on_screen` frames moves. The claim was stale. AGE 87 ->
-88. The `spxA7` CGB rows (`m2int_wxA6_spxA7_{m3stat_2,m3stat_4}`): closed
-2026-11-13 by `CGB_OBJ_LAST_PX_YIELDS` (the CGB's last-pixel object waits
-for the window start and holds only the mode flag; `docs/gb-derivations.md`,
-"The last pixel: object against window on a CGB"). `m2int_wxA6_spxA7_m0irq_2`
-[cgb] and its object-less twin `m2int_wxA6_m0irq_2` [cgb] closed with the
-mode-0 request's own rule: it does not wait for work that starts on the last
-pixel (`M0_REQ_LAST_PX`, docs/gb-derivations.md section 1).
+**CGB and WX 165.** dingbat's tail waited for the restarted fetch's push
+instead: +1 at WX 165, +2 at WX 166. The `-d:gb_m3_trace` dots at
+246/248/249 for WX 163/165/166 all retire on 254 under the rule. Refuted: a
+three-way conflict with AGE `stat-mode-window/*`. gambatte
+`m2int_wxA6_m3stat_3` [cgb] wants mode 0 by its third read, so the CGB's
+WX = 166 line is 178 dots there too; 180 was dingbat's number, not
+hardware's. Tests: AGE `stat-mode-window-{cgbBCE,ds-cgbBCE}@*`; gambatte
+`m2int_wxA5_m0irq_2` (both devices),
+`m2int_wxA6_{,firstline_,scx5_}m3stat_3` [cgb],
+`m2int_wxA6_{,scx5_}m3stat_ds_2`, `m2int_wxA6_vrambusyread_3` [cgb]. Nothing
+lost.
+
+**DMG WX 166.** AGE `stat-mode-window-dmgC` read the DMG's carried WX = 166
+line (`DMG_WIN_LAST_PX_CARRY`) as 173 against AGE's 172, the same value as
+WX 167. `fetch_work_pending` held mode 3 for the carried line's own match,
+citing gambatte `m2int_wxA6_m3stat_1` [dmg] as wanting "174, not 172". With
+the term deleted that test still passes, `m2int_wxA6_scx3_m3stat_2` [dmg]
+joins it, and nothing in `window/`, mealybug or the `on_screen` frames
+moves.
+
+**The `spxA7` CGB tests.** `m2int_wxA6_spxA7_{m3stat_2,m3stat_4}`:
+`CGB_OBJ_LAST_PX_YIELDS` (the CGB's last-pixel object waits for the window
+start and holds only the mode flag; docs/gb-derivations.md, "The last
+pixel: object against window on a CGB"). `m2int_wxA6_spxA7_m0irq_2` [cgb]
+and its object-less twin `m2int_wxA6_m0irq_2` [cgb]: the mode-0 request's
+own rule, which does not wait for work that starts on the last pixel
+(`M0_REQ_LAST_PX`, docs/gb-derivations.md section 1).
 
 ### C3. Mid-line SCX stores
 
-**Rows (3).** `scx_during_m3_spx2{,_ds}`, `scx_attrib_during_m3_spx2_ds`
-(8 px each, CGB; not timing, see below; moved to NotScored 2026-10-14 by
-`gambatte_row_reads_powerup_objpal`). The seven `scx_0761c0` [cgb] rows
-closed 2026-11-13: the map column's borrow is measured against the pixels
-the discard threw away, a wrapped pass included (`SCX_WRAP_BORROW`,
-docs/gb-derivations.md section 4).
+**Closed.** The map column's borrow is measured against the pixels the
+discard threw away, a wrapped pass included (`SCX_WRAP_BORROW`,
+docs/gb-derivations.md section 4); the three `spx2` tests are not scored
+(`gambatte_row_reads_powerup_objpal`).
+
+Tests: the seven `scx_0761c0` tests [cgb]; `scx_during_m3_spx2{,_ds}` and
+`scx_attrib_during_m3_spx2_ds` (8 px each, CGB; not timing, see below; in
+NotScored since 2026-10-14).
 
 **Behaviour.** The BG fetcher's map column is a live sum
 `((SCX + 8k - F) shr 3) and 31`. A store that lowers `SCX and 7` below the
@@ -595,7 +581,7 @@ are in NotScored instead of seeding the table.
 
 ### C4. Objects: the X = 167 slot and the CGB's fetch cancel
 
-**Closed.** The CGB fetcher stops for objects even with LCDC.1 clear
+**Closed.** A CGB fetches objects with LCDC.1 clear
 (`CGB_OBJ_FETCH_OFF`, with `OAM_SCAN_DMA_EDGE_DS`; see D2), which closed
 `sprites/late_disable_ds_1 [cgb]` and `sprites/enable/late_disable_ds_3
 [cgb]`. `sprites/10spritesPrLine_10xposA7_m0irq_2` (both devices; ten
@@ -614,10 +600,14 @@ are the double-speed members that could.
 
 ### C5. Arming the window late through WY
 
-**Closed.** A WY write or an LCDC.5 enable does not arm the latch at its
-landing: the comparator samples a few dots after the commit, and a match
-seen after the per-line check has run does not latch (`WIN_CHECK_DEFER_*`,
-`WIN_LATCH_END_*`, `win_check_now`).
+**Closed.** The WY comparator is sampled, not a level: once per line and
+a few dots after a WY write or an LCDC.5 enable, with a cut-off at the
+line's end (`WIN_LINE_CHECK_DOT_SS`, `WIN_CHECK_DEFER_*`,
+`WIN_CHECK_CUT_DOTS`, `WIN_HEAD_LATE_DOT`, `win_check_now`;
+docs/gb-derivations.md, "The window's WY comparator: when it samples").
+
+Tests: every `window/arg/late_wy_*`, `late_scx_late_wy_*` and
+`late_enable_afterVblank` test, the `lcdoffset1` ones included.
 
 **Behaviour.** The WY condition is a latch set on the first line where
 `LY == WY` while the window is enabled and held for the frame (Pan Docs,
@@ -632,36 +622,35 @@ families.
 **Modelled.** The level latch; `CGB_WY_LATENCY = 4` (one M-cycle, clipped to
 3 dots by `CGB_LATENCY_CAP = 1`), `CGB_WY_LATCH_LATENCY = 0`.
 
-**Re-derived 2026-11-13 (clean room).** The comparator is sampled, not a
-level: once per line, one dot into the line at single speed and on its
-first dot at double speed (`WIN_LINE_CHECK_DOT_SS = 1`; dot 5 of line 0 on
-a CGB), and `WIN_CHECK_DEFER_DMG = 1` / `_CGB = 5` / `_CGB_DS = 1` dots
-after a WY write or an LCDC.5 enable, except from the dot the LY = LYC
-comparator's LY steps to the next line (`WIN_CHECK_CUT_DOTS = 2`, dot 454;
-`_DS = 3`); a match up to dot `WIN_HEAD_LATE_DOT = 85` (+ SCX & 7) still
-makes a WX < 6 line a window line. Every `window/arg/late_wy_*`,
-`late_scx_late_wy_*` and `late_enable_afterVblank` row passes, the
-`lcdoffset1` ones included. Schedule, rows and brackets:
+**The sample points.** The comparator is sampled, not a level: once per
+line, one dot into the line at single speed and on its first dot at double
+speed (`WIN_LINE_CHECK_DOT_SS = 1`; dot 5 of line 0 on a CGB), and
+`WIN_CHECK_DEFER_DMG = 1` / `_CGB = 5` / `_CGB_DS = 1` dots after a WY write
+or an LCDC.5 enable, except from the dot the LY = LYC comparator's LY steps
+to the next line (`WIN_CHECK_CUT_DOTS = 2`, dot 454; `_DS = 3`); a match up
+to dot `WIN_HEAD_LATE_DOT = 85` (+ SCX & 7) still makes a WX < 6 line a
+window line. Schedule, tests and the values on each side:
 `docs/gb-derivations.md`, "The window's WY comparator: when it samples".
 
 ### C6. Window disable and re-enable mid-line on the CGB
 
-**Rows (0; closed 2026-11-13).** Were 5: `window/late_disable_scx5_ds_1`
-(`WIN_REVOKE_DS_PUSH`), `late_reenable_scx3_2` (`CGB_WE_ENABLE_LATE`),
-`late_wx_scx3_2` (`CGB_WX_LATE_SS`),
-`window/on_screen/wx17_weoff_wxA5_weon [cgb]` (`CGB_WE_DISABLE_LATE`),
-`window/on_screen/wxA6_late_we_reenable_3 [dmg]` (`WIN_CARRY_HEAD_DROP`).
-`docs/gb-derivations.md`, "LCDC.5 and WX reach a CGB's window logic late"
-and "A carried window start against LCDC.5 low".
+**Closed.** Clearing LCDC.5 mid-mode-3 returns the fetcher to the background
+at its next map read, and a CGB window start is revocable for the dots it
+has run (`WIN_EN_ABORT = 1`, `CGB_WIN_REVOKE_LAG = 1`, `CGB_WIN_EN_DEFER =
+5`, `DMG_WIN_EN_REVOKE = 1`).
 
-**Behaviour.** Clearing LCDC.5 mid-mode-3 returns the fetcher to the
-background at its next map read (mealybug's PPU notes; `WIN_EN_ABORT = 1`,
-DMG and CGB); a CGB window start is revocable for the dots it has run
-(`CGB_WIN_REVOKE_LAG = 1`, `CGB_WIN_EN_DEFER = 5`, `DMG_WIN_EN_REVOKE = 1`).
-`wxA6_late_we_reenable_3`'s extra window line was not the line counter's:
-the start carried over vblank met LCDC.5 low at line 0's head (dot 82, bit
-back on dot 85) and was spent on line 1, where hardware has lost it
-(`WIN_CARRY_HEAD_DROP = 1`).
+Tests: `window/late_disable_scx5_ds_1` (`WIN_REVOKE_DS_PUSH`),
+`late_reenable_scx3_2` (`CGB_WE_ENABLE_LATE`), `late_wx_scx3_2`
+(`CGB_WX_LATE_SS`), `window/on_screen/wx17_weoff_wxA5_weon [cgb]`
+(`CGB_WE_DISABLE_LATE`), `window/on_screen/wxA6_late_we_reenable_3 [dmg]`
+(`WIN_CARRY_HEAD_DROP`). docs/gb-derivations.md, "LCDC.5 and WX reach a
+CGB's window logic late" and "A carried window start against LCDC.5 low".
+
+**Behaviour.** The LCDC.5 rule is from mealybug's PPU notes (DMG and
+CGB). `wxA6_late_we_reenable_3`'s extra window line was not the line
+counter's: the start carried over vblank met LCDC.5 low at line 0's head
+(dot 82, bit back on dot 85) and was spent on line 1, where hardware has
+lost it (`WIN_CARRY_HEAD_DROP = 1`).
 
 ### C7. The DMG BGP transition pixel
 
@@ -761,8 +750,8 @@ wrong pixels to 1.
 
 ### D1. HBlank DMA blocks owed across a halt or a speed switch
 
-**Rows (0).** The `dma/` and `irq_precedence/` rows that rest on the
-HALT/STOP request rules were re-derived 2026-11-13 and all pass.
+**Closed.** dma 229/229: the `dma/` and `irq_precedence/` tests that rest
+on the HALT/STOP request rules all pass (the `HDMA_*` knobs below, gb.nim).
 
 **Behaviour.** An HBlank DMA copies one 16-byte block per mode-0 edge while
 the CPU is off the bus (Pan Docs, "LCD VRAM DMA Transfers"). The CPU hands
@@ -771,44 +760,52 @@ operand M-cycle (`HDMA_GRANT_FETCH_DOTS`, `HDMA_GRANT_BOUNDARY_DOTS = 3`;
 gambatte `dma/hdma_start*` and mealybug `dma/hdma_timing-C` parameterised by
 the fetch). A halted CPU's edge detector holds a CPU-clocked copy of the
 mode, so a mode-0 edge under a halt is invisible until the CPU runs again
-(`HDMA_HALT_M0_BLIND = 1`, `HDMA_HALT_BLIND_LAG = 2`).
+(`HDMA_HALT_M0_BLIND = 1`, `HDMA_HALT_BLIND_LAG = 2`). The rules
+(docs/gb-derivations.md section 5, one entry each):
 
-* Re-derived 2026-11-13 (docs/gb-derivations.md §5, one entry each): an
-  HBlank request inside a HALT's or a speed switch's own execute cycle is
-  taken there and paid at the wake, the byte that cycle read executed
-  from the latch (`HDMA_HALT_REQ`); the wake's margin and the edge
-  detector's blind M-cycle (`HDMA_WAKE_M0_MARGIN = 4`,
-  `HDMA_WAKE_BLIND_DOTS = 4`); a dispatch's first M-cycle is a hand-over
-  point (`HDMA_DISPATCH_FETCH`); a general-purpose DMA and an FF55 write
-  arming a transfer inside HBlank take the bus at the next opcode fetch
-  (`GDMA_GRANT_FETCH`, `HDMA_START_GRANT_FETCH = 2`, `HDMA_START_REQ_LAG = 1`
-  in place of the two start cutoffs); the LCD switch-off moves one block
-  (`HDMA_LCD_OFF_BLOCK`).
+* An HBlank request inside a HALT's or a speed switch's own execute cycle
+  is taken there and paid at the wake, the byte that cycle read executed
+  from the latch (`HDMA_HALT_REQ`).
+* The wake's margin and the edge detector's blind M-cycle
+  (`HDMA_WAKE_M0_MARGIN = 4`, `HDMA_WAKE_BLIND_DOTS = 4`).
+* A dispatch's first M-cycle is a hand-over point (`HDMA_DISPATCH_FETCH`).
+* A general-purpose DMA and an FF55 write arming a transfer inside HBlank
+  take the bus at the next opcode fetch (`GDMA_GRANT_FETCH`,
+  `HDMA_START_GRANT_FETCH = 2`, `HDMA_START_REQ_LAG = 1`).
+* The LCD switch-off moves one block (`HDMA_LCD_OFF_BLOCK`).
 
 Its bytes land 4 dots after the block (`HDMA_VISIBLE_DOTS`;
 `hdma_start_ds_1` and `hdma_start_scx5_2` separate dots from M-cycles).
 
 ### D2. OAM DMA against the mode-2 scan and the CPU
 
-**Rows (0).** `oamdma_src0000_busyint0002` (both devices) closed 2026-11-13
-by the dispatch's push order (`DISPATCH_PUSH_MCYCLE`, A4); the
-`srcchange0000_busyinc` pair by the bus of a transfer restarted by FF46
-moving at once (`OAMDMA_RESTART_HANDOVER`, docs/gb-derivations.md section
-6).
+**Closed.** For a slot inside a running OAM DMA the mode-2 scan's comparator
+compares the word its input latches last loaded, and at double speed the
+transfer's take/give edge sits one dot earlier against the scan
+(`OAM_SCAN_DMA_HOLD`, `OAM_SCAN_DMA_EDGE_DS`; docs/gb-derivations.md
+section 6).
 
-`late_sp{00x,00y,01x,01y,39x,39y}_ds_*`, `late_sp39x_4`,
-`sprites/late_disable_ds_1`, `sprites/enable/late_disable_ds_3` closed
-2026-11-13: a CGB fetches objects with LCDC.1 clear (`CGB_OBJ_FETCH_OFF`),
-and at double speed the transfer's take/give edge sits
-`OAM_SCAN_DMA_EDGE_DS` = 1 dot earlier against the scan (1 and 2 pass, 0
-and 3 do not). `oamdma_late_speedchange_stat_2` came with it once the
-unit releases OAM when a speed switch stops it with its last byte written
-(`OAMDMA_FROZEN_RELEASE`, docs/gb-derivations.md section 6).
+What closed each test:
+
+* `late_sp{00x,00y,01x,01y,39x,39y}_ds_*`, `late_sp39x_4`,
+  `sprites/late_disable_ds_1`, `sprites/enable/late_disable_ds_3`: a CGB
+  fetches objects with LCDC.1 clear (`CGB_OBJ_FETCH_OFF`), and at double
+  speed `OAM_SCAN_DMA_EDGE_DS` = 1 (1 and 2 pass, 0 and 3 do not).
+  `oamdma_late_speedchange_stat_2` came with it once the unit releases OAM
+  when a speed switch stops it with its last byte written
+  (`OAMDMA_FROZEN_RELEASE`).
+* `oamdma_src0000_busyint0002` (both devices): the dispatch's push order
+  (`DISPATCH_PUSH_MCYCLE`, A4).
+* The `srcchange0000_busyinc` pair: the bus of a transfer restarted by FF46
+  moves at once (`OAMDMA_RESTART_HANDOVER`, docs/gb-derivations.md
+  section 6).
+
+The `busy*` families are value tests (which byte a colliding access sees).
 
 **Behaviour.** The mode-2 scan reads OAM entry `n` on dot `2n` and reads
 nothing while an OAM DMA owns the OAM bus. The transfer moves one entry per
 16 dots (8 in double speed) against the scan's one per 2, so no start
-latency can express the rows (Pan Docs, "OAM DMA Transfer"; gambatte
+latency can express the tests (Pan Docs, "OAM DMA Transfer"; gambatte
 `oamdma/late_sp{00,01,02,39}{x,y}`, sixteen one-M-cycle brackets). For a
 slot inside a running transfer the comparator compares the word its input
 latches last loaded (`OAM_SCAN_DMA_HOLD`;
@@ -818,9 +815,6 @@ DocBoy `oam_scan_blocked_by_dma_nops*`, strikethrough,
 **Modelled.** `OAM_SCAN_DMA_LOCK = 1`,
 `OBJ_SCAN_DOT_ADJ = 0`, `CGB_OAM_DMA_START_T = 8`, `OAMDMA_HALT_PAUSE = 1`,
 `OAMDMA_FREEZE_BUS = 1`, `OAMDMA_WRAM_A12 = 1`, `OBJ_DMA_BUS_LEAD`.
-
-**Closed.** The `busy*` value rows (which byte a colliding access sees)
-pass with the two rules above.
 
 ---
 
@@ -877,23 +871,28 @@ question is which cycles the timer sees around the reset.
 
 ### F1. The eighth shift edge against a CPU access
 
-**Re-fitted 2026-11-13.** `SERIAL_SC_WRITE_LEAD_T` (serial.nim) = 4:
-T-cycles before the divider's count at the commit at which an SC store
-samples the serial tap, i.e. the top of the store's M-cycle (1..4 are one
-value; bracket at the constant). Rows:
-`serial/nopx1_start{,83}_wait_read_if_2`,
+**Closed.** An SC store samples the serial tap `SERIAL_SC_WRITE_LEAD_T` = 4
+T-cycles before the divider's count at its commit, i.e. the top of the
+store's M-cycle (serial.nim; 1..4 are one value, and the values on each side
+are at the constant). serial 82/82.
+
+Tests: `serial/nopx1_start{,83}_wait_read_if_2`,
 `start83_late_div_write_wait_read_if_{1b,2b}` (CGB),
-`nopx2_start_wait_read_if_1`. Refuted earlier: a one-M-cycle serial lead on a running
-CPU's dispatch, as `TIMER_IRQ_RUN_LEAD` (with any `SERIAL_TAP_*` it loses
-the `start_wait_read_{sb,sc}_2` family, which pins the dispatch where it
-is), and every `SERIAL_TAP_*` from 0 to 16 on its own (none turns
-`nopx1_start_wait_read_if_2`).
+`nopx2_start_wait_read_if_1`.
+
+Refuted:
+
+* A one-M-cycle serial lead on a running CPU's dispatch, as
+  `TIMER_IRQ_RUN_LEAD`. With any `SERIAL_TAP_*` it loses the
+  `start_wait_read_{sb,sc}_2` family, which pins the dispatch where it is.
+* Every `SERIAL_TAP_*` from 0 to 16 on its own. None turns
+  `nopx1_start_wait_read_if_2`.
 
 ### F2. TIMA reload against a read
 
-Re-fitted 2026-11-13: `TAC_SELECT_LEAD_T` (timer.nim) = 0, both divider
-taps judged at the end of the TAC write's M-cycle. Rows:
-`tc00_late_tc01_{5,7}` (1..4 lose them on both devices).
+**Closed.** Both divider taps are judged at the end of the TAC write's
+M-cycle (`TAC_SELECT_LEAD_T = 0`, timer.nim). Tests: `tc00_late_tc01_{5,7}`
+(1..4 lose them on both devices).
 
 ---
 
@@ -947,38 +946,40 @@ they read the APU at a resolution nothing else in the tree does. Scored since
 2026-09-21; all 220 green since 2026-10-14 (`sound` 184/184, `speedchange`
 36/36).
 
-**Closed by them (all knobs two-sided, comments carry the brackets).**
-`BOOT_CH1_PHASE_{DMG,CGB}_T` (memory.nim): the boot beep's second note is
-still stepping at the hand-off (NR52 = $F1), frequency $7C1, and
-`ch1_init_pos_{1..8}` pin where in its 2016-cycle duty cycle each boot ROM
-leaves it (728 / 1612, one value of 504). `BOOT_FS_STAGE_{DMG,CGB}`: the
-frame sequencer's step at the hand-off (1 / 0, `ch2_init_env_counter_timing`).
-A trigger against the next envelope clock (`psg_env_trigger_extra`: Pan Docs'
-extra clock when step 7 is next, judged `ENV_TRIGGER_LEAD_T` = 4 cycles ahead
-of step 6; `ch2_init_reset_env_counter_timing_{9..16}`).
-`SWEEP_TRIGGER_LEAD_T_{DMG,CGB}` = 4 / 8 (scheduler cycles before a sweep
-clock within which a trigger misses it; `ch1_init_reset_sweep_counter_timing_
-{1..12}`) and `APU_POWERON_TAP_LEAD` = 4 (apu.nim; counts ahead of the NR52
-power-on write at which the DIV-APU tap bit is sampled;
-`ch2_init_reset_env_counter_timing_{1..8}`, `ch2_late_reset_nr52_*2b`).
-Re-derived 2026-11-13, brackets at the constants and in
-`docs/gb-derivations.md` §11.
-`APU_SPSW_EXTRA_DOTS` = 8 / `_SINGLE` = 3: the APU's share of the
-KEY1 stall's oscillator restart, the PPU's 8 / 3 exactly, with
-`APU_SPSW_REPHASE_{LEAD,GRID}_T` = 3 / 1 at the first switch after an APU
-power-on (H2).
+**Knobs they pin** (values on both sides of each fail; the comments and
+docs/gb-derivations.md section 11 carry them):
+
+* `BOOT_CH1_PHASE_{DMG,CGB}_T` (memory.nim): the boot beep's second note is
+  still stepping at the hand-off (NR52 = $F1), frequency $7C1, and
+  `ch1_init_pos_{1..8}` pin where in its 2016-cycle duty cycle each boot ROM
+  leaves it (728 / 1612, one value of 504).
+* `BOOT_FS_STAGE_{DMG,CGB}`: the frame sequencer's step at the hand-off
+  (1 / 0, `ch2_init_env_counter_timing`).
+* A trigger against the next envelope clock (`psg_env_trigger_extra`: Pan
+  Docs' extra clock when step 7 is next, judged `ENV_TRIGGER_LEAD_T` = 4
+  cycles ahead of step 6; `ch2_init_reset_env_counter_timing_{9..16}`).
+* `SWEEP_TRIGGER_LEAD_T_{DMG,CGB}` = 4 / 8: scheduler cycles before a sweep
+  clock within which a trigger misses it
+  (`ch1_init_reset_sweep_counter_timing_{1..12}`).
+* `APU_POWERON_TAP_LEAD` = 4 (apu.nim): counts ahead of the NR52 power-on
+  write at which the DIV-APU tap bit is sampled
+  (`ch2_init_reset_env_counter_timing_{1..8}`, `ch2_late_reset_nr52_*2b`).
+* `APU_SPSW_EXTRA_DOTS` = 8 / `_SINGLE` = 3: the APU's share of the KEY1
+  stall's oscillator restart, the PPU's 8 / 3 exactly, with
+  `APU_SPSW_REPHASE_{LEAD,GRID}_T` = 3 / 1 at the first switch after an APU
+  power-on (H2).
 
 ### H1. A double-speed trigger's grid edge
 
-Re-derived 2026-11-13 (`docs/gb-derivations.md` §11, `gb/apu/psg_host.nim`).
-CPU CGB D/E pick a square trigger up on the next 1 MHz edge
+**Closed.** CPU CGB D/E pick a square trigger up on the next 1 MHz edge
 (`gb_apu_edge`; SameSuite `channel_{1,2}_align{,_cpu}`, DocBoy). On CPU CGB C
 and older at double speed the trigger acts in the write's own M-cycle
 (`gb_trigger_pickup`), and a channel started from off begins its first period
 on the first odd tick of the APU's 512 kHz clock at least one tick after the
-write (`SQ_START_HALF_RATE_LEAD_T` = 4). Rows: gambatte
+write (`SQ_START_HALF_RATE_LEAD_T` = 4; gb/apu/psg_host.nim,
+docs/gb-derivations.md section 11). Tests: gambatte
 `sound/ch1_duty0_pos6_to_pos7_timing_ds_{1..6}` (`_ds_{1,3,6}` red without
-it), the 36-row `speedchange` ladder (five red without it), SameSuite
+it), the 36-test `speedchange` ladder (five red without it), SameSuite
 `channel_1_freq_change_timing-cgb0BC`.
 
 ### H2. The switch ladder: one re-phase per power-on
@@ -1032,11 +1033,10 @@ With all of it, SameSuite APU 70/70 and blargg `dmg_sound` / `cgb_sound`
 stay green, and `freq_change_timing-cgb0BC` passes on CPU CGB C.
 
 **The 2026-09-22/23 conflict, for the record.** An alternative APU clock
-model (refuted, shipped compiled out) greened all 13 and turned
+model (refuted, kept compiled out) greened all 13 and turned
 `freq_change_timing-cgb0BC` red, one NOP early in BOTH halves, by charging
 the re-phase's 3 T to the first trigger after a single-speed power-on
-instead of to the switch; it was removed 2026-11-12 pending a clean-room
-re-derivation. Stock gambatte (built 2026-10-14 from upstream master, run
+instead of to the switch; it was removed 2026-11-12. Stock gambatte (built 2026-10-14 from upstream master, run
 headless) passes all 36 `speedchange` audio rows and FAILS the SameSuite
 row: `00 00 0F 0F FF FF F0 F0` / `0F 0F 0F 0F 0F FF FF FF` against
 `00 00 00 0F 0F FF FF F0` / `00 00 0F 0F 0F 0F 0F 0F`, with the real CGB
@@ -1170,39 +1170,44 @@ hardware question. Families:
   * Double speed: the clock's own check lands 3 M-cycles after the DIV-APU
     event whichever 1 MHz phase the APU was powered on in (`step0_a..d`; the
     envelope's 2 T lag on CGB E, I8, is the same shape); the CGB's trigger
-    lead before a clock is `SWEEP_TRIGGER_LEAD_T_CGB` (`..._delay12240`); a trigger
-    written while an earlier one's calculation has not started rides on it
-    (`double_trigger_*`); a clock's write-back reaches NR13/NR14 on the
-    1 MHz edge after it, undoing a CPU write in between (`..._delay12243`).
+    lead before a clock is `SWEEP_TRIGGER_LEAD_T_CGB` (`..._delay12240`);
+    a trigger written while an earlier one's calculation has not started
+    rides on it (`double_trigger_*`); a clock's write-back reaches NR13/NR14
+    on the 1 MHz edge after it, undoing a CPU write in between
+    (`..._delay12243`).
   * DocBoy-only rules taken with the rest (SameBoy differs; they fall out of
     the same model): a trigger one tick into a calculation waits a tick, a
     trigger on its way holds the channel on, and a clock cuts a running
     calculation short (`change_period_nr14_during_recalc_delay14279..14284`:
     the frequency becomes 0 and the note plays on).
-  * Left (13, 2 of them not scored): CGB `change_period_nr14_during_
-    recalc{,_step0}_delay14284` (2): DocBoy's CGB sweep-trigger lead
-    disagrees with SameSuite `channel_1_sweep_restart_2` (CGB hardware) and
-    gambatte `ch1_init_reset_sweep_counter_timing_10` [cgb04c]. Not scored
-    (`DocboyNotScored`, the ledger's CGB sweep-trigger entry).
-    DMG `step6_period93_round2`, `step7_period247`, `change_step_6_to_5_
-    period152_round2`, `change_direction_twice_period_overflow_round1_2`
-    (4): DocBoy's DMG stops the channel when a clock's second calculation
-    lands exactly on $7FF; SameBoy does not; one hardware run settles it
-    (DocBoy's own ROMs on the GBP). CGB `change_step_during_recalc_0_to_4_
-    alt_round1_2`, `change_pace_4_to_6_during_recalc_round1_1` (2): an NR10
-    write on the clock's own M-cycle reaching the clock's write-back; SameBoy
-    fails both. Double speed `delay12243_period_round2/4` (2: the duty phase
-    after a trigger the clock's write-back overwrites; dingbat and SameBoy
-    sit on opposite sides of DocBoy's edge), `disable_on_triple_trigger_
-    step4_delay4_{2,3}_round1`, `change_step_7_to_0_during_recalc_delay16_
-    after_trigger` (3); SameBoy fails all five.
-  The 14 double-speed CH1 rows outside the sweep closed 2026-10-15
+  * Not scored (2; `DocboyNotScored`, ledger "DocBoy: a CGB retrigger
+    shortly before a sweep clock"): CGB `change_period_nr14_during_
+    recalc{,_step0}_delay14284`. DocBoy's CGB sweep-trigger lead disagrees
+    with SameSuite `channel_1_sweep_restart_2` (CGB hardware) and gambatte
+    `ch1_init_reset_sweep_counter_timing_10` [cgb04c].
+  * Left (11):
+    * DMG `step6_period93_round2`, `step7_period247`, `change_step_6_to_5_
+      period152_round2`, `change_direction_twice_period_overflow_round1_2`
+      (4): DocBoy's DMG stops the channel when a clock's second calculation
+      lands exactly on $7FF; SameBoy does not. One hardware run settles it
+      (DocBoy's own ROMs on the GBP).
+    * CGB `change_step_during_recalc_0_to_4_alt_round1_2`,
+      `change_pace_4_to_6_during_recalc_round1_1` (2): an NR10 write on the
+      clock's own M-cycle reaching the clock's write-back; SameBoy fails
+      both.
+    * Double speed `delay12243_period_round2/4` (2: the duty phase after a
+      trigger the clock's write-back overwrites; dingbat and SameBoy sit on
+      opposite sides of DocBoy's edge), `disable_on_triple_trigger_
+      step4_delay4_{2,3}_round1`, `change_step_7_to_0_during_recalc_delay16_
+      after_trigger` (3); SameBoy fails all five.
+
+  The 14 double-speed CH1 tests outside the sweep are closed
   (`psg_channels.nim`: `sq_trigger`, `sq_starting`, `sq_reload_step`). Each
   family walks a write across one APU tick in half-tick steps, so a pair of
   tests one M-cycle apart that DocBoy answers alike and dingbat did not names
   the rule. SameBoy (CGB E, black box) fails all 14, so these are DocBoy's
-  rules, each stated on dingbat's own grid (a write takes effect on the next
-  1 MHz edge) and each inert at single speed and on CGB C:
+  rules. Each is stated on dingbat's own grid (a write takes effect on the
+  next 1 MHz edge) and does nothing at single speed or on CGB C:
   * A trigger written half a tick before a duty step is picked up on the
     step's edge, and the step still happens (`retrigger_same_period_75_
     {8,16}_*` against `_{9,17}_*`; `retrigger_square_wave_duty_75_alt_
@@ -1416,9 +1421,10 @@ hardware question. Families:
   `ld [hli],a` writes across line 1; the round-3/round-23 rules decide the
   scan's first and last M-cycles) and `oam_scan_blocked_by_idu_write_round2`
   (an access in mode 2 takes the OAM bus from the scan for its M-cycle, the
-  entries read then compare the last Y/X held; `fifo_oam_bus_taken`). Its `cpu_write` twin needs the same rule now that a
-  plain write corrupts: the object one row up is hidden, its corruption copy
-  is found. SameBoy fails both `round2` tests.
+  entries read then compare the last Y/X held; `fifo_oam_bus_taken`). Its
+  `cpu_write` twin needs the same rule now that a plain write corrupts: the
+  object one row up is hidden, its corruption copy is found. SameBoy fails
+  both `round2` tests.
 
   Not scored (10; `DocboyNotScored`, ledger "DocBoy: single-unit OAM-bug
   margins"), each a single unit's margin that SameBoy does not reproduce and
@@ -1749,26 +1755,29 @@ hardware question. Families:
     push on one dot), and both references draw that first tile as colour 0
     (the next tile already shows its data, by the push-dot rule). One line
     of one geometry; not modelled. SameBoy differs from DocBoy (and now
-    dingbat) on 6 to 13 other lines of five of the rows. Nothing else moves
-    in the full runner.
-  * Not scored since 2026-10-14 (ledger "DocBoy: the CGB background column
-    resumed after the window at WX = 25"): `window_bg_reprise_wx25`, 3 pixels
-    of DocBoy's (row 12, x = 26 and 32..33) where SameBoy CGB E draws dingbat's
-    frame pixel for pixel; its 17 siblings pass.
-  * Closed 2026-10-14, `double_speed/ppu/double_speed_ppu_vram_write_block_
-    timing_ly0_{1,3}_out_of_4` (2): VRAM writes one double-speed M-cycle apart
-    across the LCD-on line's mode 3. The CGB write lock there now closes one
-    CPU M-cycle and a dot past the mode-3 flag edge (5 dots single speed, in
-    gambatte `ly0_late_vramw_*`'s 5..8 bracket; 3 double, DocBoy brackets
-    2..3) and opens `LCD_ON_LINE0_LOCK_LEAD` dots past the mode-0 edge, as
-    the read lock does (DocBoy brackets 2..3). SameBoy (CGB E) passes both;
-    nothing else moves (the width: `VRAM_WRITE_LINE0_OPEN_LEAD`, gb.nim;
-    whether the CGB takes the grace: `VRAM_WRITE_LINE0_CGB_GRACE` = 1).
-* **I13. Rows with scripted input (23 of 71; 13 left).** Through `--input`; 58 pass,
-  every joypad picture and `stop_joypad*`/`stop_key*` interrupt row among
-  them. Red:
-  * 2 `joypad_{buttons,dpad}_interrupt_release`: DocBoy raises the joypad
-    interrupt when the key is released, and names switch bounce on release as
+    dingbat) on 6 to 13 other lines of five of the tests.
+  * Not scored (1; ledger "DocBoy: the CGB background column resumed after
+    the window at WX = 25"): `window_bg_reprise_wx25`, 3 pixels of DocBoy's
+    (row 12, x = 26 and 32..33) where SameBoy CGB E draws dingbat's frame
+    pixel for pixel; its 17 siblings pass.
+  * Closed, `double_speed/ppu/double_speed_ppu_vram_write_block_
+    timing_ly0_{1,3}_out_of_4` (2): VRAM writes one double-speed M-cycle
+    apart across the LCD-on line's mode 3. The CGB write lock there closes
+    one CPU M-cycle and a dot past the mode-3 flag edge (5 dots single
+    speed, inside the 5..8 that gambatte `ly0_late_vramw_*` allows; 3
+    double, where DocBoy's tests allow 2..3) and opens
+    `LCD_ON_LINE0_LOCK_LEAD` dots past the mode-0 edge, as the read lock
+    does (DocBoy's tests allow 2..3). SameBoy (CGB E) passes both; nothing
+    else moves (`VRAM_WRITE_LINE0_CGB_GRACE`, `VRAM_WRITE_LINE0_OPEN_LEAD`,
+    gb.nim).
+* **I13. Rows with scripted input (10 left of 71; 3 not scored).** Through
+  `--input`; 58 pass, every joypad picture and `stop_joypad*`/`stop_key*`
+  interrupt test among them.
+  * Not scored (3; ledger "DocBoy: a joypad interrupt on key release"): 2
+    `joypad_{buttons,dpad}_interrupt_release` and DMG
+    `stop_immediate_exit_joypad_interrupt`.
+    DocBoy raises the joypad interrupt when the key is released, and names
+    switch bounce on release as
     the cause (`stop_immediate_exit_joypad_interrupt`'s own comment). Pan
     Docs ("Joypad Input", "INT $60") raises it on a P10-P13 high-to-low edge
     and names bounce on the PRESS ("one or more High to Low transitions are
@@ -2015,7 +2024,7 @@ idea is not tried again as a knob.
 One line each; the knob's own comment carries the derivation.
 
 * Closed 2026-11-13 (docs/gb-derivations.md has an entry for each, with
-  its rows): HBlank DMA across HALT/STOP and against
+  its tests): HBlank DMA across HALT/STOP and against
   a same-dot dispatch, GDMA's hand-over point, the LCD-off HBlank block
   (section 5); OAM DMA across HALT and an FF46 restart's bus, the OAM
   scan's view inside a transfer (section 6); the HALT-with-IME-pending
@@ -2032,10 +2041,9 @@ One line each; the knob's own comment carries the derivation.
   with LCDC.1 clear (sections 3 and 4); the APU trigger/envelope rule, the
   sweep and power-on leads, CGB C's double-speed trigger and PCM12's
   channel 2 arm (H, H1; section 11); SVBK's readback and the printer's
-  status sequence (section 8). No knob is left at a placeholder value.
-  Also closed:
+  status sequence (section 8). Also closed:
   `oamdma_src0000_busyint0002`, `tima/tc00_late_tc01_{5,7}`, the gambatte
-  `lcd_offset` and `lcdoffset` rows, `window/late_disable_scx5_ds_1`.
+  `lcd_offset` and `lcdoffset` tests, `window/late_disable_scx5_ds_1`.
   `scx_during_m3/scx_0761c0` (C3) passes as well.
 
 * Line 0's pipeline one M-cycle ahead (the PNG tests): `STAT_M2_LEAD = 1` +

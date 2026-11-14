@@ -253,17 +253,17 @@ proc serial_read*(serial: GbSerial; gb: GB; idx: int): uint8 =
 const SERIAL_SC_WRITE_LEAD_T* {.intdefine.} = 4
   ## T-cycles before the divider's present count at which an SC store samples
   ## the tap it restarts the slot sequence from (0 = the present count,
-  ## serial_prime_history). 4 ships: the store's M-cycle has already run its
+  ## serial_prime_history). Default 4: the store's M-cycle has already run its
   ## bus half when the byte is committed, so 4 back is the divider at the top
   ## of the M-cycle, where a CPU write lands (SERIAL_DIV_WRITE_LEAD_T is the
   ## same statement for a DIV write). 1..4 are indistinguishable (the tap's
-  ## edges are on the M-cycle grid). 0 loses 28 rows: DocBoy `dmg/serial/
+  ## edges are on the M-cycle grid). 0 loses 28 tests: DocBoy `dmg/serial/
   ## serial_timing_{nops0,nops64,sb_bit0..7,change_sb_during_transfer_*,
   ## reset_div_during_transfer_*}_round{1,2}`, `cgb/serial/
   ## serial_timing_high_speed_nops{0,2,32}_round2` and gambatte `serial/
   ## nopx1_start{,83}_wait_read_if_2`, `start83_late_div_write_wait_read_if_
   ## {1b,2b}`; 5 and up lose 12 (`serial_timing_nops{1,65}_round1`, the CGB
-  ## high-speed rows again, gambatte `nopx2_start_wait_read_if_1` on both
+  ## high-speed tests again, gambatte `nopx2_start_wait_read_if_1` on both
   ## devices). Clean-room: derived from test ROM sources/outputs and
   ## dingbat's own trace runs; no emulator source consulted.
 

@@ -82,11 +82,11 @@ const SQ_START_HALF_RATE_LEAD_T* {.intdefine.} = 4
   ## duty0_pos6_to_pos7_timing_{1,2}: 5 M-cycles after the write.
   ## A plain two ticks after the next edge, CPU CGB D/E's rule, gives 36 for
   ## 31 and loses `_ds_6` and `nr4init_..._2`; the other half-rate phase loses
-  ## nine rows and SameSuite's. The lead: 4 passes; 2 loses the five `ds_1`
-  ## speedchange rows and SameSuite's; 6 loses `nr4init_..._2`; 8 that and
+  ## nine tests and SameSuite's. The lead: 4 passes; 2 loses the five `ds_1`
+  ## speedchange tests and SameSuite's; 6 loses `nr4init_..._2`; 8 that and
   ## `_ds_6`. Single speed is left on the two-tick rule (every write is on
-  ## the grid there, and the gambatte rows that pin it trigger on even ticks
-  ## only). A restart keeps gb_apu_edge's placement: no CGB <= C row sees a
+  ## the grid there, and the gambatte tests that pin it trigger on even ticks
+  ## only). A restart keeps gb_apu_edge's placement: no CGB <= C test sees a
   ## restarted note's next step at double speed.
 
 template gb_trigger_async(gb: GB): bool =
@@ -129,7 +129,7 @@ proc gb_trigger_pickup*(gb: GB): CycleCount =
   ## (the retrigger half a tick before the seventh step: silent) against
   ## `_ds_{2,4}` (on it: audible), and speedchange{,3_nop}_ch1_duty0_pos6_to_
   ## pos7_timing_{,nop_}1 with the step 1 T ahead; with CPU CGB D/E's pickup
-  ## those and four more rows of the two ladders are lost (nine in all).
+  ## those and four more tests of the two ladders are lost (nine in all).
   if gb_trigger_async(gb): PSG_NO_STEP else: gb_apu_edge(gb)
 
 template psg_trigger_pickup(h: GB): CycleCount = gb_trigger_pickup(h)
@@ -177,8 +177,8 @@ const PCM12_CH2_EDGE_ZERO* {.booldefine.} = true
   ## apu/README.md states the glitch for channels 1, 2 and 4 on CPU CGB C
   ## and older ("report a glitched PCM amplitude ... if they're read in the
   ## same M-cycle they change"), and the two squares are one circuit bar the
-  ## sweep unit. No scored row reads PCM12 on a channel 2 step on those
-  ## revisions (SameSuite's channel_2 rows run on CPU CGB E), so either
+  ## sweep unit. No scored test reads PCM12 on a channel 2 step on those
+  ## revisions (SameSuite's channel_2 tests run on CPU CGB E), so either
   ## setting passes everything.
 
 proc sq_pcm_edge_zero(ch: PsgSquare; gb: GB): bool {.inline.} =

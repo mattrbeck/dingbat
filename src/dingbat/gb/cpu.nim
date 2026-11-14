@@ -186,7 +186,7 @@ const DMG_HALT_MIN_MCYCLES* {.intdefine.} = 2
   ## {2a,2b}` and `late_m0irq_halt_m0stat_scx3_{2a,2b}` (the last HALT
   ## position before the mode-0 request beats it: DMG and CGB read the line's
   ## end at the same address there, where at every earlier position the DMG
-  ## reads it one NOP later). 1 loses the two `_2b` rows [dmg]; 3 loses six
+  ## reads it one NOP later). 1 loses the two `_2b` tests [dmg]; 3 loses six
   ## (`late_m0{int,irq}_halt_m0stat_scx2_2a`, `_scx3_1b`, `_scx3_2a`).
 const HALT_PENDING_RUN_VIEW* {.booldefine.} = true
   ## Whether the HALT opcode asks "IF & IE != 0?" (the halt bug with IME
@@ -273,7 +273,7 @@ proc cpu_lock*(cpu: GbCpu) =
 # pushes in its fourth and fifth M-cycles".
 const DISPATCH_PUSH_MCYCLE* {.intdefine.} = 4
   ## Which of the dispatch's five M-cycles writes PC's high byte (the low
-  ## byte is the next). 4 ships. gambatte `oamdma/oamdma_src0000_busyint0002`
+  ## byte is the next). Default 4. gambatte `oamdma/oamdma_src0000_busyint0002`
   ## (both devices) takes a timer interrupt with SP = $0002 while an OAM DMA
   ## from $0000 is on its last bytes, 156 M-cycles after the FF46 write
   ## (`ld c,$26` / 38 x `dec c; jr nz` / `nop` / `ei` / `nop`), so the pushes
@@ -283,7 +283,7 @@ const DISPATCH_PUSH_MCYCLE* {.intdefine.} = 4
   ## bytes, M-cycles 160 and 161 after the write, the dispatch's fourth and
   ## fifth. 3 reads $94 $87 (one slot early, the source's own last byte
   ## after it), 2 reads $76 $87. With IRQ_SAMPLE_T held at 18 the vector
-  ## choice and the clear move with the pushes: 3 loses 29 rows (this one,
+  ## choice and the clear move with the pushes: 3 loses 29 tests (this one,
   ## irq_precedence/late_m0irq_vs_tima_scx{2,3}{,_halt}_1 and most
   ## `*_late_retrigger_2` arms, both devices), 2 loses 42.
 static: doAssert DISPATCH_PUSH_MCYCLE in 2 .. 4
@@ -291,13 +291,13 @@ static: doAssert DISPATCH_PUSH_MCYCLE in 2 .. 4
 const IRQ_SAMPLE_T_DS* {.intdefine.} = 18
   ## IRQ_SAMPLE_T for a dispatch taken in double speed, in CPU T-cycles; the
   ## PPU's sources are judged in dots, two T-cycles each, so 18 and 19 are
-  ## one value. 18 ships, the single-speed figure: one dot into the fifth
+  ## one value. Default 18, the single-speed figure: one dot into the fifth
   ## M-cycle. 16 (and 17) lose gambatte `irq_precedence/
   ## late_m0irq_retrigger_scx1_ds_2`, `serial/
   ## start_wait_trigger_int8_read_if_ds_2` and `tima/
   ## tc00_irq_late_retrigger_ds_2` [cgb] (with
   ## IRQ_SAMPLE_CGB_TIMER_SERIAL_ADD the clear no longer reaches the
-  ## M-cycle's end); 20 loses the seven `*_late_retrigger_ds_1` rows
+  ## M-cycle's end); 20 loses the seven `*_late_retrigger_ds_1` tests
   ## (`late_m0irq_retrigger_ds_1`, `ly0/lycint152_lyc{0,153}irq_`,
   ## `lyc153int_m2irq_`, `m1/lycint143_m1irq_`, `m1/lycint_vblankirq_`,
   ## `m2int_m2irq_late_retrigger_ds_1`).
@@ -318,7 +318,7 @@ const IRQ_SAMPLE_T* {.intdefine.} = 18
   ## lycint152_lyc{0,153}irq, lyc153int_m2irq, m1/lycint143_m1irq and m1/
   ## lycint_vblankirq on both devices (sources that rise on the second dot of
   ## an M-cycle: the comparator's step and what rides it, STAT_LYC_LY_LEAD_
-  ## DOTS, and the mode-0 source at STAT_M0_LEAD_T), 14 rows with the CGB's
+  ## DOTS, and the mode-0 source at STAT_M0_LEAD_T), 14 tests with the CGB's
   ## timer and serial `_2` arms (IRQ_SAMPLE_CGB_TIMER_SERIAL_ADD counts from
   ## here); 19 loses late_m0irq_retrigger_scx1_1 (both devices); 20 also
   ## m2int_m2irq_late_retrigger_1 and, on a DMG, tima/tc00_irq_late_
@@ -330,7 +330,7 @@ const HDMA_DISPATCH_FETCH* {.intdefine.} = 1
   ## DISPATCH_PUSH_MCYCLE) is a hand-over point, on the same terms as the end
   ## of an opcode fetch (HDMA_GRANT_FETCH_DOTS, gb.nim): an HBlank request up
   ## by then takes the bus there, ahead of the two pushes. That is what the
-  ## rows show; why the CPU hands over there is not something they say. With
+  ## tests show; why the CPU hands over there is not something they say. With
   ## the mode 3 -> 0 edge on the dot the dispatch begins
   ## the request is up exactly at that M-cycle's end; one dot later it is not
   ## and the block waits for the handler's first fetch. gambatte
@@ -488,7 +488,7 @@ const M2_LEAD_HALT_BLIND_DMG_ONLY* {.intdefine.} = 1
   ## its lead. gambatte `halt/noime_m2irq_m0stat_1` [cgb] (HALT with IME
   ## clear, woken by the mode-2 request, STAT read 50 M-cycles on: still mode
   ## 0 of the same line, which a wake one M-cycle later reads as mode 2) is
-  ## lost at 0; the DMG row of the same ROM and the halted mooneye
+  ## lost at 0; the DMG test of the same ROM and the halted mooneye
   ## `intr_2_*` ROMs want the blindness and keep it.
 
 when STAT_M2_EARLY and M2_LEAD_HALT_BLIND:
