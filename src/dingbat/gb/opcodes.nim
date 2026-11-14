@@ -216,6 +216,10 @@ var UNPREFIXED* = [
   proc(cpu: GbCpu; gb: GB): int =
     cpu_inc_pc(cpu)
     if stop_instr(gb.memory, gb): cpu_inc_pc(cpu)
+    when HDMA_HALT_REQ != 0:
+      # The speed switch's stall acknowledged an HBlank request: STOP's
+      # second byte is executed from the latch (HDMA_HALT_REQ, gb.nim).
+      if unlikely(gb.hdma_latch_run): return cpu_latched_op(cpu, gb)
     4,
 
   # 0x11 LD DE,u16

@@ -115,16 +115,32 @@ when HDMA_GRANT_FETCH_DOTS >= 0:
 
   proc hdma_grant(gb: GB; slack: int32; pc = 0'u16; opcode = 0'u8;
                   point = 0) {.noinline.} =
-    ## An owed HBlank block taking the bus at one of the CPU's three hand-over
+    ## An owed HBlank block taking the bus at one of the CPU's hand-over
     ## points: the end of an opcode fetch (`point` 1, `pc` = that opcode's
-    ## address), an instruction boundary (2, `pc` past the instruction), or a
-    ## HALT (0). `slack` is the dots of allowance the point gets over the
-    ## request dot.
+    ## address) or an instruction boundary (2, `pc` past the instruction);
+    ## 0 is the HALT of the HDMA_HALT_REQ = 0 control build. `slack` is the
+    ## dots of allowance the point gets over the request dot.
     let ppu = gb.ppu
-    # A request an FF55 write raised in mode 0 stands after mode 0 ends
-    # (HDMA_START_GRANT_FETCH).
-    let start_req = gb.hdma_start_req
+    when GDMA_GRANT_FETCH != 0:
+      if gb.gdma_req:
+        # A general-purpose burst waits for the opcode fetch after its FF55
+        # write (GDMA_GRANT_FETCH, gb.nim); the write's own instruction
+        # boundary is not a hand-over point for it.
+        if point != 1: return
+        gb.gdma_req = false
+        ppu.hdma_block_due = false
+        when VDMA_BUS_RESIDUE != 0:
+          gb.vdma_residue = vdma_hand_over_residue(gb, pc, opcode, 1)
+        ppu_run_gdma(ppu, gb)
+        when VDMA_BUS_RESIDUE != 0: gb.vdma_residue = 0
+        return
+    # A request an FF55 write raised in mode 0 is the HBlank level itself,
+    # which the hand-over sees HDMA_START_REQ_LAG dots late: it stands that
+    # many dots into the next line and no further (ppu.nim).
     let hblank = ppu_hdma_hblank_level(ppu, gb)
+    let start_req = gb.hdma_start_req and
+      (hblank or (ppu.mode_flag == 2'u8 and
+                  ppu.cycle_counter <= int32(HDMA_START_REQ_LAG)))
     if ppu.hdma_active and (hblank or start_req):
       # `high(int32)` = owed to a halted CPU, waiting for its wake. Reaching a
       # fetch or boundary means the CPU is running and that wake has passed
@@ -147,13 +163,31 @@ when HDMA_GRANT_FETCH_DOTS >= 0:
       gb.hdma_start_req = false
       ppu.hdma_block_due = false
 
-# HALT with IME on and an interrupt already pending: removed 2026-11-13 for a
-# clean rewrite (cpu_halt).
-const DMG_HALT_MIN_MCYCLES* {.intdefine.} = 1
+const HALT_IME_PENDING_REDO* {.intdefine.} = 1
+  ## HALT with IME on and an interrupt already pending: the CPU does not
+  ## halt, and the dispatch that follows pushes the HALT's own address, so
+  ## the handler's return lands on the HALT again. The same failed PC step as
+  ## the halt bug with IME clear (Pan Docs, "Halt Bug"), spent by the
+  ## dispatch instead of by the next opcode (dispatch_interrupt), which is
+  ## also what `EI; HALT` does (gambatte halt/ifandie_ei_halt_sra). gambatte
+  ## `halt/late_m0int_halt_m0stat_scx{2,3}_{3,4}*` (a mode-0 handler that
+  ## returns without re-enabling interrupts: with the request up before the
+  ## HALT the CPU halts a second time, IME clear, and reads STAT 48 NOPs
+  ## after the next line's mode-0 wake; the `_{1,2}*` members, the HALT
+  ## first, read it 30 NOPs after their handler) and DocBoy
+  ## `cpu/halt_ime1_interrupt1_ret`. 0 = it halts for no time and pushes the
+  ## address after the HALT.
+const DMG_HALT_MIN_MCYCLES* {.intdefine.} = 2
   ## Halted M-cycles a DMG spends before a pending interrupt can end the HALT
   ## (M-cycles, counted from the HALT; 1 = the first halted M-cycle may end
-  ## it). Re-fit pending; neutral value 1. The CGB's side of this is
-  ## CGB_HALT_PPU_LEAD.
+  ## it). 2: a request that rises inside the DMG's first halted M-cycle is
+  ## answered one M-cycle later than the same request on a CGB, whose side of
+  ## this is CGB_HALT_PPU_LEAD. gambatte `halt/late_m0int_halt_m0stat_scx3_
+  ## {2a,2b}` and `late_m0irq_halt_m0stat_scx3_{2a,2b}` (the last HALT
+  ## position before the mode-0 request beats it: DMG and CGB read the line's
+  ## end at the same address there, where at every earlier position the DMG
+  ## reads it one NOP later). 1 loses the two `_2b` rows [dmg]; 3 loses six
+  ## (`late_m0{int,irq}_halt_m0stat_scx2_2a`, `_scx3_1b`, `_scx3_2a`).
 const HALT_PENDING_RUN_VIEW* {.booldefine.} = true
   ## Whether the HALT opcode asks "IF & IE != 0?" (the halt bug with IME
   ## clear) with the running CPU's view,
@@ -176,22 +210,36 @@ proc cpu_halt*(cpu: GbCpu; gb: GB) =
   let pending =
     when HALT_PENDING_RUN_VIEW: interrupt_ready_run(gb.interrupts)
     else: interrupt_ready(gb.interrupts)
-  if not ime_at_fetch and pending:
+  if pending and (HALT_IME_PENDING_REDO != 0 or not ime_at_fetch):
     cpu.halt_bug = true
     cpu.halted   = false
   else:
     cpu.halted = true
     when DMG_HALT_MIN_MCYCLES > 1: gb.halt_start = gb.scheduler.cycles
     when HDMA_GRANT_FETCH_DOTS >= 0:
-      # The third hand-over point, the HALT: charged at the HALT's fetch rather
-      # than per halted M-cycle (at most 4 dots apart, row-for-row identical,
-      # and free for a HALT-idling title). A block owed to an already halted
-      # CPU carries a high(int32) deadline and is paid at the wake instead
-      # (gambatte dma/hdma_late_m3halt_m2unhalt_scx2_2).
-      # HBlank DMA across HALT/STOP: removed 2026-11-13 for a clean rewrite.
-      if unlikely(gb.ppu.hdma_block_due) and
-         gb.ppu.hdma_due_deadline != high(int32):
-        hdma_grant(gb, int32(HDMA_GRANT_FETCH_DOTS))
+      # A block owed to an already halted CPU carries a high(int32) deadline
+      # and is paid at the wake (ppu_hdma_wake).
+      when HDMA_HALT_REQ != 0:
+        # A request still on its way up at the HALT's fetch arrives inside
+        # the HALT's own prefetch cycle: acknowledged there, paid at the
+        # wake (HDMA_HALT_REQ, gb.nim). An edge on the dot the fetch ends on
+        # is the same case, seen from `mode_flag=`.
+        if unlikely(gb.ppu.hdma_block_due) and
+           gb.ppu.hdma_due_deadline != high(int32) and
+           gb.ppu.hdma_active and not gb.gdma_req and not gb.hdma_start_req:
+          if gb.ppu.hdma_due_deadline <=
+             gb.ppu.cycle_counter + hdma_halt_mdots(gb):
+            ppu_hdma_halt_request(gb.ppu, gb)
+          else:
+            # Up only after that cycle: owed to a halted CPU, as an edge
+            # under the halt is (`mode_flag=`).
+            gb.ppu.hdma_due_deadline = high(int32)
+        else:
+          gb.hdma_halt_open = gb.ppu.hdma_active
+      else:
+        if unlikely(gb.ppu.hdma_block_due) and
+           gb.ppu.hdma_due_deadline != high(int32):
+          hdma_grant(gb, int32(HDMA_GRANT_FETCH_DOTS))
     when HDMA_HALT_M0_BLIND != 0:
       # The dot the VRAM DMA's HBlank edge detector stops being clocked on
       # (HDMA_HALT_M0_BLIND in gb.nim).
@@ -242,8 +290,24 @@ const IRQ_SAMPLE_T* {.intdefine.} = 18
   ## reach the dispatch one M-cycle later, relative to the instant IF rises,
   ## than the mode-2 source does. Settling the per-source rise phases (A3) is
   ## what moves them, not this constant.
-# An HBlank request raised on the dot a dispatch begins: removed 2026-11-13
-# for a clean rewrite.
+const HDMA_DISPATCH_FETCH* {.intdefine.} = 1
+  ## The first M-cycle of an interrupt dispatch is an opcode fetch whose byte
+  ## is thrown away (Pan Docs, "Interrupt Handling": the wait M-cycles), so
+  ## it is a hand-over point like any other fetch (HDMA_GRANT_FETCH_DOTS,
+  ## gb.nim): an HBlank request up by its end takes the bus there, ahead of
+  ## the two pushes. With the mode 3 -> 0 edge on the dot the dispatch begins
+  ## the request is up exactly at that M-cycle's end; one dot later it is not
+  ## and the block waits for the handler's first fetch. gambatte
+  ## `irq_precedence/hdma_vs_m0_scx1`, `late_hdma_vs_{ei,ie}_scx1_2`,
+  ## `late_hdma_vs_tima_scx1_1` and `_scx1_halt_1` (the edge on the dispatch's
+  ## first dot: the block, whose source is the stack, copies $1234 before the
+  ## pushes land) against `hdma_vs_m0_scx2`, `late_hdma_vs_ei_scx2_1` and
+  ## `late_hdma_vs_tima_scx2_halt_2` (one dot later: the pushed PC is
+  ## copied). `hdma_vs_m0_scx2_halt` and `late_hdma_vs_tima_scx2_halt_1` are
+  ## the same point reached from a HALT whose wake M-cycle the edge fell in.
+  ## Only a dispatch under an armed HBlank transfer or a requested burst runs
+  ## that M-cycle ahead of its pushes here; 0 = no hand-over inside a
+  ## dispatch.
 const IRQ_SAMPLE_CGB_TIMER_SERIAL_ADD* {.intdefine.} = 0
   ## T-cycles past IRQ_SAMPLE_T at which a CGB dispatch clears a TIMER or
   ## SERIAL request (0 = with the LCD lines). Re-fit pending; neutral value 0.
@@ -266,6 +330,15 @@ proc dispatch_interrupt(cpu: GbCpu; gb: GB) {.noinline.} =
     echo "IRQ ly=", gb.fifo_ppu.ly, " dot=", gb.fifo_ppu.cycle_counter,
          " if=", toHex(irq_read(gb.interrupts, 0xFF0F), 2),
          " pc=", toHex(cpu.pc, 4)
+  var elapsed = 8
+  when HDMA_DISPATCH_FETCH != 0 and HDMA_GRANT_FETCH_DOTS >= 0:
+    if unlikely(gb.ppu.hdma_active or gb.ppu.hdma_block_due):
+      # The dispatch's discarded opcode fetch, a hand-over point for an
+      # owed HBlank block or a requested burst (HDMA_DISPATCH_FETCH).
+      mem_tick_components(gb.memory, gb, 4)
+      elapsed += 4
+      if gb.ppu.hdma_block_due:
+        hdma_grant(gb, 0, cpu.pc, read_byte(gb.memory, gb, int(cpu.pc)), 1)
   # The same OAM-bug M-cycles as PUSH (cpu_push16; Pan Docs lists interrupt
   # handling with it): the SP step here, the two writes in mem_write.
   oam_bug_if(gb, cpu.sp, obIdu)
@@ -277,7 +350,6 @@ proc dispatch_interrupt(cpu: GbCpu; gb: GB) {.noinline.} =
   let interrupt = highest_priority(gb.interrupts)
   cpu.sp = cpu.sp - 1
   mem_write(gb.memory, gb, int(cpu.sp), uint8(cpu.pc and 0xFF))
-  let elapsed = 8
   cpu.pc = interrupt
   # Run out to the sample point before clearing IF (IRQ_SAMPLE_T). One call,
   # not one per M-cycle.
@@ -343,9 +415,14 @@ const M2_LEAD_HALT_BLIND* {.booldefine.} = true
   ## Whether a HALTED CPU is blind to the mode 2 STAT source for the
   ## STAT_M2_LEAD M-cycles it leads the line boundary by. On by default with
   ## STAT_M2_LEAD; false is the control build.
-const M2_LEAD_HALT_BLIND_DMG_ONLY* {.intdefine.} = 0
+const M2_LEAD_HALT_BLIND_DMG_ONLY* {.intdefine.} = 1
   ## The blindness on DMG-family machines only (0 = every device, 1 = DMG
-  ## family only). Re-fit pending; neutral value 0.
+  ## family only). 1: a halted CGB CPU is woken by the mode-2 source inside
+  ## its lead. gambatte `halt/noime_m2irq_m0stat_1` [cgb] (HALT with IME
+  ## clear, woken by the mode-2 request, STAT read 50 M-cycles on: still mode
+  ## 0 of the same line, which a wake one M-cycle later reads as mode 2) is
+  ## lost at 0; the DMG row of the same ROM and the halted mooneye
+  ## `intr_2_*` ROMs want the blindness and keep it.
 
 when STAT_M2_EARLY and M2_LEAD_HALT_BLIND:
   proc halt_m2_lead_blind(gb: GB): bool {.noinline.} =
@@ -513,6 +590,28 @@ template cpu_exec_fetched(cpu: GbCpu; gb: GB; opcode: uint8) =
         gb.ppu.hdma_block_due = false
   handle_interrupts(cpu, gb)
 
+when HDMA_HALT_REQ != 0:
+  proc cpu_latched_op*(cpu: GbCpu; gb: GB): int =
+    ## The byte a HALT's or STOP's prefetch cycle latched, executed as an
+    ## opcode with no read of its own and no step of PC over it; returns its
+    ## M-cycles' T-count, the first already run (HDMA_HALT_REQ, gb.nim).
+    mem_reset_cycle_count(gb.memory)
+    mem_tick_components(gb.memory, gb, 4)
+    gb.hdma_absorb    = false
+    gb.hdma_latch_run = false
+    cpu.halt_bug = true
+    result = UNPREFIXED[gb.hdma_latch](cpu, gb)
+
+  proc cpu_run_latched(cpu: GbCpu; gb: GB) =
+    ## cpu_exec_fetched for the latched opcode after a HALT.
+    let cycles_taken = cpu_latched_op(cpu, gb)
+    cpu.cached_hl = -1
+    mem_tick_extra(gb.memory, gb, cycles_taken)
+    if unlikely(gb.ppu.hdma_block_due):
+      hdma_grant(gb, int32(HDMA_GRANT_FETCH_DOTS - HDMA_GRANT_BOUNDARY_DOTS),
+                 cpu.pc, gb.hdma_latch, 2)
+    handle_interrupts(cpu, gb)
+
 proc cpu_halt_wake(cpu: GbCpu; gb: GB) {.noinline.} =
   ## The M-cycle a halt ends on (the line is up). Out of line: none of it runs
   ## on a halted M-cycle, and inline it grew `tick` past clang's inline
@@ -546,7 +645,12 @@ proc cpu_halt_wake(cpu: GbCpu; gb: GB) {.noinline.} =
          " mode=", (gb.ppu.lcd_status and 3'u8)
   when HDMA_WAKE_BLIND_DOTS > 0:
     gb.hdma_wake_dot = gb.ppu.cycle_counter
-  ppu_hdma_wake(gb.ppu, gb)
+  when HDMA_HALT_REQ != 0:
+    let latched = gb.hdma_halt_req
+    if unlikely(latched): ppu_hdma_pay_halt_request(gb.ppu, gb)
+    else:                 ppu_hdma_wake(gb.ppu, gb)
+  else:
+    ppu_hdma_wake(gb.ppu, gb)
   when CGB_HALT_PPU_LEAD_ANY:
     # The dots the head of this halt held back, paid with no bus half: a
     # phase, not a charge.
@@ -555,6 +659,12 @@ proc cpu_halt_wake(cpu: GbCpu; gb: GB) {.noinline.} =
                    ignore_speed = true)
       gb.cpu.halt_ppu_debt = 0
   cpu.halted = false
+  when HDMA_HALT_REQ != 0:
+    if unlikely(latched):
+      # The latched opcode runs before the interrupt is looked at, its
+      # first M-cycle the block's hand-back (HDMA_HALT_REQ, gb.nim).
+      cpu_run_latched(cpu, gb)
+      return
   if cpu.ime: dispatch_interrupt(cpu, gb)
 
 # ==================== IDLE-LOOP SKIP ====================

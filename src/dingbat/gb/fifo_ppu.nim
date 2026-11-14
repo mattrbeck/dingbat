@@ -343,11 +343,13 @@ const OAMDMA_FREEZE_BUS* {.intdefine.} = 1
   ## Model the frozen transfer's held write as a driven OAM bus (default 1; 0:
   ## a frozen transfer holds the bus like a running one). DMG family only: the
   ## ROM's own header says the CGB answer is a checkerboard with no object.
-const OAMDMA_FREEZE_DEST_LEAD {.intdefine.} = 1
+const OAMDMA_FREEZE_DEST_LEAD {.intdefine.} = 1 - OAMDMA_HALT_GRACE
   ## M-cycles the frozen write's destination leads `dma_position` by. The
-  ## freeze returns before that M-cycle's write, so the naive reading is 0;
-  ## hardware is one further on (mooneye-test-suite issue #1 puts the
-  ## in-flight write at $FE02 where dma_position is 1). Default 1.
+  ## unit freezes one M-cycle after the HALT's fetch (OAMDMA_HALT_GRACE,
+  ## gb.nim: the HALT's execute cycle still clocks it), so `dma_position`
+  ## already stands on the in-flight write and the lead is 0; with no grace
+  ## cycle it is 1 (mooneye-test-suite issue #1 puts the in-flight write at
+  ## $FE02 where the HALT's fetch left the position at 1). The two sum to 1.
 
 proc oam_dma_frozen*(gb: GB): bool {.inline.} =
   ## Is an OAM DMA frozen mid-write with its address and data on OAM? That is

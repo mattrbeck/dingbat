@@ -1,14 +1,14 @@
 # Dingbat Test Results
 
-*Generated: 2026-11-13 15:29:15 · commit 2dd2a78c · game-boy-test-roms v7.0*
+*Generated: 2026-11-13 17:11:42 · commit 3247e64d · game-boy-test-roms v7.0*
 
 Device column: the hardware the row is scored on. `cart` = the cart header picks the device (DMG-ABC for a DMG cart, CPU CGB C for a CGB one); `DMG`/`CGB`/`SGB` = forced; a trailing token is a specific boot table/revision (`--model`); `—` = GBA, which has no device axis here. A row name ending `@<model>` is one ARM of a test whose name declares several machines: a ROM that states the devices it was verified on (AGE's `ei-halt-dmgC-cgbBCE`, mealybug's `_cgb_c`/`_cgb_d` capture pair, mooneye's `-GS` family) gets one row per revision rather than one row on whichever machine happened to be the default, so each revision is actually covered. A suite where every row passes has only its summary row — its per-row section comes back as soon as anything in it fails.
 
 ## Summary
 
 - **Total:** 1586
-- **Pass:** 1495
-- **Fail:** 91
+- **Pass:** 1500
+- **Fail:** 86
 
 | Suite | Pass | Total | Status |
 |-------|------|-------|--------|
@@ -17,8 +17,8 @@ Device column: the hardware the row is scored on. `cart` = the cart header picks
 | Game Boy - Blargg | 28 | 28 | 👌 |
 | Game Boy - Blargg cgb_sound | 12 | 12 | 👌 |
 | Game Boy - Blargg dmg_sound | 12 | 12 | 👌 |
-| [Game Boy - DocBoy](results_docboy.md) | 42 | 70 | 👀 |
-| [Game Boy - gambatte](results_gambatte.md) | 21 | 48 | 👀 |
+| [Game Boy - DocBoy](results_docboy.md) | 45 | 70 | 👀 |
+| [Game Boy - gambatte](results_gambatte.md) | 23 | 48 | 👀 |
 | Game Boy - GBMicrotest | 462 | 480 | 👀 |
 | Game Boy - MagenTests | 7 | 7 | 👌 |
 | Game Boy - MBC | 6 | 6 | 👌 |
@@ -163,11 +163,11 @@ Device column: the hardware the row is scored on. `cart` = the cart header picks
 | age/vram/vram-read-ncmBCE@cgbc | CGB cgbc | 👌 |
 | age/vram/vram-read-ncmBCE@cgbe | CGB cgbe | 👌 |
 
-## Game Boy - DocBoy (42/70)
+## Game Boy - DocBoy (45/70)
 
 | Test | Device | Result |
 |------|--------|--------|
-| docboy/dmg/cpu | DMG dmgABC | 👀 10/11 passed |
+| docboy/dmg/cpu | DMG dmgABC | 👌 11/11 passed |
 | docboy/dmg/ppu | DMG dmgABC | 👀 1208/1260 passed |
 | docboy/dmg/mbc/mbc1 | DMG dmgABC | 👌 11/11 passed |
 | docboy/dmg/mbc/mbc3 | DMG dmgABC | 👌 18/18 passed |
@@ -191,7 +191,7 @@ Device column: the hardware the row is scored on. `cart` = the cart header picks
 | docboy/cgb/timers | CGB cgbE | 👌 2/2 passed |
 | docboy/cgb/interrupts | CGB cgbE | 👌 27/27 passed |
 | docboy/cgb/dma | CGB cgbE | 👌 41/41 passed |
-| docboy/cgb/hdma | CGB cgbE | 👀 522/639 passed |
+| docboy/cgb/hdma | CGB cgbE | 👌 639/639 passed |
 | docboy/cgb/serial | CGB cgbE | 👀 13/17 passed |
 | docboy/cgb/ir | CGB cgbE | 👌 1/1 passed |
 | docboy/cgb/mode | CGB cgbE | 👌 6/6 passed |
@@ -208,7 +208,7 @@ Device column: the hardware the row is scored on. `cart` = the cart header picks
 | docboy/cgb/double_speed/apu/ch4 | CGB cgbE | 👀 1846/1925 passed |
 | docboy/cgb/double_speed/core | CGB cgbE | 👌 8/8 passed |
 | docboy/cgb/double_speed/dma | CGB cgbE | 👌 14/14 passed |
-| docboy/cgb/double_speed/hdma | CGB cgbE | 👀 49/50 passed |
+| docboy/cgb/double_speed/hdma | CGB cgbE | 👌 50/50 passed |
 | docboy/cgb/double_speed/interactive | CGB cgbE | 👌 67/67 passed |
 | docboy/cgb/double_speed/interrupts | CGB cgbE | 👀 233/246 passed |
 | docboy/cgb/double_speed/ppu | CGB cgbE | 👀 346/357 passed |
@@ -240,7 +240,7 @@ Device column: the hardware the row is scored on. `cart` = the cart header picks
 
 Each row is one section of a DocBoy manifest (`docboy/<manifest>/<section>`). See [detailed results](results_docboy.md) for individual test outcomes.
 
-## Game Boy - gambatte (21/48)
+## Game Boy - gambatte (23/48)
 
 | Test | Device | Result |
 |------|--------|--------|
@@ -250,11 +250,11 @@ Each row is one section of a DocBoy manifest (`docboy/<manifest>/<section>`). Se
 | gambatte/cgbpal_m3 | per-ROM | 👀 33/44 passed |
 | gambatte/display_startstate | per-ROM | 👌 14/14 passed |
 | gambatte/div | per-ROM | 👌 8/8 passed |
-| gambatte/dma | per-ROM | 👀 189/229 passed |
+| gambatte/dma | per-ROM | 👌 229/229 passed |
 | gambatte/dmgpalette_during_m3 | per-ROM | 👌 17/17 passed |
 | gambatte/enable_display | per-ROM | 👀 164/184 passed |
-| gambatte/halt | per-ROM | 👀 150/158 passed |
-| gambatte/irq_precedence | per-ROM | 👀 49/64 passed |
+| gambatte/halt | per-ROM | 👌 158/158 passed |
+| gambatte/irq_precedence | per-ROM | 👀 56/64 passed |
 | gambatte/lcd_offset | per-ROM | 👀 43/62 passed |
 | gambatte/lcdirq_precedence | per-ROM | 👌 62/62 passed |
 | gambatte/ly0 | per-ROM | 👀 92/96 passed |
@@ -280,7 +280,7 @@ Each row is one section of a DocBoy manifest (`docboy/<manifest>/<section>`). Se
 | gambatte/m2int_m3stat | per-ROM | 👌 44/44 passed |
 | gambatte/miscmstatirq | per-ROM | 👀 275/279 passed |
 | gambatte/oam_access | per-ROM | 👀 67/69 passed |
-| gambatte/oamdma | per-ROM | 👀 788/802 passed |
+| gambatte/oamdma | per-ROM | 👀 792/802 passed |
 | gambatte/scx_during_m3 | per-ROM | 👀 131/138 passed |
 | gambatte/scy | per-ROM | 👌 67/67 passed |
 | gambatte/serial | per-ROM | 👀 75/82 passed |

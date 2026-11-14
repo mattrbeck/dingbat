@@ -1,6 +1,6 @@
 # DocBoy Test Suite - Detailed Results
 
-*Generated: 2026-11-13 15:29:15 · Docheinstein/docboy 01e04d3d*
+*Generated: 2026-11-13 17:11:42 · Docheinstein/docboy 01e04d3d*
 
 DocBoy's own ROMs (`docboy/` in its tests/config manifests), each
 scored by the verdict its manifest names, the way DocBoy's runner
@@ -11,15 +11,11 @@ run on a DMG ABC, the three CGB manifests on a CPU CGB E with the
 cart header picking the mode. See tests/README.md for the mechanism
 and docs/gb-failure-triage.md for the failing families.
 
-**8483/8984 passed.**
+**8602/8984 passed.**
 
-## docboy/dmg/cpu (10/11 passed)
+## docboy/dmg/cpu
 
-10/11 tests passed on DMG dmgABC, 1 failed:
-
-| Test | Result |
-|------|--------|
-| dmg/docboy/cpu/halt_ime1_interrupt1_ret | $FFF0=$02 = fail value (tick 100000) |
+All 11 tests passed (DMG dmgABC).
 
 ## docboy/dmg/ppu (1208/1260 passed)
 
@@ -242,129 +238,9 @@ All 27 tests passed (CGB cgbE).
 
 All 41 tests passed (CGB cgbE).
 
-## docboy/cgb/hdma (522/639 passed)
+## docboy/cgb/hdma
 
-522/639 tests passed on CGB cgbE, 117 failed:
-
-| Test | Result |
-|------|--------|
-| cgb/docboy/hdma/gdma_ppu_on_pixel_transfer_conflict_relaxed_128_bytes_scx0 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/hdma/gdma_ppu_on_pixel_transfer_conflict_relaxed_128_bytes_scx1 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/hdma/gdma_ppu_on_pixel_transfer_conflict_relaxed_128_bytes_scx2 | $FFF0=$02 = fail value (tick 100008) |
-| cgb/docboy/hdma/gdma_ppu_on_pixel_transfer_conflict_relaxed_128_bytes_scx3 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/hdma/gdma_ppu_on_pixel_transfer_conflict_relaxed_128_bytes_scx4 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/hdma/gdma_ppu_on_pixel_transfer_conflict_relaxed_128_bytes_scx5 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/hdma/gdma_ppu_on_pixel_transfer_conflict_relaxed_128_bytes_scx6 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/hdma/gdma_ppu_on_pixel_transfer_conflict_relaxed_128_bytes_scx7 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/hdma/gdma_ppu_on_pixel_transfer_conflict_relaxed_48_bytes_sprite_y16_x16 | $FFF0=$02 = fail value (tick 100012) |
-| cgb/docboy/hdma/gdma_ppu_on_pixel_transfer_conflict_relaxed_64_bytes_sprite_y16_x01 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/hdma/gdma_ppu_on_pixel_transfer_conflict_relaxed_64_bytes_sprite_y16_x02 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/hdma/gdma_ppu_on_pixel_transfer_conflict_relaxed_64_bytes_sprite_y16_x03 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/hdma/gdma_ppu_on_pixel_transfer_conflict_relaxed_64_bytes_sprite_y16_x04 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/hdma/gdma_ppu_on_pixel_transfer_conflict_relaxed_64_bytes_sprite_y16_x05 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/hdma/gdma_ppu_on_pixel_transfer_conflict_relaxed_64_bytes_sprite_y16_x06 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/hdma/gdma_ppu_on_pixel_transfer_conflict_relaxed_64_bytes_sprite_y16_x08 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/hdma/gdma_ppu_on_pixel_transfer_conflict_relaxed_64_bytes_sprite_y16_x09 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/hdma/gdma_ppu_on_pixel_transfer_conflict_relaxed_64_bytes_sprite_y16_x10 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/hdma/gdma_ppu_on_pixel_transfer_conflict_relaxed_64_bytes_sprite_y16_x11 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/hdma/gdma_ppu_on_pixel_transfer_conflict_relaxed_64_bytes_sprite_y16_x12 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/hdma/gdma_ppu_on_pixel_transfer_conflict_relaxed_64_bytes_sprite_y16_x13 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/hdma/gdma_ppu_on_pixel_transfer_conflict_relaxed_64_bytes_sprite_y16_x14 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/hdma/gdma_ppu_on_pixel_transfer_conflict_relaxed_64_bytes_sprite_y16_x15 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/hdma/gdma_ppu_on_pixel_transfer_conflict_relaxed_64_bytes_sprite_y16_x16 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/hdma/gdma_ppu_on_pixel_transfer_conflict_relaxed_64_bytes_sprite_y16_x17 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/hdma/gdma_ppu_on_pixel_transfer_conflict_relaxed_64_bytes_sprite_y16_x18 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/hdma/gdma_ppu_on_pixel_transfer_conflict_relaxed_64_bytes_sprite_y16_x19 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/hdma/gdma_ppu_on_pixel_transfer_conflict_relaxed_64_bytes_sprite_y16_x20 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/hdma/gdma_ppu_on_pixel_transfer_conflict_relaxed_64_bytes_sprite_y16_x21 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/hdma/gdma_ppu_on_pixel_transfer_conflict_relaxed_64_bytes_sprite_y16_x22 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/hdma/gdma_ppu_on_pixel_transfer_conflict_relaxed_64_bytes_sprite_y16_x23 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/hdma/gdma_ppu_on_pixel_transfer_conflict_relaxed_64_bytes_sprite_y16_x32 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/hdma/gdma_ppu_on_pixel_transfer_conflict_relaxed_64_bytes_sprite_y16_x33 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/hdma/gdma_ppu_on_pixel_transfer_conflict_relaxed_64_bytes_sprite_y16_x34 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/hdma/gdma_ppu_on_pixel_transfer_conflict_relaxed_64_bytes_sprite_y16_x35 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/hdma/gdma_ppu_on_pixel_transfer_conflict_relaxed_64_bytes_sprite_y16_x36 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/hdma/gdma_ppu_on_pixel_transfer_conflict_relaxed_64_bytes_sprite_y16_x37 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/hdma/gdma_ppu_on_pixel_transfer_conflict_relaxed_64_bytes_sprite_y16_x38 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/hdma/gdma_ppu_on_pixel_transfer_conflict_relaxed_64_bytes_sprite_y16_x39 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/hdma/gdma_ppu_on_pixel_transfer_conflict_relaxed_64_bytes_sprite_y16_x40 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/hdma/gdma_ppu_on_pixel_transfer_conflict_relaxed_64_bytes_sprite_y16_x41 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/hdma/gdma_ppu_on_pixel_transfer_conflict_relaxed_64_bytes_sprite_y16_x42 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/hdma/gdma_ppu_on_pixel_transfer_conflict_relaxed_64_bytes_sprite_y16_x43 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/hdma/gdma_ppu_on_pixel_transfer_conflict_relaxed_64_bytes_sprite_y16_x44 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/hdma/gdma_ppu_on_pixel_transfer_conflict_relaxed_64_bytes_sprite_y16_x45 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/hdma/gdma_ppu_on_pixel_transfer_conflict_relaxed_64_bytes_sprite_y16_x46 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/hdma/gdma_ppu_on_pixel_transfer_conflict_relaxed_64_bytes_sprite_y16_x47 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/hdma/gdma_ppu_on_pixel_transfer_conflict_relaxed_64_bytes_sprite_y16_x48 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/hdma/gdma_ppu_on_pixel_transfer_conflict_relaxed_64_bytes_sprite_y16_x49 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/hdma/gdma_ppu_on_pixel_transfer_conflict_relaxed_64_bytes_sprite_y16_x50 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/hdma/gdma_ppu_on_pixel_transfer_conflict_relaxed_64_bytes_window_wy1_wx16 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/hdma/gdma_ppu_on_pixel_transfer_conflict_relaxed_64_bytes_window_wy1_wx17 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/hdma/gdma_ppu_on_pixel_transfer_conflict_relaxed_64_bytes_window_wy1_wx18 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/hdma/gdma_ppu_on_pixel_transfer_conflict_relaxed_64_bytes_window_wy1_wx19 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/hdma/gdma_ppu_on_pixel_transfer_conflict_relaxed_64_bytes_window_wy1_wx20 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/hdma/gdma_ppu_on_pixel_transfer_conflict_relaxed_64_bytes_window_wy1_wx21 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/hdma/gdma_ppu_on_pixel_transfer_conflict_relaxed_64_bytes_window_wy1_wx22 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/hdma/gdma_ppu_on_pixel_transfer_conflict_relaxed_64_bytes_window_wy1_wx23 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/hdma/gdma_ppu_on_pixel_transfer_conflict_relaxed_80_bytes_sprite_y16_x10 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/hdma/gdma_ppu_on_pixel_transfer_conflict_relaxed_80_bytes_sprite_y16_x10_x16 | $FFF0=$02 = fail value (tick 100004) |
-| cgb/docboy/hdma/gdma_ppu_on_pixel_transfer_conflict_relaxed_80_bytes_sprite_y16_x10_x17 | $FFF0=$02 = fail value (tick 100004) |
-| cgb/docboy/hdma/gdma_ppu_on_pixel_transfer_conflict_relaxed_80_bytes_sprite_y16_x10_x18 | $FFF0=$02 = fail value (tick 100004) |
-| cgb/docboy/hdma/gdma_ppu_on_pixel_transfer_conflict_relaxed_80_bytes_sprite_y16_x10_x19 | $FFF0=$02 = fail value (tick 100004) |
-| cgb/docboy/hdma/gdma_ppu_on_pixel_transfer_conflict_relaxed_80_bytes_sprite_y16_x10_x20 | $FFF0=$02 = fail value (tick 100004) |
-| cgb/docboy/hdma/gdma_ppu_on_pixel_transfer_conflict_relaxed_80_bytes_sprite_y16_x10_x21 | $FFF0=$02 = fail value (tick 100004) |
-| cgb/docboy/hdma/gdma_ppu_on_pixel_transfer_conflict_relaxed_80_bytes_sprite_y16_x10_x22 | $FFF0=$02 = fail value (tick 100004) |
-| cgb/docboy/hdma/gdma_ppu_on_pixel_transfer_conflict_relaxed_80_bytes_sprite_y16_x10_x23 | $FFF0=$02 = fail value (tick 100004) |
-| cgb/docboy/hdma/gdma_ppu_on_pixel_transfer_conflict_relaxed_80_bytes_sprite_y16_x10_x24 | $FFF0=$02 = fail value (tick 100004) |
-| cgb/docboy/hdma/gdma_ppu_on_pixel_transfer_conflict_relaxed_80_bytes_sprite_y16_x16 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/hdma/gdma_ppu_on_pixel_transfer_conflict_relaxed_80_bytes_sprite_y16_x24_x25 | $FFF0=$02 = fail value (tick 100004) |
-| cgb/docboy/hdma/gdma_ppu_on_pixel_transfer_conflict_relaxed_80_bytes_sprite_y16_x24_x26 | $FFF0=$02 = fail value (tick 100004) |
-| cgb/docboy/hdma/gdma_ppu_on_pixel_transfer_conflict_relaxed_80_bytes_sprite_y16_x24_x27 | $FFF0=$02 = fail value (tick 100004) |
-| cgb/docboy/hdma/gdma_ppu_on_pixel_transfer_conflict_relaxed_80_bytes_sprite_y16_x24_x28 | $FFF0=$02 = fail value (tick 100004) |
-| cgb/docboy/hdma/gdma_ppu_on_pixel_transfer_conflict_relaxed_80_bytes_sprite_y16_x24_x29 | $FFF0=$02 = fail value (tick 100004) |
-| cgb/docboy/hdma/gdma_ppu_on_pixel_transfer_conflict_relaxed_80_bytes_sprite_y16_x24_x30 | $FFF0=$02 = fail value (tick 100004) |
-| cgb/docboy/hdma/gdma_ppu_on_pixel_transfer_conflict_relaxed_80_bytes_sprite_y16_x24_x31 | $FFF0=$02 = fail value (tick 100004) |
-| cgb/docboy/hdma/gdma_ppu_on_pixel_transfer_conflict_relaxed_80_bytes_sprite_y16_x24_x32 | $FFF0=$02 = fail value (tick 100004) |
-| cgb/docboy/hdma/gdma_ppu_on_pixel_transfer_conflict_relaxed_80_bytes_sprite_y16_x24_x33 | $FFF0=$02 = fail value (tick 100004) |
-| cgb/docboy/hdma/gdma_ppu_on_pixel_transfer_conflict_relaxed_80_bytes_sprite_y16_x24_x34 | $FFF0=$02 = fail value (tick 100004) |
-| cgb/docboy/hdma/gdma_ppu_on_pixel_transfer_conflict_relaxed_80_bytes_sprite_y16_x32 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/hdma/gdma_ppu_on_pixel_transfer_conflict_relaxed_80_bytes_sprite_y16_x48 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/hdma/gdma_source_echo_ram | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/hdma/gdma_source_from_vram_to_ram | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/hdma/gdma_source_hram | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/hdma/gdma_source_io | $FFF0=$02 = fail value (tick 100004) |
-| cgb/docboy/hdma/gdma_source_not_usable | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/hdma/gdma_source_oam | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/hdma/gdma_source_overflow_source_illegal | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/hdma/gdma_source_vram | $FFF0=$02 = fail value (tick 100004) |
-| cgb/docboy/hdma/gdma_source_vram_corruption | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/hdma/gdma_source_vram_jp_in_ram | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/hdma/gdma_source_wram_dma_source_ram_c000_8000 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/hdma/gdma_source_wram_dma_source_ram_c000_8000_source_overflow_illegal | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/hdma/gdma_source_wram_dma_source_ram_c000_8010 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/hdma/gdma_source_wram_dma_source_ram_c010_8000 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/hdma/gdma_source_wram_dma_source_ram_c010_8010 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/hdma/gdma_source_wram_dma_source_ram_c020_8000 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/hdma/gdma_source_wram_dma_source_ram_c020_8000_d | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/hdma/gdma_source_wram_dma_source_ram_c100_8000 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/hdma/gdma_source_wram_dma_source_ram_c110_8000 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/hdma/gdma_source_wram_dma_source_ram_c120_8000 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/hdma/gdma_source_wram_dma_source_ram_d000_8000 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/hdma/hdma_halt_resume_with_stat_vblank_46_nops_scx0 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/hdma/hdma_halt_resume_with_stat_vblank_46_nops_scx1 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/hdma/hdma_halt_resume_with_stat_vblank_46_nops_scx2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/hdma/hdma_halt_resume_with_stat_vblank_46_nops_scx3 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/hdma/hdma_halt_resume_with_stat_vblank_47_nops_scx0 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/hdma/hdma_halt_resume_with_stat_vblank_47_nops_scx1 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/hdma/hdma_halt_resume_with_stat_vblank_47_nops_scx2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/hdma/hdma_halt_resume_with_stat_vblank_47_nops_scx3 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/hdma/hdma_halt_resume_with_stat_vblank_at_oam_scan | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/hdma/hdma_halt_resume_with_timer_interrupt_halt_at_hblank_wake_at_hblank_wait_oam_scan_to_turn_off | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/hdma/hdma_halt_resume_with_timer_interrupt_halt_at_hblank_wake_at_pixel_transfer | $FFF0=$02 = fail value (tick 100004) |
-| cgb/docboy/hdma/hdma_halt_resume_with_timer_interrupt_halt_at_pixel_transfer_wake_at_hblank_wait_oam_scan_to_turn_off | $FFF0=$02 = fail value (tick 100008) |
-| cgb/docboy/hdma/hdma_halt_resume_with_timer_interrupt_halt_at_pixel_transfer_wake_at_pixel_transfer | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/hdma/hdma_ppu_on_turn_off_during_ly1_oam_scan | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/hdma/hdma_source_wram_dma_source_ram_during_oam_scan | $FFF0=$02 = fail value (tick 100000) |
+All 639 tests passed (CGB cgbE).
 
 ## docboy/cgb/serial (13/17 passed)
 
@@ -570,13 +446,9 @@ All 8 tests passed (CGB cgbE).
 
 All 14 tests passed (CGB cgbE).
 
-## docboy/cgb/double_speed/hdma (49/50 passed)
+## docboy/cgb/double_speed/hdma
 
-49/50 tests passed on CGB cgbE, 1 failed:
-
-| Test | Result |
-|------|--------|
-| cgb/docboy/double_speed/hdma/double_speed_hdma_basic_transfer | $FFF0=$02 = fail value (tick 100000) |
+All 50 tests passed (CGB cgbE).
 
 ## docboy/cgb/double_speed/interactive
 

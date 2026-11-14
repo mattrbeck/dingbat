@@ -169,15 +169,19 @@ proc load_joypad_state(j: GbJoypad; r: var Reader) =
 # Fields that live on GB itself rather than on a component. The rest of GB's
 # scratch (the comparator leads, the CGB write-in-flight slots) is live only
 # inside an M-cycle or a halt, never at the frame boundary a state is written
-# on. Rev 6 also carried three slots whose rules were removed 2026-11-13; they
-# stay in the format as reserved zeroes so older and newer states still load.
+# on. Rev 6 also carried slots whose rules were removed 2026-11-13; they stay
+# in the format so older and newer states still load: the first now carries
+# an acknowledged HBlank request (HDMA_HALT_REQ), the rest are reserved zeroes.
 
 proc save_machine_state(gb: GB; w: var Writer) =
   w.write_tag(GB_SEC_MACH)
   # The silicon revision the quirks were resolved from (gb_set_revision).
   w.write_u8(uint8(ord(gb.revision)))
-  # Reserved (rev 6): i16, i16, u64, then i32 (-1).
-  w.write_i16(0)
+  # An HBlank request a HALT acknowledged and has yet to pay
+  # (HDMA_HALT_REQ, gb.nim): the latched byte + 1, 0 = none. A reserved slot
+  # of rev 6, so the format is unchanged.
+  w.write_i16(if gb.hdma_halt_req: int16(gb.hdma_latch) + 1 else: 0'i16)
+  # Reserved (rev 6): i16, u64, then i32 (-1).
   w.write_i16(0)
   w.write_u64(0)
   w.write_i32(-1)
@@ -192,8 +196,12 @@ proc load_machine_state(gb: GB; r: var Reader; rev: uint32) =
   check_range(revb, 0, ord(high(GbRevision)), "gb.revision")
   let loaded = GbRevision(revb)
   if loaded != gb.revision: gb.gb_set_revision(loaded)
+  # Honoured only where it can be live, a halted CPU under an armed transfer
+  # (checked once the PPU section is in, gb_apply_state).
+  let req = r.read_i16()
+  gb.hdma_halt_req = req >= 1 and req <= 0x100
+  gb.hdma_latch    = if gb.hdma_halt_req: uint8(req - 1) else: 0'u8
   # The reserved slots (read and dropped).
-  discard r.read_i16()
   discard r.read_i16()
   discard r.read_u64()
   discard r.read_i32()
@@ -1236,6 +1244,16 @@ proc gb_apply_state(gb: GB; payload: string; rev: uint32;
   r.expect_tag(GB_SEC_SCHED)
   gb.scheduler.load_from(r, pad = in_process)
   load_ppu_state(gb.ppu, gb, r, rev)
+  # An acknowledged HBlank request is live only across a HALT under an armed
+  # transfer; none of the rest of that scratch crosses a frame boundary.
+  if not (gb.cpu.halted and not gb.cpu.locked and gb.ppu.hdma_active):
+    gb.hdma_halt_req = false
+  gb.hdma_halt_open = false
+  gb.hdma_latch_run = false
+  gb.hdma_absorb    = false
+  gb.hdma_stalled   = false
+  gb.gdma_req       = false
+  gb.hdma_start_req = false
   load_apu_state(gb.apu, gb, r, rev)
   gb.apu_extract_state_events()
   # Channel 4's divisor stage is in the payload from rev 6; before that it is

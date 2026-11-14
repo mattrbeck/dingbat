@@ -644,6 +644,24 @@ proc mem_read_data*(mem: GbMemory; gb: GB; idx: int): uint8 {.inline.} =
     if unlikely((idx and 0xFF00) == 0xFE00): mem_read_oam_bug(mem, gb, idx)
   mem_read(mem, gb, idx)
 
+proc mem_dma_classify(mem: GbMemory; gb: GB) =
+  ## Which bus the OAM DMA unit drives for `current_dma_source`.
+  let raw_src = int(mem.current_dma_source)
+  if raw_src >= 0xE000 and console_is_cgb(gb):
+    # On CGB a source at or above $E000 goes out on the external bus
+    # where nothing answers: every byte is open bus.
+    mem.dma_bus     = uint8(dbExternal)
+    mem.dma_drive   = DriveTristate
+    mem.dma_openbus = true
+  else:
+    # DMG: sources at or above $E000 fetch through the echo (mooneye
+    # oam_dma/sources-GS).
+    var bus_src = raw_src
+    if bus_src >= 0xE000: bus_src = bus_src and not 0x2000
+    mem.dma_bus     = dma_bus_of(gb, bus_src)
+    mem.dma_drive   = dma_drive_of(gb, bus_src)
+    mem.dma_openbus = false
+
 proc mem_dma_transfer*(mem: GbMemory; source: uint8) =
   mem.dma         = source
   mem.requested_oam_dma = true
@@ -691,8 +709,14 @@ proc write_byte*(mem: GbMemory; gb: GB; idx: int; val: uint8) =
     when SERIAL_CPU_SAMPLE_T < 4: serial_if_write_fixup(gb)
   of 0xFF10..0xFF3F: apu_write(gb.apu, idx, val, gb)
   of 0xFF46:
-    # An FF46 write while a transfer runs: the bus hand-over to the new
-    # source was removed 2026-11-13 for a clean rewrite.
+    when OAMDMA_RESTART_HANDOVER != 0:
+      # FF46 is the running unit's source page: a write under a transfer
+      # moves the bytes still to go, and the bus they hold, to the new
+      # source at once (OAMDMA_RESTART_HANDOVER, gb.nim). The restart
+      # follows on its usual delay.
+      if mem.dma_busy:
+        mem.current_dma_source = uint16(val) shl 8
+        mem_dma_classify(mem, gb)
     mem_dma_transfer(mem, val)
   of 0xFF40..0xFF45, 0xFF47..0xFF4B:
     when CGB_LYC_CMP_LATCH:
@@ -886,6 +910,20 @@ proc mem_vdma_bus_capture*(mem: GbMemory; gb: GB; src_lo: uint8; val: uint8) =
     mem.dma_latch = val
     write_byte(mem, gb, 0xFE00 + int(src_lo), val)
 
+proc mem_dma_release_frozen(mem: GbMemory; gb: GB) {.noinline.} =
+  ## A frozen OAM DMA unit that has stored its last byte gives OAM back
+  ## (OAMDMA_FROZEN_RELEASE, gb.nim): the step past $A0 moves no byte and
+  ## needs no bus cycle of the CPU's.
+  when OAMDMA_FROZEN_RELEASE != 0:
+    when defined(gb_dma_trace):
+      echo "DMAFROZEN pos=", mem.dma_position, " ly=", gb.ppu.ly,
+           " dot=", gb.ppu.cycle_counter
+    if mem.dma_position == 0xA0:
+      inc mem.dma_position
+      when OAM_SCAN_DMA_LOCK != 0:
+        if mem.dma_busy: fifo_oam_lock_change(gb.fifo_ppu, gb, taking = false)
+      mem.dma_busy = false
+
 proc mem_dma_tick*(mem: GbMemory; gb: GB; cycles: int) =
   # Idle exit: neither flag can be set inside the loop (~8-12% of a profile).
   if not mem.requested_oam_dma and mem.dma_position > 0xA0: return
@@ -904,9 +942,11 @@ proc mem_dma_tick*(mem: GbMemory; gb: GB; cycles: int) =
             inc gb.dma_halt_grace
           else:
             mem.dma_was_halted = true
+            mem_dma_release_frozen(mem, gb)
             return
         else:
           mem.dma_was_halted = true
+          mem_dma_release_frozen(mem, gb)
           return
     elif mem.dma_was_halted:
       mem.dma_was_halted = false
@@ -936,21 +976,7 @@ proc mem_dma_tick*(mem: GbMemory; gb: GB; cycles: int) =
         mem.internal_dma_timer = 0
         mem.dma_busy           = false
         # The bus is fixed for the whole transfer; classify the source once.
-        let raw_src = int(mem.current_dma_source)
-        if raw_src >= 0xE000 and console_is_cgb(gb):
-          # On CGB a source at or above $E000 goes out on the external bus
-          # where nothing answers: every byte is open bus.
-          mem.dma_bus     = uint8(dbExternal)
-          mem.dma_drive   = DriveTristate
-          mem.dma_openbus = true
-        else:
-          # DMG: sources at or above $E000 fetch through the echo (mooneye
-          # oam_dma/sources-GS).
-          var bus_src = raw_src
-          if bus_src >= 0xE000: bus_src = bus_src and not 0x2000
-          mem.dma_bus     = dma_bus_of(gb, bus_src)
-          mem.dma_drive   = dma_drive_of(gb, bus_src)
-          mem.dma_openbus = false
+        mem_dma_classify(mem, gb)
     if mem.dma_position <= 0xA0:
       if (mem.internal_dma_timer and 3) == 0:
         if mem.dma_position < 0xA0:
@@ -1054,6 +1080,8 @@ proc mem_tick_stalled(mem: GbMemory; gb: GB; cycles: int;
       # Once per stall, not per chunk: the hand-back is at the grant.
       if first_chunk:
         mem_dma_tick(mem, gb, SPEED_SWITCH_OAM_DMA_HANDBACK_T)
+        # Frozen from here to the stall's end, as under a HALT.
+        if not mem.requested_oam_dma: mem_dma_release_frozen(mem, gb)
   # `current_speed` is already the speed switched TO: 1 = ended in double.
   let extra = if first_chunk: spsw_extra_dots(mem) else: 0
   let ppu_cycles = (cycles shr mem.current_speed) + extra - ppu_hold
@@ -1259,7 +1287,7 @@ proc stop_instr*(mem: GbMemory; gb: GB): bool =
 
   if mem.requested_speed_switch and gb.cgb_enabled:
     mem.requested_speed_switch = false
-    when HDMA_SPEEDSWITCH_KILL_W != 0:
+    when HDMA_SPEEDSWITCH_KILL_W != 0 and HDMA_HALT_REQ == 0:
       # Armed only while a transfer exists to lose (HDMA_SPEEDSWITCH_KILL_W).
       if gb.ppu.hdma_active: gb.ppu.hdma_kill_from = gb.ppu.cycle_counter
     # Pan Docs' chart: the switch resets DIV. Through the timer's own entry
@@ -1301,8 +1329,28 @@ proc stop_instr*(mem: GbMemory; gb: GB): bool =
       const stall_cycles = SPEED_SWITCH_STALL_CPU
       var spent = stall_cycles
       var ppu_debt = 0
-      # HBlank DMA across the speed-switch stall: removed 2026-11-13 for a
-      # clean rewrite.
+      when HDMA_HALT_REQ != 0:
+        # The stall is a halt for the VRAM DMA: its edge detector stops with
+        # the CPU clock, and a request the STOP's own prefetch cycle meets
+        # is acknowledged there (HDMA_HALT_REQ, gb.nim).
+        let ppu = gb.ppu
+        let hdma_live = ppu.hdma_active
+        when defined(gb_dma_trace):
+          echo "STOPSW ly=", ppu.ly, " dot=", ppu.cycle_counter,
+               " mode=", (ppu.lcd_status and 3'u8), " to=", mem.current_speed,
+               " due=", (if ppu.hdma_block_due: 1 else: 0),
+               " dl=", ppu.hdma_due_deadline
+        if hdma_live:
+          gb.hdma_stalled = true
+          ppu.hdma_halt_dot = ppu.cycle_counter
+          if ppu.hdma_block_due and ppu.hdma_due_deadline != high(int32) and
+             not gb.gdma_req and not gb.hdma_start_req:
+            if ppu.hdma_due_deadline <= ppu.cycle_counter + hdma_halt_mdots(gb):
+              ppu_hdma_halt_request(ppu, gb)
+            else:
+              ppu.hdma_due_deadline = high(int32)
+          else:
+            gb.hdma_halt_open = true
       when SPEED_SWITCH_STALL_RUNS_CPU_CLOCK != 0:
         # The divider runs, so the DIV-APU event needs no lifting.
         when SPEED_SWITCH_STALL_ENDS_ON_IRQ != 0:
@@ -1315,6 +1363,30 @@ proc stop_instr*(mem: GbMemory; gb: GB): bool =
         gb.scheduler.clear(etAPUFrameSeq)
         mem_tick_stalled(mem, gb, stall_cycles)
         gb.scheduler.schedule(apu_div_phase(gb.timer, gb), etAPUFrameSeq)
+      when HDMA_HALT_REQ != 0:
+        if hdma_live:
+          # The stall's end is the wake (cpu_halt_wake): the acknowledged
+          # block's bytes, or a block that came due under the stall while
+          # its HBlank lasts. A stall that ran out has paid the PPU's lead.
+          gb.hdma_stalled   = false
+          gb.hdma_halt_open = false
+          when defined(gb_dma_trace):
+            echo "STALLEND ly=", ppu.ly, " dot=", ppu.cycle_counter,
+                 " mode=", (ppu.lcd_status and 3'u8), " debt=", ppu_debt
+          let lead_paid =
+            int32(CGB_HALT_PPU_LEAD_DOTS shr mem.current_speed) - int32(ppu_debt)
+          when HDMA_WAKE_BLIND_DOTS > 0:
+            # A stall an interrupt ends is a wake like a HALT's; one that
+            # runs out its count has no wake M-cycle for the edge detector
+            # to miss (HDMA_WAKE_BLIND_DOTS, gb.nim).
+            gb.hdma_wake_dot =
+              if spent < stall_cycles: ppu.cycle_counter
+              else: ppu.cycle_counter - int32(HDMA_WAKE_BLIND_DOTS) - 1'i32
+          if gb.hdma_halt_req:
+            ppu_hdma_pay_halt_request(ppu, gb)
+            gb.hdma_latch_run = true
+          else:
+            ppu_hdma_wake(ppu, gb, lead_paid)
       if ppu_debt != 0:
         # The wake pays the held-back dots (as at a HALT's, cpu.nim).
         mem_tick_ppu(mem, gb, ppu_debt, ignore_speed = true)

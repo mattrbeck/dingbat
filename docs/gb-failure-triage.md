@@ -269,12 +269,15 @@ rewrite (rows `irq_precedence/late_m0irq_vs_tima_*`, both devices).
 
 ### A5. Halt-woken readers of the mode-0 edge
 
-**Rows (3).** `oamdma/oamdma_late_halt_stat_2` (both),
-`oamdma_late_speedchange_stat_2`. The eight `halt/` rows: HALT with IME on
-and an interrupt already pending was removed 2026-11-13 for a clean rewrite
-(the `_3a`/`_3b` rows); `DMG_HALT_MIN_MCYCLES` (`_2b`) and
-`M2_LEAD_HALT_BLIND_DMG_ONLY` (`noime_m2irq_m0stat_1 [cgb]`, mooneye
-`intr_2_*` on CGB C and E) are re-fit pending, neutral values 1 and 0.
+**Rows (1).** `oamdma/oamdma_late_speedchange_stat_2`: the OAM DMA unit is
+released under the stall (`OAMDMA_FROZEN_RELEASE`, re-derived 2026-11-13),
+and the row stays red until the CGB fetches objects with LCDC.1 clear
+(`obj_fetch_on`, fifo_ppu.nim). `oamdma_late_halt_stat_2` (both
+devices) and the eight `halt/` rows are green again: HALT with IME on and an
+interrupt already pending pushes the HALT's own address
+(`HALT_IME_PENDING_REDO`, the `_3a`/`_3b` rows), `DMG_HALT_MIN_MCYCLES = 2`
+(`_2b`) and `M2_LEAD_HALT_BLIND_DMG_ONLY = 1` (`noime_m2irq_m0stat_1 [cgb]`);
+docs/gb-derivations.md §7.
 
 **Behaviour.** The mode-0 source's rise sits mid-M-cycle at some SCX.
 GBMicrotest's `int_hblank_{nops,halt}_scx*` pairs put the halt one M-cycle
@@ -749,17 +752,17 @@ the fetch). A halted CPU's edge detector holds a CPU-clocked copy of the
 mode, so a mode-0 edge under a halt is invisible until the CPU runs again
 (`HDMA_HALT_M0_BLIND = 1`, `HDMA_HALT_BLIND_LAG = 2`).
 
-* HBlank DMA requests across HALT and the KEY1 stall, and against a
-  same-dot interrupt dispatch: removed 2026-11-13 for a clean rewrite.
-* GDMA's bus hand-over point after the FF55 write, and the LCD-off HBlank
-  request: removed 2026-11-13 for a clean rewrite.
-* Re-fit pending: `HDMA_WAKE_BLIND_DOTS` (dots the HBlank edge detector stays
-  frozen after an interrupt wake; neutral 0), `HDMA_WAKE_M0_MARGIN` (dots of
-  mode 0 that must remain at a wake for the block to be taken; neutral 8),
-  `HDMA_START_GRANT_FETCH` (dots after an FF55 arming write inside mode 0 by
-  which the bus is handed over; neutral 0), `HDMA_START_CUTOFF_SS` / `_DS`
-  (dots before the line end within which an arming write waits for the next
-  HBlank; neutral 0).
+* Re-derived 2026-11-13 (docs/gb-derivations.md §5, one entry each): an
+  HBlank request inside a HALT's or a speed switch's own execute cycle is
+  acknowledged there and paid at the wake, the byte that cycle read executed
+  from the latch (`HDMA_HALT_REQ`); the wake's margin and the edge
+  detector's blind M-cycle (`HDMA_WAKE_M0_MARGIN = 4`,
+  `HDMA_WAKE_BLIND_DOTS = 4`); a dispatch's first M-cycle is a hand-over
+  point (`HDMA_DISPATCH_FETCH`); a general-purpose DMA and an FF55 write
+  arming a transfer inside HBlank take the bus at the next opcode fetch
+  (`GDMA_GRANT_FETCH`, `HDMA_START_GRANT_FETCH = 2`, `HDMA_START_REQ_LAG = 1`
+  in place of the two start cutoffs); the LCD switch-off moves one block
+  (`HDMA_LCD_OFF_BLOCK`).
 
 Its bytes land 4 dots after the block (`HDMA_VISIBLE_DOTS`;
 `hdma_start_ds_1` and `hdma_start_scx5_2` separate dots from M-cycles).

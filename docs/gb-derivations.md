@@ -283,21 +283,171 @@ a reference PNG, `mGBA suite <section>` a section of mGBA's test ROM.
   mode 0 and that line's block is never transferred. Paid at the M-cycle the
   halt ends, ahead of that wake's interrupt dispatch.
 - Evidence: MagenTests `hblank_vram_dma`; gambatte
-  `dma/hdma_m3halt_m1unhalt_hdma5`. The remaining `hdma_late_*` / `_unhalt_*`
-  one-M-cycle pairs are the CPU-vs-PPU phase cluster; their bracketing
-  constants (`HDMA_HALT_BLIND_LAG*`, `HDMA_WAKE_M0_MARGIN`) are documented at
-  their declarations in `gb.nim`.
+  `dma/hdma_m3halt_m1unhalt_hdma5`. The `hdma_late_*` / `_unhalt_*`
+  one-M-cycle pairs are the next two entries; `HDMA_HALT_BLIND_LAG*` is
+  documented at its declaration in `gb.nim`.
 - Site: the check sits inside the halted branch of `cpu.tick` and is asked
   only on the M-cycle the halt ends (asking every halted M-cycle measured
   0.3 % of Pokemon Blue).
 
-### HBlank DMA requests across HALT and STOP
-- HBlank DMA requests across HALT and the KEY1 stall: removed 2026-11-13 for
-  a clean rewrite.
+### A HALT's execute cycle is an opcode fetch: an HBlank request it meets waits for the wake
+- Ships: `HDMA_HALT_REQ = 1` (`gb.nim`); `cpu_halt`, `cpu_halt_wake`,
+  `cpu_latched_op` (`cpu.nim`), `ppu_hdma_halt_request`,
+  `ppu_hdma_pay_halt_request`, the mode 3 -> 0 edge in `mode_flag=`
+  (`ppu.nim`), `stop_instr` (`memory.nim`), the STOP handler (`opcodes.nim`).
+- Rule. The SM83 reads the byte after a HALT in the HALT's own execute
+  cycle, as it reads the next opcode in the last cycle of every instruction.
+  That cycle is therefore one of the CPU's hand-over points for a VRAM DMA
+  (the end of an opcode fetch, `HDMA_GRANT_FETCH_DOTS`). An HBlank request
+  that comes up inside it (the mode 3 -> 0 edge 4 dots earlier, so on one of
+  the last three dots of the HALT's fetch or on the dot that fetch ends, at
+  single speed; on the last two dots of the fetch at double speed, where the
+  cycle is 2 dots) is acknowledged at its end, but the CPU halts there and a
+  halted CPU's transfer does not run (Pan Docs, FF55). The block waits for
+  the wake, in whatever mode the wake finds the PPU, and then:
+  1. its sixteen bytes go out, 32 dots; an HBlank edge inside them, or
+     inside the M-cycle after them, makes no second request;
+  2. the byte the HALT's execute cycle read is executed from the latch, with
+     no second read and no step of PC over it. The instruction after the
+     HALT so runs twice in effect: once from the latch with its operands
+     taken from its own address, then again from memory. Its first M-cycle
+     is the block's hand-back, so the block costs 36 dots in all;
+  3. the interrupt that ended the halt is dispatched after that instruction.
+  One dot earlier the request is up by the end of the HALT's fetch and the
+  block runs before the halt; one dot later the CPU is halted when the edge
+  arrives and the block is an ordinary halted one (paid at the wake only if
+  its HBlank is still running, `HDMA_WAKE_M0_MARGIN`).
+- The speed switch's stall is the same halt (Pan Docs' STOP chart: "HALT
+  mode"), and the latched byte is STOP's second, which is executed instead
+  of skipped. Into single speed the block is paid at the stall's end exactly
+  as above. Into double speed the block's bytes go out under the stall at no
+  cost to the CPU and the transfer's control state is lost with the clock
+  change: FF55 then reads bit 7 set over the undecremented length and no
+  further block follows.
+- Rows (gambatte `dma/`, CGB), each a HALT or STOP walked across the edge one
+  M-cycle at a time, the middle member inside the window:
+  `hdma_late_m3halt_m2unhalt_scx{1,2}_{1,2}` (FF55 after a mode-2 wake: $00
+  before the window, $FF inside), `_inc_scx{1,2}_{1,2,3}` (`inc a` after the
+  HALT: 1, 2, 1), `_ly_scx2_{1..6}` (LY read after the wake: the same NOP
+  count before the window, where the next line's own block costs 36 dots,
+  and inside it, the doubled NOP included; nine NOPs more after it, the
+  block before the HALT), `hdma_late_ei_m3halt_m2unhalt_{ly,pc}_scx1_*`
+  (IME on: the same time, the pushed address HALT + 1),
+  `hdma_transition_halt_m0unhalt_ldaaimm_scx1` (`ld a,[$0080]` reads
+  [$80FA]), `hdma_transition_7fffhalt_inc_m3unhalt` (the latched `inc a`
+  from $8000 runs under a mode-3 wake, the re-read answers $FF),
+  `hdma_transition_{,ei_}halt_late_unhalt_{,ldaaimm_hdma_}scx1_{1,2}` (a wake
+  36 and 40 dots before the next edge: the edge is lost, or its block
+  follows; with IME on the latched `ld [$0080],a` writes [$80EA] before the
+  handler reads it). Speed switch: `hdma_late_m3speedchange_inc_scx1_{1,2,3}`
+  and `hdma_late_speedchange_inc_scx1_ds_{1,2,3}` (`stop, $3C`: A = 1, 2, 1),
+  `hdma_transition_speedchange_ldaaimm_scx1{,_ds}` (`stop, $FA` then
+  `$80 $80`: [$8080] is read), `hdma_transition_speedchange_7fffstop_inc`,
+  `hdma_late_m3speedchange_hdma5_scx{1,2}_{1,2,3}` ($00, $80, $FF) and
+  `_ds_{1,2}` ($00, $FF), `_read_hdmadst00_scx{1,2}{,_ds}_{1,2}` (the first
+  byte is in VRAM in both directions), `_ly_scx1_{1..6}` (into double speed:
+  one NOP late, no block time), `_tima_scx1_ds_{1..6}` (into single speed:
+  TIMA 36 dots on), `hdma_transition_speedchange_hdmalen{00,01,7f}_hdma5_scx1`
+  and `_hdmalen{01,7f}_hdmadst10_scx1`.
+- Two-sided: `-d:HDMA_HALT_REQ=0` (the request paid at the HALT) loses 33
+  gambatte rows and gains none. The window's width is not a constant: it is
+  the execute cycle, 4 dots or 2, and the double-speed rows
+  `hdma_late_m3speedchange_*_ds_1` (the edge on the dot the STOP's fetch
+  ends, or the one before: no acknowledgement) refuse the single-speed
+  width.
+- Save states: the acknowledged request and its latched byte ride in a slot
+  of `GB_SEC_MACH` that was reserved (format unchanged); a HALT can outlast a
+  frame.
+- Clean-room: derived from test ROM sources/outputs and dingbat's own trace runs; no emulator source consulted.
 
-### HBlank DMA request against an interrupt dispatch on the same dot
-- HBlank DMA against a same-dot dispatch: removed 2026-11-13 for a clean
-  rewrite.
+### A HALT wake and the HBlank edge detector
+- Ships: `HDMA_WAKE_M0_MARGIN = 4`, `HDMA_WAKE_BLIND_DOTS = 4` (`gb.nim`);
+  `ppu_hdma_wake`, `mode_flag=` (`ppu.nim`).
+- Rule. A block that came due under a HALT is taken at the wake if its
+  HBlank is still running once the PPU's held-back dots are paid
+  (`CGB_HALT_PPU_LEAD`): the margin is that lead, 4 dots, 2 at double speed.
+  A CPU halted in mode 0 has an edge detector whose copy of the mode still
+  reads 0 (`HDMA_HALT_M0_BLIND`); the first M-cycle after the wake is what
+  clocks it again, so an edge inside that M-cycle is not seen.
+- Rows and brackets. Margin [3, 5]: gambatte `dma/hdma_late_m0unhalt_{1,2}`
+  (2 loses `_1`, 7 loses `_2`) and `_ds_{1,2}` (6 loses `_ds_2`). Blind
+  window [4, 7]: `dma/hdma_m0halt_late_m3unhalt_scx1_{1,2}` (3 loses `_2`, 8
+  loses `_1`). A stall that runs out its count has no wake M-cycle and no
+  blind window: `dma/hdma_m0speedchange_late_m3wakeup_scx{1,2}_{1,2}`; the
+  stall freezes the detector as a HALT does and pays a due block at its end
+  on the same margin (`dma/hdma_m3speedchange_late_m0wakeup_{1,2}`).
+- Clean-room: derived from test ROM sources/outputs and dingbat's own trace runs; no emulator source consulted.
+
+### The first M-cycle of an interrupt dispatch is a hand-over point
+- Ships: `HDMA_DISPATCH_FETCH = 1` (`cpu.nim`, `dispatch_interrupt`).
+- Rule. A dispatch begins with an opcode fetch whose byte is discarded
+  (Pan Docs, "Interrupt Handling"), and a VRAM DMA takes the bus at the end
+  of an opcode fetch. An HBlank request up by the end of that M-cycle (the
+  mode 3 -> 0 edge no later than the dot the dispatch begins on) runs its
+  block ahead of the two pushes; one dot later the block waits for the
+  handler's first fetch.
+- Rows: gambatte `irq_precedence/hdma_vs_m0_scx{1,2,3}`,
+  `hdma_vs_m0_scx2_halt`, `late_hdma_vs_{ei,ie}_scx{1,2}_{1,2}`,
+  `late_hdma_vs_tima_scx{1,2}{,_halt}_{1,2}`: the block's source is the stack
+  the dispatch pushes onto, and the rows read $1234 (block first) or the
+  pushed PC. `-d:HDMA_DISPATCH_FETCH=0` loses the seven rows with the edge
+  on the dispatch's first dot.
+- Only a dispatch under an armed HBlank transfer runs that M-cycle ahead of
+  its pushes; the dispatch's own push order is another entry.
+- Clean-room: derived from test ROM sources/outputs and dingbat's own trace runs; no emulator source consulted.
+
+### A general-purpose DMA takes the bus at the next opcode fetch
+- Ships: `GDMA_GRANT_FETCH = 1` (`gb.nim`); `ppu_start_hdma` (`ppu.nim`),
+  `hdma_grant` (`cpu.nim`).
+- Rule. The FF55 write raises the request; the CPU fetches its next opcode
+  and hands the bus over at the end of that fetch. The burst runs, then the
+  fetched instruction's remaining M-cycles.
+- Rows: gambatte `dma/late_gdma_pc_7ffe_1` (the write at $7FFE: `LD A,[nn]`
+  is fetched from the old byte at $8000 and reads its operands from the
+  burst's bytes); DocBoy `cgb/hdma/gdma_source_*` (19 rows: the first byte
+  from a source no bus answers is the opcode after the write,
+  `VDMA_BUS_RESIDUE`) and `gdma_ppu_on_pixel_transfer_conflict_relaxed_*`
+  (82 rows: which bytes mode 3's fetches refuse, `VDMA_M3_PORT`, places the
+  burst to the dot). `-d:GDMA_GRANT_FETCH=0` loses 103 rows.
+- Clean-room: derived from test ROM sources/outputs and dingbat's own trace runs; no emulator source consulted.
+
+### An FF55 write arming an HBlank transfer inside HBlank
+- Ships: `HDMA_START_GRANT_FETCH = 2` (`gb.nim`), `HDMA_START_REQ_LAG = 1`
+  (`ppu.nim`).
+- Rule. The request is up at once and is answered at the end of the next
+  opcode fetch, not on the write and not at the write's own instruction
+  boundary. The request is the HBlank level: if the line ends first, the
+  block is still taken when that fetch ends within one dot of the new line's
+  start, and otherwise waits for the next HBlank.
+- Rows and brackets. `HDMA_START_GRANT_FETCH` [2, 3]: gambatte
+  `dma/hdma_pc_7ffe` (1 loses it and two `hdma_late_enable_*_2` rows),
+  `dma/hdma_late_enable_ds_lcdoffset1_1` (4 loses it), DocBoy
+  `cgb/hdma/hdma_start_during_oam_scan_with_dma_running` and
+  `hdma_source_wram_dma_source_ram_during_oam_scan` (5 loses both).
+  `HDMA_START_REQ_LAG` = 1 exactly: gambatte `dma/hdma_late_enable_{1,2}`,
+  `_ds_{1,2}`, `_lcdoffset3_{1,2}`, `_ds_lcdoffset1_{1,2}` (the fetch ends on
+  dot 1 of the next line in `_1` and `_ds_1`, block taken; on dot 2 in
+  `_lcdoffset3_2` and `_ds_lcdoffset1_2`, not taken). The two cutoff knobs
+  this replaces (`HDMA_START_CUTOFF_SS`/`_DS`, dots back from the line end
+  to the write) fit single speed at 2 and have no value at double speed: 0
+  loses `_ds_lcdoffset1_2`, 1 loses `_ds_1`.
+- Clean-room: derived from test ROM sources/outputs and dingbat's own trace runs; no emulator source consulted.
+
+### Switching the LCD off moves one HBlank block
+- Ships: `HDMA_LCD_OFF_BLOCK = 1`, `HDMA_LCD_OFF_EDGE = 1` (`gb.nim`);
+  `ppu_write` $FF40 (`ppu.nim`).
+- Rule. With the LCD off the mode reads 0, so the switch-off is one more
+  entry into HBlank for an armed transfer, and the last until the LCD is
+  back on. It is an edge: a PPU already in HBlank, its block paid, moves
+  nothing more; a block still owed when the write lands is paid.
+- Rows: `-d:HDMA_LCD_OFF_BLOCK=0` loses 16: gambatte
+  `dma/hdma_disable_display_1`; DocBoy `cgb/hdma/hdma_ppu_on_turn_off_
+  during_ly1_oam_scan`, nine `hdma_halt_resume_with_stat_vblank_*`, four
+  `hdma_halt_resume_with_timer_interrupt_*`, `double_speed_hdma_basic_
+  transfer`. `-d:HDMA_LCD_OFF_EDGE=0` (every switch-off moves a block) loses
+  6: `hdma_ppu_on_turn_off_during_{ly0,ly1}_hblank` and the four
+  `hdma_halt_resume_with_timer_interrupt_*` rows that switch off in HBlank.
+- Clean-room: derived from test ROM sources/outputs and dingbat's own trace runs; no emulator source consulted.
 
 ### FF55 bit 7 means "no transfer active" on every path into that state
 - Claim: Pan Docs: "This works under any circumstances — after completion of
@@ -352,6 +502,44 @@ a reference PNG, `mGBA suite <section>` a section of mGBA's test ROM.
   989 901 accesses through it, 0 conflicts). Cost analysis:
   `docs/gb_oam_dma_cost.md`.
 
+### An FF46 write under a running transfer moves the bus at once
+- Ships: `OAMDMA_RESTART_HANDOVER = 1` (`gb.nim`); `write_byte` $FF46
+  (`memory.nim`).
+- Rule. FF46 is the high byte of the address the unit drives. Written while
+  a transfer runs, it re-points the bytes that transfer still moves before
+  the restart (two M-cycles on), and with them the bus the unit holds: a CPU
+  access on the new source's bus conflicts from the next M-cycle.
+- Rows: gambatte `oamdma/oamdma_src8000_srcchange0000_busyinc` (DMG and CGB;
+  0 loses both). `oamdma_src8000_srcchange0000_busyread0000_{1,2}` and
+  `oamdma_src8000_srcchangeC000_busyread8000` do not move.
+- Clean-room: derived from test ROM sources/outputs and dingbat's own trace runs; no emulator source consulted.
+
+### The OAM DMA unit under a HALT: one more M-cycle, and the release needs none
+- Ships: `OAMDMA_HALT_GRACE = 1`, `OAMDMA_WAKE_EXTRA = 0`,
+  `OAMDMA_FROZEN_RELEASE = 1` (`gb.nim`); `mem_dma_tick`,
+  `mem_dma_release_frozen`, `mem_tick_stalled` (`memory.nim`).
+- Rule. The unit is clocked by the CPU's bus cycles and stops with them
+  (`OAMDMA_HALT_PAUSE`). The HALT's execute cycle is a bus cycle (it reads
+  the byte after the HALT), so the unit moves one more byte after the HALT's
+  fetch and owes nothing at the wake. The step after byte 159, which only
+  gives OAM back, is not a bus cycle: a unit frozen with every byte moved
+  releases OAM. The speed switch's stall is the same
+  (`SPEED_SWITCH_OAM_DMA_HANDBACK_T`).
+- Rows and joint fit. gambatte `oamdma/oamdmasrc80_halt_{lycirq,m2irq}_
+  read8000` (DMG and CGB) and `dma/hdma_transition_oamdma_2` pin grace +
+  hand-back at one M-cycle: (1, 0) and (0, 4) pass, every other pair in
+  {0,1,2} x {0,4,8} loses all five. `oamdma/oamdma_late_halt_stat_{1,2}`
+  (DMG and CGB) pick (1, 0) with the release rule: byte 159 must move under
+  the halt in `_2` and byte 158 with 159 still owed must not finish in `_1`.
+  Without the release rule only grace 2 passes `_2`, and loses the five.
+  `oamdma/oamdma_late_speedchange_stat_2` [cgb] is the same across the
+  stall, but its LCDC has bit 1 clear, so it also needs the CGB's object
+  fetch with LCDC.1 clear (`obj_fetch_on`, `fifo_ppu.nim`, another entry):
+  with that fetch forced on for a CGB the row passes with the release and
+  fails with `-d:OAMDMA_FROZEN_RELEASE=0`; without it the row reads mode 0
+  either way.
+- Clean-room: derived from test ROM sources/outputs and dingbat's own trace runs; no emulator source consulted.
+
 ## 7. CPU
 
 ### The eleven undefined opcodes lock the CPU until reset
@@ -391,10 +579,27 @@ a reference PNG, `mGBA suite <section>` a section of mGBA's test ROM.
   the instrument.
 
 ### HALT with an interrupt already pending, and the DMG HALT's minimum length
-- HALT with IME on and an interrupt already pending: removed 2026-11-13 for a
-  clean rewrite.
-- `DMG_HALT_MIN_MCYCLES` (cpu.nim): M-cycles before a DMG HALT can answer an
-  interrupt. Re-fit pending; neutral value 1.
+- Ships: `HALT_IME_PENDING_REDO = 1`, `DMG_HALT_MIN_MCYCLES = 2`,
+  `M2_LEAD_HALT_BLIND_DMG_ONLY = 1` (`cpu.nim`).
+- Rule. HALT with IF & IE != 0 does not halt, whatever IME is, and PC fails
+  to step. With IME clear that is the halt bug (Pan Docs). With IME set the
+  dispatch that follows at once pushes the unstepped PC, the HALT's own
+  address, so the handler returns onto the HALT.
+- Rows: gambatte `halt/late_m0int_halt_m0stat_scx{2,3}_*` (a mode-0 handler
+  that returns with interrupts off: the members whose HALT follows the
+  request halt again on the return and read STAT 48 NOPs after the next
+  line's wake; the members whose HALT comes first read it 30 NOPs after
+  their handler), DocBoy `dmg/cpu/halt_ime1_interrupt1_ret`.
+  `-d:HALT_IME_PENDING_REDO=0` loses the four `_3a` rows, `_scx3_3b` [dmg]
+  and the DocBoy row.
+- `DMG_HALT_MIN_MCYCLES`: a request rising inside a DMG's first halted
+  M-cycle ends the HALT one M-cycle later. 2 exactly: 1 loses gambatte
+  `halt/late_m0int_halt_m0stat_scx3_2b` and `late_m0irq_halt_m0stat_scx3_2b`
+  [dmg]; 3 loses six `late_m0{int,irq}_halt_m0stat_*` rows [dmg].
+- `M2_LEAD_HALT_BLIND_DMG_ONLY`: the halted CPU's blindness to the mode-2
+  source inside its lead is the DMG family's. 0 loses gambatte
+  `halt/noime_m2irq_m0stat_1` [cgb].
+- Clean-room: derived from test ROM sources/outputs and dingbat's own trace runs; no emulator source consulted.
 
 ### The halted CPU samples the interrupt line at the end of its M-cycle
 - Ships: `HALT_IF_SAMPLE_T = 4` (`cpu.nim`); 2 is the alternative arm.
