@@ -1336,8 +1336,8 @@ Dots are dingbat's line dots; W is the first dot of the writing M-cycle
   own hardware reads; no emulator source consulted.
 
 ### Game Boy Printer status
-- Ships: `PRN_STATUS_SEQUENCE = true`, `PRN_INIT_REPLY_CLEAN = true`
-  (`printer.nim`); `GbPrinter.done_unseen`.
+- Ships: `PRN_STATUS_SEQUENCE = true`, `PRN_DONE_HOLD = true`,
+  `PRN_INIT_REPLY_CLEAN = true` (`printer.nim`).
 - Claim: the status byte follows Pan Docs' "Example" on the Game Boy Printer
   page. INIT replies `$00`. A DATA packet with a payload sets bit 3
   (unprocessed data), which the next packet's reply is the first to show
@@ -1346,9 +1346,13 @@ Dots are dingbat's line dots; W is the first dot of the writing M-cycle
   print runs, and `$04` when it ends. A packet's status byte is therefore the
   state before that packet took effect, except INIT's, which is already the
   cleared `$00` (Pan Docs: "the normal status replied should be `$00`").
-  `$04` stays until INIT, BREAK or the 100 ms idle timeout, and the timeout
-  waits until one reply has carried the `$04` (it never interrupts a running
-  print either).
+  `$04` stays until INIT, BREAK or the next DATA with a payload. The 100 ms
+  idle timeout resets the link and the graphics buffer (Pan Docs' wording),
+  and bit 3 and the error bits with them, but it does not take `$04` away
+  and never interrupts a running print (`PRN_DONE_HOLD`). A DATA with a
+  payload that finds `$04` replies `$04` itself and leaves `$08`: the done
+  bit goes with the new transfer, so no reply is `$0C`. A DATA during a
+  running print keeps the `$06`.
 - Evidence, Pan Docs: the example's byte sequence, bit names and the 100 ms
   timeout. `tests/gb_printer_test.nim` holds each step.
 - Evidence, Game Boy Camera Gold (USA) run on dingbat as a black box (a
@@ -1366,9 +1370,18 @@ Dots are dingbat's line dots; W is the first dot of the writing M-cycle
     waits on bit 1: it must rise within six polls and fall at the end.
   - Bit 3 after DATA, bit 2 during and after the print: the game runs the
     same with or without them. They rest on Pan Docs alone.
-  - Without the done hold the game's last poll reads `$00`, not `$04`: its
-    poll period is the length of the idle timeout, which then fires between
-    the end of the print and the next poll.
+  - `PRN_DONE_HOLD=false` (the timeout returns the status to `$00`): the
+    game's last poll reads `$00`, not `$04`. Its poll period is the length of
+    the idle timeout, which then fires between the end of the print and the
+    next poll.
+- Evidence, reported game behaviour (not run here; the ROM was not
+  available): Hello Kitty Pocket Camera sends PRINT again, indefinitely, if
+  a poll after the print reads `$00` rather than done, and a camera game
+  stays on its "transferring" screen if a DATA sent while `$04` is reported
+  is answered `$0C`. `tests/gb_printer_test.nim` models both: a poller every
+  10 frames reads `$06`, then `$04` for as long as it keeps asking (ten
+  seconds of silence included) until INIT; DATA after done replies `$04`,
+  `$08`, `$08`. With `PRN_DONE_HOLD=false` the slow-poller checks fail.
 - `PRN_INIT_REPLY_CLEAN` rests on Pan Docs alone; no ROM here sends INIT
   within 100 ms of a finished print.
 - Unchanged and still assumed: about 7.5 frames per printed row, only full

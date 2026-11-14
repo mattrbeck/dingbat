@@ -105,7 +105,9 @@ block:
 echo "a slow poller still reads the end of the print"
 block:
   # One STATUS every 10 frames, past the 100 ms (6-frame) packet timeout: the
-  # timeout neither aborts the print nor takes the $04 away unread.
+  # timeout neither aborts the print nor takes the $04 away. Hello Kitty
+  # Pocket Camera is reported to send PRINT again for ever if a poll after
+  # the print reads $00, so done stays until the game starts something new.
   let prn = new_gb_printer()
   let status_pkt = build_packet(0x0F, @[])
   discard prn.send(build_packet(0x01, @[]))
@@ -117,10 +119,46 @@ block:
     for _ in 0 ..< 10: prn.tick_frame()
     let s = prn.send(status_pkt).last
     if seen.len == 0 or seen[^1] != s: seen.add(s)
-  check(seen == @[0x06'u8, 0x04, 0x00],
-        "polls 10 frames apart read $06, then $04 once, then $00 (got " & $seen & ")")
+  check(seen == @[0x06'u8, 0x04],
+        "polls 10 frames apart read $06, then $04 and nothing after (got " & $seen & ")")
   check(prn.outbox.len == 1 and prn.outbox[0].len == 160 * 48,
         "the print ran to its end under slow polls")
+  for _ in 0 ..< 600: prn.tick_frame()
+  check(prn.send(status_pkt).last == 0x04, "ten seconds of silence later: still $04")
+  check(not prn.printing and prn.outbox.len == 1, "and nothing printed twice")
+  for _ in 0 ..< 10: prn.tick_frame()
+  check(prn.send(build_packet(0x01, @[])).last == 0x00, "INIT ends it: $00")
+  for _ in 0 ..< 10: prn.tick_frame()
+  check(prn.send(status_pkt).last == 0x00, "and it stays $00")
+
+echo "a new transfer without INIT ends the done state"
+block:
+  let prn = new_gb_printer()
+  let status_pkt = build_packet(0x0F, @[])
+  for _ in 0 ..< 3: discard prn.send(build_packet(0x04, band(0x00, 0x00)))
+  discard prn.send(build_packet(0x04, @[]))
+  discard prn.send(build_packet(0x02, @[1'u8, 0x13, 0xE4, 0x40]))
+  while prn.printing: prn.tick_frame()
+  check(prn.send(status_pkt).last == 0x04, "print done: $04")
+  check(prn.send(build_packet(0x04, @[])).last == 0x04, "an empty DATA leaves $04")
+  var replies: seq[uint8] = @[]
+  for _ in 0 ..< 3: replies.add(prn.send(build_packet(0x04, band(0xFF, 0xFF))).last)
+  replies.add(prn.send(build_packet(0x04, @[])).last)
+  replies.add(prn.send(status_pkt).last)
+  check(replies == @[0x04'u8, 0x08, 0x08, 0x08, 0x08],
+        "DATA after done replies $04 then $08, never $0C (got " & $replies & ")")
+  discard prn.send(build_packet(0x02, @[1'u8, 0x13, 0xE4, 0x40]))
+  check(prn.send(status_pkt).last == 0x06, "the second print runs: $06")
+  while prn.printing: prn.tick_frame()
+  check(prn.send(status_pkt).last == 0x04 and prn.outbox.len == 2 and
+        prn.outbox[1].len == 160 * 48,
+        "and ends $04 with its own 48 rows")
+  # A DATA while a print is still running does not take its $06 away.
+  let prn2 = new_gb_printer()
+  for _ in 0 ..< 3: discard prn2.send(build_packet(0x04, band(0x00, 0x00)))
+  discard prn2.send(build_packet(0x02, @[1'u8, 0x13, 0xE4, 0x40]))
+  discard prn2.send(build_packet(0x04, band(0x00, 0x00)))
+  check((prn2.send(status_pkt).last and 0x06) == 0x06, "DATA during a print keeps bits 2 and 1")
 
 echo "idle timeout returns the printer to $00"
 block:
@@ -130,6 +168,10 @@ block:
   check(prn.send(status_pkt).last == 0x08, "data waiting")
   for _ in 0 ..< 6: prn.tick_frame()
   check(prn.send(status_pkt).last == 0x00, "100 ms of silence drops the buffer and its $08")
+  discard prn.send(build_packet(0x07, @[]))
+  check(prn.send(status_pkt).last == 0x10, "packet error set")
+  for _ in 0 ..< 6: prn.tick_frame()
+  check(prn.send(status_pkt).last == 0x00, "and the timeout clears that too")
   discard prn.send(build_packet(0x02, @[1'u8, 0, 0xE4, 0x40]))
   while prn.printing: prn.tick_frame()
   check(prn.outbox.len == 0, "nothing was left to print")
