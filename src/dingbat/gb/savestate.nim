@@ -1266,6 +1266,10 @@ proc gb_apply_state(gb: GB; payload: string; rev: uint32;
   gb.hdma_switch_stall   = false
   gb.gdma_req       = false
   gb.hdma_start_req = false
+  # A DMG HALT's minimum window (DMG_HALT_MIN_MCYCLES) never spans a frame
+  # boundary (step_frame), so a halted CPU here is already past it.
+  when DMG_HALT_MIN_MCYCLES > 1:
+    gb.halt_start = gb.scheduler.cycles - CycleCount(4 * DMG_HALT_MIN_MCYCLES)
   load_apu_state(gb.apu, gb, r, rev)
   gb.apu_extract_state_events()
   # Channel 4's divisor stage is in the payload from rev 6; before that it is

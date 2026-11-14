@@ -1196,9 +1196,9 @@ const WIN_CHECK_CUT_DOTS* {.intdefine.} = 2
   ## Dots before the end of a line from which a write's sample of the WY == LY
   ## comparator (WIN_CHECK_DEFER_*) no longer latches the window for the line
   ## being drawn, at single speed (0 = a sample latches up to the boundary).
-  ## 2 ships (dot 454 on), the dot the comparator's LY steps to the next line
-  ## (STAT_LYC_LY_LEAD_DOTS): from there the sample is no longer about this
-  ## line, and the next line's own sample follows within three dots. gambatte
+  ## 2 ships (dot 454 on), also the dot the LY = LYC comparator's LY steps
+  ## (STAT_LYC_LY_LEAD_DOTS); the next line's own sample follows within
+  ## three dots. gambatte
   ## `window/late_enable_afterVblank_lcdoffset1_1` [cgb] raises LCDC.5 from
   ## dot 448 of the WY line (sample on 453) and gets the window, so 3 loses
   ## it; `late_enable_afterVblank_2` [cgb] (from 449, sample on 454) and
@@ -4086,6 +4086,14 @@ proc step_frame*(gb: GB) =
   # the bus to yet (GDMA_GRANT_FETCH, HDMA_START_GRANT_FETCH): the request is
   # scratch, and the next opcode fetch answers it.
   if gb.gdma_req or gb.hdma_start_req: gb.cpu.tick(gb)
+  # And a DMG HALT still inside its minimum window (DMG_HALT_MIN_MCYCLES):
+  # its start is not in the format, so the boundary waits it out (at most
+  # that many halted M-cycles; a wake ends it).
+  when DMG_HALT_MIN_MCYCLES > 1:
+    while not gb.cgb_enabled and gb.cpu.halted and not gb.cpu.stopped and
+          gb.scheduler.cycles - gb.halt_start <
+            CycleCount(4 * DMG_HALT_MIN_MCYCLES):
+      gb.cpu.tick(gb)
   var settle = 4
   while gb.ppu.lcd_enabled and not gb.cpu.stopped:
     if (gb.ppu.lcd_status and 3'u8) == 3'u8: discard
@@ -4096,7 +4104,9 @@ proc step_frame*(gb: GB) =
     gb.cpu.tick(gb)
   gb.ppu.frame = false
   if gb.sgb != nil: sgb_frame_end(gb)
-  gb.gb_rebase()
+  let moved = gb.gb_rebase()
+  # The HALT start is a scheduler time too (wrapping, so the age survives).
+  when DMG_HALT_MIN_MCYCLES > 1: gb.halt_start -= moved
 
 method run_until_frame*(gb: GB) = gb.step_frame()
 
