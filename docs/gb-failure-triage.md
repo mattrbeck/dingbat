@@ -765,7 +765,7 @@ mode, so a mode-0 edge under a halt is invisible until the CPU runs again
 
 * Re-derived 2026-11-13 (docs/gb-derivations.md §5, one entry each): an
   HBlank request inside a HALT's or a speed switch's own execute cycle is
-  acknowledged there and paid at the wake, the byte that cycle read executed
+  taken there and paid at the wake, the byte that cycle read executed
   from the latch (`HDMA_HALT_REQ`); the wake's margin and the edge
   detector's blind M-cycle (`HDMA_WAKE_M0_MARGIN = 4`,
   `HDMA_WAKE_BLIND_DOTS = 4`); a dispatch's first M-cycle is a hand-over

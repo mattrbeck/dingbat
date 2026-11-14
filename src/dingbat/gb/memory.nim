@@ -724,13 +724,18 @@ proc write_byte*(mem: GbMemory; gb: GB; idx: int; val: uint8) =
   of 0xFF10..0xFF3F: apu_write(gb.apu, idx, val, gb)
   of 0xFF46:
     when OAMDMA_RESTART_HANDOVER != 0:
-      # FF46 is the running unit's source page: a write under a transfer
-      # moves the bytes still to go, and the bus they hold, to the new
-      # source at once (OAMDMA_RESTART_HANDOVER, gb.nim). The restart
-      # follows on its usual delay.
+      # A write under a running transfer hands the unit's bus to the new
+      # source page at once (OAMDMA_RESTART_HANDOVER, gb.nim); the bytes the
+      # old transfer still moves before the restart are left as they were,
+      # no row saying where they come from. The restart follows on its
+      # usual delay.
       if mem.dma_busy:
+        let old_src  = mem.current_dma_source
+        let old_open = mem.dma_openbus
         mem.current_dma_source = uint16(val) shl 8
         mem_dma_classify(mem, gb)
+        mem.current_dma_source = old_src
+        mem.dma_openbus        = old_open
     mem_dma_transfer(mem, val)
   of 0xFF40..0xFF45, 0xFF47..0xFF4B:
     when CGB_LYC_CMP_LATCH:
@@ -1349,8 +1354,8 @@ proc stop_instr*(mem: GbMemory; gb: GB): bool =
       var ppu_debt = 0
       when HDMA_HALT_REQ != 0:
         # The stall is a halt for the VRAM DMA: its edge detector stops with
-        # the CPU clock, and a request the STOP's own prefetch cycle meets
-        # is acknowledged there (HDMA_HALT_REQ, gb.nim).
+        # the CPU clock, and a request the STOP's own execute cycle meets
+        # is taken there (HDMA_HALT_REQ, gb.nim).
         let ppu = gb.ppu
         let hdma_live = ppu.hdma_active
         when defined(gb_dma_trace):
@@ -1359,12 +1364,12 @@ proc stop_instr*(mem: GbMemory; gb: GB): bool =
                " due=", (if ppu.hdma_block_due: 1 else: 0),
                " dl=", ppu.hdma_due_deadline
         if hdma_live:
-          gb.hdma_stalled = true
+          gb.hdma_switch_stall = true
           ppu.hdma_halt_dot = ppu.cycle_counter
           if ppu.hdma_block_due and ppu.hdma_due_deadline != high(int32) and
              not gb.gdma_req and not gb.hdma_start_req:
             if ppu.hdma_due_deadline <= ppu.cycle_counter + hdma_halt_mdots(gb):
-              ppu_hdma_halt_request(ppu, gb)
+              ppu_hdma_halt_takenuest(ppu, gb)
             else:
               ppu.hdma_due_deadline = high(int32)
           else:
@@ -1383,10 +1388,10 @@ proc stop_instr*(mem: GbMemory; gb: GB): bool =
         gb.scheduler.schedule(apu_div_phase(gb.timer, gb), etAPUFrameSeq)
       when HDMA_HALT_REQ != 0:
         if hdma_live:
-          # The stall's end is the wake (cpu_halt_wake): the acknowledged
+          # The stall's end is the wake (cpu_halt_wake): the taken
           # block's bytes, or a block that came due under the stall while
           # its HBlank lasts. A stall that ran out has paid the PPU's lead.
-          gb.hdma_stalled   = false
+          gb.hdma_switch_stall   = false
           gb.hdma_halt_open = false
           when defined(gb_dma_trace):
             echo "STALLEND ly=", ppu.ly, " dot=", ppu.cycle_counter,
@@ -1400,7 +1405,7 @@ proc stop_instr*(mem: GbMemory; gb: GB): bool =
             gb.hdma_wake_dot =
               if spent < stall_cycles: ppu.cycle_counter
               else: ppu.cycle_counter - int32(HDMA_WAKE_BLIND_DOTS) - 1'i32
-          if gb.hdma_halt_req:
+          if gb.hdma_halt_taken:
             ppu_hdma_pay_halt_request(ppu, gb)
             gb.hdma_latch_run = true
           else:

@@ -1933,14 +1933,14 @@ proc ppu_hdma_wake*(ppu: GbPpu; gb: GB; lead_paid = 0'i32) =
 
 when HDMA_HALT_REQ != 0:
   template hdma_halt_mdots*(gb: GB): int32 =
-    ## The dots of the HALT's own prefetch M-cycle. A speed switch's runs at
+    ## The dots of the HALT's own execute M-cycle. A speed switch's runs at
     ## the speed switched from (`current_speed` has flipped by then).
     int32(4 shr int(gb.memory.current_speed xor
-                    (if gb.hdma_stalled: 1'u8 else: 0'u8)))
+                    (if gb.hdma_switch_stall: 1'u8 else: 0'u8)))
 
   proc ppu_hdma_block_untimed(ppu: GbPpu; gb: GB) =
     ## One block's sixteen bytes with no time spent and the length register
-    ## left alone: the block a switch into double speed finds acknowledged
+    ## left alone: the block a switch into double speed finds taken
     ## (HDMA_HALT_REQ, gb.nim). The address counters step as for any block.
     let src_base = int(ppu.hdma_src)
     let dst_base = 0x8000 or int(ppu.hdma_dst and 0x1FF0'u16)
@@ -1951,31 +1951,31 @@ when HDMA_HALT_REQ != 0:
     ppu.hdma_src = ppu.hdma_src + 0x10
     ppu.hdma_dst = ppu.hdma_dst + 0x10
 
-  proc ppu_hdma_halt_request*(ppu: GbPpu; gb: GB) {.noinline.} =
-    ## The HALT's (or the speed switch's) own prefetch cycle acknowledging an
+  proc ppu_hdma_halt_takenuest*(ppu: GbPpu; gb: GB) {.noinline.} =
+    ## The HALT's (or the speed switch's) own execute cycle taking an
     ## HBlank request (HDMA_HALT_REQ, gb.nim). PC stands on the byte that
     ## cycle read: the one after a HALT, a STOP's second.
     when defined(gb_dma_trace):
       echo "HALTREQ ly=", ppu.ly, " dot=", ppu.cycle_counter,
-           " stalled=", (if gb.hdma_stalled: 1 else: 0),
+           " stalled=", (if gb.hdma_switch_stall: 1 else: 0),
            " pc=", toHex(gb.cpu.pc, 4)
     ppu.hdma_block_due = false
     gb.hdma_halt_open  = false
     gb.hdma_latch = gb.memory.read_byte(gb, int(gb.cpu.pc))
-    if gb.hdma_stalled and gb.memory.current_speed == 1'u8:
+    if gb.hdma_switch_stall and gb.memory.current_speed == 1'u8:
       # Into double speed: the bytes go out under the stall and the
       # transfer's control state is lost with the clock change.
       ppu_hdma_block_untimed(ppu, gb)
       ppu.hdma_active    = false
       gb.hdma_latch_run  = true
     else:
-      gb.hdma_halt_req = true
+      gb.hdma_halt_taken = true
 
   proc ppu_hdma_pay_halt_request*(ppu: GbPpu; gb: GB) {.noinline.} =
-    ## The acknowledged block at the wake: its bytes only, the hand-back
+    ## The taken block at the wake: its bytes only, the hand-back
     ## M-cycle being the latched opcode's own (HDMA_HALT_REQ, gb.nim).
     ## `hdma_absorb` stays up for the caller to drop after that M-cycle.
-    gb.hdma_halt_req = false
+    gb.hdma_halt_taken = false
     gb.hdma_absorb   = true
     ppu.hdma_block_due = false
     if ppu.hdma_active:
@@ -2100,10 +2100,10 @@ proc `mode_flag=`*(ppu: GbPpu; mode: uint8; gb: GB) =
   # DUE and cpu.tick pays it at the wake if still in that mode 0 (gambatte
   # dma/hdma_m3halt_m1unhalt_hdma5). `in_cpu_cycle`: the edge lands inside a
   # CPU access still on the bus, so the bytes are held HDMA_VISIBLE_DOTS dots.
-  let hdma_halted = gb.cpu.halted or gb.hdma_stalled
+  let hdma_cpu_stopped = gb.cpu.halted or gb.hdma_switch_stall
   when HDMA_HALT_REQ != 0:
     # The first mode change after a HALT or a speed switch: an HBlank edge
-    # here, on the dot the CPU stopped on, is inside the HALT's own prefetch
+    # here, on the dot the CPU stopped on, is inside the HALT's own execute
     # cycle (HDMA_HALT_REQ, gb.nim).
     let hdma_halt_first = gb.hdma_halt_open
     gb.hdma_halt_open = false
@@ -2116,18 +2116,18 @@ proc `mode_flag=`*(ppu: GbPpu; mode: uint8; gb: GB) =
     let hdma_blind_lag = int32(if gb.memory.current_speed != 0'u8:
                                  HDMA_HALT_BLIND_LAG_DS
                                else: HDMA_HALT_BLIND_LAG)
-    if (not hdma_halted) or hdma_since_halt <= hdma_blind_lag:
+    if (not hdma_cpu_stopped) or hdma_since_halt <= hdma_blind_lag:
       ppu.hdma_seen_mode = mode
   if mode == 0 and prev_mode != 0 and ppu.hdma_active and ppu.lcd_enabled:
     when HDMA_HALT_REQ != 0:
       # A block being paid at a wake, and the M-cycle after it: the request
       # is still up, so an edge under it adds nothing (HDMA_HALT_REQ).
       if gb.hdma_absorb or ppu.hdma_copying: return
-      if hdma_halted and hdma_halt_first and
+      if hdma_cpu_stopped and hdma_halt_first and
          ppu.cycle_counter >= ppu.hdma_halt_dot and
          ppu.cycle_counter + int32(HDMA_GRANT_FETCH_DOTS) <=
            ppu.hdma_halt_dot + hdma_halt_mdots(gb):
-        ppu_hdma_halt_request(ppu, gb)
+        ppu_hdma_halt_takenuest(ppu, gb)
         return
     when HDMA_SPEEDSWITCH_KILL_W != 0 and HDMA_HALT_REQ == 0:
       # A speed switch in the last dots of mode 3 destroys the armed transfer
@@ -2146,15 +2146,15 @@ proc `mode_flag=`*(ppu: GbPpu; mode: uint8; gb: GB) =
       ppu.hdma_due_dot = ppu.cycle_counter
     when defined(gb_dma_trace):
       echo "M0DUE ly=", ppu.ly, " dot=", ppu.cycle_counter,
-           " halted=", (if hdma_halted: 1 else: 0),
+           " halted=", (if hdma_cpu_stopped: 1 else: 0),
            " seenwas=", hdma_seen_was
     when HDMA_HALT_M0_BLIND != 0 and HDMA_WAKE_BLIND_DOTS > 0:
-      if not hdma_halted and hdma_seen_was == 0'u8:
+      if not hdma_cpu_stopped and hdma_seen_was == 0'u8:
         var since_wake = ppu.cycle_counter - gb.hdma_wake_dot
         if since_wake < 0: since_wake += gb_line_end(ppu)
         if since_wake <= int32(HDMA_WAKE_BLIND_DOTS shr int(gb.memory.current_speed)):
           return
-    if hdma_halted:
+    if hdma_cpu_stopped:
       when HDMA_HALT_M0_BLIND != 0:
         # Halted inside a mode 0 the detector still registers: no edge to see.
         if hdma_seen_was == 0'u8: return

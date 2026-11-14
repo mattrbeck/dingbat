@@ -477,18 +477,19 @@ const OAMDMA_HALT_PAUSE* {.intdefine.} = 1
   ## $81; the other arms answer $A0, $2B or $82).
 const OAMDMA_RESTART_HANDOVER* {.intdefine.} = 1
   ## An FF46 write while a transfer is running restarts it two M-cycles
-  ## later (mem_dma_tick), and until then the old transfer's remaining bytes
-  ## already come from the new source page: FF46 is the high byte of the
-  ## address the unit drives, not a value it latched at the start. So the
-  ## bus the unit holds changes with the write, and a CPU access on the new
-  ## source's bus conflicts from the next M-cycle on (Pan Docs, "OAM DMA bus
-  ## conflicts"). gambatte `oamdma/oamdma_src8000_srcchange0000_busyinc`
-  ## (DMG and CGB: a VRAM-sourced transfer re-pointed at ROM; none of the
-  ## three `inc a` that follow the write is fetched, the first two under the
-  ## old transfer's last bytes, the third under the new one; holding the
-  ## video bus until the restart lets the first through). `_busyread0000_
-  ## {1,2}` and `_srcchangeC000_busyread8000` are unmoved. 0 = the old
-  ## source keeps its bus until the restart.
+  ## later (mem_dma_tick), and the bus the unit holds goes to the new source
+  ## page with the write: a CPU access on the new source's bus conflicts from
+  ## the next M-cycle on (Pan Docs, "OAM DMA bus conflicts"). gambatte
+  ## `oamdma/oamdma_src8000_srcchange0000_busyinc` (DMG and CGB: a
+  ## VRAM-sourced transfer re-pointed at ROM; none of the three `inc a` that
+  ## follow the write is fetched, the first two under the old transfer's last
+  ## M-cycles, the third under the new one; holding the video bus until the
+  ## restart lets the first through). `_busyread0000_{1,2}` and
+  ## `_srcchangeC000_busyread8000` are unmoved. Only the bus is pinned: where
+  ## the old transfer's last two bytes come from (the old page or the new)
+  ## has no row -- this one passes either way -- so they are left on the old
+  ## page, as without the rule. 0 = the old source keeps its bus until the
+  ## restart.
 const OAMDMA_HALT_GRACE* {.intdefine.} = 1
   ## M-cycles the OAM DMA unit still clocks after the HALT's fetch before
   ## OAMDMA_HALT_PAUSE freezes it: one, the HALT's own execute cycle, which
@@ -540,7 +541,7 @@ const HDMA_SPEEDSWITCH_KILL_W* {.intdefine.} = 1
   ## STOP within which the mode 3 -> 0 edge destroys the armed transfer
   ## (0 = off). With HDMA_HALT_REQ on, which ships, the edge on the STOP's own
   ## dot is one of the positions that rule covers (a request inside the STOP's
-  ## prefetch cycle) and this window is not consulted.
+  ## execute cycle) and this window is not consulted.
 const HDMA_DISABLE_GRACE_DOTS* {.intdefine.} = 4
   ## Dots after the mode 3 -> 0 edge at which an owed HBlank block has
   ## committed, i.e. after which an FF55 write with bit 7 clear can no longer
@@ -560,8 +561,8 @@ const HDMA_GRANT_FETCH_DOTS* {.intdefine.} = 4
   ## Dots after the mode 3 -> 0 edge at which an owed HBlank block raises its
   ## bus request; the CPU hands the bus over at the end of its next OPCODE
   ## FETCH (the other hand-over point is the instruction boundary,
-  ## HDMA_GRANT_BOUNDARY_DOTS; never an operand or data M-cycle). A HALT's
-  ## execute cycle and a dispatch's first M-cycle are opcode fetches too
+  ## HDMA_GRANT_BOUNDARY_DOTS; never an operand or data M-cycle). The end of a
+  ## HALT's execute cycle and of a dispatch's first M-cycle hand over too
   ## (HDMA_HALT_REQ, HDMA_DISPATCH_FETCH). 4 ships; -1 = off falls back to HDMA_STEAL_DELAY_M. Pinned
   ## two-sided at `edge + 4` at both speeds by gambatte `dma/hdma_start*` (SCX
   ## 5 caps it from above) and mealybug `dma/hdma_timing-C` (SCX=2 1x floors
@@ -639,19 +640,19 @@ const HDMA_HALT_REQ* {.intdefine.} = 1
   ## An HBlank request that reaches the CPU inside the HALT's own execute
   ## cycle. That cycle is an opcode fetch (the SM83 reads the byte after the
   ## HALT in it, as it reads the next opcode in the last cycle of every
-  ## instruction), so it is a hand-over point and the request is acknowledged
+  ## instruction), so it is a hand-over point and the request is taken
   ## at its end; but the CPU halts there and a halted CPU's VRAM DMA does not
-  ## run (Pan Docs, FF55). The acknowledged block waits for the wake, whatever
+  ## run (Pan Docs, FF55). The taken block waits for the wake, whatever
   ## mode the wake finds, and then:
   ##   - its sixteen bytes go out (32 dots), HBlank edges inside them and
   ##     inside the M-cycle after them unseen;
-  ##   - the byte the HALT's prefetch read is executed as an opcode from the
+  ##   - the byte the HALT's execute cycle read is executed as an opcode from the
   ##     latch, without a second read and without stepping PC over it, so the
   ##     instruction after a HALT runs twice (its operands come from its own
   ##     address) -- the bus hand-back costs that one M-cycle;
   ##   - only then is the interrupt that ended the halt dispatched.
   ## The window is the mode 3 -> 0 edge on one of the HALT fetch's last three
-  ## dots or on the dot it ends (HDMA_SPEEDSWITCH_KILL_W): one dot earlier the
+  ## dots or on the dot it ends: one dot earlier the
   ## request is up at the fetch's end and the block runs before the halt
   ## (HDMA_GRANT_FETCH_DOTS), one dot later the CPU is halted and the edge is
   ## an ordinary halted one (HDMA_HALT_M0_BLIND, HDMA_WAKE_M0_MARGIN).
@@ -2764,15 +2765,15 @@ type
     hdma_start_req*:   bool    # HDMA_START_GRANT_FETCH: the owed block was raised by FF55
     gdma_req*:         bool    # GDMA_GRANT_FETCH: a general-purpose burst waits for the next opcode fetch
     # HDMA_HALT_REQ: an HBlank request the HALT's (or the speed switch's) own
-    # prefetch cycle acknowledged. `hdma_halt_open` is live from the HALT to
-    # the PPU's next mode change; `hdma_halt_req` and `hdma_latch` across the
+    # execute cycle took. `hdma_halt_open` is live from the HALT to
+    # the PPU's next mode change; `hdma_halt_taken` and `hdma_latch` across the
     # whole halt (serialized, GB_SEC_MACH); the rest inside one instruction.
     hdma_halt_open*:   bool
-    hdma_halt_req*:    bool
-    hdma_latch*:       uint8   # the byte that prefetch read
+    hdma_halt_taken*:    bool
+    hdma_latch*:       uint8   # the byte that execute cycle read
     hdma_latch_run*:   bool    # the stall's end owes the latched byte its execution
     hdma_absorb*:      bool    # the paid block and its hand-back are in progress
-    hdma_stalled*:     bool    # the speed switch's stall: a halt for the edge detector
+    hdma_switch_stall*: bool   # the speed switch's stall: a halt for the edge detector
     vdma_residue*:     int16   # VDMA_BUS_RESIDUE: the cartridge bus's byte at the hand-over (+1; 0 = none)
     hdma_boundary_grant*: bool # HDMA_BOUNDARY_ACQUIRE: the block now granted is at an instruction boundary
     we_off_dot*:       int32   # CGB_WE_DISABLE_LATE: dot a CGB LCDC.5 fall reaches the fetcher

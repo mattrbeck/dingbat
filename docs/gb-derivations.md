@@ -587,7 +587,7 @@ Dots are dingbat's line dots; W is the first dot of the writing M-cycle
   that comes up inside it (the mode 3 -> 0 edge 4 dots earlier, so on one of
   the last three dots of the HALT's fetch or on the dot that fetch ends, at
   single speed; on the last two dots of the fetch at double speed, where the
-  cycle is 2 dots) is acknowledged at its end, but the CPU halts there and a
+  cycle is 2 dots) is taken at its end, but the CPU halts there and a
   halted CPU's transfer does not run (Pan Docs, FF55). The block waits for
   the wake, in whatever mode the wake finds the PPU, and then:
   1. its sixteen bytes go out, 32 dots; an HBlank edge inside them, or
@@ -638,9 +638,9 @@ Dots are dingbat's line dots; W is the first dot of the writing M-cycle
   gambatte rows and gains none. The window's width is not a constant: it is
   the execute cycle, 4 dots or 2, and the double-speed rows
   `hdma_late_m3speedchange_*_ds_1` (the edge on the dot the STOP's fetch
-  ends, or the one before: no acknowledgement) refuse the single-speed
+  ends, or the one before: not taken) refuse the single-speed
   width.
-- Save states: the acknowledged request and its latched byte ride in a slot
+- Save states: the taken request and its latched byte ride in a slot
   of `GB_SEC_MACH` that was reserved (format unchanged); a HALT can outlast a
   frame.
 - Clean-room: derived from test ROM sources/outputs and dingbat's own trace runs; no emulator source consulted.
@@ -665,9 +665,10 @@ Dots are dingbat's line dots; W is the first dot of the writing M-cycle
 
 ### The first M-cycle of an interrupt dispatch is a hand-over point
 - Ships: `HDMA_DISPATCH_FETCH = 1` (`cpu.nim`, `dispatch_interrupt`).
-- Rule. A dispatch begins with an opcode fetch whose byte is discarded
-  (Pan Docs, "Interrupt Handling"), and a VRAM DMA takes the bus at the end
-  of an opcode fetch. An HBlank request up by the end of that M-cycle (the
+- Rule. The end of a dispatch's first M-cycle (the first of the two wait
+  M-cycles Pan Docs lists under "Interrupt Handling") is a hand-over point
+  on the same terms as the end of an opcode fetch; the rows show the
+  hand-over, not its cause. An HBlank request up by the end of that M-cycle (the
   mode 3 -> 0 edge no later than the dot the dispatch begins on) runs its
   block ahead of the two pushes; one dot later the block waits for the
   handler's first fetch.
@@ -790,10 +791,12 @@ Dots are dingbat's line dots; W is the first dot of the writing M-cycle
 ### An FF46 write under a running transfer moves the bus at once
 - Ships: `OAMDMA_RESTART_HANDOVER = 1` (`gb.nim`); `write_byte` $FF46
   (`memory.nim`).
-- Rule. FF46 is the high byte of the address the unit drives. Written while
-  a transfer runs, it re-points the bytes that transfer still moves before
-  the restart (two M-cycles on), and with them the bus the unit holds: a CPU
-  access on the new source's bus conflicts from the next M-cycle.
+- Rule. Written while a transfer runs, FF46 moves the bus the unit holds to
+  the new source page with the write: a CPU access on the new source's bus
+  conflicts from the next M-cycle, two M-cycles before the restart.
+- Not pinned: where the old transfer's last two bytes come from. The row
+  passes whether they are read from the old page or the new one, and no
+  other row asks, so they stay on the old page.
 - Rows: gambatte `oamdma/oamdma_src8000_srcchange0000_busyinc` (DMG and CGB;
   0 loses both). `oamdma_src8000_srcchange0000_busyread0000_{1,2}` and
   `oamdma_src8000_srcchangeC000_busyread8000` do not move.

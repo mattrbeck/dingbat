@@ -221,7 +221,7 @@ proc cpu_halt*(cpu: GbCpu; gb: GB) =
       # and is paid at the wake (ppu_hdma_wake).
       when HDMA_HALT_REQ != 0:
         # A request still on its way up at the HALT's fetch arrives inside
-        # the HALT's own prefetch cycle: acknowledged there, paid at the
+        # the HALT's own execute cycle: taken there, paid at the
         # wake (HDMA_HALT_REQ, gb.nim). An edge on the dot the fetch ends on
         # is the same case, seen from `mode_flag=`.
         if unlikely(gb.ppu.hdma_block_due) and
@@ -229,7 +229,7 @@ proc cpu_halt*(cpu: GbCpu; gb: GB) =
            gb.ppu.hdma_active and not gb.gdma_req and not gb.hdma_start_req:
           if gb.ppu.hdma_due_deadline <=
              gb.ppu.cycle_counter + hdma_halt_mdots(gb):
-            ppu_hdma_halt_request(gb.ppu, gb)
+            ppu_hdma_halt_takenuest(gb.ppu, gb)
           else:
             # Up only after that cycle: owed to a halted CPU, as an edge
             # under the halt is (`mode_flag=`).
@@ -291,11 +291,12 @@ const IRQ_SAMPLE_T* {.intdefine.} = 18
   ## than the mode-2 source does. Settling the per-source rise phases (A3) is
   ## what moves them, not this constant.
 const HDMA_DISPATCH_FETCH* {.intdefine.} = 1
-  ## The first M-cycle of an interrupt dispatch is an opcode fetch whose byte
-  ## is thrown away (Pan Docs, "Interrupt Handling": the wait M-cycles), so
-  ## it is a hand-over point like any other fetch (HDMA_GRANT_FETCH_DOTS,
-  ## gb.nim): an HBlank request up by its end takes the bus there, ahead of
-  ## the two pushes. With the mode 3 -> 0 edge on the dot the dispatch begins
+  ## The end of an interrupt dispatch's first M-cycle (the first of the two
+  ## wait M-cycles Pan Docs lists under "Interrupt Handling") is a hand-over
+  ## point, on the same terms as the end of an opcode fetch
+  ## (HDMA_GRANT_FETCH_DOTS, gb.nim): an HBlank request up by then takes the
+  ## bus there, ahead of the two pushes. That is what the rows show; why the
+  ## CPU hands over there is not something they say. With the mode 3 -> 0 edge on the dot the dispatch begins
   ## the request is up exactly at that M-cycle's end; one dot later it is not
   ## and the block waits for the handler's first fetch. gambatte
   ## `irq_precedence/hdma_vs_m0_scx1`, `late_hdma_vs_{ei,ie}_scx1_2`,
@@ -333,8 +334,8 @@ proc dispatch_interrupt(cpu: GbCpu; gb: GB) {.noinline.} =
   var elapsed = 8
   when HDMA_DISPATCH_FETCH != 0 and HDMA_GRANT_FETCH_DOTS >= 0:
     if unlikely(gb.ppu.hdma_active or gb.ppu.hdma_block_due):
-      # The dispatch's discarded opcode fetch, a hand-over point for an
-      # owed HBlank block or a requested burst (HDMA_DISPATCH_FETCH).
+      # The dispatch's first wait M-cycle, at whose end an owed HBlank
+      # block or a requested burst takes the bus (HDMA_DISPATCH_FETCH).
       mem_tick_components(gb.memory, gb, 4)
       elapsed += 4
       if gb.ppu.hdma_block_due:
@@ -592,7 +593,7 @@ template cpu_exec_fetched(cpu: GbCpu; gb: GB; opcode: uint8) =
 
 when HDMA_HALT_REQ != 0:
   proc cpu_latched_op*(cpu: GbCpu; gb: GB): int =
-    ## The byte a HALT's or STOP's prefetch cycle latched, executed as an
+    ## The byte a HALT's or STOP's execute cycle latched, executed as an
     ## opcode with no read of its own and no step of PC over it; returns its
     ## M-cycles' T-count, the first already run (HDMA_HALT_REQ, gb.nim).
     mem_reset_cycle_count(gb.memory)
@@ -646,7 +647,7 @@ proc cpu_halt_wake(cpu: GbCpu; gb: GB) {.noinline.} =
   when HDMA_WAKE_BLIND_DOTS > 0:
     gb.hdma_wake_dot = gb.ppu.cycle_counter
   when HDMA_HALT_REQ != 0:
-    let latched = gb.hdma_halt_req
+    let latched = gb.hdma_halt_taken
     if unlikely(latched): ppu_hdma_pay_halt_request(gb.ppu, gb)
     else:                 ppu_hdma_wake(gb.ppu, gb)
   else:
