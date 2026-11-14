@@ -8,12 +8,13 @@
 # MP2K HLE consumes are never written: per-side gains come from the raw
 # fields instead (gs_on_frame).
 #
-# Provenance (clean-room; this emulator is MIT): the stock m4a SoundInfo /
-# SoundChannel layout (see mp2k.nim's header) for the struct offsets;
-# ipatix/gba-hq-mixer (MIT) consulted for facts about this
-# mixer family, no code copied; this project's own runtime probing and
-# disassembly of the game's IWRAM mixer copy for everything below; GBATEK
-# for the DirectSound FIFO/DMA facts. No GPL/LGPL source was used.
+# Sources: the stock m4a SoundInfo / SoundChannel layout (see mp2k.nim's
+# header) for the struct offsets; ipatix/gba-hq-mixer (MIT) and ipatix/
+# agbplay (LGPL-3) read for facts about this mixer family (the reverb and
+# saw-wave descriptions, checked against the game's own mixer), no code
+# copied from either; this project's own runtime probing and disassembly of
+# the game's IWRAM mixer copy for everything below; GBATEK for the
+# DirectSound FIFO/DMA facts.
 #
 # Driver facts (GS1 USA, from the disassembly):
 #   * The mixer is copied at boot from ROM (file 0x770, 0xC88 bytes) to
