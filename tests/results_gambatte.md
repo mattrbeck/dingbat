@@ -1,13 +1,13 @@
 # gambatte Test Suite - Detailed Results
 
-*Generated: 2026-11-13 17:47:39*
+*Generated: 2026-11-14 07:40:07*
 
 Each row is one ROM run on one device. `[dmg]` / `[cgb]` is the
 device the filename asks for; `[.., png]` rows are scored against the
 reference image next to the ROM, the rest against the hex value the
 ROM draws on screen. See tests/README.md for the mechanism.
 
-**5208/5213 passed.**
+**5213/5213 passed.**
 
 ## bgen
 
@@ -21,13 +21,9 @@ All 34 tests passed.
 
 All 40 tests passed.
 
-## cgbpal_m3 (43/44 passed)
+## cgbpal_m3
 
-43/44 tests passed, 1 failed:
-
-| Test | Result |
-|------|--------|
-| cgbpal_m3/cgbpal_read_m3start_lcdoffset1_1_cgb04c_out00 [cgb] | got FF, expected 00 |
+All 44 tests passed.
 
 ## display_startstate
 
@@ -193,24 +189,14 @@ All 232 tests passed.
 
 All 20 tests passed.
 
-## vram_m3 (48/50 passed)
+## vram_m3
 
-48/50 tests passed, 2 failed:
-
-| Test | Result |
-|------|--------|
-| vram_m3/preread_lcdoffset1_2_cgb04c_out3 [cgb] | got 0, expected 3 |
-| vram_m3/prewrite_lcdoffset1_2_cgb04c_out0 [cgb] | got 1, expected 0 |
+All 50 tests passed.
 
 ## vramw_m3end
 
 All 36 tests passed.
 
-## window (474/476 passed)
+## window
 
-474/476 tests passed, 2 failed:
-
-| Test | Result |
-|------|--------|
-| window/arg/late_wy_1toFF_lcdoffset1_1_cgb04c_out0 [cgb] | got 3, expected 0 |
-| window/late_enable_afterVblank_lcdoffset1_1_cgb04c_out3 [cgb] | got 0, expected 3 |
+All 476 tests passed.

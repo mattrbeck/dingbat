@@ -60,8 +60,8 @@ proc serial_finish_transfer*(serial: GbSerial; gb: GB) =
   serial.bits_remaining = 0
   serial.serial_update_shifting()
   when IRQ_SAMPLE_CGB_TIMER_SERIAL_ADD != 0:
-    # A CGB dispatch that took the serial line still holds it acknowledged.
-    if not irq_ack_swallows(gb.interrupts, INT_SERIAL, gb.scheduler.cycles):
+    # A CGB dispatch that took the serial line is still holding it clear.
+    if not irq_clear_holds(gb.interrupts, INT_SERIAL, gb.scheduler.cycles):
       gb.interrupts.serial_interrupt = true
   else:
     gb.interrupts.serial_interrupt = true

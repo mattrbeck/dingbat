@@ -262,10 +262,10 @@ proc cpu_lock*(cpu: GbCpu) =
 #
 # Pan Docs, "Interrupt Handling": two wait M-cycles, the two pushes of PC,
 # then the jump, 5 M-cycles in all. Counted from the instruction boundary the
-# interrupt is taken on, as dingbat counts instructions (opcode fetch first),
-# the first of the five is the fetch the dispatch discards, the two waits
-# follow, and the pushes are the fourth and fifth: the handler's own opcode
-# fetch is the "jump". The vector is chosen between the two pushes (mooneye
+# interrupt is taken on, the pushes are the fourth and fifth of the five,
+# which is where gambatte oamdma/oamdma_src0000_busyint0002 finds PC's two
+# bytes (DISPATCH_PUSH_MCYCLE), and the handler's first opcode fetch follows
+# the fifth. The vector is chosen between the two pushes (mooneye
 # acceptance/interrupts/ie_push) and the taken line's IF bit is cleared
 # inside the fifth M-cycle, while PC's low byte is on the bus (IRQ_SAMPLE_T).
 # Clean-room: derived from test ROM sources/outputs and dingbat's own trace
@@ -325,12 +325,13 @@ const IRQ_SAMPLE_T* {.intdefine.} = 18
   ## retrigger_2 and serial/start_wait_trigger_int8_read_if_2 (the clear
   ## would reach the request the unit raises on T 20).
 const HDMA_DISPATCH_FETCH* {.intdefine.} = 1
-  ## The end of an interrupt dispatch's first M-cycle (the first of the two
-  ## wait M-cycles Pan Docs lists under "Interrupt Handling") is a hand-over
-  ## point, on the same terms as the end of an opcode fetch
-  ## (HDMA_GRANT_FETCH_DOTS, gb.nim): an HBlank request up by then takes the
-  ## bus there, ahead of the two pushes. That is what the rows show; why the
-  ## CPU hands over there is not something they say. With the mode 3 -> 0 edge on the dot the dispatch begins
+  ## The end of an interrupt dispatch's first M-cycle (of the five Pan Docs
+  ## lists under "Interrupt Handling"; the pushes are the fourth and fifth,
+  ## DISPATCH_PUSH_MCYCLE) is a hand-over point, on the same terms as the end
+  ## of an opcode fetch (HDMA_GRANT_FETCH_DOTS, gb.nim): an HBlank request up
+  ## by then takes the bus there, ahead of the two pushes. That is what the
+  ## rows show; why the CPU hands over there is not something they say. With
+  ## the mode 3 -> 0 edge on the dot the dispatch begins
   ## the request is up exactly at that M-cycle's end; one dot later it is not
   ## and the block waits for the handler's first fetch. gambatte
   ## `irq_precedence/hdma_vs_m0_scx1`, `late_hdma_vs_{ei,ie}_scx1_2`,
@@ -340,8 +341,9 @@ const HDMA_DISPATCH_FETCH* {.intdefine.} = 1
   ## `late_hdma_vs_tima_scx2_halt_2` (one dot later: the pushed PC is
   ## copied). `hdma_vs_m0_scx2_halt` and `late_hdma_vs_tima_scx2_halt_1` are
   ## the same point reached from a HALT whose wake M-cycle the edge fell in.
-  ## Only a dispatch under an armed HBlank transfer or a requested burst runs
-  ## that M-cycle ahead of its pushes here; 0 = no hand-over inside a
+  ## Every dispatch has that M-cycle; only one under an armed HBlank transfer
+  ## or a requested burst stops at its end to ask (the transfer's own time is
+  ## beside the dispatch's five M-cycles). 0 = no hand-over inside a
   ## dispatch.
 proc dispatch_interrupt(cpu: GbCpu; gb: GB) {.noinline.} =
   ## The taken half of handle_interrupts: push PC, vector, charge 5 M-cycles.
@@ -400,17 +402,17 @@ proc dispatch_interrupt(cpu: GbCpu; gb: GB) {.noinline.} =
   clear_interrupt(gb.interrupts, interrupt)
   # The timer and the serial port are on the CPU's clock and raise their
   # request where two M-cycles meet. Counted from the dispatch's first
-  # T-cycle that is T 16, 20, 24...; the clear at `ack_t` takes the ones at
+  # T-cycle that is T 16, 20, 24...; the clear at `clear_t` takes the ones at
   # or before it. A CGB clears these two lines later than the LCD's
   # (IRQ_SAMPLE_CGB_TIMER_SERIAL_ADD, gb.nim).
   let cpu_line = interrupt == INT_TIMER or interrupt == INT_SERIAL
-  let ack_t = sample_t +
+  let clear_t = sample_t +
     (if cpu_line and gb.cgb_enabled: IRQ_SAMPLE_CGB_TIMER_SERIAL_ADD else: 0)
   when SERIAL_CPU_SAMPLE_T < 4:
     # The serial tap's edge sits on this M-cycle's last T-cycle (T 20) and
     # the bus half has already run it: a byte it finished is after the clear
     # unless the clear reaches T 20.
-    if interrupt == INT_SERIAL and ack_t < 20 and
+    if interrupt == INT_SERIAL and clear_t < 20 and
        gb.serial.serial_cpu_pre(gb) and gb.serial.serial_edge_finished_byte():
       gb.interrupts.serial_interrupt = true
   when IRQ_SAMPLE_CGB_TIMER_SERIAL_ADD != 0:
@@ -419,13 +421,13 @@ proc dispatch_interrupt(cpu: GbCpu; gb: GB) {.noinline.} =
     # run): a serial byte finishing on T n is raised with the scheduler at
     # n, a TIMA reload landing on T n with it at n + 4 (the reload is on its
     # M-cycle's first T-cycle, i.e. on the boundary before it).
-    if cpu_line and ack_t >= 20:
-      gb.interrupts.ack_line  = interrupt
-      gb.interrupts.ack_until = gb.scheduler.cycles - CycleCount(20) +
-        CycleCount(ack_t + (if interrupt == INT_TIMER: 4 else: 0))
+    if cpu_line and clear_t >= 20:
+      gb.interrupts.clear_line  = interrupt
+      gb.interrupts.clear_until = gb.scheduler.cycles - CycleCount(20) +
+        CycleCount(clear_t + (if interrupt == INT_TIMER: 4 else: 0))
     else:
-      gb.interrupts.ack_line = 0'u16
-  mem_write_finish(gb.memory, gb, rest)
+      gb.interrupts.clear_line = 0'u16
+  mem_write_rest(gb.memory, gb, rest)
   mem_tick_extra(gb.memory, gb, 20)
 
 proc handle_interrupts*(cpu: GbCpu; gb: GB) =

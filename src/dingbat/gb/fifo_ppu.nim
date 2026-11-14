@@ -427,6 +427,11 @@ const OAMDMA_FREEZE_DEST_LEAD {.intdefine.} = 1 - OAMDMA_HALT_GRACE
   ## already stands on the in-flight write and the lead is 0; with no grace
   ## cycle it is 1 (mooneye-test-suite issue #1 puts the in-flight write at
   ## $FE02 where the HALT's fetch left the position at 1). The two sum to 1.
+  ## Checked with the scan's held latches (OAM_SCAN_DMA_HOLD) in place: -1
+  ## loses mooneye madness/mgb_oam_dma_halt_sprites (both copies); 0 and 1
+  ## pass everything (the bus carries the destination WORD, address bit 0
+  ## ignored, so the two name one word where the row freezes). The rows do
+  ## not choose between them; 0 is what the grace cycle implies.
 
 proc oam_dma_frozen*(gb: GB): bool {.inline.} =
   ## Is an OAM DMA frozen mid-write with its address and data on OAM? That is
@@ -1388,11 +1393,6 @@ proc tick_sprite_fetcher*(ppu: GbFifoPpu; gb: GB): bool =
   # 0..3 are control spellings a quarter of a percent apart on mealybug
   # pixels; 2 puts both fetches on the bus at once. Cost: up to six
   # tick_bg_fetcher calls per object (+0.76% Pokemon Blue).
-  when CGB_OBJ_LAST_PX_YIELDS != 0 and STAT_IRQ_SPLIT:
-    if unlikely(ppu.m0_early != 0'u8):
-      dec ppu.m0_early
-      if ppu.m0_early == 0'u8 and ppu.irq_mode == 3'u8:
-        ppu_set_irq_mode(ppu, gb, 0'u8)
   when OBJ_BG_RUN == 4:
     let bg_hold = ppu.obj_tile_fx != int32(ppu.fetcher_x)
     if ppu.obj_penalty <= 0:
@@ -1613,8 +1613,8 @@ proc obj_yields_to_window(ppu: GbFifoPpu): bool {.inline.} =
   ## (gambatte window/late_disable_spx10_wx0f_2 and two sprites/space ties).
   ## Not on the re-trigger (it may decline, parking the shifter) and not on
   ## x = 159, where gambatte window/m2int_wxA6_spxA7_* [dmg] wants the object
-  ## charged in front of the restart (the CGB's last-pixel case was removed
-  ## 2026-11-13 for a clean rewrite). The WX = 166 DMG/CGB split
+  ## charged in front of the restart; the CGB orders the two there as on
+  ## every other column (CGB_OBJ_LAST_PX_YIELDS). The WX = 166 DMG/CGB split
   ## (m2int_wxA6_m3stat, 180 vs 190 dots) is not this rule's.
   ppu.lx == ppu.win_lx and not ppu.fetching_window and
     ppu.lx + 8 == int32(ppu.sprites[0].x) and
@@ -1904,9 +1904,6 @@ when WIN_EN_REVOKE_ANY:
     ## Forward declaration (the undo replays tick_shifter); the pragmas must
     ## match the implementation's, which gcc checks and clang does not.
 
-# The mode-0 request against an X = 167 object or a WX = 166 window: removed
-# 2026-11-13 for a clean rewrite.
-
 proc fifo_pad_unpop(ppu: GbFifoPpu) {.noinline.} =
   ## WIN_FINE_PAD, on a line that started as a window line at WX = 1..5 with
   ## SCX & 7 = s > 0: the discard's first s pixels are the fine scroll's, not
@@ -1970,24 +1967,6 @@ proc tick_shifter*(ppu: GbFifoPpu; gb: GB) =
         # The walk into the tail burst was paid at the head (OBJ_TAIL_WALK_REFUND).
         pen -= tail_walk
       ppu.obj_penalty = pen
-      when CGB_OBJ_LAST_PX_YIELDS != 0 and STAT_IRQ_SPLIT:
-        # A CGB object that waited for a window start on the last pixel
-        # (the window's first tile still whole in the FIFO): the line's
-        # pixels are done as far as the mode-0 source is concerned, so it
-        # rises where the object-less line raises it; only the flag waits
-        # for this fetch (CGB_OBJ_LAST_PX_YIELDS).
-        if ppu.cgb and ppu.lx == int32(GB_WIDTH) - 1 and ppu.fetching_window and
-           ppu.fetcher_x == 1 and ppu.fifo.size == 8:
-          # That line retires on win_tail_end (WIN_TAIL_FLAG_LEAD) and
-          # raises the source m3_hold - lead dots on.
-          let due = (if ppu.win_tail_end != 0: ppu.win_tail_end
-                     else: ppu.cycle_counter + 1) +
-                    max(0'i32, int32(ppu.m3_hold) -
-                               ppu.m0_source_lead(stat_irq_lead(gb)))
-          if due > ppu.cycle_counter:
-            ppu.m0_early = uint8(due - ppu.cycle_counter)
-          elif ppu.irq_mode == 3'u8:
-            ppu_set_irq_mode(ppu, gb, 0'u8)
       when OBJ_ABORT_LATE:
         # Last dot of the object's FETCH, for an abort arriving after the
         # stall (OBJ_ABORT_LATE): the tail arm ends with the stall, the head
@@ -3124,7 +3103,6 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
           when CGB_WE_ENABLE_FETCH_LATE != 0: gb.we_on_dot = int32.low
           when M0_REQ_LAST_PX != 0: gb.m0_tail_dot = -1'i32
           when CGB_WIN_TAIL_LAST != 0: ppu.obj_last_px = false
-          when CGB_OBJ_LAST_PX_YIELDS != 0: ppu.m0_early = 0'u8
           when WIN_TAIL_FLAG_LEAD != 0: ppu.win_tail_end = 0
           # The late abort's window is this line's (fifo_obj_abort_late): the
           # last line's object must not match a dot of this one.

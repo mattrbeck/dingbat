@@ -206,8 +206,10 @@ a reference PNG, `mGBA suite <section>` a section of mGBA's test ROM.
   fetches. `window/m2int_wxA6_m0irq_{1,2}`, `m2int_wxA6_m0irq2_{1,2}` [cgb]
   (the CGB holds the flag for the last-pixel window, `CGB_WIN_TAIL_LAST`),
   `m2int_wxA6_spxA7_m0irq_{1,2}` (both devices), `m0enable/
-  enable_wxA6_2x_spxA7_ds_{1,2}` [cgb]. Off loses eight rows: the `_2` arm
-  of each `m0irq` pair on the devices named and the two `_ds_` rows.
+  enable_wxA6_2x_spxA7_{1,2}` and `_ds_{1,2,3,4}` [cgb] (the CGB object at
+  X = 167 that waited for the window start, section 2). Off loses twelve
+  rows: the `_2` arm of each `m0irq` pair on the devices named and the six
+  `m0enable` rows.
 - Site: the request is raised from the mode-3 loop's tail branch (the last
   `m3_lead` pixels), `adv - lead` dots after the first dot on which nothing
   but last-pixel work is pending, the hand-off the ordinary retire makes
@@ -249,15 +251,34 @@ a reference PNG, `mGBA suite <section>` a section of mGBA's test ROM.
   `_1` is taken and `_3` dropped on both); DocBoy
   `cgb/double_speed/ppu/double_speed_ppu_vram_write_block_timing_ly0_1_out_of_4`.
   0 loses both rows and nothing passes only at 0.
-- Not re-fit: `VRAM_READ_CGB_M3_EDGE_SS` and `VRAM_WRITE_CGB_M3_EDGE_SS`
-  (`ppu.nim`) stay 0. With the speed switch's PPU re-alignment at its
-  neutral value no row reaches the case they describe: every nonzero value
-  either loses a passing row (read 1: `vram_m3/preread_2` [cgb]; read 1..4:
-  `preread_lcdoffset1_1`; write 70..77: `vramw_m3start_1` [cgb]; write
-  70..80: `prewrite_lcdoffset1_1`) or changes nothing (read 5 and up, write
-  81 and up), and `vram_m3/{preread,prewrite}_lcdoffset2_1` are red at
-  every value. They are a question about the `lcdoffset` geometry.
 - Clean-room: derived from test ROM sources/outputs and dingbat's own trace runs; no emulator source consulted.
+
+### On a CGB the VRAM lock is shut for an M-cycle that starts on mode 3's first dot
+- Ships: `VRAM_READ_CGB_M3_EDGE_SS = 4`, `VRAM_WRITE_CGB_M3_EDGE_SS = 80`
+  (`ppu.nim`, `cpu_vram_open`).
+- Rule: at single speed a CGB VRAM read or write whose M-cycle starts on
+  dot 80, the dot the mode flag turns 3, is locked; one starting on dot 79
+  is not. The DMG's read is locked earlier (the live mode at its sample,
+  `VRAM_READ_LIVE_LOCK`), and a CPU on the PPU's 4-dot grid never starts an
+  M-cycle on dot 80, so the case exists only after a speed switch has left
+  the CPU off that grid (gambatte's `lcdoffset` rows). The two knobs are the
+  same statement at the two places the lock is asked: a read is judged
+  where it samples, at the end of its M-cycle, by the M-cycle-start mode
+  latch, which is taken before dot 80 runs and so still says 2 (hence
+  "the edge 4 dots back"); a write is judged at its commit, ahead of its
+  dots, where the flag has not moved either (hence "from line dot 80").
+- Evidence (M-cycle start dot -> answer, [cgb]): gambatte `vram_m3/
+  preread_1` 73 open, `preread_2` 77 open, `preread_3` 81 locked;
+  `preread_lcdoffset2_1` 79 open, `preread_lcdoffset1_2` 80 locked,
+  `preread_lcdoffset1_1` 76 open, `preread_lcdoffset2_2` 83 locked. Read
+  knob: 3 loses `preread_lcdoffset2_1`, 5 loses `preread_lcdoffset1_2`.
+  Writes: `prewrite_lcdoffset2_1` 79 lands, `prewrite_lcdoffset1_2` 80
+  dropped; 79 loses the first, 81 the second.
+- The palette RAM closes one dot later ("The CGB palette RAM lock around the
+  mode-3 edges", section 7): `cgbpal_m3/cgbpal_read_m3start_lcdoffset1_1`
+  reads from dot 80 and gets the palette.
+- Clean-room: derived from test ROM sources/outputs and dingbat's own trace
+  runs; no emulator source consulted.
 
 ## 2. Window
 
@@ -266,7 +287,7 @@ a reference PNG, `mGBA suite <section>` a section of mGBA's test ROM.
   (`window_trigger`) is cleared entering vblank and set by a sample of
   `WY == LY and LCDC.5`; nothing re-reads WY once it is set. The comparator is
   not a continuous level. It samples on three occasions only: once per line at
-  the line's first dot, a fixed number of dots after a WY write, and the same
+  the line's start, a fixed number of dots after a WY write, and the same
   number of dots after a write that sets LCDC.5 (or switches the LCD on with
   it set). The schedule is the next entry.
 - The match counts only with LCDC.5 set at the sample: enabling the window on
@@ -308,32 +329,47 @@ Dots are dingbat's line dots; W is the first dot of the writing M-cycle
     loses `late_wy_FFto2_ly2_ds_1`, `late_wy_1toFF_ds_1`,
     `late_enable_ly0_ds_1`, `late_wy_ds_1`, `late_wy_FFto0_ly2_ds_1`,
     `late_enable_afterVblank_ds_1`. Not half the single-speed five.
-- **The line-end cut-off.** A write's sample landing in the last
-  `WIN_CHECK_CUT_DOTS = 3` dots of a line (dot 453 on) latches nothing for
-  the line being drawn: the comparator is done with it. The written value is
-  still in place for the next line's own sample. gambatte
+- **The line-end cut-off.** At single speed a write's sample landing in the
+  last `WIN_CHECK_CUT_DOTS = 2` dots of a line (dot 454 on) latches nothing
+  for the line being drawn. Dot 454 is where the LY = LYC comparator's LY
+  steps to the next line (`STAT_LYC_LY_LEAD_DOTS = 2`, section 7): from
+  there a sample is no longer about this line, and the written value is in
+  place for the next line's own sample. gambatte
   `late_wy_FFto0_ly2_{1,2,3}`, `late_wy_10to0_ly1_{1,2,3}`,
   `late_wy_FFto1_ly2_{1,2,3}` and `window/late_enable_afterVblank_{1,2,3}`,
   `arg/late_enable_afterVblank_{3,4,5}` write on W = 445 / 449 / 453: the DMG
-  latches on the first two (samples on 446, 450), the CGB on the first only
-  (450; 454 is cut). Double speed pins the dot: W = 451 (sample 452) latches,
-  W = 452 and 453 do not (`late_wy_FFto0_ly2_ds_{1,2}`,
-  `late_enable_afterVblank_ds_{1,2}`, `_ds_lcdoffset1_{1,2}`). 2 loses
-  `late_enable_afterVblank_ds_lcdoffset1_2`; 4 loses `late_wy_FFto0_ly2_ds_1`
-  and `late_enable_afterVblank_ds_1`.
-- **The per-line sample** is at the line's first dot, after a write's sample
-  due on that same dot (`mode_flag=`; a sample due on dot 456 runs before
-  the line advances). `late_wy_1toFF_{1,2,3}`, `late_wy_2toFF_{1,2,3}` take a
-  matching WY away at the end of the line before: the DMG's W = 453 (sample
-  454) is in time and W = 457 is not; the CGB's W = 449 (sample 454) is in
-  time and W = 453 (sample 458, two dots into the line) is not, although the
-  WY register itself changed on dot 456. Double speed: W = 455 in time, 456
-  and 457 not (`late_wy_1toFF_ds_{1,2}`, `_ds_lcdoffset1_{1,2}`).
+  latches on the first two (samples on 446, 450) and not the third (454),
+  the CGB on the first only (450; 454 is cut), so 1 loses the DMG `_3` rows
+  and the CGB `_2` rows. `window/late_enable_afterVblank_lcdoffset1_{1,2}`
+  [cgb], a dot off the grid, write on W = 448 and 452: the sample on 453
+  latches and 3 loses `_1`. Double speed has a figure of its own,
+  `WIN_CHECK_CUT_DOTS_DS = 3` (dot 453 on), where the comparator's LY has
+  no lead: W = 451 (sample 452) latches, W = 452 and 453 do not
+  (`late_wy_FFto0_ly2_ds_{1,2}`, `late_enable_afterVblank_ds_{1,2}`,
+  `_ds_lcdoffset1_{1,2}`); 2 loses `late_enable_afterVblank_ds_lcdoffset1_2`,
+  4 loses `late_wy_FFto0_ly2_ds_1` and `late_enable_afterVblank_ds_1`.
+- **The per-line sample** is one dot into the line at single speed
+  (`WIN_LINE_CHECK_DOT_SS = 1`), after a write's sample due by then, and on
+  the line's first dot at double speed. `late_wy_1toFF_{1,2,3}`,
+  `late_wy_2toFF_{1,2,3}` take a matching WY away at the end of the line
+  before: the DMG's W = 453 (sample 454) is in time and W = 457 (sample on
+  dot 2) is not; the CGB's W = 449 (sample 454) is in time and W = 453
+  (sample on dot 2) is not, although the WY register itself changed on dot
+  456. `arg/late_wy_1toFF_lcdoffset1_{1,2}` [cgb] write on W = 452 and 456:
+  the sample on dot 1 is in time (0 loses `_1`), the one on dot 5 is not; 2
+  loses `late_wy_1toFF_2` and `late_wy_2toFF_2` [cgb]. The DMG rows pass at
+  0, 1 and 2. Double speed: W = 455
+  (sample 456) in time, 456 and 457 not (`late_wy_1toFF_ds_{1,2}`,
+  `_ds_lcdoffset1_{1,2}`). Nothing runs on dot 1 for it: the boundary's
+  check looks one dot ahead at a write's sample already queued
+  (`win_line_wy`, ppu.nim), the only thing that can move in that dot.
 - **Line 0 on a CGB** samples on dot `WIN_LINE0_CHECK_DOT_CGB = 5`
   (`_DS = 5`), not dot 0; the DMG's line 0 is an ordinary line.
   `window/late_wy_{1,2}` and `arg/late_wy_{1,2}` [cgb] take WY = 0 away on
   W = 453 of line 153 (sample dot 2: in time) and W = 1 of line 0 (sample
-  dot 6: too late): 2..6 pass, 1 and 7 do not. Double speed pins 5:
+  dot 6: too late), and `window/late_wy_lcdoffset1_{1,2}` [cgb] on W = 456
+  (sample dot 5: in time) and W = 4 (dot 9): 5..6 pass, 4 loses
+  `late_wy_lcdoffset1_1` and 7 loses `late_wy_2`. Double speed pins 5:
   `late_wy_ds_1` (W = 3, sample 4, in time) refuses 4 and
   `late_wy_ds_lcdoffset1_2` (W = 4, sample 5, too late) refuses 6. The line's
   check and a write's sample can both be in flight, so the queue holds two
@@ -343,10 +379,6 @@ Dots are dingbat's line dots; W is the first dot of the writing M-cycle
   which were already there for the knobs. `wy_cmp` and the queue are in
   flight for at most seven dots after a write and are not serialized
   (`win_check_clear` on load).
-- Open: `window/late_wy_lcdoffset1_2`, `late_enable_afterVblank_lcdoffset1_1`
-  and `arg/late_wy_1toFF_lcdoffset1_2` [cgb] (single speed after a speed
-  switch left the LCD one dot off the CPU grid) are red with this schedule,
-  as they were without it; the double-speed `lcdoffset1` rows fit.
 - Clean-room: derived from test ROM sources/outputs and dingbat's own trace
   runs; no emulator source consulted.
 
@@ -418,32 +450,27 @@ Dots are dingbat's line dots; W is the first dot of the writing M-cycle
   runs; no emulator source consulted.
 
 ### The last pixel: object against window on a CGB
-- Ships: `CGB_OBJ_LAST_PX_YIELDS = 1` (`fifo_ppu.nim`; `obj_yields_to_window`,
-  `m0_early`).
+- Ships: `CGB_OBJ_LAST_PX_YIELDS = 1` (`fifo_ppu.nim`; `obj_yields_to_window`).
 - Claim: an object at OAM X = 167 and a window at WX = 166 both trigger on
   the line's last pixel. The DMG fetches the object in front of the start
   (which it then cannot draw, `DMG_WIN_LAST_PX_CARRY`). The CGB orders them
   as on every other column: the object waits for the window start and is
   fetched against the window's first tile, a full 11 dots. Those dots hold
-  the mode flag only: the mode-0 STAT source rises where the object-less
-  WX = 166 line raises it.
+  the mode flag only: the mode-0 STAT request is not waiting for work that
+  starts on the last pixel (section 1, `M0_REQ_LAST_PX`), so it rises where
+  the object-less WX = 166 line raises it.
 - Evidence: gambatte `window/m2int_wxA6_spxA7_m3stat_{1,2,4,5}` [cgb] read
   STAT on dots 257 / 261 / 269 / 273 of the line and want 3, 3, 3, 0, where
   the object-less `m2int_wxA6_m3stat_{1,2,3}` [cgb] want 3, 3, 0 on 253 / 257 /
   261: the flag falls 10..13 dots later with the object; window start (6) +
   object at tile pixel 0 (11) puts it on dot 269 against 258. The DMG twins
   move by one read (the object's six dots). 0 fails `_m3stat_2` and
-  `_m3stat_4` [cgb]. The source: `m0enable/enable_wxA6_2x_spxA7_{1,2}` and
-  `_ds_{2,3,4}` [cgb] enable the mode-0 source on dots 249..261 of such a
+  `_m3stat_4` [cgb]. The request: `m0enable/enable_wxA6_2x_spxA7_{1,2}` and
+  `_ds_{1,2,3,4}` [cgb] enable the mode-0 source on dots 249..261 of such a
   line and want the interrupt at once, and
   `window/m2int_wxA6_spxA7_m0irq_{1,2}` want IF on the same read as the
-  object-less `m2int_wxA6_m0irq_{1,2}`; with the source following the flag
-  the five `m0enable` rows fail.
-- Open: `m2int_wxA6_spxA7_m0irq_2` [cgb] is still red together with its
-  object-less twin `m2int_wxA6_m0irq_2` [cgb]: both raise the source on dot
-  256 and both want it one read earlier, which is the WX = 166 line's own
-  mode-0 source on a CGB, not this rule.
-- Perf: one byte test per object-stall dot (`tick_sprite_fetcher`).
+  object-less `m2int_wxA6_m0irq_{1,2}`. Those rows are `M0_REQ_LAST_PX`'s:
+  this entry adds no request rule of its own.
 - Clean-room: derived from test ROM sources/outputs and dingbat's own trace
   runs; no emulator source consulted.
 
@@ -734,10 +761,10 @@ Dots are dingbat's line dots; W is the first dot of the writing M-cycle
 
 ### The first M-cycle of an interrupt dispatch is a hand-over point
 - Ships: `HDMA_DISPATCH_FETCH = 1` (`cpu.nim`, `dispatch_interrupt`).
-- Rule. The end of a dispatch's first M-cycle (the first of the two wait
-  M-cycles Pan Docs lists under "Interrupt Handling") is a hand-over point
-  on the same terms as the end of an opcode fetch; the rows show the
-  hand-over, not its cause. An HBlank request up by the end of that M-cycle (the
+- Rule. The end of a dispatch's first M-cycle (of the five Pan Docs lists
+  under "Interrupt Handling"; PC is pushed in the fourth and fifth, section
+  7) is a hand-over point on the same terms as the end of an opcode fetch;
+  the rows show the hand-over, not its cause. An HBlank request up by the end of that M-cycle (the
   mode 3 -> 0 edge no later than the dot the dispatch begins on) runs its
   block ahead of the two pushes; one dot later the block waits for the
   handler's first fetch.
@@ -747,8 +774,13 @@ Dots are dingbat's line dots; W is the first dot of the writing M-cycle
   the dispatch pushes onto, and the rows read $1234 (block first) or the
   pushed PC. `-d:HDMA_DISPATCH_FETCH=0` loses the seven rows with the edge
   on the dispatch's first dot.
-- Only a dispatch under an armed HBlank transfer runs that M-cycle ahead of
-  its pushes; the dispatch's own push order is another entry.
+- Every dispatch has that M-cycle; only one under an armed HBlank transfer
+  or a requested general-purpose burst stops at its end to ask. The block
+  runs beside the dispatch: the two wait M-cycles that are left, the pushes
+  and the IF clear keep their places after it ("The dispatch pushes in its
+  fourth and fifth M-cycles", section 7). With the pushes moved from the
+  first two M-cycles to the last two the seven rows did not move: the
+  hand-over is ahead of the pushes either way.
 - Clean-room: derived from test ROM sources/outputs and dingbat's own trace runs; no emulator source consulted.
 
 ### A general-purpose DMA takes the bus at the next opcode fetch
@@ -957,13 +989,12 @@ Dots are dingbat's line dots; W is the first dot of the writing M-cycle
   their traced edge dots (not swept) the single-speed CGB rows would accept
   -1..2 and DocBoy's DMG rows -1..0, so the term is double-speed only.
 - Shared row: `oamdma/oamdma_late_speedchange_stat_2` [cgb] needs this
-  cluster's CGB fetch with LCDC.1 clear (it runs at LCDC = $91) and one thing
-  more, on the DMA unit's side: its `_1`/`_2` pair stops the unit by a speed
-  switch with one byte left (`_1`, no object on line 3) or with the last
-  byte written (`_2`, the object is found). The unit as it stands still
-  holds the bus across the stall in `_2`; letting a unit whose last byte is
-  written release OAM at the stall turns the row green with nothing lost.
-  That change is not made here.
+  entry's neighbour, the CGB fetch with LCDC.1 clear (it runs at LCDC = $91),
+  and one thing more on the DMA unit's side: its `_1`/`_2` pair stops the
+  unit by a speed switch with one byte left (`_1`, no object on line 3) or
+  with the last byte written (`_2`, the object is found), and a unit whose
+  last byte is written releases OAM at the stall (`OAMDMA_FROZEN_RELEASE`,
+  "The OAM DMA unit under a HALT", above). With both the row is green.
 - Clean-room: derived from test ROM sources/outputs and dingbat's own trace runs; no emulator source consulted.
 
 ## 7. CPU
@@ -1040,11 +1071,10 @@ Dots are dingbat's line dots; W is the first dot of the writing M-cycle
 ### The dispatch pushes in its fourth and fifth M-cycles
 - Ships: `DISPATCH_PUSH_MCYCLE = 4` (`cpu.nim`, `dispatch_interrupt`).
 - Claim: Pan Docs, "Interrupt Handling": two wait M-cycles, two pushes, the
-  jump. Counted as dingbat counts an instruction (from the boundary the
-  interrupt is taken on, the opcode fetch first), the first of the five
-  M-cycles is the fetch the dispatch throws away, the waits are the second
-  and third, and PC's high and low bytes are written in the fourth and
-  fifth; the "jump" is the handler's own fetch. The vector is chosen
+  jump, five M-cycles in all. Counted from the instruction boundary the
+  interrupt is taken on, PC's high and low bytes are written in the fourth
+  and fifth of the five, which is where the row below finds them, and the
+  handler's first opcode fetch follows the fifth. The vector is chosen
   between the two writes (mooneye `acceptance/interrupts/ie_push`).
 - Evidence: gambatte `oamdma/oamdma_src0000_busyint0002` (both devices)
   starts an OAM DMA from $0000, burns 154 M-cycles, and takes a timer
@@ -1097,7 +1127,7 @@ Dots are dingbat's line dots; W is the first dot of the writing M-cycle
 ### A CGB clears a timer or serial request at the end of the dispatch
 - Ships: `IRQ_SAMPLE_CGB_TIMER_SERIAL_ADD = 2` (`gb.nim`): T-cycles past
   `IRQ_SAMPLE_T` at which a CGB dispatch clears the TIMER or SERIAL line.
-  `GbInterrupts.ack_line` / `ack_until`, `irq_ack_swallows`
+  `GbInterrupts.clear_line` / `clear_until`, `irq_clear_holds`
   (`interrupts.nim`), asked where the timer reload and the serial
   completion raise their request.
 - Claim: on a CGB the clear of these two lines reaches T 20, the end of the
@@ -1109,7 +1139,7 @@ Dots are dingbat's line dots; W is the first dot of the writing M-cycle
   pairs agree. 0 and 1 lose the four CGB `_2` / `_ds_2` rows; 2..5 are one
   value (the clear past T 20, short of T 24); 6 loses the four `_1` /
   `_ds_1` rows.
-- Not serialized: the acknowledge is open for one M-cycle past the dispatch
+- Not serialized: the clear is held for one M-cycle past the dispatch
   and `step_frame` runs an instruction past a frame edge that would cut it.
 - Clean-room: derived from test ROM sources/outputs and dingbat's own trace
   runs; no emulator source consulted.
@@ -1176,17 +1206,17 @@ Dots are dingbat's line dots; W is the first dot of the writing M-cycle
   Off loses that row; opening the window for every parked LYC write loses
   `ff45_enable_weirdpoint_3` [dmg]. The CGB's side of the same statement is
   `CGB_LYC_BRIDGE`, below.
-- Rows that now wait on other rules (2026-11-13). With the LYC interrupt
-  taken from S, gambatte `vram_m3/preread_lcdoffset1_2` and
-  `prewrite_lcdoffset1_2` [cgb] touch VRAM in an M-cycle that begins on
-  mode 3's first dot and want the lock shut
-  (`VRAM_READ_CGB_M3_EDGE_SS` / `VRAM_WRITE_CGB_M3_EDGE_SS`, `ppu.nim`,
-  re-fit pending); with the lead at 0 they passed because the dispatch was
-  one M-cycle late. `window/late_wy_lcdoffset1_1`, `window/arg/
-  late_wy_{1,2}toFF_2` and `window/late_enable_afterVblank_lcdoffset1_1`
-  [cgb] wait on the window's WY check (`WIN_CHECK_DEFER_*`, and the
-  next-line check that sits on S in `fifo_lyc_ly_lead`); the last passes at
-  any `WIN_CHECK_DEFER_CGB` of 1..4 with nothing else changed.
+- Rows other rules answer once the LYC interrupt is taken from S: gambatte
+  `vram_m3/preread_lcdoffset1_2` and `prewrite_lcdoffset1_2` [cgb] touch
+  VRAM in an M-cycle that begins on mode 3's first dot and find the lock
+  shut (section 1, "On a CGB the VRAM lock is shut for an M-cycle that
+  starts on mode 3's first dot"); `cgbpal_m3/
+  cgbpal_read_m3start_lcdoffset1_1` reads the palette there (`CRAM_LOCK_ON_
+  LAT`, below); `window/late_enable_afterVblank_lcdoffset1_1` and `window/
+  arg/late_wy_1toFF_lcdoffset1_1` [cgb] are the window comparator's cut-off
+  on S and its per-line sample (section 2, "The window's WY comparator:
+  when it samples"). With the lead at 0 the dispatch was one M-cycle late
+  and each of them read the far side of its edge.
 - Clean-room: derived from test ROM sources/outputs and dingbat's own trace
   runs; no emulator source consulted.
 
@@ -1437,7 +1467,7 @@ Dots are dingbat's line dots; W is the first dot of the writing M-cycle
   `lyc153_src_held` (ppu.nim), `mem_flush_deferred` (memory.nim),
   `fifo_line153_edge` (fifo_ppu.nim).
 
-### An IF write lands one dot into its M-cycle
+### An IF write replaces the register on its M-cycle's second dot
 - Ships: `IF_WRITE_LAND_DOTS = 1`, `IF_WRITE_LAND_DOTS_DS = 1`
   (`memory.nim`); `LYC_SRC_RELATCH_ADJ = 1` (`ppu.nim`).
 - Claim: a CPU write to IF replaces the register one dot after the top of
@@ -1555,13 +1585,13 @@ Dots are dingbat's line dots; W is the first dot of the writing M-cycle
 - See §2, "The window's WY comparator: when it samples".
 
 ### The CGB palette RAM lock around the mode-3 edges
-- Ships: `CRAM_LOCK_DOTS = true`, `CRAM_LOCK_ON_LAT = 0`,
+- Ships: `CRAM_LOCK_DOTS = true`, `CRAM_LOCK_ON_LAT = 1`,
   `CRAM_LOCK_ON_LAT_DS = 2`, `CRAM_LOCK_OFF_LAT = 2`,
   `CRAM_LOCK_OFF_LAT_DS = 3`, `CRAM_LOCK_LINE0_EXTRA = 2`,
   `CRAM_LOCK_LINE0_EXTRA_DS = -1` (the single-speed value) (`ppu.nim`,
   `cpu_cram_open_dots`).
-- Rule: BCPD/OCPD are locked from the mode-3 edge (2 dots after it at double
-  speed) until 2 dots after the mode-0 edge (3 at double speed), the VRAM
+- Rule: BCPD/OCPD are locked from the dot after the mode-3 edge (2 dots
+  after it at double speed) until 2 dots after the mode-0 edge (3 at double speed), the VRAM
   read lock's own open edge (`VRAM_READ_M0_OPEN_DOTS{,_DS}`). A write asks
   at its commit, a read at the start of its M-cycle, so a read and a write in
   the same M-cycle get the same answer. On the line the LCD is switched on
@@ -1576,19 +1606,19 @@ Dots are dingbat's line dots; W is the first dot of the writing M-cycle
 - Evidence, the close edge: `cgbpal_m3start_*`, `cgbpal_read_m3start_*`,
   `cgbpal_write_m3start_*`. Double speed 2 is a strict optimum (1 loses the
   three `_ds_1` rows, 3 loses `cgbpal_{read,write}_m3start_ds_lcdoffset1_2`).
-  Single speed -2..1 pass the same rows (-3 loses `cgbpal_read_m3start_1`, 2
-  loses the three `_2` rows); 0 ships.
+  Single speed 1 is a strict optimum: 2 loses the three `_2` rows (an
+  M-cycle starting on dot 81 is locked) and 0 loses
+  `cgbpal_read_m3start_lcdoffset1_1` (one starting on dot 80, mode 3's
+  first, still reads the palette, where the VRAM lock is already shut:
+  section 1).
 - Evidence, the LCD-on line: `enable_display/ly0_late_cgbp{r,w}{,_ds}_{1,2}`.
-  Single speed 2..5 pass (1 loses the `_1` pair, 6 the `_2` pair), double
-  speed 2..3 (1 loses `_ds_1`, 4 loses `_ds_2`); 2 is the lead the other
-  locks take on that line.
+  Single speed 1..4 pass on top of `CRAM_LOCK_ON_LAT = 1` (0 loses the
+  `_1` pair, 5 the `_2` pair), double speed 2..3 (1 loses `_ds_1`, 4 loses
+  `_ds_2`); 2 is the lead the other locks take on that line.
 - With `CRAM_LOCK_DOTS = false` (the mode-based `CRAM_LOCK_R`/`CRAM_LOCK_W`)
   thirteen rows are lost: `cgbpal_m3end_{1,3}`, `_ds_{1,3}`, `_scx5_ds_{1,3}`,
   `cgbpal_m3start_ds_1`, `cgbpal_{read,write}_m3start_ds_1`,
   `ly0_late_cgbp{r,w}{,_ds}_2`.
-- Open: `cgbpal_{read,write}_m3start_lcdoffset1_1` want the close edge at
-  single speed 5 dots or more after the flag edge, which the three plain
-  `_2` rows refuse; an `lcdoffset` question, red before and after.
 - Clean-room: derived from test ROM sources/outputs and dingbat's own trace runs; no emulator source consulted.
 
 ### The interrupt check stays a leaf

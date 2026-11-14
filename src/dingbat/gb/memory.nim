@@ -927,7 +927,7 @@ proc mem_write_head*(mem: GbMemory; gb: GB; idx: int; val: uint8;
                      head_t: int): int {.noinline.} =
   ## mem_write for the interrupt dispatch's last push, stopped `head_t` CPU
   ## T-cycles into the M-cycle's PPU half so the caller can clear IF there
-  ## (dispatch_interrupt, IRQ_SAMPLE_T); returns the dots mem_write_finish
+  ## (dispatch_interrupt, IRQ_SAMPLE_T); returns the dots mem_write_rest
   ## still has to run. Same order as mem_write: the bus half, the byte, the
   ## dots. A push that parks something for the M-cycle to finish (a PPU
   ## register under SP) runs whole, and the clear follows the M-cycle.
@@ -956,7 +956,7 @@ proc mem_write_head*(mem: GbMemory; gb: GB; idx: int; val: uint8;
   if head > 0: mem_tick_ppu(mem, gb, head, ignore_speed = true)
   dots - head
 
-proc mem_write_finish*(mem: GbMemory; gb: GB; rest: int) {.inline.} =
+proc mem_write_rest*(mem: GbMemory; gb: GB; rest: int) {.inline.} =
   ## The dots mem_write_head left.
   if rest > 0: mem_tick_ppu(mem, gb, rest, ignore_speed = true)
 

@@ -399,9 +399,13 @@ const M0_REQ_LAST_PX* {.intdefine.} = 1
   ## m2int_wxA6_m0irq_{1,2}`, `m2int_wxA6_m0irq2_{1,2}` [cgb] (the CGB holds
   ## the flag for the last-pixel window's fetch, CGB_WIN_TAIL_LAST),
   ## `m2int_wxA6_spxA7_m0irq_{1,2}` (both devices), `m0enable/
-  ## enable_wxA6_2x_spxA7_ds_{1,2}` [cgb]. 0 loses eight rows: the `_2` arm
-  ## of each `m0irq` pair on the devices named and the two `_ds_` rows. Clean-room: derived from test ROM sources/outputs and
-  ## dingbat's own trace runs; no emulator source consulted.
+  ## enable_wxA6_2x_spxA7_{1,2}` and `_ds_{1,2,3,4}` [cgb] (a CGB object at
+  ## X = 167 that waited for the WX = 166 window, CGB_OBJ_LAST_PX_YIELDS:
+  ## the request is there before the flag). 0 loses twelve rows: the `_2`
+  ## arm of each `m0irq` pair on the devices named and the six `m0enable`
+  ## rows.
+  ## Clean-room: derived from test ROM sources/outputs and dingbat's own
+  ## trace runs; no emulator source consulted.
 const STAT_GLITCH_M0_LEAD* {.intdefine.} = 1
   ## Dots before the mode 3 -> 0 flag at which the DMG STAT-write bug's $FF
   ## phase already finds the mode-0 source (ppu_stat_write_glitch); measured
@@ -1088,7 +1092,7 @@ const IRQ_SAMPLE_CGB_TIMER_SERIAL_ADD* {.intdefine.} = 2
   ## lose `tc00_irq_late_retrigger_{2,ds_2}` and
   ## `start_wait_trigger_int8_read_if_{2,ds_2}` [cgb]; 6 loses the four
   ## `_1` / `_ds_1` rows. See dispatch_interrupt (cpu.nim) and
-  ## irq_ack_swallows (interrupts.nim).
+  ## irq_clear_holds (interrupts.nim).
   ## Clean-room: derived from test ROM sources/outputs and dingbat's own trace
   ## runs; no emulator source consulted.
 const CGB_WY_LATENCY*         {.intdefine.} = 4
@@ -1181,21 +1185,44 @@ const WIN_CHECK_DEFER_DMG*    {.intdefine.} = 1
 const WIN_LINE0_CHECK_DOT_CGB* {.intdefine.} = 5
   ## Dot of line 0 at which a CGB runs the per-line WY == LY sample, where
   ## every other line (and the DMG's line 0) runs it on the first dot; 0 = the
-  ## first dot here too. gambatte `window/late_wy_{1,2}` [cgb] pass at 2..6
-  ## and fail at 1 and 7; 5 is the double-speed value.
+  ## first dot here too. 5..6 pass: gambatte `window/late_wy_lcdoffset1_1`
+  ## [cgb] takes WY = 0 away with its sample on dot 5 and is in time (4
+  ## loses it); `window/late_wy_2` [cgb] has its sample on dot 6 and is too
+  ## late (7 loses it). 5 is the double-speed value.
 const WIN_LINE0_CHECK_DOT_CGB_DS* {.intdefine.} = 5
   ## The same in double speed, in dots. 5: `window/late_wy_ds_1` refuses 4,
   ## `late_wy_ds_lcdoffset1_2` refuses 6.
-const WIN_CHECK_CUT_DOTS* {.intdefine.} = 3
+const WIN_CHECK_CUT_DOTS* {.intdefine.} = 2
   ## Dots before the end of a line from which a write's sample of the WY == LY
   ## comparator (WIN_CHECK_DEFER_*) no longer latches the window for the line
-  ## being drawn: the comparator has finished with this line and next answers
-  ## at the boundary, for the next one (0 = a sample latches up to the
-  ## boundary). 3 (dot 453 on): gambatte `window/
-  ## late_enable_afterVblank_ds_lcdoffset1_2` refuses 2,
-  ## `arg/late_wy_FFto0_ly2_ds_1` and `late_enable_afterVblank_ds_1` refuse 4;
-  ## the single-speed rows (`late_wy_FFto0_ly2_{1,2,3}` and their kin) bracket
-  ## it to 2..5 on both devices.
+  ## being drawn, at single speed (0 = a sample latches up to the boundary).
+  ## 2 ships (dot 454 on), the dot the comparator's LY steps to the next line
+  ## (STAT_LYC_LY_LEAD_DOTS): from there the sample is no longer about this
+  ## line, and the next line's own sample follows within three dots. gambatte
+  ## `window/late_enable_afterVblank_lcdoffset1_1` [cgb] raises LCDC.5 from
+  ## dot 448 of the WY line (sample on 453) and gets the window, so 3 loses
+  ## it; `late_enable_afterVblank_2` [cgb] (from 449, sample on 454) and
+  ## `late_enable_afterVblank_3`, `arg/late_wy_FFto0_ly2_3`,
+  ## `late_wy_10to0_ly1_3`, `late_wy_FFto1_ly2_3` [dmg] (from 453, sample on
+  ## 454) get none, so 1 loses those.
+const WIN_CHECK_CUT_DOTS_DS* {.intdefine.} = 3
+  ## The same at double speed, in dots. 3 ships (dot 453 on): gambatte
+  ## `window/late_enable_afterVblank_ds_lcdoffset1_2` refuses 2,
+  ## `arg/late_wy_FFto0_ly2_ds_1` and `late_enable_afterVblank_ds_1` refuse 4.
+  ## The comparator's LY has no lead at double speed (STAT_LYC_LY_LEAD_DS), so
+  ## this one is a figure of its own.
+const WIN_LINE_CHECK_DOT_SS* {.intdefine.} = 1
+  ## Dot of a line at which the per-line WY == LY sample runs at single speed
+  ## (0 = the first dot, as at double speed); a write's sample due by then is
+  ## ahead of it. 1 ships. gambatte `window/arg/late_wy_1toFF_lcdoffset1_1`
+  ## [cgb] takes the matching WY away from dot 452 of the line before (its
+  ## sample on dot 1) and gets no window: 0 loses it. `late_wy_1toFF_2` and
+  ## `late_wy_2toFF_2` [cgb] (from 453, sample on dot 2) are too late: 2
+  ## loses those. The DMG's rows sit either side with room to spare (sample
+  ## on 454 in time, a write from dot 1 not) and pass at 0, 1 and 2. Double
+  ## speed is on the first dot: `late_wy_1toFF_ds_lcdoffset1_2` (sample on
+  ## dot 1) is too late. Line 0 on a CGB has WIN_LINE0_CHECK_DOT_CGB instead.
+static: doAssert WIN_LINE_CHECK_DOT_SS in 0 .. 3
 const WIN_CHECK_DEFER_ANY* = WIN_CHECK_DEFER_CGB != 0 or WIN_CHECK_DEFER_DMG != 0 or
                              WIN_LINE0_CHECK_DOT_CGB != 0
 const WIN_EN_ABORT*           {.intdefine.} = 1
@@ -2115,12 +2142,12 @@ type
     # test reads it. Not serialized: live for the 4 T of the reload countdown.
     timer_interrupt_early*: bool
     # IRQ_SAMPLE_CGB_TIMER_SERIAL_ADD (cpu.nim): the line a CGB dispatch is
-    # still acknowledging (INT_TIMER / INT_SERIAL, 0 = none) and the last
-    # scheduler cycle it does so on (irq_ack_swallows, interrupts.nim). Not
+    # still holding clear (INT_TIMER / INT_SERIAL, 0 = none) and the last
+    # scheduler cycle it does so on (irq_clear_holds, interrupts.nim). Not
     # serialized: live for one M-cycle after the dispatch, and step_frame
     # runs an instruction past a frame edge that would cut it.
-    ack_line*:  uint16
-    ack_until*: CycleCount
+    clear_line*:  uint16
+    clear_until*: CycleCount
     serial_interrupt*:   bool
     joypad_interrupt*:   bool
     vblank_enabled*:     bool
@@ -2460,9 +2487,6 @@ type
     # only by fetch_work_pending on a CGB, where a window restart and an object
     # fetch on that pixel are one fetch slot (CGB_WIN_TAIL_LAST).
     obj_last_px*:         bool
-    # CGB_OBJ_LAST_PX_YIELDS (fifo_ppu.nim): object-stall dots left until the
-    # mode-0 source rises ahead of a flag that object holds (0 = none).
-    m0_early*:            uint8
     win_tail_end*:        int32   # WIN_TAIL_FLAG_LEAD: the dot a tail restart retires on (0 = none)
     # A window start owed to the next line: the WX comparator matched on the
     # line's last pixel, which a DMG's end-of-line cleanup cannot clear
@@ -4056,8 +4080,8 @@ proc step_frame*(gb: GB) =
   # Likewise a CGB LYC write still in flight to the comparator (GB.lyc_sampled,
   # at most two dots past its instruction), which is not in the format
   # either; `settle` bounds it, so a run of back-to-back LYC writes cannot
-  # hold the frame. And a CGB dispatch's acknowledge still open on its timer
-  # or serial line (GbInterrupts.ack_line, one M-cycle past the dispatch).
+  # hold the frame. And a CGB dispatch's clear still held on its timer
+  # or serial line (GbInterrupts.clear_line, one M-cycle past the dispatch).
   # And a VRAM DMA an FF55 write has requested but the CPU has not handed
   # the bus to yet (GDMA_GRANT_FETCH, HDMA_START_GRANT_FETCH): the request is
   # scratch, and the next opcode fetch answers it.
@@ -4067,7 +4091,7 @@ proc step_frame*(gb: GB) =
     if (gb.ppu.lcd_status and 3'u8) == 3'u8: discard
     elif CGB_LYC_CMP_LATCH and gb.lyc_land_left >= 0 and settle > 0: dec settle
     elif IRQ_SAMPLE_CGB_TIMER_SERIAL_ADD != 0 and settle > 0 and
-         irq_ack_live(gb.interrupts, gb.scheduler.cycles): dec settle
+         irq_clear_live(gb.interrupts, gb.scheduler.cycles): dec settle
     else: break
     gb.cpu.tick(gb)
   gb.ppu.frame = false

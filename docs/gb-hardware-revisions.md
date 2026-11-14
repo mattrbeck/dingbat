@@ -116,8 +116,8 @@ SameSuite `apu/README.md`: "A quirk in CPU-CGB revisions C and older makes
 registers PCM12 and PCM34 report a glitched PCM amplitude for channels 1, 2
 and 4 if they're read in the same M-cycle they change." `pcm_read_edge_zero`
 models channel 1's rising-edge case the `freq_change_timing` ladder pins;
-channels 2 and 4 are not pinned by any ROM in the tree (channel 2's arm:
-removed 2026-11-13 for a clean rewrite).
+channels 2 and 4 are not pinned by any ROM in the tree (channel 2 is given
+channel 1's arm, `PCM12_CH2_EDGE_ZERO`, docs/gb-derivations.md section 11).
 
 ## 3. Save states
 

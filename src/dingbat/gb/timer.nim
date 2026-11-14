@@ -138,8 +138,8 @@ proc timer_reload_tima(t: GbTimer; gb: GB) =
     # anchor of the gambatte speedchange*_tima0N_* rows.
     echo "TIMAIRQ tdiv=", t.tdiv, " tap=", t.bit_for_tima
   when IRQ_SAMPLE_CGB_TIMER_SERIAL_ADD != 0:
-    # A CGB dispatch that took the timer line still holds it acknowledged.
-    if not irq_ack_swallows(gb.interrupts, INT_TIMER, gb.scheduler.cycles):
+    # A CGB dispatch that took the timer line is still holding it clear.
+    if not irq_clear_holds(gb.interrupts, INT_TIMER, gb.scheduler.cycles):
       gb.interrupts.timer_interrupt = true
   else:
     gb.interrupts.timer_interrupt = true

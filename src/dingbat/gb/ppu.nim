@@ -392,20 +392,27 @@ template lcdon_latched_mode(ppu: GbPpu; ds: bool): uint8 =
         m = 3'u8
     m
 
-const VRAM_READ_CGB_M3_EDGE_SS* {.intdefine.} = 0
+const VRAM_READ_CGB_M3_EDGE_SS* {.intdefine.} = 4
   ## CGB, single speed: a VRAM read whose M-cycle began on mode 3's first dot
-  ## (live mode 3, prev 2, the edge this many dots back) is locked although
-  ## the M-cycle-start latch still says mode 2 (dots; 0 = off). Left at 0:
-  ## with the speed switch's PPU re-alignment at its neutral value no row
-  ## reaches the case (1 loses gambatte vram_m3/preread_2 [cgb], 1..4 lose
-  ## `preread_lcdoffset1_1`, 5 and up change nothing). Re-fit pending on the
-  ## `lcdoffset` geometry.
-const VRAM_WRITE_CGB_M3_EDGE_SS* {.intdefine.} = 0
+  ## is locked, although the M-cycle-start latch, taken before that dot runs,
+  ## still says mode 2. The test is made where the read samples, at the
+  ## M-cycle's end: live mode 3, previous mode 2, the edge this many dots
+  ## back (0 = off). 4 ships, one M-cycle. Only a CPU the speed switch has
+  ## left off the PPU's 4-dot grid can start an M-cycle on that dot: gambatte
+  ## `vram_m3/preread_lcdoffset1_2` [cgb] does (read from dot 80, locked) and
+  ## 5 loses it; `preread_lcdoffset2_1` [cgb] reads from dot 79 (open) and 3
+  ## loses it; 2 also loses `dma/hdma_late_enable_lcdoffset3_1` and 1
+  ## `vram_m3/preread_2` [cgb] (from dot 77, open, where a DMG is locked).
+const VRAM_WRITE_CGB_M3_EDGE_SS* {.intdefine.} = 80
   ## The write side's twin: the line dot from which a CGB write committed at
-  ## single speed with the PPU still in mode 2 is locked (0 = off). Left at
-  ## 0 for the same reason (70..77 lose gambatte vramw_m3start_1 [cgb],
-  ## 70..80 lose vram_m3/prewrite_lcdoffset1_1, 81 and up change nothing).
-  ## Re-fit pending on the `lcdoffset` geometry.
+  ## single speed with the mode flag still at 2 is locked (0 = off). 80
+  ## ships, mode 3's first dot: a write commits ahead of its M-cycle's dots,
+  ## so one committed on dot 80 is asked before the flag moves. gambatte
+  ## `vram_m3/prewrite_lcdoffset1_2` [cgb] writes from dot 80 and is dropped
+  ## (81 loses it); `prewrite_lcdoffset2_1` [cgb] writes from dot 79 and
+  ## lands (79 loses it).
+  ## Clean-room: derived from test ROM sources/outputs and dingbat's own trace
+  ## runs; no emulator source consulted.
 proc cpu_vram_open*(ppu: GbPpu; is_write: bool; cgb = false;
                     ds = false): bool {.inline.} =
   if not lcd_enabled(ppu): return true
@@ -490,11 +497,14 @@ const CRAM_LOCK_DOTS* {.booldefine.} = true
   ## at its commit, a read at the start of its M-cycle. false (the mode-based
   ## lock) loses thirteen gambatte rows: nine of cgbpal_m3 and
   ## enable_display/ly0_late_cgbp{r,w}{,_ds}_2.
-const CRAM_LOCK_ON_LAT*    {.intdefine.} = 0
+const CRAM_LOCK_ON_LAT*    {.intdefine.} = 1
 const CRAM_LOCK_ON_LAT_DS* {.intdefine.} = 2
-  ## Single speed: -2..1 score the same; -3 loses gambatte
-  ## cgbpal_m3/cgbpal_read_m3start_1 and 2 loses `cgbpal_m3start_2`,
-  ## `cgbpal_read_m3start_2` and `cgbpal_write_m3start_2`. Double speed: 2 is
+  ## Single speed: 1 is a strict optimum, one dot later than the VRAM lock
+  ## (VRAM_READ_CGB_M3_EDGE_SS). 0 loses gambatte
+  ## cgbpal_m3/cgbpal_read_m3start_lcdoffset1_1 (a read whose M-cycle starts
+  ## on mode 3's first dot still gets the palette) and 2 loses
+  ## `cgbpal_m3start_2`, `cgbpal_read_m3start_2` and
+  ## `cgbpal_write_m3start_2` (from the dot after it). Double speed: 2 is
   ## a strict optimum (1 loses `cgbpal_m3start_ds_1` and the `read`/`write`
   ## `_m3start_ds_1` pair, 3 loses `cgbpal_{read,write}_m3start_ds_lcdoffset1_2`).
 const CRAM_LOCK_OFF_LAT*   {.intdefine.} = 2
@@ -509,9 +519,9 @@ const CRAM_LOCK_LINE0_EXTRA* {.intdefine.} = 2
 const CRAM_LOCK_LINE0_EXTRA_DS* {.intdefine.} = -1
   ## Dots; -1 = the single-speed value. 2 is LCD_ON_LINE0_LOCK_LEAD, the same
   ## lead the VRAM and OAM locks take on that line. gambatte
-  ## enable_display/ly0_late_cgbp{r,w}{,_ds}_{1,2}: single speed 2..5 pass
-  ## (1 loses the two `_1` rows, 6 the two `_2` rows); double speed 2..3
-  ## pass (1 loses `_ds_1`, 4 loses `_ds_2`).
+  ## enable_display/ly0_late_cgbp{r,w}{,_ds}_{1,2}: single speed 1..4 pass
+  ## on top of CRAM_LOCK_ON_LAT = 1 (0 loses the two `_1` rows, 5 the two
+  ## `_2` rows); double speed 2..3 pass (1 loses `_ds_1`, 4 loses `_ds_2`).
 
 proc cpu_cram_open_dots(ppu: GbPpu; gb: GB; is_write: bool): bool {.noinline.} =
   ## CRAM_LOCK_DOTS: the lock as a dot window around the mode-3 edges.
@@ -2148,6 +2158,20 @@ template win_check_clear*(ppu: GbPpu) =
   ppu.win_check_wr = 0
   ppu.wy_cmp = ppu.wy
 
+proc win_line_wy(ppu: GbPpu; gb: GB): uint8 {.inline.} =
+  ## WY as the per-line sample finds it, asked on the line's first dot. At
+  ## single speed that sample is WIN_LINE_CHECK_DOT_SS dots into the line, and
+  ## the one thing that can move in those dots is a WY write's value reaching
+  ## the comparator (`wy_cmp`), so the look-ahead stands in for a stop there.
+  result = ppu.wy_cmp
+  when WIN_LINE_CHECK_DOT_SS != 0 and WIN_CHECK_DEFER_ANY:
+    if unlikely(ppu.win_check_dot >= 0) and gb.memory.current_speed == 0'u8:
+      if ((ppu.win_check_wr and 1'u8) != 0 and
+          ppu.win_check_dot <= int32(WIN_LINE_CHECK_DOT_SS)) or
+         ((ppu.win_check_wr and 2'u8) != 0 and ppu.win_check_dot2 >= 0 and
+          ppu.win_check_dot2 <= int32(WIN_LINE_CHECK_DOT_SS)):
+        result = ppu.wy
+
 proc `mode_flag=`*(ppu: GbPpu; mode: uint8; gb: GB) =
   let prev_mode = ppu.mode_flag
   # Backstop for a held HBlank DMA block (HDMA_VISIBLE_DOTS): a mode change is
@@ -2176,7 +2200,7 @@ proc `mode_flag=`*(ppu: GbPpu; mode: uint8; gb: GB) =
     win_check_push(ppu,
       (if gb.memory.current_speed != 0'u8: int32(WIN_LINE0_CHECK_DOT_CGB_DS)
        else: int32(WIN_LINE0_CHECK_DOT_CGB)), false)
-  elif mode == 2 and ppu.ly == ppu.wy_cmp and window_enabled(ppu):
+  elif mode == 2 and win_line_wy(ppu, gb) == ppu.ly and window_enabled(ppu):
     when defined(gb_win_trace):
       echo "WYLATCH ly=", ppu.ly, " wy=", ppu.wy, " dot=", ppu.cycle_counter
     ppu.window_trigger = true
@@ -2593,11 +2617,13 @@ proc win_check_now*(ppu: GbPpu; gb: GB) =
   ppu.win_check_dot2 = -1
   ppu.win_check_wr = ppu.win_check_wr shr 1
   if wr: ppu.wy_cmp = ppu.wy
-  when WIN_CHECK_CUT_DOTS != 0:
+  when WIN_CHECK_CUT_DOTS != 0 or WIN_CHECK_CUT_DOTS_DS != 0:
     # Late in the line the comparator is done with it (WIN_CHECK_CUT_DOTS):
     # the value is in place for the boundary's check, nothing latches here.
     if (ppu.lcd_status and 3'u8) == 0'u8 and
-       ppu.cycle_counter >= gb_line_end(ppu) - int32(WIN_CHECK_CUT_DOTS):
+       ppu.cycle_counter >= gb_line_end(ppu) -
+         (if gb.memory.current_speed != 0'u8: int32(WIN_CHECK_CUT_DOTS_DS)
+          else: int32(WIN_CHECK_CUT_DOTS)):
       return
   if ppu.lcd_enabled and window_enabled(ppu) and (ppu.lcd_status and 3'u8) != 1'u8 and
      ppu.ly == ppu.wy_cmp:

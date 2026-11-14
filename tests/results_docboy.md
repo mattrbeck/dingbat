@@ -1,6 +1,6 @@
 # DocBoy Test Suite - Detailed Results
 
-*Generated: 2026-11-13 17:47:39 · Docheinstein/docboy 01e04d3d*
+*Generated: 2026-11-14 07:40:07 · Docheinstein/docboy 01e04d3d*
 
 DocBoy's own ROMs (`docboy/` in its tests/config manifests), each
 scored by the verdict its manifest names, the way DocBoy's runner
