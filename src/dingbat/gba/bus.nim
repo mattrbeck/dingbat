@@ -617,8 +617,8 @@ proc new_bus*(gba: GBA; bios_path: string): Bus =
     write_stub_u32(result.bios, 0x22C, 0xEF000000'u32)  # swi 0 (boot finish)
     # SoundGetJumpList (SWI 0x2A): the 36 sound-driver function addresses the
     # real BIOS copies to [r0] (BIOS 0x3738), same values so games that
-    # compare the pointers see the real thing. Entry 35 (0x23B0, channel
-    # clear) is real code; the others trap into the HLE.
+    # compare the pointers see the real thing. Each entry traps into the
+    # HLE.
     const JUMP_LIST = [0x2665'u32, 0x26CF, 0x26EF, 0x2709, 0x271D, 0x2665,
                        0x2665, 0x2665, 0x2665, 0x274B, 0x2755, 0x2769,
                        0x277B, 0x27A9, 0x27BB, 0x27CF, 0x27E3, 0x27F5,
@@ -632,12 +632,6 @@ proc new_bus*(gba: GBA; bios_path: string): Bus =
       let t = int(v and not 1'u32)
       result.bios[t]     = 0x00'u8
       result.bios[t + 1] = 0xDF'u8
-    # Entry 35, the real routine at 0x23B0 (verbatim):
-    #   mov ip, r4; movs r1-r4, #0; 4x stmia r0!, {r1-r4}; mov r4, ip; bx lr
-    for i, h in [0x46A4'u16, 0x2100, 0x2200, 0x2300, 0x2400,
-                 0xC01E, 0xC01E, 0xC01E, 0xC01E, 0x4664, 0x4770]:
-      result.bios[0x23B0 + i * 2]     = uint8(h and 0xFF)
-      result.bios[0x23B0 + i * 2 + 1] = uint8(h shr 8)
     # SoundDriverMain's callback returns (hle_sound.nim sd_main): the real
     # routine calls SoundInfo +0x20 and +0x28 with lr 0x1DF1 / 0x1DF9, so the
     # stub puts its `swi 0` traps (Thumb) at those addresses. The BIOS's

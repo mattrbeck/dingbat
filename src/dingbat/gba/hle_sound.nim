@@ -1026,7 +1026,7 @@ const
 type SdJl = enum
   jlFine, jlGoto, jlPatt, jlPend, jlRept, jlPrio, jlTempo, jlKeysh, jlVoice,
   jlVol, jlPan, jlBend, jlBendr, jlLfos, jlLfodl, jlMod, jlModt, jlTune,
-  jlPort, jlEndtie, jlRealClearChain, jlTrkVolPitSet
+  jlPort, jlEndtie, jlRealClearChain, jlTrkVolPitSet, jlChannelClear
 
 proc sd_jl_kind(trap_pc: uint32; kind: var SdJl): bool =
   ## The function a jump-list trap (r15 = entry + 4) stands for.
@@ -1054,6 +1054,7 @@ proc sd_jl_kind(trap_pc: uint32; kind: var SdJl): bool =
   of 0x262C: kind = jlEndtie
   of 0x23CA: kind = jlRealClearChain
   of 0x15A0: kind = jlTrkVolPitSet
+  of 0x23B4: kind = jlChannelClear
   else: result = false
 
 # Costs. Each function's time was measured with its structures in EWRAM
@@ -1089,7 +1090,8 @@ const
     44,   # port (+1 for the I/O write)
     35,   # endtie (no key byte, empty chain)
     31,   # RealClearChain
-    58]   # TrkVolPitSet (no update)
+    58,   # TrkVolPitSet (no update)
+    32]   # ChannelClear (sixteen word stores)
   SD_FINE_CH_ON = 45      # a channel released by fine, 43 with nothing to
   SD_FINE_CH_OFF = 43     # release, 4 more for each after the first
   SD_FINE_CH_NEXT = 4
@@ -1374,6 +1376,18 @@ proc sd_jl_run(cpu: CPU; kind: SdJl): int =
       ww(c + CH_TRACK, 0)
     else:
       result = SD_RCC_NONE
+  of jlChannelClear:
+    # Entry 35: zero the 64-byte channel at r0 as four 16-byte bursts, r0
+    # left past it, r1-r3 cleared, r12 holding the caller's r4 and the
+    # flags as a zero result leaves them (jlist.c / jlist_iw.c: 144 cycles
+    # with the channel in EWRAM, 64 in IWRAM).
+    let c = cpu.r[0]
+    for i in 0'u32 ..< 16'u32: ww(c + i * 4, 0)
+    cpu.r[0] = c + 64
+    cpu.r[1] = 0; cpu.r[2] = 0; cpu.r[3] = 0
+    cpu.r[12] = cpu.r[4]
+    cpu.cpsr.negative = false
+    cpu.cpsr.zero = true
   result += acc
   # What the real routine leaves below sp (jlist_stk.c: registers set to
   # known values, the stack captured after each call): fine pushes r4, r5
@@ -1401,7 +1415,7 @@ proc sd_jl_run(cpu: CPU; kind: SdJl): int =
     put(8, cpu.r[4]); put(4, cpu.r[14])
   of jlTrkVolPitSet:
     put(16, cpu.r[4]); put(12, cpu.r[5]); put(8, cpu.r[7]); put(4, cpu.r[14])
-  of jlPend, jlRealClearChain: discard
+  of jlPend, jlRealClearChain, jlChannelClear: discard
 
 # --- TrackStop and FadeOutBody: loops that call the game ---
 #
