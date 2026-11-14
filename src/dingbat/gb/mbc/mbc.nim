@@ -223,8 +223,8 @@ proc load_cartridge*(rom_path: string): Mbc =
     # not the zeroes newSeq would give.
     let c = Mbc7(rom: rom, ram: newSeq[uint8](0x100),
                  sav_path: sav_path, has_battery: has_battery,
-                 x_latch: 0x8000, y_latch: 0x8000, latch_ready: true,
-                 read_bits: 0xFFFF, eeprom_do: true)
+                 x_sample: 0x8000, y_sample: 0x8000, latch_armed: true,
+                 data_reg: 0xFFFF, pin_do: true)
     for i in 0 ..< c.ram.len: c.ram[i] = 0xFF
     cart = c
   of 0xFC:

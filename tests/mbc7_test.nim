@@ -23,8 +23,8 @@ proc make_cart(): Mbc7 =
   ## Mirrors the power-on state load_cartridge gives a type-$22 cart: erased
   ## EEPROM (all ones), unlatched accelerometer, idle port.
   result = Mbc7(rom: newSeq[uint8](0x8000), ram: newSeq[uint8](0x100),
-                x_latch: 0x8000, y_latch: 0x8000, latch_ready: true,
-                read_bits: 0xFFFF, eeprom_do: true)
+                x_sample: 0x8000, y_sample: 0x8000, latch_armed: true,
+                data_reg: 0xFFFF, pin_do: true)
   for i in 0 ..< result.ram.len: result.ram[i] = 0xFF
   mbc_write(result, 0x0000, 0x0A)   # RAM enable 1
   mbc_write(result, 0x4000, 0x40)   # RAM enable 2
@@ -114,7 +114,7 @@ block:
   check(not c.ram_dirty, "refused WRITE does not dirty the save")
 
   discard c.simple(OP_EXT, EXT_EWEN)
-  check(c.eeprom_write_enabled, "EWEN enables programming")
+  check(c.write_enabled, "EWEN enables programming")
   let busy = c.write_word(5, 0x1234)
   check(busy > 0, "WRITE: DO reads Busy (0) before Ready, polls = " & $busy)
   check(c.read_words(5, 1) == @[0x1234'u16], "WRITE then READ returns the word")
@@ -147,7 +147,7 @@ block:
   check(all_erased, "ERAL erases the whole array")
 
   discard c.simple(OP_EXT, EXT_EWDS)
-  check(not c.eeprom_write_enabled, "EWDS disables programming")
+  check(not c.write_enabled, "EWDS disables programming")
   discard c.write_word(9, 0x5555)
   check(c.read_words(9, 1) == @[0xFFFF'u16], "WRITE after EWDS is refused")
   discard c.simple(OP_EXT, EXT_EWEN)
@@ -171,7 +171,7 @@ block:
   check(mbc_read(c, 0xA020) == 0xFF and mbc_read(c, PORT) == 0xFF,
         "registers read $FF with only gate 1 set")
   c.port(CS)
-  check(not c.eeprom_cs, "port writes are ignored with only gate 1 set")
+  check(not c.pin_cs, "port writes are ignored with only gate 1 set")
   mbc_write(c, 0x4000, 0x40)
   mbc_write(c, 0x0000, 0x00)   # drop gate 1 only
   check(mbc_read(c, PORT) == 0xFF, "registers read $FF with only gate 2 set")
