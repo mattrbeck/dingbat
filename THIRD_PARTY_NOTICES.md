@@ -46,7 +46,8 @@ The MPL-2.0 components' source is the upstream source at those tags.
   zaydlang. The full zlib notice is kept in the source file as the licence
   requires.
 - **GBA colour-correction model** (`src/dingbat.nim`, `src/dingbat_wasm.nim`,
-  `src/dingbat_ios.nim`, `web/glpresent.js`): the gamma and mixing constants
+  `src/dingbat_ios.nim`, `web/glpresent.js`,
+  `ios/Dingbat/Sources/PresentShader.swift`): the gamma and mixing constants
   of the ares emulator's GBA colour model. ISC licence, Copyright (c)
   2004-2025 ares team, Near et al. Permission to use, copy, modify, and/or
   distribute this software for any purpose with or without fee is hereby
