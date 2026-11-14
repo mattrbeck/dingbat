@@ -527,7 +527,10 @@ Dots are dingbat's line dots; W is the first dot of the writing M-cycle
   measured against the latched 7 it would be 23. With D frozen at the
   latched value (0) `scx_during_m3_{2,3,4}` and `_ds_{2,3,4,5}` [cgb] fail
   by one tile from the $C0 store on. The DMG frames show 23 and pass either
-  way: `($C0 - 9 + 1) shr 3 = 23`. A variant in which D moves only on a wrap
+  way: `($C0 - 9 + 1) shr 3 = 23`. The term is only ever a borrow: on a DMG
+  whose reference is -1 (an unscrolled line) the plain floor would add a
+  tile at `SCX and 7 = 7`; no row asks for that and the borrow is clamped
+  at none there, as it was before the wrap term. A variant in which D moves only on a wrap
   was tried and scores the same on every suite; the rule with no special
   case ships (1; 0 is the frozen reference).
 - Clean-room: derived from test ROM sources/outputs and dingbat's own trace runs; no emulator source consulted.
@@ -836,12 +839,13 @@ Dots are dingbat's line dots; W is the first dot of the writing M-cycle
   bus. While a transfer has the bus the scan's Y/X input latches are not
   loaded, so each slot inside the transfer's span compares the word the
   latches last loaded, and an object is kept (at that X) for every slot in
-  which that Y is on the line, up to the usual ten. The latches load on every
-  OAM read the PPU makes: an entry's Y/X word in its slot, and an object's
-  tile/flags word at its mode-3 fetch. The fetch loads them under a transfer
-  too, with the byte the unit has on its bus (the read strikethrough pins,
-  `OBJ_DMA_BUS_LEAD`). A transfer frozen by HALT on a DMG drives the latches
-  with its destination word instead (`OAMDMA_FREEZE_BUS`).
+  which that Y is on the line, up to the usual ten. The latches
+  (`scan_y_latch`, `scan_x_latch`) load an entry's Y and X in its slot, until
+  the line has its ten objects. An object's mode-3 fetch then replaces the Y
+  latch with its tile byte; under a transfer that is the byte the unit has
+  on its bus (the read strikethrough pins, `OBJ_DMA_BUS_LEAD`). A transfer
+  frozen by HALT on a DMG drives the latches with its destination word
+  instead (`OAMDMA_FREEZE_BUS`).
 - Evidence, the hold: DocBoy `dmg/ppu/oam_scan_blocked_by_dma_nops{100..107}`
   (ten objects in entries 0..9, X = $10, $18 .. $58) and `nops{115..122}`
   (the same ten in entries 30..39) start a transfer one M-cycle later per
@@ -862,11 +866,21 @@ Dots are dingbat's line dots; W is the first dot of the writing M-cycle
 - Evidence, what is held before a line's first slot: gambatte
   `oamdma/late_sp39y_2` (both devices) has entry 39 on the line (Y = $10,
   X = $A0, tile and flags $A0), fetched on line 2, and a transfer covering
-  all of line 3's scan: no object is found. Holding entry 39's Y/X (the
-  scan's last read) finds ten; holding the fetch's tile/flags word ($A0,
-  $A0) finds none. `late_sp39y_ds_2` [cgb] starts the transfer before that
-  fetch and still finds none, so the fetch loads the latches under a
-  transfer as well (the unit's byte, $A0).
+  all of line 3's scan: no object is found. A Y latch still holding entry
+  39's Y (the scan's last read) finds ten; one the fetch replaced with the
+  tile byte ($A0) finds none. `late_sp39y_ds_2` [cgb] starts the transfer
+  before that fetch and still finds none, so the fetch replaces the Y latch
+  under a transfer as well (the unit's byte, $A0).
+- Pinned and chosen. Pinned by rows: the hold and the X the copies take
+  (the twenty DocBoy rows, strikethrough, `mgb_oam_dma_halt_sprites`); that
+  a fetch replaces the Y latch, with and without a transfer running (the two
+  `late_sp39y` rows). Those two rows only need a Y that is off the line.
+  Modelling choices no row sees: that the replacing byte is the tile byte
+  (any off-line value passes); that the fetch leaves the X latch alone
+  (loading the flags byte into it gives identical verdicts and screenshots);
+  that the latches stop loading once the line has ten objects (loading on
+  through entry 39 gives identical verdicts and screenshots). The smaller
+  model ships in both cases.
 - Evidence, the double-speed edge: `OAM_SCAN_DMA_EDGE_DS` is the number of
   dots the take/give edge sits ahead of the dot its M-cycle starts on, at
   double speed. gambatte `oamdma/late_sp{00,01,39}{x,y}_ds_{1,2}` [cgb]: 0

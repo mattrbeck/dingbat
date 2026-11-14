@@ -344,8 +344,8 @@ proc save_ppu_state(ppu: GbPpu; w: var Writer) =
   w.write_bool(fp.win_carry)
   w.write_bool(fp.win_carry_gap)
   # The mode-2 comparator's Y/X input latches: the last entry a scan read.
-  w.write_u8(fp.scan_y_bus)
-  w.write_u8(fp.scan_x_bus)
+  w.write_u8(fp.scan_y_latch)
+  w.write_u8(fp.scan_x_latch)
   # CGB_TDSEL_GLITCH's address latch: the last $8000-region tile-data read,
   # a bus register that keeps it through H-Blank and V-blank alike.
   w.write_i32(fp.tdsel_addr)
@@ -505,8 +505,8 @@ proc load_ppu_state(ppu: GbPpu; gb: GB; r: var Reader; rev: uint32) =
     scan_x = ppu.sprite_table[0x9D]
   fp.win_carry = carry
   fp.win_carry_gap = carry_gap
-  fp.scan_y_bus = scan_y
-  fp.scan_x_bus = scan_x
+  fp.scan_y_latch = scan_y
+  fp.scan_x_latch = scan_x
   fp.tdsel_addr = tdsel
 
 # ---- APU ----

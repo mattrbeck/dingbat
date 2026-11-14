@@ -293,7 +293,7 @@ const VRAM_WRITE_LINE0_CGB_GRACE* {.intdefine.} = 1
   ## `double_speed_ppu_vram_write_block_timing_ly0_1_out_of_4`.
   ## The width: DocBoy `double_speed_ppu_vram_write_block_timing_ly0_1_out_of_4`
   ## (CPU CGB E, writes one double-speed M-cycle apart) takes 2..3 and loses
-  ## 4, and SameBoy (CGB E) passes it.
+  ## 4.
 const VRAM_WRITE_LINE0_OPEN_LEAD* {.intdefine.} = 1
   ## Whether a CGB VRAM write on the LCD-on line sees mode 3 end
   ## LCD_ON_LINE0_LOCK_LEAD dots late, as a read does (lcdon_latched_mode):
@@ -2462,13 +2462,13 @@ type
     # underneath it (oam_scan_advance). Per-line scratch.
     scan_next*:           int32
     scan_line*:           int32
-    # The mode-2 comparator's two input latches: the last OAM word the PPU
-    # read (an entry's Y/X in the scan, an object's tile/flags at its fetch).
-    # An OAM DMA takes the OAM bus away from the scan, and the scan does not
-    # stop -- it keeps stepping and keeps comparing whatever these last held.
-    # See OAM_SCAN_DMA_HOLD (fifo_ppu.nim).
-    scan_y_bus*:          uint8
-    scan_x_bus*:          uint8
+    # The mode-2 comparator's two input latches: the Y and X of the last
+    # entry the scan read; an object's mode-3 fetch then replaces the Y latch
+    # with its tile byte. An OAM DMA takes the OAM bus away from the scan,
+    # and the scan does not stop -- it keeps stepping and keeps comparing
+    # whatever these last held. See OAM_SCAN_DMA_HOLD (fifo_ppu.nim).
+    scan_y_latch*:          uint8
+    scan_x_latch*:          uint8
     # The window start's undo record (CGB_WIN_EN_DEFER): `win_defer` counts the
     # dots left before the start becomes final; the rest is what
     # `win_start_reset` overwrote on the match dot (`fifo_clear` leaves `data`

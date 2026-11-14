@@ -799,7 +799,7 @@ nothing while an OAM DMA owns the OAM bus. The transfer moves one entry per
 latency can express the rows (Pan Docs, "OAM DMA Transfer"; gambatte
 `oamdma/late_sp{00,01,02,39}{x,y}`, sixteen one-M-cycle brackets). For a
 slot inside a running transfer the comparator compares the word its input
-latches last loaded, the last OAM word the PPU read (`OAM_SCAN_DMA_HOLD`;
+latches last loaded (`OAM_SCAN_DMA_HOLD`;
 DocBoy `oam_scan_blocked_by_dma_nops*`, strikethrough,
 `mgb_oam_dma_halt_sprites`; docs/gb-derivations.md section 6).
 
