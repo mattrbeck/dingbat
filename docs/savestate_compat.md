@@ -116,7 +116,7 @@ live values across one field at a time until nothing diverged):
 |---|---|---|
 | CPU | `stopped`; `halted`/`locked` now written raw | `stopped=false` (older writers masked STOP out: it loads as the running CPU after the STOP, as it did) |
 | `GB_SEC_MACH` (new, after `cgb_enabled`) | `revision`, then four reserved slots (i16, i16, u64, i32; written 0, 0, 0, -1 and ignored on load since 2026-11-13) | the running machine's revision (as before) |
-| MEM | `$FEA0-$FEFF`, RP, SVBK readback | the running machine's, as before (SVBK readback from the bank) |
+| MEM | `$FEA0-$FEFF`, RP, SVBK readback (`$F8` \| the stored bits; loaded only where it agrees with the mapped bank, i.e. a stored 0 over bank 1) | the running machine's, as before (SVBK readback from the bank) |
 | PPU | `lcd_on_first_frame`, the pending STAT drop (`pending`, `level`, `dot`), FIFO `win_carry`/`win_carry_gap`, the OAM comparator's Y/X latches, the tile-data address latch | LCD-on flag clear, no pending drop, no carry, latches as an undisturbed scan of the loaded OAM leaves them, address latch empty |
 | APU | `tick_phase`, `noise_phase`, `div_skip`, `spsw_fs_lag`, CH1/CH2 `sample_bit` and `env_extra_tick`, CH1's sweep deadlines and `sweep_load_value`, CH3 `wave_fetched`, CH4 `env_extra_tick`, `div_counter`, `div_next` | the running machine's phases, lag and latches (as before); no extra envelope tick or sweep deadline in flight; CH4's divisor stage rebuilt from its LFSR deadline (`ch4_resync_divisor`) |
 

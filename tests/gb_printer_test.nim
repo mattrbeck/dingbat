@@ -71,8 +71,84 @@ block:
   for px in prn.outbox[0]:
     if px != 0: all_white = false
   check(all_white, "zero tile data maps to shade 0 via palette 0xE4")
-# The status sequencing across DATA / PRINT / completion: removed 2026-11-13
-# for a clean rewrite (its checks go with it).
+
+# Pan Docs, "Game Boy Printer", Example: INIT $00; DATA $00, then $08; the
+# empty DATA $08; PRINT $08; STATUS $06 until the print ends, then $04.
+echo "status sequence (Pan Docs example)"
+block:
+  let prn = new_gb_printer()
+  let status_pkt = build_packet(0x0F, @[])
+  check(prn.send(build_packet(0x01, @[])).last == 0x00, "INIT replies $00")
+  check(prn.send(build_packet(0x04, band(0x00, 0x00))).last == 0x00,
+        "DATA's own reply is still $00")
+  check(prn.send(status_pkt).last == 0x08, "STATUS after DATA: $08, ready to print")
+  check(prn.send(build_packet(0x04, band(0x00, 0x00))).last == 0x08,
+        "a second DATA replies $08")
+  check(prn.send(build_packet(0x04, @[])).last == 0x08, "the empty DATA replies $08")
+  check(prn.send(status_pkt).last == 0x08, "the empty DATA changes nothing")
+  check(prn.send(build_packet(0x02, @[1'u8, 0x13, 0xE4, 0x40])).last == 0x08,
+        "PRINT's own reply is still $08")
+  check(prn.printing, "PRINT starts the print")
+  var polls, busy = 0
+  while prn.printing and polls < 1000:
+    if prn.send(status_pkt).last == 0x06: inc busy
+    inc polls
+    prn.tick_frame()
+  check(polls >= 30 and busy == polls,
+        "every STATUS during the print reads $06 (" & $busy & " of " & $polls & ")")
+  check(prn.send(status_pkt).last == 0x04, "STATUS after the print: $04, done")
+  check(prn.send(status_pkt).last == 0x04, "$04 holds while the game keeps talking")
+  check(prn.send(build_packet(0x01, @[])).last == 0x00,
+        "INIT straight after a print replies $00, not the old $04")
+  check(prn.send(status_pkt).last == 0x00, "and leaves $00")
+
+echo "a slow poller still reads the end of the print"
+block:
+  # One STATUS every 10 frames, past the 100 ms (6-frame) packet timeout: the
+  # timeout neither aborts the print nor takes the $04 away unread.
+  let prn = new_gb_printer()
+  let status_pkt = build_packet(0x0F, @[])
+  discard prn.send(build_packet(0x01, @[]))
+  for _ in 0 ..< 3: discard prn.send(build_packet(0x04, band(0x00, 0x00)))
+  discard prn.send(build_packet(0x04, @[]))
+  discard prn.send(build_packet(0x02, @[1'u8, 0x13, 0xE4, 0x40]))
+  var seen: seq[uint8] = @[]
+  for _ in 0 ..< 60:
+    for _ in 0 ..< 10: prn.tick_frame()
+    let s = prn.send(status_pkt).last
+    if seen.len == 0 or seen[^1] != s: seen.add(s)
+  check(seen == @[0x06'u8, 0x04, 0x00],
+        "polls 10 frames apart read $06, then $04 once, then $00 (got " & $seen & ")")
+  check(prn.outbox.len == 1 and prn.outbox[0].len == 160 * 48,
+        "the print ran to its end under slow polls")
+
+echo "idle timeout returns the printer to $00"
+block:
+  let prn = new_gb_printer()
+  let status_pkt = build_packet(0x0F, @[])
+  discard prn.send(build_packet(0x04, band(0x00, 0x00)))
+  check(prn.send(status_pkt).last == 0x08, "data waiting")
+  for _ in 0 ..< 6: prn.tick_frame()
+  check(prn.send(status_pkt).last == 0x00, "100 ms of silence drops the buffer and its $08")
+  discard prn.send(build_packet(0x02, @[1'u8, 0, 0xE4, 0x40]))
+  while prn.printing: prn.tick_frame()
+  check(prn.outbox.len == 0, "nothing was left to print")
+
+echo "break and error bits"
+block:
+  let prn = new_gb_printer()
+  let status_pkt = build_packet(0x0F, @[])
+  for _ in 0 ..< 3: discard prn.send(build_packet(0x04, band(0x00, 0x00)))
+  discard prn.send(build_packet(0x02, @[1'u8, 0, 0xE4, 0x40]))
+  check(prn.send(status_pkt).last == 0x06, "printing")
+  discard prn.send(build_packet(0x08, @[]))
+  check(not prn.printing and prn.send(status_pkt).last == 0x00, "BREAK stops the print: $00")
+  let bad = prn.send(build_packet(0x04, band(0, 0), corrupt_chk = true))
+  check(bad.last == 0x01, "a bad checksum reports bit 0 alone")
+  check(prn.send(status_pkt).last == 0x00, "and the rejected DATA is not waiting")
+  discard prn.send(build_packet(0x07, @[]))
+  check(prn.send(status_pkt).last == 0x10, "an unknown command sets the packet-error bit")
+  check(prn.send(build_packet(0x01, @[])).last == 0x00, "INIT clears it")
 
 echo "paper-feed strips stay out of the gallery"
 block:

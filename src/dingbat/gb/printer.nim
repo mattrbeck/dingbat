@@ -13,9 +13,37 @@
 # byte outside a packet keeps the parser in MAGIC1, so mid-packet aborts and
 # state loads self-heal.
 #
-# Status byte: bit 0 checksum error and bit 4 packet error are modelled. The
-# status sequencing across DATA / PRINT / completion and its latching were
-# removed 2026-11-13 for a clean rewrite.
+# Status byte (Pan Docs, "Status byte"): bit 0 checksum error, bit 1
+# printing, bit 2 image data full, bit 3 unprocessed data, bit 4 packet
+# error. The upper three (battery, jam, other) never set here. The sequence
+# is the one in Pan Docs' "Example":
+#   INIT            -> $00
+#   DATA            -> $00, and $08 from the next packet on
+#   DATA (empty)    -> $08
+#   PRINT           -> $08 still
+#   STATUS ...      -> $06 while the print runs, then $04 (done)
+# So a packet's own status byte is the state before that packet took effect:
+# the DATA that fills the buffer and the PRINT that starts the motor both
+# still report what the previous packet left. feed() therefore takes the
+# reply at the ACK slot and executes the command after the status slot. INIT
+# is the exception Pan Docs gives ("the normal status replied should be
+# $00"): its own reply is already the cleared status, whatever a previous
+# print left behind (PRN_INIT_REPLY_CLEAN).
+#
+# PRINT moves bit 3 (data waiting) to bits 2 and 1 ($08 -> $06); the end of
+# the print drops bit 1 ($04), and $04 stays until INIT, BREAK or the idle
+# timeout. Games sit in a loop on these bits. Game Boy Camera Gold, observed
+# through GbPrinter.log, sends STATUS about every six frames after PRINT and
+# keeps its "Printing..." screen up while bit 1 reads set; with bit 1 never
+# set it takes the sixth poll as the end and is back at its menu within
+# half a second, the paper still running (docs/gb-derivations.md, "Game Boy
+# Printer status").
+#
+# The done status is held until one reply has carried it (`done_unseen`):
+# the 100 ms idle timeout would otherwise return a finished printer to $00
+# between two polls, and a game waiting for $04 would never see the print
+# end. Camera Gold's poll period is the timeout's length: without the hold
+# its last poll reads $00 instead of $04.
 
 import gb
 
@@ -30,6 +58,20 @@ const
   # Paper-feed jobs print a few blank rows to eject the sheet. They are not
   # photographs, so they never reach the gallery.
   PRN_MIN_PHOTO_ROWS = 24
+
+  ST_CHECKSUM* = 0x01'u8    # this packet's checksum did not match
+  ST_PRINTING* = 0x02'u8    # the print countdown is running
+  ST_FULL*     = 0x04'u8    # set by PRINT, kept after the print ($06, $04)
+  ST_DATA*     = 0x08'u8    # DATA received and not yet printed
+  ST_PACKET*   = 0x10'u8    # unknown command
+
+const PRN_STATUS_SEQUENCE* {.booldefine.} = true
+  ## The $08 / $06 / $04 sequence above. false leaves only the checksum and
+  ## packet-error bits: Game Boy Camera Gold then leaves its printing screen
+  ## after six status polls (tests/gb_printer_test.nim holds the sequence).
+const PRN_INIT_REPLY_CLEAN* {.booldefine.} = true
+  ## INIT's own status byte is the cleared status. false: it reports what
+  ## the previous print left ($04), against Pan Docs' "should be $00".
 
 type
   PrnState = enum
@@ -55,6 +97,7 @@ type
     log*:         seq[uint16]    # RX<<8|TX ring of the last exchanges
     muted*:       bool        # clip replay: reply 0, mutate nothing
     idle_frames:  int         # frames since the last serial byte (timeout)
+    done_unseen:  bool        # the print ended and no reply has said so yet
 
   GbPrinterDriver* = ref object of GbSerialDriver
     printer*: GbPrinter
@@ -100,18 +143,24 @@ proc printing*(prn: GbPrinter): bool =
 proc tick_frame*(prn: GbPrinter) =
   ## Advance the print countdown; call once per emulated frame.
   # Pan Docs: a 100 ms packet timeout returns the printer to its initialized
-  # state (link and graphics buffers reset). An active print is left to
-  # finish: the game only polls status while the motor runs, and aborting on
-  # a slow poll re-breaks Hello Kitty Pocket Camera (see below).
+  # state (link and graphics buffers reset), which is status $00. Two things
+  # outlast it. An active print: the game only polls status while the motor
+  # runs, and a poll slower than 100 ms must not abort the print. And a
+  # finished print nobody has been told about (done_unseen, above): the same
+  # slow poller has to read $04 once.
   inc prn.idle_frames
   if prn.idle_frames >= PRN_TIMEOUT_FRAMES and prn.print_left == 0 and
-     (prn.state != psMagic1 or prn.buffer.len > 0):
+     not prn.done_unseen and
+     (prn.state != psMagic1 or prn.buffer.len > 0 or prn.status != 0):
     prn.state = psMagic1
     prn.buffer.setLen(0)
     prn.status = 0
   if prn.print_left > 0:
     dec prn.print_left
     if prn.print_left == 0:
+      when PRN_STATUS_SEQUENCE:
+        prn.status = prn.status and not ST_PRINTING      # $06 -> $04
+        prn.done_unseen = true
       if prn.feed_after:
         prn.emit_strip()
 
@@ -144,6 +193,7 @@ proc exec_command(prn: GbPrinter) =
     prn.buffer.setLen(0)
     prn.status = 0
     prn.print_left = 0
+    prn.done_unseen = false
   of 0x02:  # PRINT: payload = sheets, margins, palette, exposure
     if prn.payload.len >= 4:
       let sheets  = prn.payload[0]
@@ -154,6 +204,10 @@ proc exec_command(prn: GbPrinter) =
       prn.buffer.setLen(0)
       prn.feed_after = sheets != 0
       prn.print_left = max(30, printed_rows * PRN_FRAMES_PER_ROW_NUM div PRN_FRAMES_PER_ROW_DEN)
+      when PRN_STATUS_SEQUENCE:
+        # The waiting data becomes the print: $08 -> $06.
+        prn.status = (prn.status and not ST_DATA) or ST_FULL or ST_PRINTING
+        prn.done_unseen = false
   of 0x04:  # DATA: append a band (empty payload = the conventional flush)
     let chunk = if prn.compressed: rle_decode(prn.payload) else: prn.payload
     # Only a full band counts: a short/zero-length packet (the conventional
@@ -161,14 +215,20 @@ proc exec_command(prn: GbPrinter) =
     if chunk.len == PRN_BAND_TILES * 16:
       if prn.buffer.len + chunk.len <= PRN_MAX_IMAGE:
         prn.buffer.add(chunk)
+    when PRN_STATUS_SEQUENCE:
+      # Any payload counts as data waiting; the empty packet changes nothing
+      # (Pan Docs' example: $08 after the DATA, "still" $08 after the empty
+      # one).
+      if prn.payload.len > 0: prn.status = prn.status or ST_DATA
   of 0x08:  # BREAK: abort
     prn.print_left = 0
     prn.buffer.setLen(0)
     prn.status = 0
+    prn.done_unseen = false
   of 0x0F:  # STATUS inquiry: nothing to execute
     discard
   else:
-    prn.status = prn.status or 0x10      # packet error (unknown command)
+    prn.status = prn.status or ST_PACKET   # unknown command
 
 # ---- the byte engine ------------------------------------------------------
 
@@ -231,6 +291,13 @@ proc feed*(prn: GbPrinter; b: uint8): uint8 =
     else:
       prn.status = prn.status and not 0x01'u8
     prn.reply = prn.status
+    when PRN_INIT_REPLY_CLEAN:
+      # INIT answers with the status it is about to leave.
+      if (prn.cmd and 0x0F) == 0x01 and (prn.status and 0x01) == 0:
+        prn.reply = 0
+    # A reply that reports the finished print releases the idle timeout.
+    if prn.print_left == 0 and (prn.reply and ST_FULL) != 0:
+      prn.done_unseen = false
     prn.state = psStatus
   of psStatus:
     result = prn.reply            # latched at psAck, pre-execution
@@ -263,6 +330,7 @@ proc copy_into*(src, dst: GbPrinter) =
   dst.outbox = src.outbox
   dst.muted = src.muted
   dst.idle_frames = src.idle_frames
+  dst.done_unseen = src.done_unseen
 
 proc clone*(prn: GbPrinter): GbPrinter =
   result = new_gb_printer()

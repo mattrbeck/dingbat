@@ -2615,6 +2615,10 @@ type
   GbMemory* = ref object
     wram*:                 array[8, seq[uint8]]
     wram_bank*:            uint8
+    # SVBK ($FF70) as written, bits 0-2. The register holds what was stored;
+    # `wram_bank` is the bank that value maps at $D000 (0 maps bank 1). The
+    # two differ only for a stored 0 (SVBK_READS_WRITTEN, memory.nim).
+    svbk*:                 uint8
     # RP ($FF56): bits 0/6/7 are stored (LED and the read-enable pair);
     # readback ORs $3E -- bits 2-5 read set, bit 1 is "no IR signal", which
     # is all this models. hardware: gbedge p00 on AGS reads $3E at boot.

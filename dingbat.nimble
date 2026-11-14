@@ -133,6 +133,10 @@ task test_gbobjabortlate, "Check the late object abort never runs the GB pipelin
   exec "nim c -r -d:test_harness -d:release --path:src " &
        "-o:dingbat_gbobjabortlate_test tests/gb_obj_abort_late_test.nim"
 
+task test_gblcdonpacing, "Check frame pacing across an LCD enable (LCD_ON_FRAME_DOTS)":
+  exec "nim c -r -d:test_harness -d:release -d:gb_dot_counter --path:src " &
+       "-o:dingbat_gblcdonpacing_test tests/gb_lcd_on_pacing_test.nim"
+
 task test_psgagb, "Run the PSG's AGB-only checks (the SP's answers) on both cores":
   exec "nim c -r -d:test_harness -d:release --path:src " &
        "-o:dingbat_psgagb_test tests/psg_agb_test.nim"

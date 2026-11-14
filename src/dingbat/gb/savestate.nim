@@ -227,10 +227,10 @@ proc save_mem_state(mem: GbMemory; w: var Writer) =
   w.write_bool(mem.requested_speed_switch)
   w.write_u8(mem.current_speed)
   # rev 6: $FEA0-$FEFF (real RAM on CGB 0-D, GbQuirks.unusable_region), RP,
-  # and a reserved SVBK byte (written as the mapped bank; not read back).
+  # and SVBK's readback ($F8 | the stored bits; the mapped bank is above).
   w.write_bytes(mem.unusable)
   w.write_u8(mem.rp)
-  w.write_u8(mem.wram_bank)
+  w.write_u8(0xF8'u8 or mem.svbk)
   # rev 9: OPRI's bit.
   w.write_u8(mem.opri)
   # rev 10: whether the PPU is sitting out a leaf switch's restart.
@@ -243,6 +243,9 @@ proc load_mem_state(mem: GbMemory; r: var Reader; rev: uint32) =
   # than reject: a real machine could not have produced anything else.
   mem.wram_bank = r.read_u8() and 0x7'u8
   if mem.wram_bank == 0: mem.wram_bank = 1
+  # Until the readback byte below says otherwise (and for a state older than
+  # rev 6): the register holds the bank it maps.
+  mem.svbk = mem.wram_bank
   r.read_bytes(mem.hram)
   mem.bootrom = r.read_seq_u8()
   mem.ff72 = r.read_u8()
@@ -263,8 +266,13 @@ proc load_mem_state(mem: GbMemory; r: var Reader; rev: uint32) =
   if rev >= 6:
     r.read_bytes(mem.unusable)
     mem.rp = r.read_u8() and 0xC1'u8
-    # The reserved SVBK byte.
-    discard r.read_u8()
+    # SVBK's readback. Only its low three bits are taken, and only where
+    # they agree with the mapped bank: the one thing the byte can add is
+    # that bank 1 is mapped by a stored 0. (A state written between
+    # 2026-11-13 and the readback rule carries the mapped bank here, which
+    # loads as that bank's own number.)
+    let stored = r.read_u8() and 0x7'u8
+    if stored == 0 and mem.wram_bank == 1: mem.svbk = 0
   # Before rev 6 neither was carried and a load kept the running machine's
   # $FEA0-$FEFF and RP.
   # OPRI from rev 9; an older state gets the hand-off's 0 (a CGB-mode cart

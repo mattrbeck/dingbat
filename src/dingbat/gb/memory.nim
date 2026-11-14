@@ -5,6 +5,13 @@
 # of STAT/LY), MODE (PPU mode changes), FF55 (writes, with mode/hdma_active),
 # HDMABLOCK (each block copy), VRAMRD (CPU VRAM reads with the lock state).
 
+const SVBK_READS_WRITTEN* {.booldefine.} = true
+  ## $FF70 reads back the three bits last stored (so $F8 after a stored 0,
+  ## and $F8 at hand-off) rather than the bank mapped at $D000 ($F9 for
+  ## both). true: DocBoy cgb/boot/boot_regs_cgb passes and matches the AGS
+  ## read of gbedge p00 (SVBK = $F8, docs/flashcart-runbook.md). false: that
+  ## row fails ($F9). docs/gb-derivations.md, "SVBK readback".
+
 proc new_gb_memory*(gb: GB): GbMemory =
   # DMA (FF46) reads back the last written value; post-boot it's 0xFF on
   # DMG-family models, 0x00 on CGB (Pan Docs power-up sequence).
@@ -211,8 +218,10 @@ proc skip_boot*(mem: GbMemory; gb: GB) =
     let native_cart = gb.cgb_flag != cgbNone
     mem.write_byte(gb, 0xFF68, if native_cart: 0xC0 else: 0xC8)
     mem.write_byte(gb, 0xFF6A, if native_cart: 0xC1 else: 0xD0)
-    # SVBK's readback at hand-off: removed 2026-11-13 with the readback rule
-    # for a clean rewrite.
+    # SVBK is left as it powers up: the boot ROM stores nothing to it, so the
+    # register hands off holding 0 with bank 1 mapped and reads $F8
+    # (SVBK_READS_WRITTEN; DocBoy cgb/boot/boot_regs_cgb, and gbedge p00 on
+    # an AGS, docs/flashcart-runbook.md).
   # P1 at handoff. The select lines power up low (new_gb_joypad: $CF), and a
   # boot ROM that never writes P1 hands that off: the DMG-family ones, and the
   # CGB/AGB one for a CGB cart (Pan Docs, "Power Up Sequence": P1 = $C7 or
@@ -440,9 +449,13 @@ proc read_byte*(mem: GbMemory; gb: GB; idx: int): uint8 =
     # modelled); bits 2-5 read set.
     if gb.cgb_native: (mem.rp and 0xC1'u8) or 0x3E'u8 else: 0xFF'u8
   of 0xFF70:
-    # SVBK readback: removed 2026-11-13 for a clean rewrite; reads the mapped
-    # bank for now.
-    if gb.cgb_native: 0xF8'u8 or mem.wram_bank else: 0xFF'u8
+    # SVBK is a 3-bit register: it reads back what was stored, bits 3-7 set
+    # (Pan Docs, "FF70 - SVBK": bits 0-2 read/write). A stored 0 maps bank 1
+    # but still reads 0: the 0 -> 1 substitution is in the bank decode, not
+    # in the register (SVBK_READS_WRITTEN).
+    if gb.cgb_native:
+      0xF8'u8 or (when SVBK_READS_WRITTEN: mem.svbk else: mem.wram_bank)
+    else: 0xFF'u8
   of 0xFF6C:
     # OPRI: bit 0 readable in CGB mode; $FF in compatibility mode (DocBoy
     # cgb_dmg_mode/ppu/opri_write_read, boot_regs_cgb).
@@ -738,8 +751,8 @@ proc write_byte*(mem: GbMemory; gb: GB; idx: int; val: uint8) =
     if gb.cgb_native: mem.rp = val and 0xC1
   of 0xFF70:
     if gb.cgb_native:
-      mem.wram_bank = val and 0x7
-      if mem.wram_bank == 0: mem.wram_bank = 1
+      mem.svbk = val and 0x7
+      mem.wram_bank = if mem.svbk == 0: 1'u8 else: mem.svbk
   of 0xFF6C:
     if gb.cgb_native: mem.opri = val and 0x01
   of 0xFF72: mem.ff72 = val

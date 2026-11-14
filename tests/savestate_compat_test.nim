@@ -1549,8 +1549,8 @@ proc run_gb_rev6() =
           check(replays_in_new_core(emu, lcdon, 12),
                 "GB LCD-on frame state (LY 0, mode 2) loads and replays",
                 "frame " & $f)
-    # LCD_ON_FRAME_DOTS = 0 pushes no frame at the LCD-on write (re-fit
-    # pending), so the LCD-on frame state is only reachable with it set.
+    # A build with LCD_ON_FRAME_DOTS = 0 pushes no frame at the LCD-on
+    # write, so the LCD-on frame state is only reachable with it set.
     when LCD_ON_FRAME_DOTS != 0:
       check(seen > 0, "the LCD-on test ROM ends frames on the LCD-on write")
 
@@ -1595,8 +1595,30 @@ proc run_gb_rev6() =
           twin.quirks == emu.quirks,
           "the silicon revision (and its quirks) travel with the state")
 
-  # Line-relative state must not outlive its line; the state soak found both
-  # of these live at frame boundaries.
+  # SVBK reads back the stored bits (SVBK_READS_WRITTEN): $F8 at hand-off and
+  # after a stored 0, both with bank 1 mapped; the stored 0 travels with the
+  # state.
+  block:
+    for (val, want) in [(-1, 0xF8), (0, 0xF8), (1, 0xF9), (3, 0xFB), (0xFF, 0xFF)]:
+      let code = if val < 0: @[0x18, 0xFE]                       # jr -2
+                 else: @[0x3E, val, 0xE0, 0x70, 0x18, 0xFE]      # SVBK = val
+      let path = gb_test_rom("svbk", cgb = true, code)
+      let emu = new_gb_at(path)
+      for _ in 0 ..< 2: emu.step_frame()
+      let twin = new_gb_at(path)
+      let loaded = twin.load_state_bytes(emu.state_bytes())
+      let bank = if val <= 0: 1 else: val and 7
+      check(int(emu.memory.read_byte(emu, 0xFF70)) == want and
+            int(emu.memory.wram_bank) == bank,
+            "GB SVBK reads back what was stored", "stored " & $val)
+      check(loaded and int(twin.memory.read_byte(twin, 0xFF70)) == want and
+            twin.memory.wram_bank == emu.memory.wram_bank,
+            "GB SVBK readback travels with the state", "stored " & $val)
+      removeFile(path)
+      removeFile(path[0 ..< path.rfind('.')] & ".sav")
+
+  # Line-relative state must not outlive its line. Both were found live at
+  # frame boundaries by the state soak, long past the line that set them.
   let idle = gb_test_rom("idle", cgb = true, [0x18, 0xFE])        # jr -2
   # Copy an OAM-DMA routine to HRAM, then run it every frame as LY hits 50
   # (early in that line's mode 2).

@@ -649,7 +649,10 @@ random register-writing program per core; known core issues print `[KNOWN]`,
 mixing twin's payload every frame: committed ROMs, the soak's random programs and
 channel-1 stop storms), `test_gbtimedinput` (`--input` lands on its M-cycle; see
 "Timed joypad input"), `test_gbwindowscx` (where a window starting left of the
-screen sits across WX x SCX & 7, DMG and CGB), `test_printer`,
+screen sits across WX x SCX & 7, DMG and CGB), `test_gblcdonpacing` (no
+`step_frame` across an LCD enable is further than 72 lines from one frame
+period; `LCD_ON_FRAME_DOTS`), `test_printer` (the Game Boy Printer's packets,
+its Pan Docs status sequence and image assembly),
 `test_lcdresponse`, `test_mbc3` (MBC3/MBC30 bank registers, 64 KiB RAM, `.sav` and
 save-state round trips on synthetic carts), `test_sgb`, `test_gbartc` (GBA cartridge RTC protocol and the
 battery-save RTC trailer), `test_swihalt` (Halt and Stop from the cartridge

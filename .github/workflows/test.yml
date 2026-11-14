@@ -165,6 +165,12 @@ jobs:
         # wrote past the framebuffer). A program assembled in the test.
         shell: bash
         run: ./dingbat_gbobjabortlate_test
+      - name: GB frame pacing across an LCD enable
+        # LCD_ON_FRAME_DOTS: with the LCD switched back on after a swept
+        # idle, no step_frame is further than 72 lines from one frame
+        # period. A program assembled in the test.
+        shell: bash
+        run: ./dingbat_gblcdonpacing_test
       - name: PSG AGB-only behaviour (the SP's answers, both cores)
         # Wave RAM banks, the NR22 period-0 rewrite cells and the noise
         # shift-14 freeze as the GBA SP answered them, and the GB core

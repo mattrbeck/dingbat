@@ -1315,6 +1315,97 @@ Dots are dingbat's line dots; W is the first dot of the writing M-cycle
   +0.8 % on Pokemon Crystal).
 - Evidence: mooneye `misc/bits/unused_hwio-C` reads $FE from FF4F.
 
+### SVBK reads back the stored bits, not the mapped bank
+- Ships: `SVBK_READS_WRITTEN = true` (`memory.nim`); `GbMemory.svbk` beside
+  `wram_bank`.
+- Claim: `$FF70` is a 3-bit register. A read returns the three bits last
+  stored with bits 3-7 set. Storing 0 maps bank 1 at `$D000` but the register
+  still holds 0: the 0 -> 1 substitution is in the bank decode. The boot ROM
+  stores nothing to it, so it hands off holding 0 and reads `$F8` with bank 1
+  mapped. Outside CGB mode it reads `$FF` and ignores stores (unchanged).
+- Evidence: DocBoy `cgb/boot/boot_regs_cgb` passes at `true` and fails at
+  `false` (which reads `$F9`, the mapped bank). Hardware: gbedge p00 on an
+  AGS reads SVBK = `$F8` after the boot ROM (docs/flashcart-runbook.md), and
+  p18 on the same console shows SVBK 0 and 1 mapping the same bank. Pan Docs,
+  "FF70 - SVBK": bits 0-2 read/write, 0 selects bank 1.
+- The save state's SVBK byte is written as the full readback (`$F8` | bits)
+  and only its low three bits are loaded, and only where they agree with the
+  mapped bank (a stored 0 over bank 1); anything else loads as the bank's own
+  number, which is also what a state without the byte gets.
+- Clean-room: derived from test ROM sources/outputs, Pan Docs and the tree's
+  own hardware reads; no emulator source consulted.
+
+### Game Boy Printer status
+- Ships: `PRN_STATUS_SEQUENCE = true`, `PRN_INIT_REPLY_CLEAN = true`
+  (`printer.nim`); `GbPrinter.done_unseen`.
+- Claim: the status byte follows Pan Docs' "Example" on the Game Boy Printer
+  page. INIT replies `$00`. A DATA packet with a payload sets bit 3
+  (unprocessed data), which the next packet's reply is the first to show
+  (`$00`, then `$08`); the empty DATA leaves it. PRINT's own reply is still
+  `$08`; from the next packet on the status is `$06` (bits 2 and 1) while the
+  print runs, and `$04` when it ends. A packet's status byte is therefore the
+  state before that packet took effect, except INIT's, which is already the
+  cleared `$00` (Pan Docs: "the normal status replied should be `$00`").
+  `$04` stays until INIT, BREAK or the 100 ms idle timeout, and the timeout
+  waits until one reply has carried the `$04` (it never interrupts a running
+  print either).
+- Evidence, Pan Docs: the example's byte sequence, bit names and the 100 ms
+  timeout. `tests/gb_printer_test.nim` holds each step.
+- Evidence, Game Boy Camera Gold (USA) run on dingbat as a black box (a
+  scratch driver pressing through Shoot, View, Print and decoding
+  `GbPrinter.log`): the game sends INIT, nine 640-byte DATA packets with a
+  STATUS after each pair, the empty DATA, PRINT `01 13 E4 40`, then STATUS
+  about every six frames.
+  - Shipped: 180 polls read `$06` over the 1080 frames of a 144-row print,
+    the "Printing..." screen stays up for all of them, the next poll reads
+    `$04` and the game returns to its print menu. A second print straight
+    after runs the same dialogue.
+  - `PRN_STATUS_SEQUENCE=false` (status always `$00`): six polls, then the
+    game is back at its menu half a second after PRINT with the paper still
+    running. The same happens if PRINT sets bit 2 without bit 1, so the game
+    waits on bit 1: it must rise within six polls and fall at the end.
+  - Bit 3 after DATA, bit 2 during and after the print: the game runs the
+    same with or without them. They rest on Pan Docs alone.
+  - Without the done hold the game's last poll reads `$00`, not `$04`: its
+    poll period is the length of the idle timeout, which then fires between
+    the end of the print and the next poll.
+- `PRN_INIT_REPLY_CLEAN` rests on Pan Docs alone; no ROM here sends INIT
+  within 100 ms of a finished print.
+- Unchanged and still assumed: about 7.5 frames per printed row, only full
+  640-byte bands are kept, PRINT does not require the empty DATA first.
+- Clean-room: derived from Pan Docs and black-box runs of Game Boy Camera
+  Gold on dingbat itself; no emulator source consulted.
+
+### LCD-on frame push (frontend pacing)
+- Ships: `LCD_ON_FRAME_DOTS = 37392` (`ppu.nim`): an LCD enable more than
+  that many dots after the last presented frame presents one at the enable.
+- Hardware side: with the LCD off nothing refreshes; an enable restarts the
+  PPU at line 0 wherever the old frame was, so its first vblank is 144 lines
+  = 65664 dots away; the panel stays blank for that first frame (Pan Docs,
+  LCDC.7). The picture is white from the enable to that vblank either way,
+  so the pushed frame (a white one; on SGB the held one) shows nothing the
+  panel would not. The threshold only decides when the frontend, which
+  expects a frame every 70224 dots, gets one.
+- Derivation: with d dots since the last present, waiting gives one interval
+  of d + 65664 (long by d - 4560), pushing gives d (short by 70224 - d) and
+  then 65664. The two errors are equal at d = (70224 + 4560) / 2 = 37392 =
+  70224 - 65664 / 2 (82 lines). Push above it, wait below it, and no
+  interval is further than 65664 / 2 = 32832 dots (72 lines) from a frame
+  period; any other threshold has a worse worst case on one side.
+- Evidence: `tests/gb_lcd_on_pacing_test.nim` (`nimble test_gblcdonpacing`)
+  switches the LCD off at vblank and on again after 0 to 2 frames in steps
+  of 1/64 frame, DMG and CGB, and measures every `step_frame` in dots. At
+  37392: longest interval +32656, shortest -32248, all checks pass (37300
+  to 37800 measure the same; the sweep's step is 1097 dots). 37000: shortest
+  -33008, fails. 36000: -34100. 30000: -39892. 20000: -49720. 39000: longest
+  +33748, fails. 45000: +40300. 60000: +55284. 0 (never push): +65416, a
+  step of nearly two frames.
+- `tests/savestate_compat_test.nim` reaches the LCD-on frame state (LY 0,
+  mode 2 at a frame boundary) only when the constant is non-zero, and checks
+  it loads and replays.
+- Clean-room: derived from Pan Docs' LCDC description and dingbat's own
+  runs; no emulator source consulted.
+
 ### Revision-dependent behaviour
 - `docs/gb-hardware-revisions.md`: the `GbRevision` → `GbQuirks` axis, its
   defaults (CGB C / DMG ABC) and the ROM behind each flag.

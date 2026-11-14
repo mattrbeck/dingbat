@@ -209,15 +209,28 @@ const LY_JUST_CHANGED* = 0x80'u8
 proc lcd_enabled*(ppu: GbPpu): bool {.inline.} = (ppu.lcd_control and 0x80) != 0
 
 const DOTS_PER_FRAME* = 70224   # 154 lines x 456 dots
-# Frontend pacing, not hardware: with the LCD off there is no refresh, and a
-# re-enable restarts at line 0 so the next VBlank is 65664 dots away. Push a
-# frame at the enable once this much time has passed since the last present,
-# so a frame-paced frontend does not see a dropped frame on every toggle. No
-# hardware quantity corresponds to the threshold (nothing is displayed while
-# the LCD is off). No test ROM scores it.
-const LCD_ON_FRAME_DOTS* {.intdefine.} = 0
+# Frontend pacing. The hardware facts: with the LCD off there is no refresh;
+# an enable restarts the PPU at the top of line 0 wherever the old frame
+# was, so its first vblank is 144 lines (65664 dots) away; and the panel
+# stays blank through that first frame (Pan Docs, LCDC.7). So the picture is
+# white from the enable to that vblank whatever is presented, and the only
+# open question is when the frontend, which wants a frame every 70224 dots,
+# is handed one. With d dots gone since the last present there are two
+# choices at the enable:
+#   wait:  one interval of d + 65664 dots (long by d - 4560)
+#   push:  an interval of d (short by 70224 - d), then one of 65664
+# Each is an error against the 70224-dot frame period; they are equal at
+# d = (70224 + 4560) / 2 = 37392, i.e. 70224 less half the 65664. Below it
+# waiting is the nearer to one period, above it pushing is, and with the
+# threshold there no interval is ever further than half the enable-to-vblank
+# distance (32832 dots, 72 lines) from a frame period: intervals stay
+# within 37392..103056 dots. Measured by tests/gb_lcd_on_pacing_test.nim,
+# which sweeps d; docs/gb-derivations.md, "LCD-on frame push" has the
+# neighbours. No test ROM scores it (the pushed frame is a white one, as the
+# panel is).
+const LCD_ON_FRAME_DOTS* {.intdefine.} = 37392
   ## Dots since the last present past which an LCD enable pushes a frame
-  ## (0 = never). Re-fit pending; neutral value 0.
+  ## (0 = never).
 
 when defined(gb_dot_counter):
   # Diagnostic frame-pacing instrumentation (tools only). gb_total_dots is the

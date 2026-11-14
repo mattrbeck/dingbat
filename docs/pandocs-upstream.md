@@ -16,8 +16,9 @@ needs hardware first.
    write's own low 7 bits, not "remaining − 1" (SameSuite `dma/hdma_lcd_off`).
 4. **MBC3 RTC latch** (MBC3): any `$6000` write latches — CasualPokePlayer
    `latch-rtc-test` capture 51/51 vs 28/51 for a bit-0 edge.
-5. **Printer status bits** (Gameboy_Printer): withdrawn pending the
-   printer status rewrite (2026-11-13).
+5. **Printer status bits** (Gameboy_Printer): nothing to correct; the model
+   follows the page's example. Worth adding: Game Boy Camera Gold polls
+   STATUS about every 100 ms and waits on bit 1 alone.
 6. **"CPU can access only HRAM during OAM DMA"** (OAM_DMA_Transfer): the CPU
    uses the other bus freely; 314 gambatte `oamdma/busy*` rows, 0 mismatches.
 7. **CGB registers in Non-CGB mode** (Power_Up_Sequence footnote): VBK reads
@@ -34,8 +35,10 @@ needs hardware first.
     the hblank→mode-2 edge fires.
 11. **Post-boot SC on CGB** (Power_Up_Sequence): $7C on AGS hardware, not $7F
     (gbedge p00, docs/flashcart-runbook.md).
-12. **SVBK readback** (CGB_Registers): withdrawn pending the readback rewrite
-    (2026-11-13).
+12. **SVBK readback** (CGB_Registers): the register reads back the stored
+    bits with bits 3–7 set; a stored 0 reads `$F8` (bank 1 mapped), and it
+    reads `$F8` after the boot ROM (DocBoy `boot_regs_cgb`; gbedge p00 on
+    an AGS).
 13. **Post-boot P1 on CGB/AGB depends on the cart** (Power_Up_Sequence):
     $CF with a CGB cart (the boot ROM never writes P1), $FF with a DMG cart
     (its compatibility-palette key poll ends with both groups deselected;

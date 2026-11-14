@@ -68,12 +68,12 @@ Each of these is a candidate Pan Docs correction (docs/pandocs-upstream.md).
 | Audio_Registers NR10: sweep trigger actions immediate | the calculation shifts one bit per APU tick: the trigger's check stops the channel step + 3 M-cycles after the write, a clock's second check step + 1 after the clock, NR10 read when it ends | SameSuite `channel_1_sweep_restart*`; DocBoy `ch1_period_sweep_*` (SameBoy agrees) |
 | Audio: CH3 sample buffer clears only on APU power-on | also clears on NR30 DAC-off | SameSuite `channel_3_restart_stop_delay`; hardware re-check queued (flashcart folder 7) |
 | Power_Up_Sequence footnote: CGB registers read $FF in Non-CGB mode | VBK reads `$FE|bank`; FF72/73/75/PCM12/34 answer in compat mode; KEY1/SVBK/HDMA/RP/FF74 do read $FF | mooneye `misc/bits/unused_hwio-C` |
-| Gameboy_Printer: status bits | status sequencing and done latch removed 2026-11-13 for a clean rewrite | pending; observable: Hello Kitty and Camera Gold print loops |
+| Gameboy_Printer: status bits | follows the page's example ($00, $08, $06, $04); two additions: INIT's own reply is already $00, and the 100 ms timeout leaves a finished print's $04 until one reply has carried it | Game Boy Camera Gold's print loop waits on bit 1 only; docs/gb-derivations.md, "Game Boy Printer status" |
 | MMM01 heading: RAM-bank-high is bits 1–2 | bits 2–3 | Pan Docs' own diagrams |
 | STOP with LCD on (DMG): "horizontal black line" | leaves the frame white | daid `stop_instr.gb` reference; panel decay is analog |
 | Compat colorization per title | one fallback palette | boot-ROM data deliberately not lifted |
 | OAM_DMA_Transfer: "CPU can access only HRAM during OAM DMA" | per-bus conflict model | 314 gambatte `oamdma/busy*` rows, 0 mismatches |
-| CGB_Registers SVBK: R/W | readback rule removed 2026-11-13 for a clean rewrite | hardware AGS post-boot IDENT read (gbedge p00) |
+| CGB_Registers SVBK: R/W | reads back the stored bits with bits 3–7 set: a stored 0 reads $F8 while bank 1 is mapped, and the register hands off reading $F8 | DocBoy `cgb/boot/boot_regs_cgb`; hardware AGS post-boot IDENT read (gbedge p00) |
 | MBC5: RAM enable = exactly $0A | any low nibble $A | MBCs.md current text; hardware unconfirmed (needs a real MBC5 cart) |
 
 ## D — subsystems absent
