@@ -7,7 +7,7 @@ const EEPROM_SETTLE_CYCLES {.intdefine.} = 108368
   ## A chip's analog time, not a console constant: a game that formats a
   ## blank cart (Super Mario Advance 3: 196 block writes at first boot)
   ## carries it into its frame phase, so the playtest references' outcomes
-  ## follow theirs (mgba as if 115000, the second reference ~101000;
+  ## follow theirs (one as if 115000, the other ~101000;
   ## docs/playtest-bugs.md). The define lets a build try a measured value
   ## (tests/roms/payloads/eesettle.s on the cart) without an edit.
 
@@ -166,12 +166,13 @@ method `[]=`*(ep: EEPROM; address: uint32; value: uint8) =
     let mask = 1'u8 shl bit_pos
     ep.memory[base] = (cur and not mask) or (uint8(v) shl bit_pos)
     ep.dirty = true
-    # Each data bit restarts the programming window: busy for
-    # EEPROM_SETTLE_CYCLES after the LAST bit. Assumed; GBATEK times only the
-    # whole write and no ROM pins where the window starts.
-    ep.busy_until = ep.eeprom_now() + EEPROM_SETTLE_CYCLES
     ep.wrote_bits += 1
     if ep.wrote_bits == 64:
+      # The block is complete: programming runs for EEPROM_SETTLE_CYCLES
+      # from its last data bit (GBATEK times the whole write and does not say
+      # where the window starts; no ROM pins it, and a status poll inside a
+      # block's own DMA burst cannot happen).
+      ep.busy_until = ep.eeprom_now() + EEPROM_SETTLE_CYCLES
       ep.buffer.clear()
       ep.wrote_bits = 0
       ep.state = {esReady, esWriteFinalBit}
