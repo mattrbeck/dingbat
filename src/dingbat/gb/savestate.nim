@@ -388,6 +388,10 @@ proc load_ppu_state(ppu: GbPpu; gb: GB; r: var Reader; rev: uint32) =
   r.read_bytes(ppu.obp0)
   r.read_bytes(ppu.obp1)
   ppu.wy = r.read_u8()
+  # The comparator's copy and its queued samples are in flight for a few dots
+  # after a write (WIN_CHECK_DEFER), never across the frame boundary a state
+  # is written on.
+  win_check_clear(ppu)
   ppu.wx = r.read_u8()
   ppu.vram_bank = r.read_u8()
   # Indexes `ppu.vram` (array[2, ...]); VBK is one bit.

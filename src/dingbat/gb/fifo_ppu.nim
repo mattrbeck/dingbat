@@ -65,6 +65,7 @@ proc new_gb_fifo_ppu*(gb: GB): GbFifoPpu =
     hdma_src: base.hdma_src, hdma_dst: base.hdma_dst,
     hdma_active: base.hdma_active,
     window_trigger: base.window_trigger,
+    win_check_dot: -1, win_check_dot2: -1, wy_cmp: base.wy,
     current_window_line: -1,
     win_lx: WIN_LX_OFF,
     stat_chg_dot: STAT_NO_HOLD,
@@ -235,9 +236,13 @@ const SCX_LATCH_LCDON_EXTRA_CGB* {.intdefine.} = 0
   ## Dots the LCD-on line's fine-scroll discard keeps taking an SCX store past
   ## its own length (SCX_FINE_LATCH_LIVE's window), DMG / CGB. Re-fit pending;
   ## neutral value 0 (both).
-# Objects on the LCD-on line, the CGB's object fetch with LCDC.1 clear, and
-# the CGB's last-pixel object against a window start: removed 2026-11-13 for
-# a clean rewrite.
+# Objects on the LCD-on line and the CGB's object fetch with LCDC.1 clear:
+# removed 2026-11-13 for a clean rewrite.
+const CGB_OBJ_LAST_PX_YIELDS* {.intdefine.} = 1
+  ## Whether, on a CGB, an object on the line's last pixel (OAM X = 167) waits
+  ## for a window start on that pixel (WX = 166) as it does on every other
+  ## column (obj_yields_to_window), 1, or is fetched in front of it as on the
+  ## DMG, 0. docs/gb-derivations.md, "The last pixel: object against window".
 
 template obj_fetch_on(ppu: GbFifoPpu): bool =
   ## Whether the fetcher stops for this line's objects: LCDC.1.
@@ -773,8 +778,10 @@ proc fifo_head_window(ppu: GbFifoPpu) =
       ppu.fetcher_x = WIN_CARRY_TILE
       fifo_arm_window(ppu)
       return
-    # A carried start meeting LCDC.5 low at the head: removed 2026-11-13 for
-    # a clean rewrite.
+    when WIN_CARRY_HEAD_DROP != 0:
+      # The head is the one place an owed start is spent: with LCDC.5 low
+      # here it is lost, not kept for a later line (WIN_CARRY_HEAD_DROP).
+      ppu.win_carry = false
   when WIN_LINE_START_LATCH != 0:
     if not ppu.fetching_window and window_enabled(ppu) and ppu.window_trigger and
        ppu.wx < uint8(WIN_LINE_START_WX):
@@ -1232,6 +1239,17 @@ proc sprite_fetch_merge*(ppu: GbFifoPpu; gb: GB) =
     ppu.obj_hi_dot = ppu.cycle_counter + OBJ_FETCH_DOTS + OBJ_PLANE1_LAG -
       (if gb.cgb_enabled: int32(CGB_OBJ_SIZE_LATENCY) else: 0'i32)
 
+when STAT_IRQ_SPLIT:
+  template m0_source_lead(ppu: GbFifoPpu; lead: int32): int32 =
+    ## The mode-0 source's share of the domain's lead: zero on the first line
+    ## after an LCD enable (tools/gbppu/gam_dispatch.py: exact there, 2 dots
+    ## late on every later line; M0_HALT_BLIND_DOTS in ppu.nim). Only the
+    ## mode-0 source is gated; STAT_IRQ_LEAD's sources are unmeasured there.
+    when STAT_M0_LEAD_T != 0 and not STAT_M0_LEAD_FIRST_LINE:
+      (if ppu.first_line: 0'i32 else: lead)
+    else:
+      lead
+
 proc tick_sprite_fetcher*(ppu: GbFifoPpu; gb: GB): bool =
   ## One dot of an object fetch. True if the dot was the object's (the shifter
   ## is stopped), false for the one tail dot the shifter has back but the BG
@@ -1253,6 +1271,11 @@ proc tick_sprite_fetcher*(ppu: GbFifoPpu; gb: GB): bool =
   # 0..3 are control spellings a quarter of a percent apart on mealybug
   # pixels; 2 puts both fetches on the bus at once. Cost: up to six
   # tick_bg_fetcher calls per object (+0.76% Pokemon Blue).
+  when CGB_OBJ_LAST_PX_YIELDS != 0 and STAT_IRQ_SPLIT:
+    if unlikely(ppu.m0_early != 0'u8):
+      dec ppu.m0_early
+      if ppu.m0_early == 0'u8 and ppu.irq_mode == 3'u8:
+        ppu_set_irq_mode(ppu, gb, 0'u8)
   when OBJ_BG_RUN == 4:
     let bg_hold = ppu.obj_tile_fx != int32(ppu.fetcher_x)
     if ppu.obj_penalty <= 0:
@@ -1478,7 +1501,7 @@ proc obj_yields_to_window(ppu: GbFifoPpu): bool {.inline.} =
   ## (m2int_wxA6_m3stat, 180 vs 190 dots) is not this rule's.
   ppu.lx == ppu.win_lx and not ppu.fetching_window and
     ppu.lx + 8 == int32(ppu.sprites[0].x) and
-    ppu.lx < int32(GB_WIDTH) - 1
+    (ppu.lx < int32(GB_WIDTH) - 1 or (CGB_OBJ_LAST_PX_YIELDS != 0 and ppu.cgb))
 
 proc win_start_reaches_pixels(ppu: GbFifoPpu): bool {.inline.} =
   ## DMG_WIN_START_LAST_PX (off): refuse a DMG window START on x = 159. The
@@ -1830,6 +1853,24 @@ proc tick_shifter*(ppu: GbFifoPpu; gb: GB) =
         # The walk into the tail burst was paid at the head (OBJ_TAIL_WALK_REFUND).
         pen -= tail_walk
       ppu.obj_penalty = pen
+      when CGB_OBJ_LAST_PX_YIELDS != 0 and STAT_IRQ_SPLIT:
+        # A CGB object that waited for a window start on the last pixel
+        # (the window's first tile still whole in the FIFO): the line's
+        # pixels are done as far as the mode-0 source is concerned, so it
+        # rises where the object-less line raises it; only the flag waits
+        # for this fetch (CGB_OBJ_LAST_PX_YIELDS).
+        if ppu.cgb and ppu.lx == int32(GB_WIDTH) - 1 and ppu.fetching_window and
+           ppu.fetcher_x == 1 and ppu.fifo.size == 8:
+          # That line retires on win_tail_end (WIN_TAIL_FLAG_LEAD) and
+          # raises the source m3_hold - lead dots on.
+          let due = (if ppu.win_tail_end != 0: ppu.win_tail_end
+                     else: ppu.cycle_counter + 1) +
+                    max(0'i32, int32(ppu.m3_hold) -
+                               ppu.m0_source_lead(stat_irq_lead(gb)))
+          if due > ppu.cycle_counter:
+            ppu.m0_early = uint8(due - ppu.cycle_counter)
+          elif ppu.irq_mode == 3'u8:
+            ppu_set_irq_mode(ppu, gb, 0'u8)
       when OBJ_ABORT_LATE:
         # Last dot of the object's FETCH, for an abort arriving after the
         # stall (OBJ_ABORT_LATE): the tail arm ends with the stall, the head
@@ -2250,16 +2291,6 @@ const M0_LOOKAHEAD_REACHABLE* = STAT_DOMAIN_LEAD != 0 or not M3_AHEAD_HOLD or
                                 STAT_M0_LEAD_T > 4 * M3_PIPE_AHEAD
 
 when STAT_IRQ_SPLIT:
-  template m0_source_lead(ppu: GbFifoPpu; lead: int32): int32 =
-    ## The mode-0 source's share of the domain's lead: zero on the first line
-    ## after an LCD enable (tools/gbppu/gam_dispatch.py: exact there, 2 dots
-    ## late on every later line; M0_HALT_BLIND_DOTS in ppu.nim). Only the
-    ## mode-0 source is gated; STAT_IRQ_LEAD's sources are unmeasured there.
-    when STAT_M0_LEAD_T != 0 and not STAT_M0_LEAD_FIRST_LINE:
-      (if ppu.first_line: 0'i32 else: lead)
-    else:
-      lead
-
   template lyc_lead_dots(gb: GB): int32 =
     ## STAT_LYC_LY_LEAD_DOTS / _DS for the speed the CPU is in.
     (if gb.memory.current_speed == 0: int32(STAT_LYC_LY_LEAD_DOTS)
@@ -2871,7 +2902,7 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
               var left = remaining
               while left > 0 and not fetcher_retired(ppu):
                 when WIN_CHECK_DEFER_ANY:
-                  if ppu.cycle_counter == ppu.win_check_dot: win_check_now(ppu, gb)
+                  if ppu.cycle_counter == ppu.win_check_dot: win_check_due(ppu, gb)
                 fifo_pipeline_dot(ppu, gb)
                 ppu.cycle_counter += 1
                 dec left
@@ -2899,7 +2930,7 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
                fifo_irq_m0_ready(ppu, px_lead):
               ppu_set_irq_mode(ppu, gb, 0'u8)
           when WIN_CHECK_DEFER_ANY:
-            if ppu.cycle_counter == ppu.win_check_dot: win_check_now(ppu, gb)
+            if ppu.cycle_counter == ppu.win_check_dot: win_check_due(ppu, gb)
           fifo_pipeline_dot(ppu, gb)
           ppu.cycle_counter += 1
           dec remaining
@@ -2909,7 +2940,7 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
         gb_phase = int32(cycles - remaining - 1)
         gb_ticklen = int32(cycles)
       when WIN_CHECK_DEFER_ANY:
-        if ppu.cycle_counter == ppu.win_check_dot: win_check_now(ppu, gb)
+        if ppu.cycle_counter == ppu.win_check_dot: win_check_due(ppu, gb)
       case m
       of 2:  # OAM search
         # The edge detector at the OAM pulse's end: removed 2026-11-13 for a
@@ -2937,6 +2968,7 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
           fifo_reset_sprite(ppu)
           when CGB_WE_ENABLE_FETCH_LATE != 0: gb.we_on_dot = int32.low
           when CGB_WIN_TAIL_LAST != 0: ppu.obj_last_px = false
+          when CGB_OBJ_LAST_PX_YIELDS != 0: ppu.m0_early = 0'u8
           when WIN_TAIL_FLAG_LEAD != 0: ppu.win_tail_end = 0
           # The late abort's window is this line's (fifo_obj_abort_late): the
           # last line's object must not match a dot of this one.
@@ -3085,7 +3117,7 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
               fifo_irq_line_advance(ppu, gb)
         if ppu.cycle_counter == gb_line_end(ppu):
           when WIN_CHECK_DEFER_ANY:
-            if ppu.win_check_dot >= 0: ppu.win_check_dot -= ppu.cycle_counter
+            win_check_rebase(ppu, ppu.cycle_counter)
           when CGB_M0_FALL_DS_FIRST:
             # Double speed: the mode-0 source falls, then a STAT write's
             # enables land, then the comparator lets go (CGB_M0_FALL_DS_FIRST).
@@ -3162,7 +3194,7 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
         if ppu.cycle_counter == 456:
           ppu.cycle_counter = 0
           when WIN_CHECK_DEFER_ANY:
-            if ppu.win_check_dot >= 0: ppu.win_check_dot -= 456
+            win_check_rebase(ppu, 456'i32)
           ppu.stat_chg_dot -= 456
           # Line 153's advance to 0 already ran in fifo_line153_edge; the
           # `ly == 0` branch is that snap's mode 1 -> 2.
@@ -3206,7 +3238,7 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
       ppu.cycle_counter += 1
   else:
     ppu.cycle_counter = 0
-    when WIN_CHECK_DEFER_ANY: ppu.win_check_dot = -1
+    when WIN_CHECK_DEFER_ANY: win_check_clear(ppu)
     ppu.`mode_flag=`(0'u8, gb)
     ppu.ly = 0
     when STAT_IRQ_SPLIT: ppu.irq_ly = 0

@@ -97,6 +97,7 @@ proc new_ppu_base(cgb: bool): GbPpu =
   # would have been written with.
   result.hdma5    = 0xFF
   result.hdma_kill_from = -1
+  result.win_check_dot2 = -1
   # Anything non-zero: the first mode-0 edge after power-up is a real edge.
   result.hdma_seen_mode = 2
   result.hdma_src = 0xFFF0'u16
@@ -109,6 +110,9 @@ proc skip_boot*(ppu: GbPpu; gb: GB) =
   # (gambatte window/*). The boot ROM ends in VBlank with the latch clear.
   ppu.window_trigger = false
   ppu.win_check_dot = -1
+  ppu.win_check_dot2 = -1
+  ppu.win_check_wr = 0
+  ppu.wy_cmp = ppu.wy
   when CGB_LYC_CMP_LATCH:
     gb.lyc_land_left = -1
     gb.lyc_sampled = ppu.lyc
@@ -1948,6 +1952,43 @@ when HDMA_HALT_REQ != 0:
       ppu_step_hdma(ppu, gb, charge_overhead = false)
       # The block is whole: no byte decision carries past it (VDMA_M3_PORT).
       when VDMA_M3_PORT != 0: gb.fifo_ppu.vdma_lost_dot = -1
+proc win_check_push*(ppu: GbPpu; dot: int32; wr: bool) =
+  ## Queue a sample of the WY == LY comparator on line dot `dot` (it may lie
+  ## past the line's end; the boundary rebases it). `wr` = a WY write's
+  ## sample, which brings the written value to the comparator. Two fit, in
+  ## dot order: a write's sample and line 0's own check on a CGB can be in
+  ## flight together. A third (two writes inside one deferral, which no
+  ## instruction sequence at single speed produces) takes the earliest one's
+  ## slot: its value reaches the comparator now and its compare is skipped.
+  let w = (if wr: 1'u8 else: 0'u8)
+  if ppu.win_check_dot < 0:
+    ppu.win_check_dot = dot
+    ppu.win_check_wr = w
+    return
+  if ppu.win_check_dot2 >= 0:
+    # Full: the earliest gives up its slot, its value taken now.
+    if (ppu.win_check_wr and 1'u8) != 0: ppu.wy_cmp = ppu.wy
+    ppu.win_check_dot = ppu.win_check_dot2
+    ppu.win_check_wr = ppu.win_check_wr shr 1
+    ppu.win_check_dot2 = -1
+  if dot >= ppu.win_check_dot:
+    ppu.win_check_dot2 = dot
+    ppu.win_check_wr = (ppu.win_check_wr and 1'u8) or (w shl 1)
+  else:
+    ppu.win_check_dot2 = ppu.win_check_dot
+    ppu.win_check_dot = dot
+    ppu.win_check_wr = ((ppu.win_check_wr and 1'u8) shl 1) or w
+
+template win_check_rebase*(ppu: GbPpu; n: int32) =
+  ## A line boundary: pending samples move into the new line's dots.
+  if ppu.win_check_dot >= 0: ppu.win_check_dot -= n
+  if ppu.win_check_dot2 >= 0: ppu.win_check_dot2 -= n
+
+template win_check_clear*(ppu: GbPpu) =
+  ppu.win_check_dot = -1
+  ppu.win_check_dot2 = -1
+  ppu.win_check_wr = 0
+  ppu.wy_cmp = ppu.wy
 
 proc `mode_flag=`*(ppu: GbPpu; mode: uint8; gb: GB) =
   let prev_mode = ppu.mode_flag
@@ -1964,18 +2005,20 @@ proc `mode_flag=`*(ppu: GbPpu; mode: uint8; gb: GB) =
     ppu.window_trigger = false
   # Pan Docs: the window is drawn once "WY == LY at any point in the frame", so
   # the latch is per frame: cleared entering VBlank, set at the top of every
-  # visible line, and by the WY write itself (ppu_latch_wy). Tested here and
+  # visible line, and by the sample a WY or LCDC.5-on write queues
+  # (win_check_now; `wy_cmp` is WY as the comparator has it). Tested here and
   # not at the 2 -> 3 edge: gambatte window/arg/late_wy_1 vs late_wy_2. The
   # match counts only with LCDC.5 set: enabling the window on a later line
   # of the frame draws nothing (hardware: gbprobe probe_g_wy1 on AGB SP,
   # docs/hwprobe-questions.md row 19).
   elif mode == 2 and WIN_LINE0_CHECK_DOT_CGB != 0 and ppu.ly == 0'u8 and
        gb.cgb_enabled:
-    # Line 0's check runs WIN_LINE0_CHECK_DOT_CGB dots in (gb.nim).
-    ppu.win_check_dot =
-      if gb.memory.current_speed != 0'u8: int32(WIN_LINE0_CHECK_DOT_CGB_DS)
-      else: int32(WIN_LINE0_CHECK_DOT_CGB)
-  elif mode == 2 and ppu.ly == ppu.wy and window_enabled(ppu):
+    # Line 0's check runs WIN_LINE0_CHECK_DOT_CGB dots in (gb.nim), queued
+    # with any write's sample still in flight.
+    win_check_push(ppu,
+      (if gb.memory.current_speed != 0'u8: int32(WIN_LINE0_CHECK_DOT_CGB_DS)
+       else: int32(WIN_LINE0_CHECK_DOT_CGB)), false)
+  elif mode == 2 and ppu.ly == ppu.wy_cmp and window_enabled(ppu):
     when defined(gb_win_trace):
       echo "WYLATCH ly=", ppu.ly, " wy=", ppu.wy, " dot=", ppu.cycle_counter
     ppu.window_trigger = true
@@ -2376,13 +2419,23 @@ template win_check_defer*(gb: GB): int32 =
        gb.memory.current_speed)
 
 proc win_check_now*(ppu: GbPpu; gb: GB) =
-  ## The WY == LY comparator, sampled now (WIN_CHECK_DEFER).
-  ppu.win_check_dot = -1
-  let cmp_ly = ppu.ly
+  ## The WY == LY comparator, sampled now (WIN_CHECK_DEFER): the head of the
+  ## queue. A write's sample first brings the written WY to the comparator.
+  let wr = (ppu.win_check_wr and 1'u8) != 0
+  ppu.win_check_dot = ppu.win_check_dot2
+  ppu.win_check_dot2 = -1
+  ppu.win_check_wr = ppu.win_check_wr shr 1
+  if wr: ppu.wy_cmp = ppu.wy
+  when WIN_CHECK_CUT_DOTS != 0:
+    # Late in the line the comparator is done with it (WIN_CHECK_CUT_DOTS):
+    # the value is in place for the boundary's check, nothing latches here.
+    if (ppu.lcd_status and 3'u8) == 0'u8 and
+       ppu.cycle_counter >= gb_line_end(ppu) - int32(WIN_CHECK_CUT_DOTS):
+      return
   if ppu.lcd_enabled and window_enabled(ppu) and (ppu.lcd_status and 3'u8) != 1'u8 and
-     cmp_ly == ppu.wy:
+     ppu.ly == ppu.wy_cmp:
     when defined(gb_win_trace):
-      echo "WYCHECK ly=", ppu.ly, " cmp=", cmp_ly, " wy=", ppu.wy, " dot=", ppu.cycle_counter
+      echo "WYCHECK ly=", ppu.ly, " wy=", ppu.wy_cmp, " dot=", ppu.cycle_counter
     when WIN_HEAD_LATE_DOT != 0:
       let was = ppu.window_trigger
     ppu.window_trigger = true
@@ -2393,25 +2446,29 @@ proc win_check_now*(ppu: GbPpu; gb: GB) =
          ppu.cycle_counter <= int32(WIN_HEAD_LATE_DOT) + int32(ppu.scx and 7):
         fifo_head_window_late(gb.fifo_ppu)
 
-proc win_check_schedule*(ppu: GbPpu; gb: GB; dots: int32) {.inline.} =
+proc win_check_due*(ppu: GbPpu; gb: GB) {.noinline.} =
+  ## Every sample due on this dot, in queue order.
+  while ppu.win_check_dot == ppu.cycle_counter: win_check_now(ppu, gb)
+
+proc win_check_schedule*(ppu: GbPpu; gb: GB; dots: int32; wr: bool) {.inline.} =
   ## Sample the comparator `dots` from now (may fall on the next line; the
-  ## boundary rebases it). A later schedule replaces an earlier one.
-  ppu.win_check_dot = ppu.cycle_counter + dots
+  ## boundary rebases it).
+  win_check_push(ppu, ppu.cycle_counter + dots, wr)
 
 proc ppu_store_wy*(ppu: GbPpu; gb: GB; val: uint8) {.inline.} =
   fifo_sync(gb)
   ppu.wy = val
 
 proc ppu_latch_wy*(ppu: GbPpu; gb: GB; val: uint8) {.inline.} =
-  ## The other half of the WY level comparator at `mode_flag=`: a write that
-  ## makes WY equal the line being drawn latches the window for the frame
-  ## (gambatte window/arg/late_wy_*). VBlank is excluded because the latch is
-  ## cleared entering it. Split from ppu_store_wy because the CGB takes the
-  ## register and the latch at different latencies (CGB_WY_LATENCY,
-  ## CGB_WY_LATCH_LATENCY); `ppu.ly` is read here for that reason.
+  ## The other half of the WY comparator at `mode_flag=`: a write that makes
+  ## WY equal the line being drawn latches the window for the frame (gambatte
+  ## window/arg/late_wy_*). VBlank is excluded because the latch is cleared
+  ## entering it. With a deferral (WIN_CHECK_DEFER_*) the sample queued at the
+  ## write does all of this instead (win_check_now).
   fifo_sync(gb)
   when WIN_CHECK_DEFER_ANY:
     if win_check_defer(gb) != 0: return
+  ppu.wy_cmp = val
   if ppu.ly == val and (ppu.lcd_status and 3'u8) != 1'u8 and ppu.lcd_enabled and
      window_enabled(ppu):
     ppu.window_trigger = true
@@ -2426,16 +2483,29 @@ proc ppu_store_lcdc*(ppu: GbPpu; gb: GB; val: uint8) {.inline.} =
   let moved = ppu.lcd_control xor val
   let flip2 = (moved and 0x04'u8) != 0
   when WIN_CHECK_DEFER_ANY:
-    if (moved and val and 0x20'u8) != 0 and
+    if (moved and 0xA0'u8) != 0 and (val and 0xA0'u8) == 0xA0'u8 and
        win_check_defer(gb) != 0:
-      win_check_schedule(ppu, gb, win_check_defer(gb))
+      win_check_schedule(ppu, gb, win_check_defer(gb), false)
   when defined(gb_lcdc2_trace):
     if flip2:
       echo "LCDC2 ly=", ppu.ly, " dot=", ppu.cycle_counter,
            " mode=", (ppu.lcd_status and 3'u8), " val=", toHex(val, 2)
   ppu.lcd_control = val
-  # The WY match on an LCDC.5 rise at the store itself: removed 2026-11-13 for
-  # a clean rewrite (Pan Docs states the WY condition per line only).
+  # A store that sets LCDC.5 (or switches the LCD on with it set) makes the
+  # WY == LY comparator sample, exactly as a WY store does: with WY equal to
+  # the line being drawn the window is latched for the frame. Queued above
+  # where the device defers the sample (WIN_CHECK_DEFER_*), taken here where
+  # it does not. docs/gb-derivations.md, "The window's WY comparator: when it
+  # samples". GBMicrotest `win*_a` (LCD on with WY = 0 and the bit set),
+  # mealybug `m2_win_en_toggle`, gambatte `window/late_enable_afterVblank_*`.
+  if (moved and 0xA0'u8) != 0 and (val and 0xA0'u8) == 0xA0'u8:
+    var imm = true
+    when WIN_CHECK_DEFER_ANY:
+      imm = win_check_defer(gb) == 0
+    if imm and ppu.ly == ppu.wy_cmp and (ppu.lcd_status and 3'u8) != 1'u8:
+      when defined(gb_win_trace):
+        echo "WYLCDC ly=", ppu.ly, " wy=", ppu.wy, " dot=", ppu.cycle_counter
+      ppu.window_trigger = true
   when CGB_WE_DISABLE_LATE != 0:
     # The fall's own latency to the window abort (CGB_WE_DISABLE_LATE).
     if (moved and 0x20'u8) != 0 and (val and 0x20'u8) == 0'u8:
@@ -2861,7 +2931,7 @@ proc ppu_write*(ppu: GbPpu; gb: GB; idx: int; val: uint8) =
            (ppu.lcd_status and 3), " old=", ppu.wy, " new=", val
     when WIN_CHECK_DEFER_ANY:
       if win_check_defer(gb) != 0:
-        win_check_schedule(ppu, gb, win_check_defer(gb))
+        win_check_schedule(ppu, gb, win_check_defer(gb), true)
     when CGB_WY_LATENCY_ANY:
       if gb.cgb_enabled:
         ppu_park_pipeline_write(ppu, gb, idx, val)

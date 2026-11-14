@@ -159,13 +159,191 @@ a reference PNG, `mGBA suite <section>` a section of mGBA's test ROM.
 
 ## 2. Window
 
-### WY is a level comparator behind a per-frame latch
+### WY is a sampled comparator behind a per-frame latch
 - Claim: Pan Docs, "Window": "WY == LY at any point in the frame". The latch
-  is set at the top of every visible line and on any WY write that makes the
-  two equal; nothing re-reads WY afterwards.
+  (`window_trigger`) is cleared entering vblank and set by a sample of
+  `WY == LY and LCDC.5`; nothing re-reads WY once it is set. The comparator is
+  not a continuous level. It samples on three occasions only: once per line at
+  the line's first dot, a fixed number of dots after a WY write, and the same
+  number of dots after a write that sets LCDC.5 (or switches the LCD on with
+  it set). The schedule is the next entry.
+- The match counts only with LCDC.5 set at the sample: enabling the window on
+  a later line of the frame draws nothing (first-party hardware: gbprobe
+  `probe_g_wy1` on an AGB SP, docs/hwprobe-questions.md row 19).
 - Evidence: gambatte `window/arg/late_wy_1` vs `_2` put the per-line sample at
   dot 0, not 80; `late_wy_1toFF_*` show a `ly >= wy` re-test retracting a
   window hardware keeps drawing.
+
+### The window's WY comparator: when it samples
+Dots are dingbat's line dots; W is the first dot of the writing M-cycle
+(`ppu_write`). "Sampled on dot X" means before dot X's pipeline step.
+- **A write's sample.** A WY write, or an LCDC write that raises bit 5 (or
+  bit 7 with bit 5 set), is sampled `WIN_CHECK_DEFER_*` dots after W:
+  1 on a DMG, 5 on a CGB at single speed, 1 on a CGB at double speed
+  (`win_check_schedule`, `win_check_now`, ppu.nim). A WY write's sample is
+  also the dot the comparator's copy of WY (`wy_cmp`) takes the new value, so
+  the per-line sample reads the old value until then; the readable register
+  and `CGB_WY_LATENCY` are untouched.
+  - DMG 1: gambatte `window/arg/late_wy_FFto2_ly2_scx3_3` [dmg] writes WY = LY
+    on W = 93 of a line whose window would start on dot 93 and reads no
+    window; 0 starts one, and (a sample at the store, with no cut-off and
+    no late head) also loses the five W = 453 line-end rows below and
+    `late_scx_late_wy_FFto4_ly4_wx00_2` [dmg]. 2 loses `late_wy_FFto2_ly2_2`,
+    `_wx0f_2`, `late_wy_FFto0_ly0_2`, `late_wy_10to1_ly1_2`,
+    `late_scx_late_wy_FFto4_ly4_wx00_1` [dmg] (W one M-cycle before the start
+    dot, window expected).
+  - CGB 5: `late_wy_FFto2_ly2_scx3_2` [cgb] (W = 89, start dot 93, no
+    window), `late_wy_FFto2_ly2_wx00_2` and `late_scx_late_wy_FFto4_ly4_wx00_2`
+    [cgb] refuse 4; `late_wy_FFto2_ly2_1`, `_wx0f_1`, `late_wy_FFto0_ly0_1`,
+    `late_wy_10to1_ly1_1` [cgb] (W = 85, start dot 90) refuse 6. One M-cycle
+    more than the DMG, as `CGB_WY_LATENCY` already said of the store; the
+    LCDC.5 rise takes the same five (`window/late_enable_afterVblank_{1,2}`
+    [cgb] have the thresholds of the WY rows), so the delay is the
+    comparator's, not the WY register's.
+  - CGB double speed 1: 0 (a sample at the store, which then has no line-end
+    cut-off) loses `late_wy_FFto0_ly2_ds_2`, `late_enable_afterVblank_ds_2`,
+    `late_enable_afterVblank_ds_lcdoffset1_2`, `late_wy_ds_lcdoffset1_2`; 2
+    loses `late_wy_FFto2_ly2_ds_1`, `late_wy_1toFF_ds_1`,
+    `late_enable_ly0_ds_1`, `late_wy_ds_1`, `late_wy_FFto0_ly2_ds_1`,
+    `late_enable_afterVblank_ds_1`. Not half the single-speed five.
+- **The line-end cut-off.** A write's sample landing in the last
+  `WIN_CHECK_CUT_DOTS = 3` dots of a line (dot 453 on) latches nothing for
+  the line being drawn: the comparator is done with it. The written value is
+  still in place for the next line's own sample. gambatte
+  `late_wy_FFto0_ly2_{1,2,3}`, `late_wy_10to0_ly1_{1,2,3}`,
+  `late_wy_FFto1_ly2_{1,2,3}` and `window/late_enable_afterVblank_{1,2,3}`,
+  `arg/late_enable_afterVblank_{3,4,5}` write on W = 445 / 449 / 453: the DMG
+  latches on the first two (samples on 446, 450), the CGB on the first only
+  (450; 454 is cut). Double speed pins the dot: W = 451 (sample 452) latches,
+  W = 452 and 453 do not (`late_wy_FFto0_ly2_ds_{1,2}`,
+  `late_enable_afterVblank_ds_{1,2}`, `_ds_lcdoffset1_{1,2}`). 2 loses
+  `late_enable_afterVblank_ds_lcdoffset1_2`; 4 loses `late_wy_FFto0_ly2_ds_1`
+  and `late_enable_afterVblank_ds_1`.
+- **The per-line sample** is at the line's first dot, after a write's sample
+  due on that same dot (`mode_flag=`; a sample due on dot 456 runs before
+  the line advances). `late_wy_1toFF_{1,2,3}`, `late_wy_2toFF_{1,2,3}` take a
+  matching WY away at the end of the line before: the DMG's W = 453 (sample
+  454) is in time and W = 457 is not; the CGB's W = 449 (sample 454) is in
+  time and W = 453 (sample 458, two dots into the line) is not, although the
+  WY register itself changed on dot 456. Double speed: W = 455 in time, 456
+  and 457 not (`late_wy_1toFF_ds_{1,2}`, `_ds_lcdoffset1_{1,2}`).
+- **Line 0 on a CGB** samples on dot `WIN_LINE0_CHECK_DOT_CGB = 5`
+  (`_DS = 5`), not dot 0; the DMG's line 0 is an ordinary line.
+  `window/late_wy_{1,2}` and `arg/late_wy_{1,2}` [cgb] take WY = 0 away on
+  W = 453 of line 153 (sample dot 2: in time) and W = 1 of line 0 (sample
+  dot 6: too late): 2..6 pass, 1 and 7 do not. Double speed pins 5:
+  `late_wy_ds_1` (W = 3, sample 4, in time) refuses 4 and
+  `late_wy_ds_lcdoffset1_2` (W = 4, sample 5, too late) refuses 6. The line's
+  check and a write's sample can both be in flight, so the queue holds two
+  (`win_check_push`).
+- Sites: `win_check_push` / `win_check_now` / `win_check_due` (ppu.nim), the
+  stop in `fifo_skip_target` and the three dot-loop tests (fifo_ppu.nim),
+  which were already there for the knobs. `wy_cmp` and the queue are in
+  flight for at most seven dots after a write and are not serialized
+  (`win_check_clear` on load).
+- Open: `window/late_wy_lcdoffset1_2`, `late_enable_afterVblank_lcdoffset1_1`
+  and `arg/late_wy_1toFF_lcdoffset1_2` [cgb] (single speed after a speed
+  switch left the LCD one dot off the CPU grid) are red with this schedule,
+  as they were without it; the double-speed `lcdoffset1` rows fit.
+- Clean-room: derived from test ROM sources/outputs and dingbat's own trace
+  runs; no emulator source consulted.
+
+### A WY match past the head still makes a WX < 6 line a window line
+- Ships: `WIN_HEAD_LATE_DOT = 85` (`gb.nim`; `fifo_head_window_late`).
+- Claim: a line whose WX is below `WIN_LINE_START_WX` decides to be a window
+  line at the head of mode 3, but a WY match sampled up to dot
+  `85 + (SCX & 7)` still turns it into one, the startup fetch beginning
+  there: the decision moves with the fine-scroll discard.
+- Evidence: gambatte `window/arg/late_scx_late_wy_FFto4_ly4_wx00_{1,2,3}`
+  (WX = 0, SCX = 4 written eight dots ahead of WY): the DMG's W = 85 and the
+  CGB's W = 81 (both sampled on dot 86) draw the window, one M-cycle later
+  (dot 90) does not; `late_wy_FFto2_ly2_wx00_{1,2,3}` (SCX = 0) put the same
+  edge between dots 82 and 86. 82..85 pass all twelve rows; 81 and 0 lose
+  `late_scx_late_wy_FFto4_ly4_wx00_1` [cgb] and `_2` [dmg]; 86 loses
+  `late_scx_late_wy_FFto4_ly4_wx00_2` [cgb], `_3` [dmg] and
+  `late_wy_FFto2_ly2_wx00_2` [cgb], `_3` [dmg]. 85 ships: the last dot before
+  the head's own read of WX (dot 86, `WIN_LINE_START_LATCH`).
+- Clean-room: derived from test ROM sources/outputs and dingbat's own trace
+  runs; no emulator source consulted.
+
+### LCDC.5 and WX reach a CGB's window logic late
+- Ships (`gb.nim`): `CGB_WX_LATE_SS = 1`, `CGB_WE_ENABLE_LATE = 1`,
+  `CGB_WE_DISABLE_LATE = 2`, `WIN_REVOKE_DS_PUSH = 1`.
+- `CGB_WX_LATE_SS`: every CGB, not only the AGB, takes a WX store
+  `CGB_WX_LATENCY` (1) dot late at single speed. gambatte
+  `window/late_wx_scx3_2` writes WX = $FF on the very dot WX = 7 matches
+  (dot 93 at SCX = 3): the DMG reads no window, the CGB a window (0 fails the
+  CGB row; `late_wx_scx2_2`, one dot of slack, cannot tell). DocBoy
+  `cgb/ppu/visual/change_wx_glitch_{wx6_nops16,wx6_nops17,wx7_nops17,wx8_nops17}`
+  need the same dot (all four fail at 0). The AGB SP photograph of gbprobe
+  `probe_h_wx` (docs/flashcart-runbook.md row 32) is the same dot on a third
+  console.
+- `CGB_WE_ENABLE_LATE`: an LCDC.5 rise at single speed reaches the WX
+  comparator a dot late, so a match on the write's own dot is missed.
+  gambatte `window/late_reenable_scx3_2` (DMG window, CGB none) and DocBoy
+  `cgb_dmg_mode/ppu/visual/enable_win_during_pixel_transfer_round1` fail at 0.
+- `CGB_WE_DISABLE_LATE`: an LCDC.5 fall reaches the fetcher's window abort
+  (`WIN_EN_ABORT`) two dots late, so a map read on the write's dot or the
+  next still fetches a window tile. DocBoy `cgb/ppu/visual/window_bg_reprise_wx{14,15,22,23}`
+  and gambatte `window/on_screen/wx17_weoff_wxA5_weon` [cgb]: 1 passes
+  `_wx14`, `_wx22` only; 2 passes all five; 3 loses `window_bg_reprise_wx{8,16,24}`
+  and gambatte `on_screen/weon_wx18_weoff_weon_wx80` [cgb].
+- `WIN_REVOKE_DS_PUSH`: at double speed a CGB window start is still revoked
+  by an LCDC.5 fall on the dot its restart pushes the first tile (the fifth
+  dot is inside the same 2-dot M-cycle). gambatte
+  `window/late_disable_scx5_ds_1` fails at 0.
+- Clean-room: derived from test ROM sources/outputs and dingbat's own trace
+  runs; no emulator source consulted.
+
+### A carried window start against LCDC.5 low
+- Ships: `WIN_CARRY_HEAD_DROP = 1` (`gb.nim`; `fifo_head_window`).
+- Claim: a DMG window start owed from the previous line's last pixel
+  (`DMG_WIN_LAST_PX_CARRY`) is spent or lost at the head of the next mode 3:
+  with LCDC.5 low there it is gone, not kept for a later line. Inside the
+  window's lines nothing shows it, because every line's WX = 166 match owes a
+  new start; it shows on the first line after vblank, where the WY latch is
+  clear and nothing re-owes it.
+- Evidence: gambatte `window/on_screen/wxA6_late_we_reenable_{1,2,3,4}` [dmg]
+  hold LCDC.5 low from early mode 2 to dot 77 / 81 / 85 / 89 of every line.
+  Line 0's head reads on dot 82: `_1` and `_2` draw a window line on line 0
+  (the start carried over the frame boundary from line 143); `_3` (bit back on
+  dot 85, three dots after line 0's head and one before line 1's) draws none
+  on line 0 and none on line 1 either. Kept, the start is spent on line 1
+  and every later window row comes a line early (916 pixels). 0 fails `_3`
+  alone; `wxA6_wy01_weoff_ly02`, `wxA6_wy01_weoff_ly02_weon_ly60`,
+  `wxA6_weoff_at_xposA6`, `wxA6_wy8F` are unmoved.
+- Clean-room: derived from test ROM sources/outputs and dingbat's own trace
+  runs; no emulator source consulted.
+
+### The last pixel: object against window on a CGB
+- Ships: `CGB_OBJ_LAST_PX_YIELDS = 1` (`fifo_ppu.nim`; `obj_yields_to_window`,
+  `m0_early`).
+- Claim: an object at OAM X = 167 and a window at WX = 166 both trigger on
+  the line's last pixel. The DMG fetches the object in front of the start
+  (which it then cannot draw, `DMG_WIN_LAST_PX_CARRY`). The CGB orders them
+  as on every other column: the object waits for the window start and is
+  fetched against the window's first tile, a full 11 dots. Those dots hold
+  the mode flag only: the mode-0 STAT source rises where the object-less
+  WX = 166 line raises it.
+- Evidence: gambatte `window/m2int_wxA6_spxA7_m3stat_{1,2,4,5}` [cgb] read
+  STAT on dots 257 / 261 / 269 / 273 of the line and want 3, 3, 3, 0, where
+  the object-less `m2int_wxA6_m3stat_{1,2,3}` [cgb] want 3, 3, 0 on 253 / 257 /
+  261: the flag falls 10..13 dots later with the object; window start (6) +
+  object at tile pixel 0 (11) puts it on dot 269 against 258. The DMG twins
+  move by one read (the object's six dots). 0 fails `_m3stat_2` and
+  `_m3stat_4` [cgb]. The source: `m0enable/enable_wxA6_2x_spxA7_{1,2}` and
+  `_ds_{2,3,4}` [cgb] enable the mode-0 source on dots 249..261 of such a
+  line and want the interrupt at once, and
+  `window/m2int_wxA6_spxA7_m0irq_{1,2}` want IF on the same read as the
+  object-less `m2int_wxA6_m0irq_{1,2}`; with the source following the flag
+  the five `m0enable` rows fail.
+- Open: `m2int_wxA6_spxA7_m0irq_2` [cgb] is still red together with its
+  object-less twin `m2int_wxA6_m0irq_2` [cgb]: both raise the source on dot
+  256 and both want it one read earlier, which is the WX = 166 line's own
+  mode-0 source on a CGB, not this rule.
+- Perf: one byte test per object-stall dot (`tick_sprite_fetcher`).
+- Clean-room: derived from test ROM sources/outputs and dingbat's own trace
+  runs; no emulator source consulted.
 
 ### The window starts on an equality with the pixel about to be emitted
 - Claim: `lx + 7 == wx`, not `>=`. A `>=` cannot be un-satisfied, so a window
@@ -223,7 +401,7 @@ a reference PNG, `mGBA suite <section>` a section of mGBA's test ROM.
 
 ### The CGB delays a mid-line write per register, not by one phase
 - Ships (`gb.nim`): `CGB_SCY_LATENCY = 2`, `CGB_SCX_LATENCY = 2`,
-  `CGB_WY_LATENCY = 4`, `CGB_WX_LATENCY = 0`, `CGB_WY_LATCH_LATENCY = 0`,
+  `CGB_WY_LATENCY = 4`, `CGB_WX_LATENCY = 1`, `CGB_WY_LATCH_LATENCY = 0`,
   `CGB_LCDC_LATENCY = 0`, `CGB_MAP_LATENCY = 2`, `CGB_MIXER_LATENCY = 1`,
   `CGB_LATENCY_CAP = 1`. The mechanism (`mem_tick_ppu_latched`) parks the
   store and runs the M-cycle's dots around it, so nothing runs per dot.
@@ -238,7 +416,8 @@ a reference PNG, `mGBA suite <section>` a section of mGBA's test ROM.
   read 1: the fetch phase absorbs a dot of latency).
 - WY 4: gambatte `window/arg/late_wy_*` expect the CGB step one M-cycle
   earlier than DMG in 13 of 14 families; the sweep saturates from 3 up.
-- WX 0: no instrument in the tree moves.
+- WX: `CGB_WX_LATENCY = 1`, taken by every CGB at single speed
+  (`CGB_WX_LATE_SS`, §2) and by the AGB at both speeds.
 - LCDC 0: every nonzero whole-register value costs gambatte
   `window/late_disable*`, which want a CGB fetcher abort on a mid-fetch
   window disable, not a dot. Per-bit readers carry their own delay
@@ -903,11 +1082,7 @@ a reference PNG, `mGBA suite <section>` a section of mGBA's test ROM.
   `serial/start_wait_trigger_int8_read_if_2` [cgb].
 
 ### The window's WY comparator sample after a CGB write
-- `WIN_CHECK_DEFER_CGB` / `_CGB_DS` / `WIN_CHECK_DEFER_DMG` (gb.nim): dots
-  after a WY write or LCDC.5 enable lands at which the WY comparator samples;
-  `WIN_LINE0_CHECK_DOT_CGB` / `_DS`: the dot of line 0's own WY check.
-  Re-fit pending; neutral value 0 each.
-- Rows: gambatte `window/arg/late_wy_*`, `late_enable_afterVblank`.
+- See §2, "The window's WY comparator: when it samples".
 
 ### The CGB palette RAM lock around the mode-3 edges
 - `CRAM_LOCK_DOTS` (ppu.nim): whether BCPD/OCPD lock on a dot window around

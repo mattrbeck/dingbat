@@ -499,10 +499,13 @@ the carried line's own match, citing gambatte `m2int_wxA6_m3stat_1` [dmg]
 as wanting "174, not 172"; with the term deleted that row still passes,
 `m2int_wxA6_scx3_m3stat_2` [dmg] joins it, and nothing in `window/`,
 mealybug or the `on_screen` frames moves. The claim was stale. AGE 87 ->
-88. The `spxA7` CGB rows (`m2int_wxA6_spxA7_{m0irq_2,m3stat_2,m3stat_4}`):
-the CGB object at the window's first column against a window start on the
-last pixel was removed 2026-11-13 for a clean rewrite. The remaining
-`window/` rows are the `m0irq`, `oambusyread` and `on_screen` families.
+88. The `spxA7` CGB rows (`m2int_wxA6_spxA7_{m3stat_2,m3stat_4}`): closed
+2026-11-13 by `CGB_OBJ_LAST_PX_YIELDS` (the CGB's last-pixel object waits
+for the window start and holds only the mode flag; `docs/gb-derivations.md`,
+"The last pixel: object against window on a CGB"). `m2int_wxA6_spxA7_m0irq_2`
+[cgb] stays red with its object-less twin `m2int_wxA6_m0irq_2` [cgb]: the
+WX = 166 line's own mode-0 source. The remaining `window/` rows are the
+`m0irq`, `oambusyread` and `on_screen` families.
 
 ### C3. Mid-line SCX stores
 
@@ -617,30 +620,36 @@ families.
 **Modelled.** The level latch; `CGB_WY_LATENCY = 4` (one M-cycle, clipped to
 3 dots by `CGB_LATENCY_CAP = 1`), `CGB_WY_LATCH_LATENCY = 0`.
 
-**Re-fit pending (2026-11-13).** `WIN_CHECK_DEFER_CGB` / `_CGB_DS` /
-`WIN_CHECK_DEFER_DMG` (dots after a WY write or LCDC.5 enable lands at which
-the WY comparator samples) and `WIN_LINE0_CHECK_DOT_CGB` / `_DS` (the dot of
-line 0's own check), `win_check_now`: neutral value 0 each. The per-line
-window-latch cutoff dot was removed for a clean rewrite. Rows: the
-`window/arg/late_wy_*` and `late_enable_afterVblank` families.
+**Re-derived 2026-11-13 (clean room).** The comparator is sampled, not a
+level: once per line on the line's first dot (dot 5 of line 0 on a CGB),
+and `WIN_CHECK_DEFER_DMG = 1` / `_CGB = 5` / `_CGB_DS = 1` dots after a WY
+write or an LCDC.5 enable, except in a line's last `WIN_CHECK_CUT_DOTS = 3`
+dots; a match up to dot `WIN_HEAD_LATE_DOT = 85` (+ SCX & 7) still makes a
+WX < 6 line a window line. Every `window/arg/late_wy_*`,
+`late_scx_late_wy_*` and `late_enable_afterVblank` row without `lcdoffset`
+in its name passes. Schedule, rows and brackets: `docs/gb-derivations.md`,
+"The window's WY comparator: when it samples". Still red: the single-speed
+`lcdoffset1` rows (`window/late_wy_lcdoffset1_2`,
+`late_enable_afterVblank_lcdoffset1_1`, `arg/late_wy_1toFF_lcdoffset1_2`).
 
 ### C6. Window disable and re-enable mid-line on the CGB
 
-**Closed.** Clearing LCDC.5 mid-mode-3 returns the fetcher to the background
-at its next map read, and a CGB window start is revocable for the dots it
-has run (`WIN_EN_ABORT = 1`, `CGB_WIN_REVOKE_LAG = 1`, `CGB_WIN_EN_DEFER =
-5`, `DMG_WIN_EN_REVOKE = 1`).
+**Rows (0; closed 2026-11-13).** Were 5: `window/late_disable_scx5_ds_1`
+(`WIN_REVOKE_DS_PUSH`), `late_reenable_scx3_2` (`CGB_WE_ENABLE_LATE`),
+`late_wx_scx3_2` (`CGB_WX_LATE_SS`),
+`window/on_screen/wx17_weoff_wxA5_weon [cgb]` (`CGB_WE_DISABLE_LATE`),
+`window/on_screen/wxA6_late_we_reenable_3 [dmg]` (`WIN_CARRY_HEAD_DROP`).
+`docs/gb-derivations.md`, "LCDC.5 and WX reach a CGB's window logic late"
+and "A carried window start against LCDC.5 low".
 
-Tests: `window/late_disable_scx5_ds_1`,
-`late_reenable_scx3_2`, `late_wx_scx3_2` (CGB),
-`window/on_screen/wx17_weoff_wxA5_weon [cgb]` (960 px) and
-`window/on_screen/wxA6_late_we_reenable_3 [dmg]` (916 px). Not recorded.
-
-**Behaviour.** The LCDC.5 rule is from mealybug's PPU notes (`WIN_EN_ABORT =
-1`, DMG and CGB). `wxA6_late_we_reenable_3` was the last DMG carry test: its
-re-enable at dot 85 counted one window line too many on the first
-reactivated line only (`WIN_CARRY_REACT_LINES = 1` was right on 126 lines
-and wrong on one).
+**Behaviour.** Clearing LCDC.5 mid-mode-3 returns the fetcher to the
+background at its next map read (mealybug's PPU notes; `WIN_EN_ABORT = 1`,
+DMG and CGB); a CGB window start is revocable for the dots it has run
+(`CGB_WIN_REVOKE_LAG = 1`, `CGB_WIN_EN_DEFER = 5`, `DMG_WIN_EN_REVOKE = 1`).
+`wxA6_late_we_reenable_3`'s extra window line was not the line counter's:
+the start carried over vblank met LCDC.5 low at line 0's head (dot 82, bit
+back on dot 85) and was spent on line 1, where hardware has lost it
+(`WIN_CARRY_HEAD_DROP = 1`).
 
 ### C7. The DMG BGP transition pixel
 

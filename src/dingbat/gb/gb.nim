@@ -763,26 +763,42 @@ const CGB_HALT_PPU_LEAD_ANY* = CGB_HALT_PPU_LEAD_DOTS != 0
 #   takes it too is CGB_WX_LATE_SS; the CGB's own pages are still
 #   unphotographed.
 const CGB_WX_LATENCY*         {.intdefine.} = 1
-const CGB_WE_ENABLE_LATE* {.intdefine.} = 0
-  ## Dots a CGB LCDC.5 rise at single speed takes to reach the window
-  ## comparator (0 = on the write's dot). Re-fit pending; neutral value 0.
+const CGB_WE_ENABLE_LATE* {.intdefine.} = 1
+  ## Whether a CGB LCDC.5 rise at single speed reaches the WX comparator a dot
+  ## late, so a WX match on the write's own dot is missed (0 = on the write's
+  ## dot). 1: gambatte `window/late_reenable_scx3_2` (DMG window, CGB none)
+  ## and DocBoy `cgb_dmg_mode/ppu/visual/enable_win_during_pixel_transfer_round1`
+  ## fail at 0.
 const WIN_LX_OFF_V* = -128'i32
   ## fifo_ppu.nim's WIN_LX_OFF (the comparator parked), here for ppu.nim.
-const CGB_WX_LATE_SS* {.intdefine.} = 0
+const CGB_WX_LATE_SS* {.intdefine.} = 1
   ## Whether every CGB (not only the AGB, GbQuirks.wx_write_late) takes a WX
-  ## store CGB_WX_LATENCY dots late at single speed (0 = no, 1 = yes).
-  ## Re-fit pending; neutral value 0.
+  ## store CGB_WX_LATENCY dots late at single speed (0 = no, 1 = yes). 1:
+  ## gambatte `window/late_wx_scx3_2` moves WX off its match on the match's
+  ## own dot and wants a window on the CGB, none on the DMG; DocBoy
+  ## `cgb/ppu/visual/change_wx_glitch_{wx6_nops16,wx6_nops17,wx7_nops17,wx8_nops17}`
+  ## need the same dot. All five fail at 0.
 # The map column after a wrapped fine-scroll discard: removed 2026-11-13 for
 # a clean rewrite.
-const WIN_REVOKE_DS_PUSH* {.intdefine.} = 0
+const WIN_REVOKE_DS_PUSH* {.intdefine.} = 1
   ## Whether, at CGB double speed, a window start is still revoked by an
   ## LCDC.5 fall landing on the dot its restart pushes the first tile (0 = no,
-  ## 1 = yes). Re-fit pending; neutral value 0.
-# A carried DMG window start meeting LCDC.5 low at the head of mode 3: removed
-# 2026-11-13 for a clean rewrite.
-const CGB_WE_DISABLE_LATE* {.intdefine.} = 0
+  ## 1 = yes). 1: gambatte `window/late_disable_scx5_ds_1` fails at 0 and
+  ## nothing else moves.
+const WIN_CARRY_HEAD_DROP* {.intdefine.} = 1
+  ## Whether a DMG window start owed from the previous line's last pixel
+  ## (DMG_WIN_LAST_PX_CARRY) that meets LCDC.5 low at the head of mode 3 is
+  ## lost there (1) or stays owed to a later line's head (0). 1: gambatte
+  ## `window/on_screen/wxA6_late_we_reenable_3` [dmg] fails at 0 (the start
+  ## carried over vblank is spent on line 1, where the reference has none).
+  ## docs/gb-derivations.md, "A carried window start against LCDC.5 low".
+const CGB_WE_DISABLE_LATE* {.intdefine.} = 2
   ## Dots a CGB LCDC.5 fall takes to reach the fetcher's window abort
-  ## (WIN_EN_ABORT; 0 = on the write's dot). Re-fit pending; neutral value 0.
+  ## (WIN_EN_ABORT; 0 = on the write's dot). 2: DocBoy `cgb/ppu/visual/
+  ## window_bg_reprise_wx{14,22}` pass from 1, `_wx{15,23}` and gambatte
+  ## `window/on_screen/wx17_weoff_wxA5_weon` [cgb] from 2; 3 loses
+  ## `window_bg_reprise_wx{8,16,24}` and gambatte
+  ## `on_screen/weon_wx18_weoff_weon_wx80` [cgb].
 const WIN_TAIL_PASSED_MATCH* {.intdefine.} = 1
   ## Whether mode 3's tail stops waiting on a window whose WX match the
   ## shifter has already passed (a match LCDC.5 refused, the bit set again
@@ -1000,25 +1016,42 @@ const CGB_MAP_ANY* = CGB_MAP_LATENCY != 0
   ## Whether anything records the map-select bits' change dot; at 0 the field
   ## is never written and the fetcher's compare never takes.
 const CGB_WY_LATCH_LATENCY*   {.intdefine.} = 0
-const WIN_CHECK_DEFER_CGB*    {.intdefine.} = 0
-  ## Dots after a WY write's (or an LCDC.5 enable's) commit at which the
-  ## window's WY == LY comparator samples on a CGB, in place of the immediate
-  ## latch (ppu_latch_wy); 0 = immediate. Re-fit pending; neutral value 0.
-const WIN_CHECK_DEFER_CGB_DS* {.intdefine.} = 0
+const WIN_CHECK_DEFER_CGB*    {.intdefine.} = 5
+  ## Dots after the first dot of a WY write's (or an LCDC.5 enable's) M-cycle
+  ## at which the window's WY == LY comparator samples on a CGB at single
+  ## speed, and at which its copy of WY (`wy_cmp`) takes a written value;
+  ## 0 = at the store (ppu_latch_wy). 5: gambatte `window/arg/
+  ## late_wy_FFto2_ly2_scx3_2` [cgb] and two `_wx00_2` rows refuse 4,
+  ## `late_wy_FFto2_ly2_1` [cgb] and three like it refuse 6. docs/gb-derivations.md, "The window's WY
+  ## comparator: when it samples", has the whole schedule.
+const WIN_CHECK_DEFER_CGB_DS* {.intdefine.} = 1
   ## WIN_CHECK_DEFER_CGB at double speed, in dots (-1 = the single-speed value
-  ## halved). Re-fit pending; neutral value 0.
-const WIN_CHECK_DEFER_DMG*    {.intdefine.} = 0
-  ## The same deferral on a DMG, in dots (0 = immediate). Re-fit pending;
-  ## neutral value 0.
-const WIN_LINE0_CHECK_DOT_CGB* {.intdefine.} = 0
-  ## Dot of line 0 at which a CGB runs the per-line WY == LY check, instead of
-  ## the mode-2 entry at the boundary (0 = the boundary). Re-fit pending;
-  ## neutral value 0.
-const WIN_LINE0_CHECK_DOT_CGB_DS* {.intdefine.} = 0
-  ## The same in double speed, in dots. Re-fit pending; neutral value 0.
-# The window's latch cut-off late in a line, its next-line check, and the
-# queueing of a WY write's check behind line 0's: removed 2026-11-13 for a
-# clean rewrite.
+  ## halved; 0 = at the store, which then has no line-end cut-off). 1: 0
+  ## loses `late_wy_FFto0_ly2_ds_2` and three `_ds_` rows like it, 2 loses
+  ## `late_wy_FFto2_ly2_ds_1`, `late_wy_1toFF_ds_1`, `late_enable_ly0_ds_1`
+  ## and three more.
+const WIN_CHECK_DEFER_DMG*    {.intdefine.} = 1
+  ## The same on a DMG, in dots (0 = at the store). 1: 0 loses
+  ## `late_wy_FFto2_ly2_scx3_3` [dmg] (and the line-end rows, having no
+  ## cut-off), 2 loses `late_wy_FFto2_ly2_2` [dmg] and four like it.
+const WIN_LINE0_CHECK_DOT_CGB* {.intdefine.} = 5
+  ## Dot of line 0 at which a CGB runs the per-line WY == LY sample, where
+  ## every other line (and the DMG's line 0) runs it on the first dot; 0 = the
+  ## first dot here too. gambatte `window/late_wy_{1,2}` [cgb] pass at 2..6
+  ## and fail at 1 and 7; 5 is the double-speed value.
+const WIN_LINE0_CHECK_DOT_CGB_DS* {.intdefine.} = 5
+  ## The same in double speed, in dots. 5: `window/late_wy_ds_1` refuses 4,
+  ## `late_wy_ds_lcdoffset1_2` refuses 6.
+const WIN_CHECK_CUT_DOTS* {.intdefine.} = 3
+  ## Dots before the end of a line from which a write's sample of the WY == LY
+  ## comparator (WIN_CHECK_DEFER_*) no longer latches the window for the line
+  ## being drawn: the comparator has finished with this line and next answers
+  ## at the boundary, for the next one (0 = a sample latches up to the
+  ## boundary). 3 (dot 453 on): gambatte `window/
+  ## late_enable_afterVblank_ds_lcdoffset1_2` refuses 2,
+  ## `arg/late_wy_FFto0_ly2_ds_1` and `late_enable_afterVblank_ds_1` refuse 4;
+  ## the single-speed rows (`late_wy_FFto0_ly2_{1,2,3}` and their kin) bracket
+  ## it to 2..5 on both devices.
 const WIN_CHECK_DEFER_ANY* = WIN_CHECK_DEFER_CGB != 0 or WIN_CHECK_DEFER_DMG != 0 or
                              WIN_LINE0_CHECK_DOT_CGB != 0
 const WIN_EN_ABORT*           {.intdefine.} = 1
@@ -1185,11 +1218,14 @@ const WIN_LINE_START_LATCH*   {.intdefine.} = 1
   ## the last dot of the throw-away fetch at the head of mode 3 (1, default) or
   ## the mode 2 -> 3 edge six dots earlier (0). Bracketed on both sides by two
   ## mealybug ROMs; see the head latch in fifo_ppu.nim.
-const WIN_HEAD_LATE_DOT* {.intdefine.} = 0
+const WIN_HEAD_LATE_DOT* {.intdefine.} = 85
   ## Line dot (plus SCX & 7) until which a WY match can still make the line a
   ## window line when WX is below WIN_LINE_START_WX, beyond the head
-  ## (fifo_head_window_late); 0 compiles it out. Re-fit pending; neutral
-  ## value 0.
+  ## (fifo_head_window_late); 0 compiles it out. 82..85 pass gambatte
+  ## `window/arg/late_scx_late_wy_FFto4_ly4_wx00_{1,2,3}` and
+  ## `late_wy_FFto2_ly2_wx00_{1,2,3}` on both devices; 81 loses
+  ## `late_scx_..._wx00_1` [cgb] and `_2` [dmg], 86 loses four. 85 ships: the
+  ## dot before the head's own read of WX.
 const WIN_START_PRE_PIXEL*    {.intdefine.} = 1
   ## Whether the window's WX comparator can match one slot LEFT of the
   ## shifter's first pixel (screen x = -1 when SCX & 7 = 0, i.e. WX = 6).
@@ -1265,14 +1301,13 @@ const DMG_WIN_LAST_PX_CARRY* {.intdefine.} = 1
   ## reference pair: the restart's first pixel never shifts out, so x = 159
   ## keeps its background pixel (`wxA6_late_we_reenable_4`); the latch survives
   ## into the next line, even across the frame boundary (`wxA6_wy8F`); it is
-  ## consumed at the head only if LCDC.5 is set there and kept otherwise
-  ## (`wxA6_wy01_weoff_ly02`). Consumed at dot 86, the end of the throw-away
+  ## consumed at the head if LCDC.5 is set there and lost otherwise
+  ## (WIN_CARRY_HEAD_DROP). Consumed at dot 86, the end of the throw-away
   ## fetch, where `fifo_head_window` reads WX (`wxA6_late_we_reenable_1..4`
   ## re-enable at 77/81/85/89; 89 is not consumed). The window line counter
   ## counts the consumption as a start. Every per-dot term is behind
   ## `not ppu.cgb`; written as a template because an `{.inline.}` proc here
-  ## measured +3.6% (see `fifo_emit_pixel`). Still red:
-  ## `wxA6_late_we_reenable_3` [dmg], one window line too many.
+  ## measured +3.6% (see `fifo_emit_pixel`).
 
 const WIN_CARRY_TILE*        {.intdefine.} = 1
   ## The window tile column a carried start (DMG_WIN_LAST_PX_CARRY) draws
@@ -2152,7 +2187,7 @@ type
     # boundary a state loads from, and gb_apply_state sets it so.
     lcd_on_first_frame*: bool
     # window state: a WY match seen with LCDC.5 set this frame (ppu.nim
-    # `mode_flag=`, ppu_latch_wy, ppu_store_lcdc)
+    # `mode_flag=`, win_check_now, ppu_latch_wy, ppu_store_lcdc)
     window_trigger*:     bool
     current_window_line*: int
     old_stat_flag*:      bool
@@ -2162,6 +2197,14 @@ type
     # past its dot, so it can still be set at a frame boundary; serialized
     # from GB payload rev 6. The dot is in cycle_counter's terms.
     win_check_dot*:      int32     # WIN_CHECK_DEFER: dot the comparator samples on, -1 none
+    # A second sample queued behind that one (a WY write's against line 0's
+    # own check on a CGB), -1 none; and which of the two take the written WY
+    # with them (bit 0 the first, bit 1 the second). `wy_cmp` is WY as the
+    # comparator has it: the register, WIN_CHECK_DEFER_* dots late. In flight
+    # for a few dots after a write; not serialized (load_ppu_state re-derives).
+    win_check_dot2*:     int32
+    win_check_wr*:       uint8
+    wy_cmp*:             uint8
     stat_drop_pending*:  bool
     stat_drop_level*:    bool
     stat_drop_dot*:      int32
@@ -2264,6 +2307,9 @@ type
     # only by fetch_work_pending on a CGB, where a window restart and an object
     # fetch on that pixel are one fetch slot (CGB_WIN_TAIL_LAST).
     obj_last_px*:         bool
+    # CGB_OBJ_LAST_PX_YIELDS (fifo_ppu.nim): object-stall dots left until the
+    # mode-0 source rises ahead of a flag that object holds (0 = none).
+    m0_early*:            uint8
     win_tail_end*:        int32   # WIN_TAIL_FLAG_LEAD: the dot a tail restart retires on (0 = none)
     # A window start owed to the next line: the WX comparator matched on the
     # line's last pixel, which a DMG's end-of-line cleanup cannot clear
