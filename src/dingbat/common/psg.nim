@@ -28,15 +28,45 @@ const PSG_DUTY*: array[4, array[8, uint8]] = [
   [0'u8, 1, 1, 1, 1, 1, 1, 0],  # 75%
 ]
 
-# A trigger's envelope start next to the frame sequencer's envelope clock:
-# removed 2026-11-13 for a clean rewrite (psg_env_trigger_extra).
-const SWEEP_TRIGGER_LEAD_T_DMG* {.intdefine.} = 0
-const SWEEP_TRIGGER_LEAD_T_CGB* {.intdefine.} = 0
-  ## A trigger within this many T-cycles before a sweep clock (steps 2 and 6)
-  ## misses that clock: the sweep timer starts one clock later (0 = none).
-  ## Scheduler cycles, so M-cycles at double speed too
-  ## (psg_sweep_trigger_extra). GB only. Re-fit pending; neutral value 0
-  ## (both).
+const ENV_TRIGGER_LEAD_T* {.intdefine.} = 4
+  ## GB: a trigger within this many scheduler cycles before the frame
+  ## sequencer's step 6 finds step 7 next already and gets its extra envelope
+  ## clock (psg_env_trigger_extra): the write lands in the M-cycle whose end
+  ## is the DIV-APU edge. gambatte sound/ch2_init_reset_env_counter_timing_
+  ## {9..16}: a period-1 note triggered 8 cycles before step 6 steps at the
+  ## next step 7 (`_9`/`_10` [dmg], `_13`/`_14` [cgb]), one triggered 4
+  ## before it at the one after (`_11`/`_12` [dmg], `_15`/`_16` [cgb]). 4..7
+  ## pass; 0..3 lose `_11` [dmg] and `_15` [cgb], 8 loses `_10` [dmg] and
+  ## `_14` [cgb]. The same M-cycle as APU_POWERON_TAP_LEAD (gb/apu.nim) and
+  ## the DMG's sweep lead below. Measured at single speed only. 0 leaves
+  ## Pan Docs' rule alone.
+const SWEEP_TRIGGER_LEAD_T_DMG* {.intdefine.} = 4
+const SWEEP_TRIGGER_LEAD_T_CGB* {.intdefine.} = 8
+  ## A trigger within this many scheduler cycles before a sweep clock (steps
+  ## 2 and 6) misses that clock: the sweep timer starts one clock later (0 =
+  ## none). CPU cycles, so the same count of M-cycles at double speed
+  ## (psg_sweep_trigger_extra). GB only.
+  ## DMG, 4: gambatte sound/ch1_init_reset_sweep_counter_timing_{1..6} [dmg]
+  ## (pace 2, step 0 at $700: the second clock's overflow check stops the
+  ## note unless NR10 is cleared first) take the clock 8 cycles after the
+  ## trigger (`_1`, `_3`) and miss the one 4 after (`_4`, `_6`); DocBoy
+  ## dmg/apu ch1_period_sweep_change_period_nr14_during_recalc_delay14284
+  ## (8 before: taken) and `_delay14285_round{1,2}` (4 before: missed).
+  ## 0 loses `_4` [dmg] and `delay14285_round2`; 8 loses `_3` [dmg],
+  ## `delay14284` and `step0_delay14284_round1`.
+  ## CGB, 8: gambatte `_7`..`_12` [cgb] take the clock 12 cycles after the
+  ## trigger (`_7`, `_9`) and miss the one 8 after (`_10`, `_12`); SameSuite
+  ## channel_1_sweep_restart_2 (CGB E) passes at 8 only; DocBoy cgb/double_
+  ## speed/apu/ch1 `..._nr14_during_recalc_delay1224{1,2}_round2` and six
+  ## `double_trigger_delay{0,1,2}_delay1224{3..6}_round1` rows want 8
+  ## scheduler cycles at double speed too (two M-cycles at either speed),
+  ## and `delay12240`, `step0_delay12240_round2` and `double_trigger_
+  ## delay{0,1,2}_delay1224{2,3,4}` fail at 12. 4 loses `_10` [cgb],
+  ## SameSuite's row and four of those DocBoy rows (0 all eight and cgb/apu
+  ## `delay14285_round2`); 12 loses `_9` [cgb], the 12240 rows and cgb/apu
+  ## `step0_delay14283_round2`. DocBoy's two single-speed CGB rows that
+  ## want 4 (`delay14284`, `step0_delay14284_round1`) are not scored (the
+  ## runner's DocboyNotScored).
 
 const PSG_WAVE_BANK* = 16
   ## Bytes in one wave RAM bank. The GB has one; the GBA two (SOUND3CNT_L).

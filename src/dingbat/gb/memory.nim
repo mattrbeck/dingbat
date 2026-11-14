@@ -465,10 +465,11 @@ proc read_byte*(mem: GbMemory; gb: GB; idx: int): uint8 =
       var lo = sq_dac_input(gb.apu.channel1)
       var hi = sq_dac_input(gb.apu.channel2)
       # CGB 0/A/B/C: a read on a rising duty step answers 0 for that channel
-      # (GbQuirks.pcm_read_edge_zero).
-      # Channel 2 under the same quirk: removed 2026-11-13 for a clean rewrite.
+      # (GbQuirks.pcm_read_edge_zero); channel 2 by PCM12_CH2_EDGE_ZERO.
       if gb.quirks.pcm_read_edge_zero:
         if sq_pcm_edge_zero(gb.apu.channel1, gb): lo = 0
+        when PCM12_CH2_EDGE_ZERO:
+          if sq_pcm_edge_zero(gb.apu.channel2, gb): hi = 0
       lo or (hi shl 4)
     else: 0xFF'u8
   of 0xFF77:

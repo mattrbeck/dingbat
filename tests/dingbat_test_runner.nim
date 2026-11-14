@@ -2101,7 +2101,7 @@ const NotScored: seq[(string, string)] = @[
     "retrigger to take the new frequency. They disagree with SameSuite " &
     "`channel_1_sweep_restart_2` (CGB hardware) and gambatte " &
     "`sound/ch1_init_reset_sweep_counter_timing_10` [cgb04c] on the CGB's " &
-    "trigger lead (SWEEP_TRIGGER_LEAD_T_CGB, re-fit pending), and " &
+    "trigger lead (SWEEP_TRIGGER_LEAD_T_CGB = 8, where they want 4), and " &
     "SameBoy (CGB E) fails both. The DMG rows of the same family ARE scored " &
     "and pass (docs/gb-failure-triage.md I2). (build_docboy_rows, " &
     "DocboyNotScored)"),

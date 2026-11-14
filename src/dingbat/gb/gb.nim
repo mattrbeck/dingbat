@@ -1653,7 +1653,8 @@ type
       ## identical to the latched render (docs/flashcart-runbook.md row 31).
     pcm_read_edge_zero*: bool
     cgb_c_or_older*: bool
-      ## CGB 0 / A / B / C (a revision set, no rule of its own today).
+      ## CGB 0 / A / B / C: where a double-speed square trigger lands
+      ## (apu/psg_host.nim, SQ_START_HALF_RATE_LEAD_T, gb_trigger_pickup).
       ## pcm_read_edge_zero: a PCM12 read landing on the very cycle a square
       ## channel's duty step lands reads 0 for that channel if its output was 0
       ## before the step (the rising edge is invisible to a read taken on it).

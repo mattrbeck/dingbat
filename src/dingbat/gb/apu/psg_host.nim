@@ -60,8 +60,41 @@ proc gb_apu_edge_before*(gb: GB): CycleCount =
   let now  = gb.scheduler.cycles
   now - ((now + tick - (gb.apu.tick_phase mod tick)) mod tick)
 
-# Where a double-speed square trigger is placed on CPU CGB C and older:
-# removed 2026-11-13 for a clean rewrite.
+const SQ_START_HALF_RATE_LEAD_T* {.intdefine.} = 4
+  ## CPU CGB C and older, double speed: a square channel triggered from off
+  ## starts counting its period on the first 1 MHz edge at least this many
+  ## T-cycles after the NRx4 write that is an odd tick of the grid's half
+  ## rate, the 512 kHz clock the APU power-on starts with it (GbApu.
+  ## noise_phase; gb_trigger_deadline). 0 compiles the CGB <= C placement out
+  ## (every revision then takes gb_apu_edge's).
+  ##
+  ## Four write phases are measured, in 2 MHz M-cycles after the NR52
+  ## power-on write (two to a tick, so even ticks are 0, 4, 8, ...):
+  ##   25 -> 30  SameSuite channel_1_freq_change_timing-cgb0BC, cells 8..15
+  ##             (the sixth step falls 53 M-cycles after the trigger: cell
+  ##             9's NR14 write there wins the reload, cell 10's a M-cycle
+  ##             later does not), and the five gambatte speedchange{,2}*_ch1_
+  ##             duty0_pos6_to_pos7_timing_{,nop_}ds_{1,2} pairs
+  ##   30 -> 34  gambatte sound/ch1_duty0_pos6_to_pos7_timing_ds_{1,2,3,4}
+  ##   31 -> 34  the same family's `_ds_{5,6}`
+  ## and, powered on at single speed and triggered after a KEY1 switch (which
+  ## re-anchors both grids, apu_rescale_speed), speedchange_ch1_nr4init_
+  ## duty0_pos6_to_pos7_timing_{1,2}: 5 M-cycles after the write.
+  ## A plain two ticks after the next edge, CPU CGB D/E's rule, gives 36 for
+  ## 31 and loses `_ds_6` and `nr4init_..._2`; the other half-rate phase loses
+  ## nine rows and SameSuite's. The lead: 4 passes; 2 loses the five `ds_1`
+  ## speedchange rows and SameSuite's; 6 loses `nr4init_..._2`; 8 that and
+  ## `_ds_6`. Single speed is left on the two-tick rule (every write is on
+  ## the grid there, and the gambatte rows that pin it trigger on even ticks
+  ## only). A restart keeps gb_apu_edge's placement: no CGB <= C row sees a
+  ## restarted note's next step at double speed.
+
+template gb_trigger_async(gb: GB): bool =
+  ## CPU CGB C and older at double speed: SQ_START_HALF_RATE_LEAD_T's
+  ## placement, and a trigger that acts in the write's own M-cycle
+  ## (gb_trigger_pickup).
+  SQ_START_HALF_RATE_LEAD_T != 0 and gb.quirks.cgb_c_or_older and
+    gb.scheduler.speed != 0
 
 proc gb_trigger_deadline*(gb: GB; period: CycleCount;
                           extra_ticks: int): CycleCount =
@@ -71,8 +104,16 @@ proc gb_trigger_deadline*(gb: GB; period: CycleCount;
   ## extra_ticks of startup delay -- 2 for a square that was off
   ## (channel_1_delay), 1 for a restart (channel_1_restart). The waveform
   ## position is untouched. Channel 4 has its own rule: psg_noise_first_inc.
-  let edge = gb_apu_edge(gb)
-  edge + period + CycleCount(extra_ticks) * gb_apu_tick(gb)
+  let tick = gb_apu_tick(gb)
+  if extra_ticks == 2 and gb_trigger_async(gb):
+    # From off on CPU CGB C and older at double speed: the first odd tick of
+    # the 512 kHz grid at least the lead after the write.
+    let lead = CycleCount(SQ_START_HALF_RATE_LEAD_T) shl gb.scheduler.speed
+    var e = gb_apu_edge_at(gb, gb.scheduler.cycles + lead)
+    let half = 2 * tick
+    if (e + half - (gb.apu.noise_phase mod half)) mod half < tick: e += tick
+    return e + period
+  gb_apu_edge(gb) + period + CycleCount(extra_ticks) * tick
 
 template psg_trigger_deadline(h: GB; period: CycleCount;
                               extra_ticks: int): CycleCount =
@@ -81,9 +122,15 @@ template psg_trigger_deadline(h: GB; period: CycleCount;
 proc gb_trigger_pickup*(gb: GB): CycleCount =
   ## The 1 MHz edge a square trigger written now takes effect on: the edge at
   ## or after the write (gb_trigger_deadline's rule): the pickup rules in
-  ## sq_trigger are stated on this edge (PSG_NO_STEP would mean another rule
-  ## places the trigger).
-  gb_apu_edge(gb)
+  ## sq_trigger are stated on this edge. PSG_NO_STEP on CPU CGB C and older
+  ## at double speed, where the trigger acts in the write's own M-cycle: a
+  ## duty step due on the next edge, half a tick or less ahead, is lost with
+  ## the restart. gambatte sound/ch1_duty0_pos6_to_pos7_timing_ds_{1,3}
+  ## (the retrigger half a tick before the seventh step: silent) against
+  ## `_ds_{2,4}` (on it: audible), and speedchange{,3_nop}_ch1_duty0_pos6_to_
+  ## pos7_timing_{,nop_}1 with the step 1 T ahead; with CPU CGB D/E's pickup
+  ## those and four more rows of the two ladders are lost (nine in all).
+  if gb_trigger_async(gb): PSG_NO_STEP else: gb_apu_edge(gb)
 
 template psg_trigger_pickup(h: GB): CycleCount = gb_trigger_pickup(h)
 
@@ -123,6 +170,16 @@ proc sq_dac_input(ch: PsgSquare): uint8 =
   if ch.enabled and ch.dac_enabled:
     uint8(int(ch.sample_bit) * int(ch.current_volume)) and 0x0F
   else: 0'u8
+
+const PCM12_CH2_EDGE_ZERO* {.booldefine.} = true
+  ## GbQuirks.pcm_read_edge_zero covers channel 2 as it does channel 1
+  ## (gb/memory.nim, $FF76). Not measured on channel 2: SameSuite's
+  ## apu/README.md states the glitch for channels 1, 2 and 4 on CPU CGB C
+  ## and older ("report a glitched PCM amplitude ... if they're read in the
+  ## same M-cycle they change"), and the two squares are one circuit bar the
+  ## sweep unit. No scored row reads PCM12 on a channel 2 step on those
+  ## revisions (SameSuite's channel_2 rows run on CPU CGB E), so either
+  ## setting passes everything.
 
 proc sq_pcm_edge_zero(ch: PsgSquare; gb: GB): bool {.inline.} =
   ## Whether a PCM12 read on this cycle answers 0 for a square channel (CGB

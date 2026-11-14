@@ -1382,3 +1382,132 @@ the sweep scripts are catalogued in
 `TMPDIR`, one binary pair per world) in [`tests/README.md`](../tests/README.md),
 "Exit code, baselines, hazards"; the retired-instruction A/B rules in
 `docs/gb_oam_dma_cost.md`.
+
+## 11. GB APU: triggers against the clocks
+
+Clean-room for every entry in this section: derived from test ROM sources and
+outputs (gambatte `test/hwtests/sound`, `speedchange`; DocBoy's test-suite
+sources; SameSuite `apu/`), Pan Docs, and dingbat's own trace runs; no emulator
+source consulted, no other emulator run.
+
+### A trigger with the envelope clock next gets one more clock
+- Claim: a trigger while the frame sequencer's next step is 7 loads the
+  envelope timer with the period plus one, so that step only brings it back to
+  the period (Pan Docs, Audio Details, "Obscure Behavior": "If a channel is
+  triggered when the DIV-APU next step will clock the volume envelope, the
+  envelope's timer is reloaded with one greater than it would have been"). On
+  the GB "next" is judged an M-cycle ahead: a trigger written in the M-cycle
+  whose end is step 6's DIV-APU edge already finds step 7 next.
+- Ships: `psg_env_trigger_extra` (`common/psg_channels.nim`),
+  `ENV_TRIGGER_LEAD_T = 4` scheduler cycles (`common/psg.nim`).
+- Evidence: gambatte `sound/ch2_init_reset_env_counter_timing_{9..16}`
+  trigger a volume-0, increasing, period-1 note and rewrite NR22 = $08 one
+  M-cycle either side of an envelope clock; the mix is silent if the volume
+  had not stepped. Trigger 8 cycles before step 6: the next step 7 steps it
+  (`_9`/`_10` [dmg], `_13`/`_14` [cgb]). Trigger 4 cycles before step 6: the
+  step 7 after that one does (`_11`/`_12` [dmg], `_15`/`_16` [cgb]). With
+  step 7 next outright (`_13`..`_16` [dmg]) the first step 7 is skipped too.
+  DocBoy `cgb/apu/ch2/ch2_volume_sweep_retrigger_divapu0_round{1,2}` (a
+  retrigger 7 steps after the APU power-on: the volume moves 18384 M-cycles
+  later, not 2048).
+- Brackets: lead 4..7 pass; 0..3 lose `_11` [dmg] and `_15` [cgb]; 8 loses
+  `_10` [dmg] and `_14` [cgb]. Without the rule `_11`, `_13`, `_14` [dmg],
+  `_15` [cgb] and DocBoy's two fail.
+- GBA: the shared PSG takes Pan Docs' rule without the lead. No GBA row sees
+  the rule either way (dbsuite, mGBA suite, alyosha and hwverified are
+  row-for-row the same with it and without); the lead is unmeasured there.
+- Open: the lead at double speed (every row is single speed; it ships as CPU
+  cycles, like the sweep's).
+
+### A trigger just before a sweep clock misses it
+- Claim: a channel 1 trigger within one M-cycle (DMG) or two (CGB) of a sweep
+  clock (frame sequencer steps 2 and 6) does not have that clock count: the
+  sweep timer runs one clock longer. The count is CPU cycles: two M-cycles at
+  double speed as well.
+- Ships: `SWEEP_TRIGGER_LEAD_T_DMG = 4`, `SWEEP_TRIGGER_LEAD_T_CGB = 8`
+  scheduler cycles (`common/psg.nim`, `psg_sweep_trigger_extra`).
+- Evidence, DMG: gambatte `sound/ch1_init_reset_sweep_counter_timing_{1..6}`
+  [dmg] (pace 2, step 0 at $700; the second clock's overflow check stops the
+  note unless NR10 = 0 lands first): the clock 8 cycles after the trigger
+  counts, the one 4 after does not. DocBoy `dmg/apu/ch1_period_sweep_change_
+  period_nr14_during_recalc_delay14284` (8 before) and `_delay14285_round{1,2}`
+  (4 before) agree. 0 loses `_4` [dmg] and `delay14285_round2`; 8 loses `_3`
+  [dmg], `delay14284` and `step0_delay14284_round1`.
+- Evidence, CGB: gambatte `_7`..`_12` [cgb]: 12 cycles after counts, 8 after
+  does not. SameSuite `apu/channel_1/channel_1_sweep_restart_2` (CGB E
+  hardware) passes at 8 and fails at 4 and 12. DocBoy `cgb/double_speed/apu/
+  ch1/..._nr14_during_recalc_delay1224{1,2}_round2` and six `double_trigger_
+  delay{0,1,2}_delay1224{3..6}_round1` rows need 8 scheduler cycles at
+  double speed (4 passes half of them, 0 none), and `delay12240`,
+  `step0_delay12240_round2` and three `double_trigger_*` rows fail at 12, so
+  the lead is two M-cycles at double speed, not 8 T-cycles of real time.
+- Not scored: DocBoy's single-speed CGB rows `cgb/apu/ch1/..._delay14284`
+  and `..._step0_delay14284_round1` want 4 on the CGB and fail at 8; they
+  contradict SameSuite's and gambatte's CGB captures (the runner's
+  `DocboyNotScored` entry).
+
+### An APU power-on samples the DIV-APU bit an M-cycle ahead
+- Claim: the NR52 power-on skips the first DIV-APU edge when the divider's tap
+  bit is set (SameSuite `div_write_trigger_10`); the bit it sees is the one
+  the divider holds 4 counts after the write's time stamp.
+- Ships: `APU_POWERON_TAP_LEAD = 4` (`gb/apu.nim`).
+- Evidence: gambatte `sound/ch2_init_reset_env_counter_timing_{1..8}`:
+  powered on 8 counts before the bit rises, a period-1 envelope steps at the
+  eighth DIV-APU edge (`_1`/`_2` [dmg], `_3`/`_4` [cgb]); 4 counts before,
+  one edge later (`_5`/`_6` [dmg], `_7`/`_8` [cgb]). `sound/ch2_late_reset_
+  nr52_2b` [dmg, cgb] and `ch2_late_reset_nr52_ds_2b` [cgb] read the same skip
+  through the length counter, the last at double speed.
+- Brackets: 4..7 pass; 0..3 lose `_5` [dmg], `_7` [cgb] and the three `2b`
+  rows; 8 loses `_2` [dmg], `_4` [cgb] and their `1a` siblings
+  (`ch2_late_reset_nr52_1a` [dmg, cgb], `_ds_1a` [cgb]).
+- The three leads above are one M-cycle of the write against the divider's
+  edge, seen from three registers; the CGB's sweep unit adds a second.
+
+### CPU CGB C and older: a double-speed square trigger acts at once and starts on the 512 kHz clock
+- Claim: on CPU CGB D/E a trigger waits for the next 1 MHz edge, and a duty
+  step due on that edge still happens (DocBoy, CGB E). On CPU CGB 0/A/B/C at
+  double speed (a) the trigger acts in the write's own M-cycle: a step half a
+  tick or less ahead is lost with the restart; and (b) a channel started from
+  off begins its first period on the first 1 MHz edge at least one tick after
+  the write that is an odd tick of the 512 kHz clock the power-on starts with
+  the 1 MHz one (the noise channel's grid, `GbApu.noise_phase`).
+- Ships: `gb_trigger_pickup` returns no edge for `GbQuirks.cgb_c_or_older` at
+  double speed; `SQ_START_HALF_RATE_LEAD_T = 4` T-cycles in
+  `gb_trigger_deadline` (`gb/apu/psg_host.nim`).
+- Evidence for (b), write time -> start of the first period, in 2 MHz
+  M-cycles after the NR52 power-on (a tick is two):
+  - 25 -> 30: SameSuite `channel_1_freq_change_timing-cgb0BC` cells 8..15
+    (period 8 M-cycles; the sixth step is 53 M-cycles after the trigger: an
+    NR14 write on it wins the reload, one M-cycle later does not), and
+    gambatte `speedchange/speedchange{,2}*_ch1_duty0_pos6_to_pos7_timing_
+    {,nop_}ds_{1,2}` (five pairs, through one or two KEY1 switches).
+  - 30 -> 34: gambatte `sound/ch1_duty0_pos6_to_pos7_timing_ds_{1..4}`.
+  - 31 -> 34: `sound/ch1_duty0_pos6_to_pos7_timing_ds_{5,6}`.
+  - powered on at single speed, triggered after a switch:
+    `speedchange_ch1_nr4init_duty0_pos6_to_pos7_timing_{1,2}`, 5 M-cycles.
+  25 and 31 are both half a tick off the 1 MHz grid and start 5 and 3
+  M-cycles later, so no rule on the 1 MHz grid alone fits; 30, 34 are odd
+  ticks (15, 17).
+- Two-sided: CGB D/E's two ticks after the next edge loses `_ds_6` and
+  `nr4init_..._2`; the even 512 kHz phase loses nine rows and SameSuite's;
+  the lead passes at 4 T, loses the five `ds_1` speedchange rows and
+  SameSuite's at 2, `nr4init_..._2` at 6, that and `_ds_6` at 8.
+- Evidence for (a): `sound/ch1_duty0_pos6_to_pos7_timing_ds_{1,3}` retrigger
+  half a tick before the seventh duty step and stay silent, `_ds_{2,4}` on it
+  and sound; `speedchange{,3_nop}_ch1_duty0_pos6_to_pos7_timing_{,nop_}1`
+  retrigger 1 T before it. With CGB D/E's pickup nine rows of the two ladders
+  fail.
+- Open: a restart's own next step on these revisions at double speed (no row
+  sees it; it keeps the D/E placement), and whether single speed has the
+  512 kHz dependence (its rows trigger on even ticks only). Every row is
+  channel 1; channel 2 shares the code.
+
+### PCM12 on CPU CGB C and older: channel 2 reads as channel 1 does
+- Claim: a PCM12 read in the M-cycle a square's duty output rises answers 0
+  for that channel on CPU CGB 0/A/B/C. Measured on channel 1 (SameSuite
+  `channel_1_freq_change_timing-cgb0BC` cells 4 and 15); channel 2 is the same
+  circuit and SameSuite's `apu/README.md` names channels 1, 2 and 4.
+- Ships: `PCM12_CH2_EDGE_ZERO = true` (`gb/apu/psg_host.nim`), `$FF76` in
+  `gb/memory.nim`.
+- Evidence: none of its own. No scored row reads PCM12 on a channel 2 step on
+  those revisions; every suite is identical with the knob off.

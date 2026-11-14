@@ -1,9 +1,17 @@
 # GB APU master (included by gb.nim)
 
-const APU_POWERON_TAP_LEAD* {.intdefine.} = 0
+const APU_POWERON_TAP_LEAD* {.intdefine.} = 4
   ## Divider counts ahead of an NR52 power-on write at which the DIV-APU tap
-  ## bit is sampled for the skipped first edge (GbApu.div_skip). Re-fit
-  ## pending; neutral value 0.
+  ## bit is sampled for the skipped first edge (GbApu.div_skip): a power-on
+  ## in the M-cycle whose end raises the bit finds it raised. gambatte
+  ## sound/ch2_init_reset_env_counter_timing_{1..8}: powered on 8 counts
+  ## before the bit rises, a period-1 envelope first steps on the eighth
+  ## DIV-APU edge (`_1`/`_2` [dmg], `_3`/`_4` [cgb]); 4 counts before, one
+  ## edge later (`_5`/`_6` [dmg], `_7`/`_8` [cgb]). ch2_late_reset_nr52_2b
+  ## [dmg, cgb] and `_ds_2b` [cgb] (the length counter's side of the same
+  ## skip) agree, the last at double speed. 4..7 pass; 0..3 lose `_5` [dmg],
+  ## `_7` [cgb] and the three `2b` rows; 8 loses `_2` [dmg], `_4` [cgb] and
+  ## the `2b` rows' `1a` siblings.
 
 const APU_SPSW_TAP_LAG_T* {.intdefine.} = 4
   ## Divider counts added to every etAPUFrameSeq re-aim while

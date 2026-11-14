@@ -950,11 +950,16 @@ still stepping at the hand-off (NR52 = $F1), frequency $7C1, and
 `ch1_init_pos_{1..8}` pin where in its 2016-cycle duty cycle each boot ROM
 leaves it (728 / 1612, one value of 504). `BOOT_FS_STAGE_{DMG,CGB}`: the
 frame sequencer's step at the hand-off (1 / 0, `ch2_init_env_counter_timing`).
-A trigger against the next envelope clock: removed 2026-11-13 for a clean
-rewrite. Re-fit pending (2026-11-13): `SWEEP_TRIGGER_LEAD_T_{DMG,CGB}`
-(scheduler cycles before a sweep clock within which a trigger misses it) and
-`APU_POWERON_TAP_LEAD` (apu.nim; counts ahead of the NR52 power-on write at
-which the DIV-APU tap bit is sampled), neutral value 0 each.
+A trigger against the next envelope clock (`psg_env_trigger_extra`: Pan Docs'
+extra clock when step 7 is next, judged `ENV_TRIGGER_LEAD_T` = 4 cycles ahead
+of step 6; `ch2_init_reset_env_counter_timing_{9..16}`).
+`SWEEP_TRIGGER_LEAD_T_{DMG,CGB}` = 4 / 8 (scheduler cycles before a sweep
+clock within which a trigger misses it; `ch1_init_reset_sweep_counter_timing_
+{1..12}`) and `APU_POWERON_TAP_LEAD` = 4 (apu.nim; counts ahead of the NR52
+power-on write at which the DIV-APU tap bit is sampled;
+`ch2_init_reset_env_counter_timing_{1..8}`, `ch2_late_reset_nr52_*2b`).
+Re-derived 2026-11-13, brackets at the constants and in
+`docs/gb-derivations.md` §11.
 `APU_SPSW_EXTRA_DOTS` = 8 / `_SINGLE` = 3: the APU's share of the
 KEY1 stall's oscillator restart, the PPU's 8 / 3 exactly, with
 `APU_SPSW_REPHASE_{LEAD,GRID}_T` = 3 / 1 at the first switch after an APU
@@ -962,10 +967,16 @@ power-on (H2).
 
 ### H1. A double-speed trigger's grid edge
 
-A double-speed square trigger's grid edge on CGB C and older: removed
-2026-11-13 for a clean rewrite (rows: gambatte `sound/*_ds_*` and
-`speedchange` ladders, SameSuite `channel_1_freq_change_timing-cgb0BC`,
-`channel_{1,2}_align`).
+Re-derived 2026-11-13 (`docs/gb-derivations.md` §11, `gb/apu/psg_host.nim`).
+CPU CGB D/E pick a square trigger up on the next 1 MHz edge
+(`gb_apu_edge`; SameSuite `channel_{1,2}_align{,_cpu}`, DocBoy). On CPU CGB C
+and older at double speed the trigger acts in the write's own M-cycle
+(`gb_trigger_pickup`), and a channel started from off begins its first period
+on the first odd tick of the APU's 512 kHz clock at least one tick after the
+write (`SQ_START_HALF_RATE_LEAD_T` = 4). Rows: gambatte
+`sound/ch1_duty0_pos6_to_pos7_timing_ds_{1..6}` (`_ds_{1,3,6}` red without
+it), the 36-row `speedchange` ladder (five red without it), SameSuite
+`channel_1_freq_change_timing-cgb0BC`.
 
 ### H2. The switch ladder: one re-phase per power-on
 
@@ -2020,6 +2031,9 @@ One line each; the knob's own comment carries the derivation.
   `tima/tc00_late_tc01_{5,7}` (a TAC-glitch overflow's $00 window, A6),
   the `lcd_offset` phase rows, `window/late_disable_scx5_ds_1`,
   `scx_during_m3/scx_0761c0` (C3).
+* Re-derived 2026-11-13 from that list: the APU trigger/envelope rule, the
+  sweep and power-on leads, CGB C's double-speed trigger and PCM12's
+  channel 2 arm (H, H1; `docs/gb-derivations.md` §11).
 
 * Line 0's pipeline one M-cycle ahead (the PNG tests): `STAT_M2_LEAD = 1` +
   `M3_PIPE_AHEAD = 1` (the OAM source rises one CPU M-cycle before its line,

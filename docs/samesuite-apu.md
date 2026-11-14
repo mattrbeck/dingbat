@@ -92,9 +92,9 @@ restarts it a tick sooner than a fresh one (`channel_1_sweep_restart` round 2: n
 M-cycles at shift 7, DocBoy `disable_on_double_trigger_*`). The model, with what
 else DocBoy's rows and SameBoy (black box) pin, is in `psg_channels.nim`, "Channel 1's
 sweep unit"; `channel_1_sweep_restart_2`'s cut-off is the trigger lead before a
-sweep clock (`SWEEP_TRIGGER_LEAD_T_DMG` / `_CGB`, scheduler cycles; re-fit pending,
-neutral value 0), with DocBoy `change_period_nr14_during_recalc_step0_delay14284`
-on the DMG side.
+sweep clock (`SWEEP_TRIGGER_LEAD_T_DMG` / `_CGB` = 4 / 8 scheduler cycles; the row
+passes at 8 and fails at 4 and 12), with DocBoy
+`change_period_nr14_during_recalc_step0_delay14284` on the DMG side.
 
 Trap: a lazily-evaluated check that can clear `enabled` must run on every reader of
 `enabled`. blargg's `sync_sweep` polls NR52 for the overflow disable

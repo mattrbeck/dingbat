@@ -149,8 +149,19 @@ proc write_nrx2(ch: PsgEnvChannel; value: uint8) =
   if not ch.dac_enabled: ch.enabled = false
 
 proc psg_env_trigger_extra(h: PsgHost): int =
-  ## Extra envelope clocks for a trigger now. The rule next to the envelope
-  ## clock was removed 2026-11-13 for a clean rewrite; none for now.
+  ## Extra envelope clocks for a trigger now: one when the frame sequencer's
+  ## next step is the envelope clock, step 7, so that clock only brings the
+  ## timer back to the period (Pan Docs, "Obscure Behavior": "If a channel is
+  ## triggered when the DIV-APU next step will clock the volume envelope, the
+  ## envelope's timer is reloaded with one greater than it would have been").
+  ## On the GB, step 6 counts as run from ENV_TRIGGER_LEAD_T before its edge
+  ## (psg.nim). The GBA takes Pan Docs' rule as it stands: no lead has been
+  ## measured there, and none of its suites sees the rule either way.
+  let stage = psg_fs_next_stage(h)
+  if stage == 7: return 1
+  when not PSG_AGB:
+    if ENV_TRIGGER_LEAD_T != 0 and stage == 6 and
+       psg_fs_next_edge_in(h) <= ENV_TRIGGER_LEAD_T: return 1
   0
 
 when not PSG_AGB:
