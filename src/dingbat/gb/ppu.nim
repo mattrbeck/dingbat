@@ -375,12 +375,17 @@ template lcdon_latched_mode(ppu: GbPpu; ds: bool): uint8 =
 const VRAM_READ_CGB_M3_EDGE_SS* {.intdefine.} = 0
   ## CGB, single speed: a VRAM read whose M-cycle began on mode 3's first dot
   ## (live mode 3, prev 2, the edge this many dots back) is locked although
-  ## the M-cycle-start latch still says mode 2 (dots; 0 = off). Re-fit
-  ## pending; neutral value 0.
+  ## the M-cycle-start latch still says mode 2 (dots; 0 = off). Left at 0:
+  ## with the speed switch's PPU re-alignment at its neutral value no row
+  ## reaches the case (1 loses gambatte vram_m3/preread_2 [cgb], 1..4 lose
+  ## `preread_lcdoffset1_1`, 5 and up change nothing). Re-fit pending on the
+  ## `lcdoffset` geometry.
 const VRAM_WRITE_CGB_M3_EDGE_SS* {.intdefine.} = 0
   ## The write side's twin: the line dot from which a CGB write committed at
-  ## single speed with the PPU still in mode 2 is locked (0 = off). Re-fit
-  ## pending; neutral value 0.
+  ## single speed with the PPU still in mode 2 is locked (0 = off). Left at
+  ## 0 for the same reason (70..77 lose gambatte vramw_m3start_1 [cgb],
+  ## 70..80 lose vram_m3/prewrite_lcdoffset1_1, 81 and up change nothing).
+  ## Re-fit pending on the `lcdoffset` geometry.
 proc cpu_vram_open*(ppu: GbPpu; is_write: bool; cgb = false;
                     ds = false): bool {.inline.} =
   if not lcd_enabled(ppu): return true
@@ -457,24 +462,36 @@ const CRAM_LOCK_W {.intdefine.} = 0
   ## R=3: the latched mode (one M-cycle later than the VRAM lock on the read
   ## side) plus the LCD-on line-0 exemption.
 
-const CRAM_LOCK_DOTS* {.booldefine.} = false
-  ## Dot-based CGB palette-RAM lock (replaces CRAM_LOCK_R/W when true): locked
-  ## from CRAM_LOCK_ON_LAT{,_DS} dots after the mode-3 edge until
-  ## CRAM_LOCK_OFF_LAT{,_DS} dots after the mode-0 edge; the LCD-on first line
-  ## locks CRAM_LOCK_LINE0_EXTRA{,_DS} dots later. A write is asked at its
-  ## commit, a read at the start of its M-cycle. Re-fit pending; neutral value
-  ## false (the mode-based lock), and every latency below is inert until it
-  ## is true.
+const CRAM_LOCK_DOTS* {.booldefine.} = true
+  ## Dot-based CGB palette-RAM lock (replaces CRAM_LOCK_R/W when true, which
+  ## ships): locked from CRAM_LOCK_ON_LAT{,_DS} dots after the mode-3 edge
+  ## until CRAM_LOCK_OFF_LAT{,_DS} dots after the mode-0 edge; the LCD-on
+  ## first line locks CRAM_LOCK_LINE0_EXTRA{,_DS} dots later. A write is asked
+  ## at its commit, a read at the start of its M-cycle. false (the mode-based
+  ## lock) loses thirteen gambatte rows: nine of cgbpal_m3 and
+  ## enable_display/ly0_late_cgbp{r,w}{,_ds}_2.
 const CRAM_LOCK_ON_LAT*    {.intdefine.} = 0
-const CRAM_LOCK_ON_LAT_DS* {.intdefine.} = 0
-const CRAM_LOCK_OFF_LAT*   {.intdefine.} = 0
-const CRAM_LOCK_OFF_LAT_DS* {.intdefine.} = -1
-  ## Dots; -1 = the single-speed value. Re-fit pending; neutral value -1.
-const CRAM_LOCK_LINE0_EXTRA* {.intdefine.} = 0
+const CRAM_LOCK_ON_LAT_DS* {.intdefine.} = 2
+  ## Single speed: -2..1 score the same; -3 loses gambatte
+  ## cgbpal_m3/cgbpal_read_m3start_1 and 2 loses `cgbpal_m3start_2`,
+  ## `cgbpal_read_m3start_2` and `cgbpal_write_m3start_2`. Double speed: 2 is
+  ## a strict optimum (1 loses `cgbpal_m3start_ds_1` and the `read`/`write`
+  ## `_m3start_ds_1` pair, 3 loses `cgbpal_{read,write}_m3start_ds_lcdoffset1_2`).
+const CRAM_LOCK_OFF_LAT*   {.intdefine.} = 2
+const CRAM_LOCK_OFF_LAT_DS* {.intdefine.} = 3
+  ## Dots; -1 = the single-speed value. Both strict optima and both the VRAM
+  ## read lock's own open edge (VRAM_READ_M0_OPEN_DOTS{,_DS}). gambatte
+  ## cgbpal_m3/cgbpal_m3end_*: a write then a read of BCPD one M-cycle later
+  ## per ROM across the end of mode 3, at SCX 0, 2, 3 and 5. Single speed: 1
+  ## loses `cgbpal_m3end_{1,3}`, 3 loses `cgbpal_m3end_scx3_{2,4}`. Double: 2
+  ## loses `cgbpal_m3end_scx5_ds_{1,3}`, 4 loses `cgbpal_m3end_ds_{2,4}`.
+const CRAM_LOCK_LINE0_EXTRA* {.intdefine.} = 2
 const CRAM_LOCK_LINE0_EXTRA_DS* {.intdefine.} = -1
-  ## Dots; -1 = the single-speed value. Re-fit pending; neutral values 0
-  ## (the four single-speed and ON_DS latencies) and -1 (the two _DS
-  ## fall-backs).
+  ## Dots; -1 = the single-speed value. 2 is LCD_ON_LINE0_LOCK_LEAD, the same
+  ## lead the VRAM and OAM locks take on that line. gambatte
+  ## enable_display/ly0_late_cgbp{r,w}{,_ds}_{1,2}: single speed 2..5 pass
+  ## (1 loses the two `_1` rows, 6 the two `_2` rows); double speed 2..3
+  ## pass (1 loses `_ds_1`, 4 loses `_ds_2`).
 
 proc cpu_cram_open_dots(ppu: GbPpu; gb: GB; is_write: bool): bool {.noinline.} =
   ## CRAM_LOCK_DOTS: the lock as a dot window around the mode-3 edges.

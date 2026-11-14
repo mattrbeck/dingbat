@@ -811,12 +811,16 @@ const IF_WRITE_LAND_DOTS* {.intdefine.} = 0
   ## with LYC_SRC_RELATCH_ADJ; neutral value 0.
 const IF_WRITE_LAND_DOTS_DS* {.intdefine.} = 0
   ## The same in double speed, in dots. Re-fit pending; neutral value 0.
-const VRAM_WRITE_M3_END_DOTS* {.intdefine.} = 0
+const VRAM_WRITE_M3_END_DOTS* {.intdefine.} = 3
   ## Dots into its M-cycle at which a VRAM write issued in mode 3 asks the
-  ## lock: a mode 3 that ends in those dots lets it through (0 = off).
-  ## Re-fit pending; neutral value 0.
+  ## lock: a mode 3 that ends in those dots lets it through (0 = off, the
+  ## write asks at the top of its M-cycle). 3 ships, a strict optimum on
+  ## gambatte vramw_m3end/* (a write one M-cycle later per ROM across the end
+  ## of mode 3, at SCX 0 and 3): 0..2 lose `vramw_m3end_scx3_5` (both devices)
+  ## and 4 loses `vramw_m3end_4` (both devices).
 const VRAM_WRITE_M3_END_DOTS_DS* {.intdefine.} = 0
-  ## The same at double speed, in dots. Re-fit pending; neutral value 0.
+  ## The same at double speed, in dots. 0 ships: 1 loses
+  ## `vramw_m3end_scx5_ds_4` [cgb] and 2 `vramw_m3end_ds_4` as well.
 proc mem_write_vram_m3(mem: GbMemory; gb: GB; idx: int; val: uint8) {.noinline.} =
   ## A VRAM write issued in mode 3 asks the lock VRAM_WRITE_M3_END_DOTS into
   ## its M-cycle, so a mode 3 that ends inside the M-cycle lets it through.

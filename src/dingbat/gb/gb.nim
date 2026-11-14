@@ -284,14 +284,16 @@ const LCDON_M0_LAG_DS* {.intdefine.} = 0
   ## Scheduler cycles (4 per M-cycle) the mode-0 STAT source trails the mode
   ## flag on the first line after an LCD enable at double speed (0 = none).
   ## Re-fit pending; neutral value 0.
-const VRAM_WRITE_LINE0_CGB_GRACE* {.intdefine.} = 0
+const VRAM_WRITE_LINE0_CGB_GRACE* {.intdefine.} = 1
   ## Whether a CGB VRAM write on the LCD-on line meets a late close edge
-  ## (cpu_vram_open; 0 = no, 1 = yes): the lock shuts one CPU M-cycle and a
-  ## dot past the mode-3 flag edge, 5 dots at single speed and 3 at double.
+  ## (cpu_vram_open; 0 = no, 1 = yes, ships): the lock shuts one CPU M-cycle
+  ## and a dot past the mode-3 flag edge, 5 dots at single speed and 3 at
+  ## double. 0 loses gambatte enable_display/ly0_late_vramw_2 [cgb] (its name
+  ## states the split: the DMG drops that write, the CGB takes it) and DocBoy
+  ## `double_speed_ppu_vram_write_block_timing_ly0_1_out_of_4`.
   ## The width: DocBoy `double_speed_ppu_vram_write_block_timing_ly0_1_out_of_4`
   ## (CPU CGB E, writes one double-speed M-cycle apart) takes 2..3 and loses
-  ## 4, and SameBoy (CGB E) passes it. Re-fit pending (the switch); neutral
-  ## value 0.
+  ## 4, and SameBoy (CGB E) passes it.
 const VRAM_WRITE_LINE0_OPEN_LEAD* {.intdefine.} = 1
   ## Whether a CGB VRAM write on the LCD-on line sees mode 3 end
   ## LCD_ON_LINE0_LOCK_LEAD dots late, as a read does (lcdon_latched_mode):
@@ -778,8 +780,22 @@ const CGB_WX_LATE_SS* {.intdefine.} = 1
   ## own dot and wants a window on the CGB, none on the DMG; DocBoy
   ## `cgb/ppu/visual/change_wx_glitch_{wx6_nops16,wx6_nops17,wx7_nops17,wx8_nops17}`
   ## need the same dot. All five fail at 0.
-# The map column after a wrapped fine-scroll discard: removed 2026-11-13 for
-# a clean rewrite.
+const SCX_WRAP_BORROW* {.intdefine.} = 1
+  ## What SCX_FINE_BORROW's carry is measured against once a store has moved
+  ## the fine-scroll discard (SCX_FINE_LATCH_LIVE / _WRAP). The map column is
+  ## `floor((SCX + 8k - D) / 8)` with D the pixels the line's discard threw
+  ## away. 0: D stays the fine scroll the line latched. 1 (ships): D follows
+  ## the discard on every store it takes, as `lx` does (fifo_arm_scx): the
+  ## store's `SCX and 7`, plus eight for every wrapped pass.
+  ## gambatte scx_during_m3/scx_0761c0 [cgb]: SCX = 7 at the latch, $61
+  ## stored inside the discard (which wraps: 9 pixels thrown away) and $C0
+  ## later on the line. The picture after the $C0 store is the map column of
+  ## `($C0 - 9) shr 3` = 22, not of `($C0 - 7) shr 3` = 23: 0 loses
+  ## `scx_during_m3_{2,3,4}` and `_ds_{2,3,4,5}`. The DMG rows pass at both:
+  ## its one-pixel lead (SCX_FINE_BORROW_DMG_LEAD) makes it
+  ## `($C0 - 8) shr 3` = 23 either way. No row separates D moving on every
+  ## taken store from D moving only on a wrap (tried; identical on every
+  ## suite), so the rule without the special case ships.
 const WIN_REVOKE_DS_PUSH* {.intdefine.} = 1
   ## Whether, at CGB double speed, a window start is still revoked by an
   ## LCDC.5 fall landing on the dot its restart pushes the first tile (0 = no,
@@ -1519,10 +1535,11 @@ const SCX_FINE_LATCH_LIVE* {.booldefine.} = true
   ## fifo_ppu.nim.
 
 const SCX_LIVE_BORROW_LATCHED* {.booldefine.} = true
-  ## Whether `SCX_FINE_BORROW`'s carry is measured against the fine scroll the
-  ## line latched even after SCX_FINE_LATCH_LIVE has moved the live discard
-  ## target. Worth every gambatte `scx_during_m3/scx_0360c0` and `scx_0761c0`
-  ## row; derivation in fifo_ppu.nim. `GbFifoPpu` grows a field only when on.
+  ## Whether `SCX_FINE_BORROW`'s carry keeps a reference of its own once
+  ## SCX_FINE_LATCH_LIVE has moved the live discard target (what that
+  ## reference is: SCX_WRAP_BORROW). Worth every gambatte
+  ## `scx_during_m3/scx_0360c0` and `scx_0761c0` row; derivation in
+  ## fifo_ppu.nim. `GbFifoPpu` grows a field only when on.
 
 const SCX_FINE_LATCH_WRAP* {.intdefine.} = 8'i32
   ## Dots the fine-scroll discard costs when a mid-line SCX store lands after
@@ -2443,9 +2460,11 @@ type
     # underneath it (oam_scan_advance). Per-line scratch.
     scan_next*:           int32
     scan_line*:           int32
-    # The mode-2 comparator's two input latches. An OAM DMA takes the OAM bus
-    # away from the scan, and the scan does not stop -- it keeps stepping and
-    # keeps comparing whatever these last held. See OAM_SCAN_DMA_LOCK.
+    # The mode-2 comparator's two input latches: the last OAM word the PPU
+    # read (an entry's Y/X in the scan, an object's tile/flags at its fetch).
+    # An OAM DMA takes the OAM bus away from the scan, and the scan does not
+    # stop -- it keeps stepping and keeps comparing whatever these last held.
+    # See OAM_SCAN_DMA_HOLD (fifo_ppu.nim).
     scan_y_bus*:          uint8
     scan_x_bus*:          uint8
     # The window start's undo record (CGB_WIN_EN_DEFER): `win_defer` counts the

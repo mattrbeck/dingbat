@@ -341,8 +341,11 @@ questions for it are hwprobe rows 2 and 10 (`docs/hwprobe-questions.md`).
 `enable_display_ly0_sprites_m0stat_2`, `ly0_oambusy_read_ds_1`),
 `lcd_offset` 19 (all CGB). `display_startstate/stat_*_2 [cgb]` (4) closed
 2026-09-22: `CGB_BOOT_PHASE` 161 -> 165, which no other row felt.
-`enable_display_ly0_sprites_m0stat_2` (both devices): the LCD-on line's
-object scan was removed 2026-11-13 for a clean rewrite.
+`enable_display_ly0_sprites_m0stat_2` (both devices) closed 2026-11-13: the
+LCD-on line has no OAM scan and no objects (`LCD_ON_LINE_NO_SCAN`,
+docs/gb-derivations.md section 3). `ly0_late_scx7_m3stat_scx0_2` [dmg] and
+`_scx1_1` [cgb] closed with `SCX_LATCH_LCDON_EXTRA{,_CGB}` = 1 / 2,
+`ly0_late_vramw_2` [cgb] with `VRAM_WRITE_LINE0_CGB_GRACE` = 1.
 `ly0_m0irq_scx{0,1}_ds_1` and `frame0_m0irq_count_scx{2,3}_ds_1`: at double
 speed the LCD-on line's mode-0 source lag behind its flag is
 `LCDON_M0_LAG_DS` (gb.nim; re-fit pending, neutral value 0).
@@ -423,13 +426,10 @@ revision split as `oam_read_open_late`. 3 loses gambatte
 
 ### B2. The CGB palette-RAM lock's edges
 
-**Closed.** The palette-RAM lock is a dot window around the mode-3 edges; a
-write is asked at its commit and a read at the start of its M-cycle
-(`CRAM_LOCK_DOTS`, `cpu_cram_open_dots`; ppu.nim).
-
-Tests: `cgbpal_m3/cgbpal_m3end_{1,3}`, `_ds_{1,3}`, `_scx5_ds_{1,3}`,
-`cgbpal_m3start_ds_1`, `cgbpal_{read,write}_m3start_{ds,lcdoffset1}_1`;
-`enable_display/ly0_late_cgbp{r,w}{,_ds}_2`.
+**Rows (2).** `cgbpal_{read,write}_m3start_lcdoffset1_1`. Closed 2026-11-13
+by the dot-window lock below (13): `cgbpal_m3/cgbpal_m3end_{1,3}`,
+`_ds_{1,3}`, `_scx5_ds_{1,3}`, `cgbpal_m3start_ds_1`,
+`cgbpal_{read,write}_m3start_ds_1`; `enable_display/ly0_late_cgbp{r,w}{,_ds}_2`.
 
 **Behaviour.** BCPD/OCPD belong to the PPU during mode 3: reads answer
 `$FF`, writes are dropped with the auto-increment still taken (Pan Docs,
@@ -437,13 +437,14 @@ Tests: `cgbpal_m3/cgbpal_m3end_{1,3}`, `_ds_{1,3}`, `_scx5_ds_{1,3}`,
 VRAM lock's on the read side. The `_ds_`/`lcdoffset1` members and the
 `m3end_1/_3` pairs ask for the edge in dots, as C1 does for VRAM.
 
-**Re-fit pending (2026-11-13).** `CRAM_LOCK_DOTS` (`cpu_cram_open_dots`):
-whether the lock is a dot window around the mode-3 edges, with
-`CRAM_LOCK_ON_LAT{,_DS}` (dots after the mode-3 edge),
-`CRAM_LOCK_OFF_LAT{,_DS}` (dots after the mode-0 edge) and
-`CRAM_LOCK_LINE0_EXTRA{,_DS}` (extra dots on the LCD-on first line). Neutral
-value false: the latched `CRAM_LOCK_R`/`CRAM_LOCK_W` rule, the dot values
-inert.
+**Modelled (re-fit 2026-11-13).** `CRAM_LOCK_DOTS = true`
+(`cpu_cram_open_dots`): the lock is a dot window, closed from
+`CRAM_LOCK_ON_LAT{,_DS}` = 0 / 2 dots after the mode-3 edge until
+`CRAM_LOCK_OFF_LAT{,_DS}` = 2 / 3 dots after the mode-0 edge (the VRAM read
+lock's open edge), `CRAM_LOCK_LINE0_EXTRA` = 2 dots later on the LCD-on
+line. Brackets per knob in docs/gb-derivations.md section 7. The two
+`lcdoffset1_1` rows want the single-speed close edge 5 dots or more after
+the flag edge, which the plain `_2` rows refuse.
 
 ---
 
@@ -455,9 +456,9 @@ inert.
 postwrite_2_scx3, midwrite_2, prewrite_{2,ds_2,ds_lcdoffset1_2},
 preread_{ds,lcdoffset1}_1}`, `vram_m3/{postread_scx{2,3}_2,
 10spritesprline_postread_2, preread_lcdoffset2_1, prewrite_lcdoffset2_1}`.
-`vramw_m3end_scx3_5` (both devices): the dots into its M-cycle at which a
-VRAM write issued in mode 3 asks the lock are `VRAM_WRITE_M3_END_DOTS` /
-`_DS` (memory.nim; re-fit pending, neutral value 0).
+`vramw_m3end_scx3_5` (both devices) closed 2026-11-13: a VRAM write issued
+in mode 3 asks the lock `VRAM_WRITE_M3_END_DOTS` = 3 dots into its M-cycle
+(`_DS` = 0; memory.nim, both strict optima on `vramw_m3end/*`).
 
 Tests: `oam_access/{postread_scx{2,3,5}_2,
 10spritesprline_postread_2, postwrite_2_scx3, midwrite_2,
@@ -511,9 +512,10 @@ WX = 166 line's own mode-0 source. The remaining `window/` rows are the
 
 **Rows (3).** `scx_during_m3_spx2{,_ds}`, `scx_attrib_during_m3_spx2_ds`
 (8 px each, CGB; not timing, see below; moved to NotScored 2026-10-14 by
-`gambatte_row_reads_powerup_objpal`). The seven `scx_0761c0` rows: the map
-column's borrow after a wrapped fine-scroll discard was removed 2026-11-13
-for a clean rewrite.
+`gambatte_row_reads_powerup_objpal`). The seven `scx_0761c0` [cgb] rows
+closed 2026-11-13: the map column's borrow is measured against the pixels
+the discard threw away, a wrapped pass included (`SCX_WRAP_BORROW`,
+docs/gb-derivations.md section 4).
 
 **Behaviour.** The BG fetcher's map column is a live sum
 `((SCX + 8k - F) shr 3) and 31`. A store that lowers `SCX and 7` below the
@@ -783,18 +785,23 @@ Its bytes land 4 dots after the block (`HDMA_VISIBLE_DOTS`;
 removed 2026-11-13 for a clean rewrite.
 
 `late_sp{00x,00y,01x,01y,39x,39y}_ds_*`, `late_sp39x_4`,
-`sprites/late_disable_ds_1`, `sprites/enable/late_disable_ds_3`: the CGB
-fetcher with LCDC.1 clear was removed 2026-11-13 for a clean rewrite;
-`OAM_SCAN_DMA_EDGE_DS` (dots by which the transfer's take/give edge moves
-against the scan at double speed) is re-fit pending, neutral value 0.
+`sprites/late_disable_ds_1`, `sprites/enable/late_disable_ds_3` closed
+2026-11-13: a CGB fetches objects with LCDC.1 clear (`CGB_OBJ_FETCH_OFF`),
+and at double speed the transfer's take/give edge sits
+`OAM_SCAN_DMA_EDGE_DS` = 1 dot earlier against the scan (1 and 2 pass, 0
+and 3 do not). `oamdma_late_speedchange_stat_2` stays red: it needs the
+unit to have released OAM when a speed switch stops it with its last byte
+written (docs/gb-derivations.md section 6).
 
 **Behaviour.** The mode-2 scan reads OAM entry `n` on dot `2n` and reads
 nothing while an OAM DMA owns the OAM bus. The transfer moves one entry per
 16 dots (8 in double speed) against the scan's one per 2, so no start
 latency can express the rows (Pan Docs, "OAM DMA Transfer"; gambatte
-`oamdma/late_sp{00,01,02,39}{x,y}`, sixteen one-M-cycle brackets). What
-the scan's comparator sees for entries inside a running transfer: removed
-2026-11-13 for a clean rewrite.
+`oamdma/late_sp{00,01,02,39}{x,y}`, sixteen one-M-cycle brackets). For a
+slot inside a running transfer the comparator compares the word its input
+latches last loaded, the last OAM word the PPU read (`OAM_SCAN_DMA_HOLD`;
+DocBoy `oam_scan_blocked_by_dma_nops*`, strikethrough,
+`mgb_oam_dma_halt_sprites`; docs/gb-derivations.md section 6).
 
 **Modelled.** `OAM_SCAN_DMA_LOCK = 1`,
 `OBJ_SCAN_DOT_ADJ = 0`, `CGB_OAM_DMA_START_T = 8`, `OAMDMA_HALT_PAUSE = 1`,
@@ -1742,8 +1749,7 @@ hardware question. Families:
     2..3) and opens `LCD_ON_LINE0_LOCK_LEAD` dots past the mode-0 edge, as
     the read lock does (DocBoy brackets 2..3). SameBoy (CGB E) passes both;
     nothing else moves (the width: `VRAM_WRITE_LINE0_OPEN_LEAD`, gb.nim;
-    whether the CGB takes the grace: `VRAM_WRITE_LINE0_CGB_GRACE`, re-fit
-    pending, neutral value 0).
+    whether the CGB takes the grace: `VRAM_WRITE_LINE0_CGB_GRACE` = 1).
 * **I13. Rows with scripted input (23 of 71; 13 left).** Through `--input`; 58 pass,
   every joypad picture and `stop_joypad*`/`stop_key*` interrupt row among
   them. Red:
@@ -2004,10 +2010,11 @@ One line each; the knob's own comment carries the derivation.
   STAT/LYC request, the DMG parked-LYC window, the vblank-line blind window,
   the OAM pulse's falling-edge evaluation, the window latch cutoff and
   next-line check, the DMG carried window start under LCDC.5 low, line 0's
-  two window-check slots, the CGB object at X = 167 against the window, the
-  wrapped-discard borrow, the LCD-on line's object scan, the CGB fetcher
-  with LCDC.1 clear, the OAM scan's view inside a transfer, and the APU
-  trigger/envelope and double-speed grid rules. Knobs at neutral values
+  two window-check slots, the CGB object at X = 167 against the window, and
+  the APU trigger/envelope and double-speed grid rules. (The wrapped-discard
+  borrow, the LCD-on line's object scan, the CGB fetcher with LCDC.1 clear
+  and the OAM scan's view inside a transfer were re-derived 2026-11-13;
+  docs/gb-derivations.md sections 3, 4 and 6.) Knobs at neutral values
   pending a re-fit: listed at their declarations ("Re-fit pending").
   Still open from the oracle pass: `oamdma_src0000_busyint0002`,
   `tima/tc00_late_tc01_{5,7}` (a TAC-glitch overflow's $00 window, A6),
@@ -2033,8 +2040,8 @@ One line each; the knob's own comment carries the derivation.
 * The mode-0 STAT source's 2 dots in the retire -> flag hand-off:
   `STAT_M0_LEAD_T = 2`; AGE `halt-m0-interrupt` and `stat-int` (single speed)
   with it.
-* The OAM scan against an OAM DMA: `OAM_SCAN_DMA_LOCK`; the comparator's
-  view inside the transfer was removed 2026-11-13 for a clean rewrite.
+* The OAM scan against an OAM DMA: `OAM_SCAN_DMA_LOCK`; inside the transfer
+  the comparator compares its held latches (`OAM_SCAN_DMA_HOLD`).
 * The speed switch's two clocks and the PPU's 8/3 re-alignment:
   `SPEED_SWITCH_STALL_CPU`, `SPEED_SWITCH_PPU_EXTRA_DOTS{,_SINGLE}`; the DIV
   reset one M-cycle after the STOP fetch and its slow-tap split:

@@ -157,6 +157,42 @@ a reference PNG, `mGBA suite <section>` a section of mGBA's test ROM.
   M-cycle of mode 2 while a read in that M-cycle is refused);
   `hblank_ly_scx_timing-GS` for the mode-0 quantisation.
 
+### A mode-3 VRAM write asks its lock three dots into its M-cycle
+- Ships: `VRAM_WRITE_M3_END_DOTS = 3`, `VRAM_WRITE_M3_END_DOTS_DS = 0`
+  (`memory.nim`, `mem_write_vram_m3`).
+- Rule: a VRAM write issued with the PPU in mode 3 does not ask the lock at
+  the top of its M-cycle but 3 dots in, so a mode 3 that ends inside those
+  dots lets the write through. At double speed the write asks at the top.
+  Writes issued in any other mode are unchanged (they ask at the top).
+- Evidence: gambatte `vramw_m3end/*` moves one write across the end of mode
+  3 one M-cycle per ROM, at SCX 0 and 3 (the SCX step moves the edge by
+  three dots against the M-cycle grid). Single speed: 0, 1 and 2 lose
+  `vramw_m3end_scx3_5` on both devices, 4 loses `vramw_m3end_4` on both; 3
+  passes all twelve. Double speed: 1 loses `vramw_m3end_scx5_ds_4`, 2 also
+  `vramw_m3end_ds_4`; 0 passes all twelve.
+- Clean-room: derived from test ROM sources/outputs and dingbat's own trace runs; no emulator source consulted.
+
+### The CGB's VRAM write lock closes late on the LCD-on line
+- Ships: `VRAM_WRITE_LINE0_CGB_GRACE = 1` (`gb.nim`; the arm is in
+  `cpu_vram_open`).
+- Rule: on the line the LCD is switched on with, a CGB VRAM write is still
+  taken for one CPU M-cycle and a dot past the mode-3 flag edge (5 dots at
+  single speed, 3 at double). The DMG closes on the edge.
+- Evidence: gambatte `enable_display/ly0_late_vramw_2_dmg08_out55_cgb04c_outAA`
+  states the split in its name (the DMG drops the write, the CGB takes it;
+  `_1` is taken and `_3` dropped on both); DocBoy
+  `cgb/double_speed/ppu/double_speed_ppu_vram_write_block_timing_ly0_1_out_of_4`.
+  0 loses both rows and nothing passes only at 0.
+- Not re-fit: `VRAM_READ_CGB_M3_EDGE_SS` and `VRAM_WRITE_CGB_M3_EDGE_SS`
+  (`ppu.nim`) stay 0. With the speed switch's PPU re-alignment at its
+  neutral value no row reaches the case they describe: every nonzero value
+  either loses a passing row (read 1: `vram_m3/preread_2` [cgb]; read 1..4:
+  `preread_lcdoffset1_1`; write 70..77: `vramw_m3start_1` [cgb]; write
+  70..80: `prewrite_lcdoffset1_1`) or changes nothing (read 5 and up, write
+  81 and up), and `vram_m3/{preread,prewrite}_lcdoffset2_1` are red at
+  every value. They are a question about the `lcdoffset` geometry.
+- Clean-room: derived from test ROM sources/outputs and dingbat's own trace runs; no emulator source consulted.
+
 ## 2. Window
 
 ### WY is a sampled comparator behind a per-frame latch
@@ -391,6 +427,40 @@ Dots are dingbat's line dots; W is the first dot of the writing M-cycle
   but moves every later BG VRAM read on the line; eleven mealybug `m3_*` rows
   refuse it, `m3_scy_change` most sharply.
 
+### The line the LCD is switched on with has no objects
+- Ships: `LCD_ON_LINE_NO_SCAN = 1` (`fifo_ppu.nim`; applied at the mode
+  2 -> 3 edge in `fifo_tick_slow`).
+- Rule: that line has no mode 2 (STAT reads mode 0 until mode 3 begins), and
+  no OAM scan runs on it. Its mode 3 has the object-free length whatever OAM
+  holds.
+- Evidence: DocBoy `dmg/ppu/turn_on_ly0_sprites_round{1,2}` puts an object at
+  Y = $10, X = $10 and reads STAT 59 and 60 M-cycles after the LCDC write:
+  mode 3, then mode 0, the object-free end. gambatte
+  `enable_display/enable_display_ly0_sprites_m0stat_{1,2}` (objects at X = 8
+  and $18, both devices) brackets the same end by one M-cycle. 0 (scan the
+  line) loses the three `_2` rows.
+- Clean-room: derived from test ROM sources/outputs and dingbat's own trace runs; no emulator source consulted.
+
+### A CGB fetches objects with LCDC.1 clear
+- Ships: `CGB_OBJ_FETCH_OFF = 1` (`fifo_ppu.nim`, `obj_fetch_on`).
+- Rule: on a CGB the fetcher stops for every object the scan kept whether or
+  not LCDC.1 is set; the bit only keeps object pixels out of the mixer. On a
+  DMG a clear LCDC.1 stops the fetches (and their dots) as well.
+- Evidence: gambatte `sprites/late_disable_ds_1` [cgb] runs with LCDC = $91
+  throughout, ten objects on the line, and still reads mode 3 where an
+  object-free line has ended. `sprites/enable/late_disable_ds_{3,4}` clear
+  the bit on the line before and bracket the end of mode 3 to one
+  double-speed M-cycle at the full object length. `oamdma/late_sp39x_{3,4}`
+  and the twelve `oamdma/late_sp*_ds_*` rows never set the bit and time an
+  object's presence by the length of mode 3. 0 loses nine rows
+  (`late_disable_ds_1`, `enable/late_disable_ds_3`, `late_sp39x_4`,
+  `late_sp{00,01,39}x_ds_2`, `late_sp{00,01,39}y_ds_1`). The DMG half is the
+  sixteen `sprites/sprite_late_disable_*` and `sprite_late_late_disable_*`
+  rows, which the knob does not touch.
+- Open: nothing here says whether a DMG cart on a CGB behaves as the CGB or
+  as the DMG; the rule is applied to the console.
+- Clean-room: derived from test ROM sources/outputs and dingbat's own trace runs; no emulator source consulted.
+
 ### Reading a mealybug `m3_*` frame as eighteen measurements
 - `m3_scy_change`'s OAM table is Y = 16 + 8k, X = k, so each 8-line band is one
   object whose X sets the wait term; score per band, not per frame, or a
@@ -438,6 +508,42 @@ Dots are dingbat's line dots; W is the first dot of the writing M-cycle
   and the fine scroll is latched once per line. The discard is the fetcher's,
   taken when the throw-away first fetch completes.
 - Evidence: mealybug `m3_scx_low_3_bits`, `m3_scx_high_5_bits`.
+
+### The map column's borrow is measured against the pixels the discard threw away
+- Ships: `SCX_WRAP_BORROW = 1` (`gb.nim`; `fifo_arm_scx` in `fifo_ppu.nim`).
+- Rule: the BG fetcher's map column is `floor((SCX + 8k - D) / 8)`, k the
+  fetch index and D the number of pixels the line's fine-scroll discard
+  threw away (less one on a DMG, `SCX_FINE_BORROW_DMG_LEAD`). On an
+  undisturbed line D is the latched `SCX and 7` and the term is the one-tile
+  borrow `SCX_FINE_BORROW` describes. A store the discard takes
+  (`SCX_FINE_LATCH_LIVE`) moves D with it, and a store that wraps the
+  discard's slot counter (`SCX_FINE_LATCH_WRAP`) adds its eight pixels to D.
+- Evidence: gambatte `scx_during_m3/scx_0761c0` latches SCX = 7, stores $61
+  inside the discard (the target 1 is already behind the slot counter, so it
+  wraps: 9 pixels thrown away) and stores $C0 at a point that moves across
+  the line from ROM to ROM. Its map has tiles 2/3 alternating in columns
+  0..11 and 0/1 in 12..31, so the picture gives the column's parity. After
+  the $C0 store the CGB frames show the column of `($C0 - 9) shr 3 = 22`;
+  measured against the latched 7 it would be 23. With D frozen at the
+  latched value (0) `scx_during_m3_{2,3,4}` and `_ds_{2,3,4,5}` [cgb] fail
+  by one tile from the $C0 store on. The DMG frames show 23 and pass either
+  way: `($C0 - 9 + 1) shr 3 = 23`. A variant in which D moves only on a wrap
+  was tried and scores the same on every suite; the rule with no special
+  case ships (1; 0 is the frozen reference).
+- Clean-room: derived from test ROM sources/outputs and dingbat's own trace runs; no emulator source consulted.
+
+### The LCD-on line takes an SCX store for longer
+- Ships: `SCX_LATCH_LCDON_EXTRA = 1` (DMG), `SCX_LATCH_LCDON_EXTRA_CGB = 2`
+  (`fifo_ppu.nim`, `fifo_sample_smooth_scroll`).
+- Rule: on the line the LCD is switched on with, the fine-scroll discard
+  keeps taking an SCX store (`SCX_FINE_LATCH_LIVE`) for 1 dot (DMG) or 2
+  dots (CGB) past its own length.
+- Evidence: gambatte `enable_display/ly0_late_scx7_m3stat_scx{0,1,3}_*`
+  replace SCX 0, 1 or 3 by 7 one M-cycle later per ROM on that line and read
+  the end of mode 3. Both values are strict optima: DMG 0 loses
+  `scx0_2` [dmg], 2 loses `scx3_2` [dmg]; CGB 1 loses `scx1_1` [cgb], 3
+  loses `scx0_2` [cgb].
+- Clean-room: derived from test ROM sources/outputs and dingbat's own trace runs; no emulator source consulted.
 
 ## 5. VRAM DMA (HDMA/GDMA)
 
@@ -717,6 +823,64 @@ Dots are dingbat's line dots; W is the first dot of the writing M-cycle
   with that fetch forced on for a CGB the row passes with the release and
   fails with `-d:OAMDMA_FROZEN_RELEASE=0`; without it the row reads mode 0
   either way.
+- Clean-room: derived from test ROM sources/outputs and dingbat's own trace runs; no emulator source consulted.
+
+### The mode-2 scan under an OAM DMA compares what its latches last held
+- Ships: `OAM_SCAN_DMA_HOLD = 1`, `OAM_SCAN_DMA_EDGE_DS = 1` (`fifo_ppu.nim`;
+  `oam_scan_advance`, `fifo_oam_lock_change`, `sprite_fetch_merge`), on top
+  of `OAM_SCAN_DMA_LOCK` and `OAMDMA_FREEZE_BUS`.
+- Rule: the scan steps through its forty two-dot slots whoever has the OAM
+  bus. While a transfer has the bus the scan's Y/X input latches are not
+  loaded, so each slot inside the transfer's span compares the word the
+  latches last loaded, and an object is kept (at that X) for every slot in
+  which that Y is on the line, up to the usual ten. The latches load on every
+  OAM read the PPU makes: an entry's Y/X word in its slot, and an object's
+  tile/flags word at its mode-3 fetch. The fetch loads them under a transfer
+  too, with the byte the unit has on its bus (the read strikethrough pins,
+  `OBJ_DMA_BUS_LEAD`). A transfer frozen by HALT on a DMG drives the latches
+  with its destination word instead (`OAMDMA_FREEZE_BUS`).
+- Evidence, the hold: DocBoy `dmg/ppu/oam_scan_blocked_by_dma_nops{100..107}`
+  (ten objects in entries 0..9, X = $10, $18 .. $58) and `nops{115..122}`
+  (the same ten in entries 30..39) start a transfer one M-cycle later per
+  ROM and bracket the end of mode 3 to one M-cycle (`_round1` reads mode 3,
+  `_round2` one M-cycle later reads mode 0). The object dots come out as 0
+  for nops 100/115, then 64, 72, 84, 92, 104 (each +0..3) for 101..105 and
+  116..120, then 108 for the rest. A transfer that takes the bus after k
+  entries were read (k = 1, 3, 5, 7, 9) leaves k objects on k tiles (11 dots
+  each) and 10 - k copies of the last one read at its X (6 dots each): 60 +
+  5k = 65, 75, 85, 95, 105. Dropping the blocked entries gives 11k and loses
+  the ten `_round1` rows; reading OAM at the unit's address would put
+  several X values per M-cycle on the line and fits neither group. The same
+  two groups, 60 dots apart with identical lengths, show the count follows
+  the entries read and not the dot. `strikethrough` (both frames, and the
+  shootout's row) and mooneye `madness/mgb_oam_dma_halt_sprites` (both
+  copies) pass only with the hold; the second reaches the comparator through
+  the frozen-bus word.
+- Evidence, what is held before a line's first slot: gambatte
+  `oamdma/late_sp39y_2` (both devices) has entry 39 on the line (Y = $10,
+  X = $A0, tile and flags $A0), fetched on line 2, and a transfer covering
+  all of line 3's scan: no object is found. Holding entry 39's Y/X (the
+  scan's last read) finds ten; holding the fetch's tile/flags word ($A0,
+  $A0) finds none. `late_sp39y_ds_2` [cgb] starts the transfer before that
+  fetch and still finds none, so the fetch loads the latches under a
+  transfer as well (the unit's byte, $A0).
+- Evidence, the double-speed edge: `OAM_SCAN_DMA_EDGE_DS` is the number of
+  dots the take/give edge sits ahead of the dot its M-cycle starts on, at
+  double speed. gambatte `oamdma/late_sp{00,01,39}{x,y}_ds_{1,2}` [cgb]: 0
+  loses the six `_ds_1` rows, 3 loses `late_sp{00,01}{x,y}_ds_2`, 1 and 2
+  pass all twelve (slots sit on even dots, these edges on odd ones). The
+  value is relative to `OBJ_SCAN_DOT_ADJ = 0`; at -1 the six `_ds_1` rows
+  fail again. By
+  their traced edge dots (not swept) the single-speed CGB rows would accept
+  -1..2 and DocBoy's DMG rows -1..0, so the term is double-speed only.
+- Shared row: `oamdma/oamdma_late_speedchange_stat_2` [cgb] needs this
+  cluster's CGB fetch with LCDC.1 clear (it runs at LCDC = $91) and one thing
+  more, on the DMA unit's side: its `_1`/`_2` pair stops the unit by a speed
+  switch with one byte left (`_1`, no object on line 3) or with the last
+  byte written (`_2`, the object is found). The unit as it stands still
+  holds the bus across the stall in `_2`; letting a unit whose last byte is
+  written release OAM at the stall turns the row green with nothing lost.
+  That change is not made here.
 - Clean-room: derived from test ROM sources/outputs and dingbat's own trace runs; no emulator source consulted.
 
 ## 7. CPU
@@ -1085,11 +1249,41 @@ Dots are dingbat's line dots; W is the first dot of the writing M-cycle
 - See §2, "The window's WY comparator: when it samples".
 
 ### The CGB palette RAM lock around the mode-3 edges
-- `CRAM_LOCK_DOTS` (ppu.nim): whether BCPD/OCPD lock on a dot window around
-  the mode-3 edges (`CRAM_LOCK_ON_LAT{,_DS}`, `CRAM_LOCK_OFF_LAT{,_DS}`,
-  `CRAM_LOCK_LINE0_EXTRA{,_DS}`, dots). Re-fit pending; neutral value false
-  (the latched `CRAM_LOCK_R`/`CRAM_LOCK_W` rule), the dot values inert.
-- Rows: gambatte `cgbpal_m3/*`, `enable_display/ly0_late_cgbp{r,w}_*`.
+- Ships: `CRAM_LOCK_DOTS = true`, `CRAM_LOCK_ON_LAT = 0`,
+  `CRAM_LOCK_ON_LAT_DS = 2`, `CRAM_LOCK_OFF_LAT = 2`,
+  `CRAM_LOCK_OFF_LAT_DS = 3`, `CRAM_LOCK_LINE0_EXTRA = 2`,
+  `CRAM_LOCK_LINE0_EXTRA_DS = -1` (the single-speed value) (`ppu.nim`,
+  `cpu_cram_open_dots`).
+- Rule: BCPD/OCPD are locked from the mode-3 edge (2 dots after it at double
+  speed) until 2 dots after the mode-0 edge (3 at double speed), the VRAM
+  read lock's own open edge (`VRAM_READ_M0_OPEN_DOTS{,_DS}`). A write asks
+  at its commit, a read at the start of its M-cycle, so a read and a write in
+  the same M-cycle get the same answer. On the line the LCD is switched on
+  with the lock closes `LCD_ON_LINE0_LOCK_LEAD` = 2 dots later, as the VRAM
+  and OAM locks do.
+- Evidence, the open edge: gambatte `cgbpal_m3/cgbpal_m3end_*` write BCPD
+  and read it back two M-cycles later, one M-cycle later per ROM, at SCX 0,
+  2, 3, 5 and at double speed: out 7 (read locked), 0 (read open, write was
+  locked), 0, 1 (both open). Single speed 2 is a strict optimum (1 loses
+  `cgbpal_m3end_{1,3}`, 3 loses `cgbpal_m3end_scx3_{2,4}`); double speed 3
+  is (2 loses `cgbpal_m3end_scx5_ds_{1,3}`, 4 loses `cgbpal_m3end_ds_{2,4}`).
+- Evidence, the close edge: `cgbpal_m3start_*`, `cgbpal_read_m3start_*`,
+  `cgbpal_write_m3start_*`. Double speed 2 is a strict optimum (1 loses the
+  three `_ds_1` rows, 3 loses `cgbpal_{read,write}_m3start_ds_lcdoffset1_2`).
+  Single speed -2..1 pass the same rows (-3 loses `cgbpal_read_m3start_1`, 2
+  loses the three `_2` rows); 0 ships.
+- Evidence, the LCD-on line: `enable_display/ly0_late_cgbp{r,w}{,_ds}_{1,2}`.
+  Single speed 2..5 pass (1 loses the `_1` pair, 6 the `_2` pair), double
+  speed 2..3 (1 loses `_ds_1`, 4 loses `_ds_2`); 2 is the lead the other
+  locks take on that line.
+- With `CRAM_LOCK_DOTS = false` (the mode-based `CRAM_LOCK_R`/`CRAM_LOCK_W`)
+  thirteen rows are lost: `cgbpal_m3end_{1,3}`, `_ds_{1,3}`, `_scx5_ds_{1,3}`,
+  `cgbpal_m3start_ds_1`, `cgbpal_{read,write}_m3start_ds_1`,
+  `ly0_late_cgbp{r,w}{,_ds}_2`.
+- Open: `cgbpal_{read,write}_m3start_lcdoffset1_1` want the close edge at
+  single speed 5 dots or more after the flag edge, which the three plain
+  `_2` rows refuse; an `lcdoffset` question, red before and after.
+- Clean-room: derived from test ROM sources/outputs and dingbat's own trace runs; no emulator source consulted.
 
 ### The interrupt check stays a leaf
 - `handle_interrupts` runs after every instruction and almost never takes the
