@@ -2089,14 +2089,21 @@ proc tick_shifter*(ppu: GbFifoPpu; gb: GB) =
 
 proc fetch_work_pending(ppu: GbFifoPpu; for_irq = false): bool {.inline.} =
   ## What the fetcher still owes for the last `m3_lead` pixels of a line;
-  ## shared by fetcher_retired and fifo_irq_m0_ready. Only reached inside the
-  ## tail. See fetcher_retired for the terms. `for_irq`: the mode-0 request's
-  ## question, today the same answer as the retire's.
+  ## shared by fetcher_retired and the mode-0 request (fifo_tail_m0_request).
+  ## Only reached inside the tail. See fetcher_retired for the terms.
+  ## `for_irq`: the mode-0 request's question, which leaves out the work that
+  ## starts on the last pixel itself (M0_REQ_LAST_PX, gb.nim): an object at
+  ## X = 167 and a window at WX = 166.
   const obj_x_max = GB_WIDTH + 7
   const wx_max = GB_WIDTH + 6
-  if ppu.fetching_sprite: return true
-  if obj_fetch_on(ppu) and ppu.sprites.len > 0 and
-     int(ppu.sprites[0].x) <= obj_x_max: return true
+  let last_px = for_irq and M0_REQ_LAST_PX != 0
+  if ppu.fetching_sprite:
+    # The object in the fetcher is still at the head of the list.
+    if not (last_px and ppu.sprites.len > 0 and
+            int(ppu.sprites[0].x) == obj_x_max and
+            ppu.lx == int32(GB_WIDTH) - 1): return true
+  elif obj_fetch_on(ppu) and ppu.sprites.len > 0 and
+       int(ppu.sprites[0].x) <= obj_x_max - ord(last_px): return true
   when WIN_TAIL_FETCH != 0:
     # A started window whose restart has not pushed yet (`fetcher_x == 0`)
     # still owes the fetcher (WIN_TAIL_FETCH, gb.nim). On the last pixel the
@@ -2104,19 +2111,22 @@ proc fetch_work_pending(ppu: GbFifoPpu; for_irq = false): bool {.inline.} =
     # ends with the pixel; an object already fetched on that pixel
     # (obj_last_px) is not charged twice.
     if ppu.fetching_window and ppu.fetcher_x == 0:
-      when WIN_TAIL_FLAG_LEAD != 0:
-        # A tail restart's retire dot (WIN_TAIL_FLAG_LEAD, gb.nim); an object
-        # fetched on the last pixel keeps the shared-slot rule below.
-        if ppu.win_tail_end != 0 and not ppu.obj_last_px:
-          return ppu.cycle_counter < ppu.win_tail_end
-      if ppu.lx < int32(GB_WIDTH) - 1 or
-         (CGB_WIN_TAIL_LAST != 0 and ppu.cgb and not ppu.obj_last_px):
-        return true
+      if last_px:
+        if ppu.lx < int32(GB_WIDTH) - 1: return true
+      else:
+        when WIN_TAIL_FLAG_LEAD != 0:
+          # A tail restart's retire dot (WIN_TAIL_FLAG_LEAD, gb.nim); an object
+          # fetched on the last pixel keeps the shared-slot rule below.
+          if ppu.win_tail_end != 0 and not ppu.obj_last_px:
+            return ppu.cycle_counter < ppu.win_tail_end
+        if ppu.lx < int32(GB_WIDTH) - 1 or
+           (CGB_WIN_TAIL_LAST != 0 and ppu.cgb and not ppu.obj_last_px):
+          return true
   # Only a match still ahead of the shifter: one refused earlier on the line
   # (LCDC.5 low at it, set again since) starts nothing and owes nothing
   # (WIN_TAIL_PASSED_MATCH, gb.nim).
   if not ppu.fetching_window and ppu.window_trigger and window_enabled(ppu) and
-     int(ppu.wx) <= wx_max and
+     int(ppu.wx) <= wx_max - ord(last_px) and
      (WIN_TAIL_PASSED_MATCH == 0 or ppu.win_lx >= ppu.lx): return true
   # A DMG line carried out of the previous one (DMG_WIN_LAST_PX_CARRY) owes
   # nothing for its own WX = 166 match: AGE stat-mode-window-dmgC reads the
@@ -2504,6 +2514,23 @@ when STAT_IRQ_SPLIT:
     if ppu.lx < ppu.m3_retire_lx - lead: return false
     if ppu.lx >= int32(GB_WIDTH) - lead: return true
     not fetch_work_pending(ppu, for_irq = true)
+
+when STAT_IRQ_SPLIT and M0_REQ_LAST_PX != 0:
+  proc fifo_tail_m0_request(ppu: GbFifoPpu; gb: GB) {.noinline.} =
+    ## The mode-0 request on a line whose mode 3 is held open by work that
+    ## starts on the last pixel (M0_REQ_LAST_PX, gb.nim). Called on the dots
+    ## of the line's tail while the fetcher has not retired and the request
+    ## is not up: once nothing but last-pixel work is left the request goes
+    ## up where it would on a line without it, the pipeline's advance less
+    ## the source's lead after that dot (the same hand-off the retire makes
+    ## through m3_hold). `m0_tail_dot` is the dot that was first true on,
+    ## -1 until then (reset where mode 3 begins).
+    if gb.m0_tail_dot < 0:
+      if fetch_work_pending(ppu, for_irq = true): return
+      gb.m0_tail_dot = ppu.cycle_counter
+    if ppu.cycle_counter - gb.m0_tail_dot >=
+       int32(ppu.m3_hold) - ppu.m0_source_lead(stat_irq_lead(gb)):
+      ppu_set_irq_mode(ppu, gb, 0'u8)
 
 # ---- The VRAM DMA's write port in mode 3 (VDMA_M3_PORT, gb.nim) -------------
 #
@@ -3041,7 +3068,18 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
                 fifo_plain_span(ppu, gb, remaining)
             remaining = 0
             continue
-        while remaining > 0 and not fetcher_retired(ppu):
+        while remaining > 0:
+          # fetcher_retired, opened up: the tail of the line (the last
+          # m3_lead pixels and whatever holds mode 3 open on them) is the
+          # only place the mode-0 request can part from the mode flag
+          # (fifo_tail_m0_request), and this spelling keeps that question
+          # off every other dot.
+          when M3_PIPE_LEAD_ANY and M0_REQ_LAST_PX != 0 and STAT_IRQ_SPLIT:
+            if ppu.lx >= ppu.m3_retire_lx:
+              if ppu.lx >= GB_WIDTH or not fetch_work_pending(ppu): break
+              if ppu.irq_mode == 3'u8: fifo_tail_m0_request(ppu, gb)
+          else:
+            if fetcher_retired(ppu): break
           when STAT_IRQ_SPLIT and M0_LOOKAHEAD_REACHABLE:
             if ppu.lx >= m0_hook_lx and ppu.irq_mode == 3 and
                fifo_irq_m0_ready(ppu, px_lead):
@@ -3060,8 +3098,8 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
         if ppu.cycle_counter == ppu.win_check_dot: win_check_due(ppu, gb)
       case m
       of 2:  # OAM search
-        # The edge detector at the OAM pulse's end: removed 2026-11-13 for a
-        # clean rewrite.
+        # The OAM pulse's end is not a stop here: the line's fall is taken
+        # by the next CPU write that looks at it (stat_m2_pulse_settle).
         # The whole boundary moves M3_GRID_EARLY early.
         let m3_dot = m3_start_dot(gb)
         when STAT_IRQ_SPLIT:
@@ -3084,6 +3122,7 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
               ppu.wx < uint8(WIN_LINE_START_WX) and ppu.window_trigger)
           fifo_reset_sprite(ppu)
           when CGB_WE_ENABLE_FETCH_LATE != 0: gb.we_on_dot = int32.low
+          when M0_REQ_LAST_PX != 0: gb.m0_tail_dot = -1'i32
           when CGB_WIN_TAIL_LAST != 0: ppu.obj_last_px = false
           when CGB_OBJ_LAST_PX_YIELDS != 0: ppu.m0_early = 0'u8
           when WIN_TAIL_FLAG_LEAD != 0: ppu.win_tail_end = 0

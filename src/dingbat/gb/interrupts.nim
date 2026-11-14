@@ -48,6 +48,20 @@ proc clear_interrupt*(irq: GbInterrupts; line: uint16) =
   of INT_JOYPAD: irq.joypad_interrupt    = false
   else: discard
 
+proc irq_ack_live*(irq: GbInterrupts; now: CycleCount): bool {.inline.} =
+  ## Is a CGB dispatch's acknowledge of its timer or serial line still open
+  ## (IRQ_SAMPLE_CGB_TIMER_SERIAL_ADD, cpu.nim)? The window is a few T-cycles
+  ## long; the upper bound keeps a stale `ack_until` from matching after the
+  ## scheduler's per-frame rebase.
+  irq.ack_line != 0'u16 and now <= irq.ack_until and
+    irq.ack_until - now < CycleCount(16)
+
+proc irq_ack_swallows*(irq: GbInterrupts; line: uint16;
+                       now: CycleCount): bool {.inline.} =
+  ## Asked where the timer and the serial port raise their request: does the
+  ## dispatch that just took this line still hold it acknowledged?
+  irq.ack_line == line and irq_ack_live(irq, now)
+
 proc irq_packed*(irq: GbInterrupts): uint8 {.inline.} =
   0xE0'u8 or
   (if irq.joypad_interrupt:   0x10'u8 else: 0'u8) or

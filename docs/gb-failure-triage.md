@@ -49,7 +49,8 @@ cgbc,cgbe}`, gambatte `m0int_m0stat/m0int_m0stat_scx5_ds_2` and
 `m0enable/disable_scx5_ds_2` (the whole `m0int_m0stat` directory is green).
 The `-d:gb_dispatch_trace` dots said it outright: the double-speed dispatch
 grid sits on odd dots, the mode-0 source rises ahead of the flag
-(`STAT_M0_LEAD_DS`, re-fit pending), so for an odd SCX it rose one dot before a
+(`STAT_M0_LEAD_DS`; re-fitted 2026-11-13 to 0, which leaves
+`STAT_DISPATCH_MIN_AGE_DS` at 0 with the three AGE rows green), so for an odd SCX it rose one dot before a
 boundary and was taken there, while for an even SCX it rose two dots before
 one. AGE's staircase pairs SCX (1,2), (3,4), (5,6): a mode-0 rise one dot old
 at the boundary waits for the next. `STAT_DISPATCH_MIN_AGE_DS = 2` (gb.nim),
@@ -61,17 +62,20 @@ did not move either way.
 
 ### A2. The dispatch's IF clear against a source rising inside it
 
-**Rows (2).** `tima/tc00_irq_late_retrigger_{2 [cgb],ds_2}`. Closed
+**Rows (0).** `tima/tc00_irq_late_retrigger_{2 [cgb],ds_2}` closed 2026-11-13
+(the CGB's later clear of its timer and serial lines,
+`IRQ_SAMPLE_CGB_TIMER_SERIAL_ADD`, with `IRQ_SAMPLE_T_DS = 18`). Closed
 2026-09-22: `ly0/lycint152_lyc153irq_late_retrigger_2` and
 `lyc153int_m2irq_late_retrigger_2` (both devices),
 `ly0/lycint152_lyc0irq_late_retrigger_2`, `irq_precedence/
 late_m0irq_retrigger_2`, then `m1/lycint143_m1irq_late_retrigger_2` and
 `m1/lycint_vblankirq_late_retrigger_2` (both devices),
 `tc00_irq_late_retrigger_3` [cgb] and
-`serial/start_wait_trigger_int8_read_if_2` [cgb]. Since 2026-11-13 the knobs
-these rows rest on (`STAT_M2_LY0_LEAD`, `STAT_M1_LEAD`, `VBLANK_IRQ_LEAD`,
-`IRQ_SAMPLE_CGB_TIMER_SERIAL_ADD`) are at neutral values, re-fit pending; the
-vblank-line blind-window rule was removed for a clean rewrite.
+`serial/start_wait_trigger_int8_read_if_2` [cgb]. The knobs these rows rest on were
+re-fitted clean-room on 2026-11-13 (`STAT_M2_LY0_LEAD`, `STAT_M1_LEAD`,
+`VBLANK_IRQ_LEAD` = 1, `IRQ_SAMPLE_CGB_TIMER_SERIAL_ADD` = 2) and the
+vblank-line rule rewritten (`LYC_STEPPED_VBLANK_SHUT`); all are green
+(docs/gb-derivations.md, section 7).
 
 **Behaviour.** Each ROM's handler re-requests its own interrupt with an
 `LDH ($0F),A` that moves one M-cycle per member, `EI`s, and reads IF inside
@@ -90,7 +94,7 @@ M-cycles, the fifth setting PC.
 **Modelled.** `IRQ_SAMPLE_T = 18` (cpu.nim; the bracket is at the constant:
 16 loses the two mid-M-cycle sources, 19 loses
 `late_m0irq_retrigger_scx1_1`, 20 also `m2int_m2irq_late_retrigger_1`).
-`IRQ_SAMPLE_T_DS`: re-fit pending, neutral value 16.
+`IRQ_SAMPLE_T_DS = 18` (re-fitted 2026-11-13; bracket at the constant).
 
 One clear cannot sit in both windows. So the two groups of sources reach the
 dispatch one M-cycle apart, relative to the instant their IF bit rises, with
@@ -131,8 +135,8 @@ ppu.nim, gb.nim).
 edge (+4).** `lycint_lycflag_ds_3`, `ly0/lycint152_lyc0flag_ds_3` and
 `enable_display/frame{0,1}_m2stat_count_ds_1` read STAT in the M-cycle LY
 steps in. At double speed how long the bit still compares against the line
-being left is `LYC_JUST_CHANGED_HOLD_DS` (dots, ppu.nim; re-fit pending,
-neutral value 0). `lycint152_lyc153flag_ds_3` stays red.
+being left is `LYC_JUST_CHANGED_HOLD_DS` (dots, ppu.nim; 2, re-fitted
+2026-11-13). `lycint152_lyc153flag_ds_3` is `LYC153_HOLD_DS = 1`.
 
 **Closed 2026-09-22: a disable is an edge's other half (+20).** The STAT
 line is a level OR into an edge detector, and dingbat only re-evaluated it
@@ -232,12 +236,15 @@ each source's level rises and falls relative to the line boundary. No Pan
 Docs sentence gives these dots; the evidence is the families themselves.
 Closed 2026-09-22 (second round) and since 2026-11-13 partly open again:
 
-* *The comparator's LY may step before the boundary* (`STAT_LYC_LY_LEAD_DOTS`,
-  `STAT_LYC_LY_LEAD_DS`, `fifo_lyc_ly_lead`): re-fit pending; neutral value
-  0. The clean-room CGB line end (`CGB_LINE_END_STEPS`: docs/gb-derivations.md,
-  "A CGB STAT write across a line's end") runs at the comparator's step.
-* The OAM pulse's falling-edge evaluation: removed 2026-11-13 for a clean
-  rewrite.
+* *The comparator's LY steps before the boundary* (`STAT_LYC_LY_LEAD_DOTS`
+  = 2, `STAT_LYC_LY_LEAD_DS` = 0, `fifo_lyc_ly_lead`): re-fitted clean-room
+  2026-11-13 (docs/gb-derivations.md, "The comparator's LY steps two dots
+  before the line boundary"). The clean-room CGB line end
+  (`CGB_LINE_END_STEPS`, "A CGB STAT write across a line's end") runs at the
+  comparator's step.
+* The OAM pulse's falling edge: `M2_PULSE_END_EDGE` (docs/gb-derivations.md,
+  "The STAT line falls where a line's OAM pulse ends"), taken lazily at the
+  next CPU write that looks at the line.
 * *The CGB's last-M-cycle mode-2 enable* (`m2enable/late_enable_m0disable_2
   [cgb]`): closed 2026-11-12, step 4 of the CGB line end
   (`CGB_LINE_END_STEPS`; docs/gb-derivations.md, "A CGB STAT write across a
@@ -252,9 +259,9 @@ each loses 26..34 `speedchange*_ly44_m3*` ladder rows and takes no
 
 **Closed (A3), 2026-09-22.** The last row, `m1/ly143_late_m2enable_ds_
 lcdoffset1_1`, rests on the double-speed line-144 pulse's rise dot
-(`M2_144_EARLY_DOT_DS`) and an IF read's tie with it (`IF_READ_M2_144_TIE_DS`;
-`enable_display/frame{0,1}_m2irq_count_ds_2`). Both re-fit pending; neutral
-values 452 and 0.
+(`M2_144_EARLY_DOT_DS` = 454, re-fitted 2026-11-13: one double-speed M-cycle
+before the line ends) and an IF read's tie with it (`IF_READ_M2_144_TIE_DS`,
+0: `enable_display/frame{0,1}_m2irq_count_ds_2` pass without it).
 
 The knob sweep of 2026-09-22 tried `+-1` of every GB `{.intdefine.}` (206
 knobs), failing tests first, with every hit validated on the full 5157-test
@@ -264,8 +271,10 @@ positive.
 
 ### A4. Mode-0 STAT interrupt against a timer interrupt
 
-The dispatch's push order and vector choice: removed 2026-11-13 for a clean
-rewrite (rows `irq_precedence/late_m0irq_vs_tima_*`, both devices).
+Closed: the dispatch writes PC in its fourth and fifth M-cycles and picks
+the vector between the two (`DISPATCH_PUSH_MCYCLE`, clean-room 2026-11-13;
+docs/gb-derivations.md, "The dispatch pushes in its fourth and fifth
+M-cycles"). Rows `irq_precedence/late_m0irq_vs_tima_*`, both devices.
 
 ### A5. Halt-woken readers of the mode-0 edge
 
@@ -348,7 +357,8 @@ docs/gb-derivations.md section 3). `ly0_late_scx7_m3stat_scx0_2` [dmg] and
 `ly0_late_vramw_2` [cgb] with `VRAM_WRITE_LINE0_CGB_GRACE` = 1.
 `ly0_m0irq_scx{0,1}_ds_1` and `frame0_m0irq_count_scx{2,3}_ds_1`: at double
 speed the LCD-on line's mode-0 source lag behind its flag is
-`LCDON_M0_LAG_DS` (gb.nim; re-fit pending, neutral value 0).
+`LCDON_M0_LAG_DS` (gb.nim; 8 scheduler cycles = one double-speed M-cycle,
+re-fitted 2026-11-13).
 
 Tests: AGE `oam/oam-read-dmgC-cgbBC@dmgC`,
 `oam-read-cgbE`, `vram/vram-read-{dmgC, cgbBCE@*}`; gambatte
@@ -875,9 +885,9 @@ question is which cycles the timer sees around the reset.
 
 ### F1. The eighth shift edge against a CPU access
 
-**Re-fit pending (2026-11-13).** `SERIAL_SC_WRITE_LEAD_T` (serial.nim):
+**Re-fitted 2026-11-13.** `SERIAL_SC_WRITE_LEAD_T` (serial.nim) = 1:
 T-cycles before the end of the SC store's M-cycle from which the store
-samples the serial tap; neutral value 0. Rows:
+samples the serial tap (1..4 are one value; bracket at the constant). Rows:
 `serial/nopx1_start{,83}_wait_read_if_2`,
 `start83_late_div_write_wait_read_if_{1b,2b}` (CGB),
 `nopx2_start_wait_read_if_1`. Refuted earlier: a one-M-cycle serial lead on a running
@@ -888,9 +898,9 @@ is), and every `SERIAL_TAP_*` from 0 to 16 on its own (none turns
 
 ### F2. TIMA reload against a read
 
-Re-fit pending (2026-11-13): `TAC_SELECT_LEAD_T` (timer.nim), T-cycles
-before the end of the TAC write's M-cycle at which both divider taps are
-judged; neutral value 4. Rows: `tc00_late_tc01_{5,7}`.
+Re-fitted 2026-11-13: `TAC_SELECT_LEAD_T` (timer.nim) = 0, both divider
+taps judged at the end of the TAC write's M-cycle. Rows:
+`tc00_late_tc01_{5,7}` (1..4 lose them on both devices).
 
 ---
 
@@ -2103,13 +2113,13 @@ One line each; the knob's own comment carries the derivation.
   takes a second look one M-cycle earlier: `OBJ_SCAN_DOT_ADJ`,
   `CGB_OBJ_SCAN_LEAD`; every `sprites/late_sizechange*`.
 * `EI; HALT` with `IF & IE` arms the halt bug: `ime_set_cycle`. The TAC
-  write's tap sample (`TAC_SELECT_LEAD_T`) is re-fit pending.
+  write's tap sample is `TAC_SELECT_LEAD_T` (0).
 * A TIMA overflow reaches a running CPU one M-cycle before a halted one:
   `TIMER_IRQ_RUN_LEAD`.
 * The serial shift clock is a half-rate toggle the SC write reseeds, and a
   CPU access meets it before its own tap edge: `SERIAL_TAP_*`,
-  `SERIAL_CPU_SAMPLE_T`. The SC store's own sample point
-  (`SERIAL_SC_WRITE_LEAD_T`) is re-fit pending.
+  `SERIAL_CPU_SAMPLE_T`. The SC store's own sample point is
+  `SERIAL_SC_WRITE_LEAD_T` (1).
 * The CGB window start is revocable; the DMG revokes for one dot:
   `CGB_WIN_REVOKE_LAG`, `DMG_WIN_EN_REVOKE`.
 * The OAM X = 167 object charged for the tail walk twice:

@@ -1,33 +1,33 @@
 # Dingbat Test Results
 
-*Generated: 2026-11-13 17:30:19 · commit 14d29b6a · game-boy-test-roms v7.0*
+*Generated: 2026-11-13 17:47:39 · commit 12888b61 · game-boy-test-roms v7.0*
 
 Device column: the hardware the row is scored on. `cart` = the cart header picks the device (DMG-ABC for a DMG cart, CPU CGB C for a CGB one); `DMG`/`CGB`/`SGB` = forced; a trailing token is a specific boot table/revision (`--model`); `—` = GBA, which has no device axis here. A row name ending `@<model>` is one ARM of a test whose name declares several machines: a ROM that states the devices it was verified on (AGE's `ei-halt-dmgC-cgbBCE`, mealybug's `_cgb_c`/`_cgb_d` capture pair, mooneye's `-GS` family) gets one row per revision rather than one row on whichever machine happened to be the default, so each revision is actually covered. A suite where every row passes has only its summary row — its per-row section comes back as soon as anything in it fails.
 
 ## Summary
 
 - **Total:** 1586
-- **Pass:** 1500
-- **Fail:** 86
+- **Pass:** 1565
+- **Fail:** 21
 
 | Suite | Pass | Total | Status |
 |-------|------|-------|--------|
 | Game Boy - Acid2 | 2 | 2 | 👌 |
-| Game Boy - AGE | 115 | 118 | 👀 |
+| Game Boy - AGE | 118 | 118 | 👌 |
 | Game Boy - Blargg | 28 | 28 | 👌 |
 | Game Boy - Blargg cgb_sound | 12 | 12 | 👌 |
 | Game Boy - Blargg dmg_sound | 12 | 12 | 👌 |
-| [Game Boy - DocBoy](results_docboy.md) | 45 | 70 | 👀 |
-| [Game Boy - gambatte](results_gambatte.md) | 23 | 48 | 👀 |
-| Game Boy - GBMicrotest | 462 | 480 | 👀 |
+| [Game Boy - DocBoy](results_docboy.md) | 53 | 70 | 👀 |
+| [Game Boy - gambatte](results_gambatte.md) | 45 | 48 | 👀 |
+| Game Boy - GBMicrotest | 480 | 480 | 👌 |
 | Game Boy - MagenTests | 7 | 7 | 👌 |
 | Game Boy - MBC | 6 | 6 | 👌 |
-| Game Boy - Mealybug Tearoom | 71 | 74 | 👀 |
-| Game Boy - Mooneye | 151 | 152 | 👀 |
-| Game Boy - Mooneye (wilbertpol) | 177 | 184 | 👀 |
+| Game Boy - Mealybug Tearoom | 74 | 74 | 👌 |
+| Game Boy - Mooneye | 152 | 152 | 👌 |
+| Game Boy - Mooneye (wilbertpol) | 184 | 184 | 👌 |
 | Game Boy - SameSuite | 8 | 8 | 👌 |
-| Game Boy - SameSuite APU | 69 | 70 | 👀 |
-| Game Boy - Screenshot suites | 19 | 21 | 👀 |
+| Game Boy - SameSuite APU | 70 | 70 | 👌 |
+| Game Boy - Screenshot suites | 21 | 21 | 👌 |
 | Game Boy - Shootout ROMs | 15 | 15 | 👌 |
 | [Game Boy - SingleStepTests SM83](results_singlestep.md) | 20 | 20 | 👌 |
 | GBA - alyosha gba-tests | 125 | 125 | 👌 |
@@ -40,135 +40,12 @@ Device column: the hardware the row is scored on. `cart` = the cart header picks
 | GBA - PeterLemon BIOS | 25 | 25 | 👌 |
 | [GBA - SingleStepTests ARM7TDMI](results_singlestep.md) | 45 | 45 | 👌 |
 
-## Game Boy - AGE (115/118)
-
-| Test | Device | Result |
-|------|--------|--------|
-| age/halt/ei-halt-dmgC-cgbBCE@dmgC | DMG dmgC | 👌 |
-| age/halt/ei-halt-dmgC-cgbBCE@cgbab | CGB cgbab | 👌 |
-| age/halt/ei-halt-dmgC-cgbBCE@cgbc | CGB cgbc | 👌 |
-| age/halt/ei-halt-dmgC-cgbBCE@cgbe | CGB cgbe | 👌 |
-| age/halt/halt-m0-interrupt-dmgC-cgbBCE@dmgC | DMG dmgC | 👌 |
-| age/halt/halt-m0-interrupt-dmgC-cgbBCE@cgbab | CGB cgbab | 👌 |
-| age/halt/halt-m0-interrupt-dmgC-cgbBCE@cgbc | CGB cgbc | 👌 |
-| age/halt/halt-m0-interrupt-dmgC-cgbBCE@cgbe | CGB cgbe | 👌 |
-| age/halt/halt-prefetch-dmgC-cgbBCE@dmgC | DMG dmgC | 👌 |
-| age/halt/halt-prefetch-dmgC-cgbBCE@cgbab | CGB cgbab | 👌 |
-| age/halt/halt-prefetch-dmgC-cgbBCE@cgbc | CGB cgbc | 👌 |
-| age/halt/halt-prefetch-dmgC-cgbBCE@cgbe | CGB cgbe | 👌 |
-| age/lcd-align-ly/lcd-align-ly-cgbBC@cgbab | CGB cgbab | 👌 |
-| age/lcd-align-ly/lcd-align-ly-cgbBC@cgbc | CGB cgbc | 👌 |
-| age/lcd-align-ly/lcd-align-ly-cgbE | CGB cgbe | 👌 |
-| age/ly/ly-cgbE | CGB cgbe | 👌 |
-| age/ly/ly-dmgC-cgbBC@dmgC | DMG dmgC | 👌 |
-| age/ly/ly-dmgC-cgbBC@cgbab | CGB cgbab | 👌 |
-| age/ly/ly-dmgC-cgbBC@cgbc | CGB cgbc | 👌 |
-| age/ly/ly-ncmBC@cgbab | CGB cgbab | 👌 |
-| age/ly/ly-ncmBC@cgbc | CGB cgbc | 👌 |
-| age/ly/ly-ncmE | CGB cgbe | 👌 |
-| age/m3-bg-bgp/m3-bg-bgp-dmgC | DMG dmgC | 👌 |
-| age/m3-bg-bgp/m3-bg-bgp-ncmBC@cgbab | CGB cgbab | 👌 |
-| age/m3-bg-bgp/m3-bg-bgp-ncmBC@cgbc | CGB cgbc | 👌 |
-| age/m3-bg-bgp/m3-bg-bgp-ncmE | CGB cgbe | 👌 |
-| age/m3-bg-lcdc/m3-bg-lcdc-ds-cgbBCE@cgbab | CGB cgbab | 👌 |
-| age/m3-bg-lcdc/m3-bg-lcdc-ds-cgbBCE@cgbc | CGB cgbc | 👌 |
-| age/m3-bg-lcdc/m3-bg-lcdc-ds-cgbBCE@cgbe | CGB cgbe | 👌 |
-| age/m3-bg-lcdc/m3-bg-lcdc-nocgb-ncmBCE@cgbab | CGB cgbab | 👌 |
-| age/m3-bg-lcdc/m3-bg-lcdc-nocgb-ncmBCE@cgbc | CGB cgbc | 👌 |
-| age/m3-bg-lcdc/m3-bg-lcdc-nocgb-ncmBCE@cgbe | CGB cgbe | 👌 |
-| age/m3-bg-lcdc/m3-bg-lcdc-cgbBCE@cgbab | CGB cgbab | 👌 |
-| age/m3-bg-lcdc/m3-bg-lcdc-cgbBCE@cgbc | CGB cgbc | 👌 |
-| age/m3-bg-lcdc/m3-bg-lcdc-cgbBCE@cgbe | CGB cgbe | 👌 |
-| age/m3-bg-lcdc/m3-bg-lcdc-dmgC | DMG dmgC | 👌 |
-| age/m3-bg-scx/m3-bg-scx-ds-cgbBCE@cgbab | CGB cgbab | 👌 |
-| age/m3-bg-scx/m3-bg-scx-ds-cgbBCE@cgbc | CGB cgbc | 👌 |
-| age/m3-bg-scx/m3-bg-scx-ds-cgbBCE@cgbe | CGB cgbe | 👌 |
-| age/m3-bg-scx/m3-bg-scx-nocgb-ncmBCE@cgbab | CGB cgbab | 👌 |
-| age/m3-bg-scx/m3-bg-scx-nocgb-ncmBCE@cgbc | CGB cgbc | 👌 |
-| age/m3-bg-scx/m3-bg-scx-nocgb-ncmBCE@cgbe | CGB cgbe | 👌 |
-| age/m3-bg-scx/m3-bg-scx-cgbBCE@cgbab | CGB cgbab | 👌 |
-| age/m3-bg-scx/m3-bg-scx-cgbBCE@cgbc | CGB cgbc | 👌 |
-| age/m3-bg-scx/m3-bg-scx-cgbBCE@cgbe | CGB cgbe | 👌 |
-| age/m3-bg-scx/m3-bg-scx-dmgC | DMG dmgC | 👌 |
-| age/oam/oam-read-cgbE | CGB cgbe | 👌 |
-| age/oam/oam-read-dmgC-cgbBC@dmgC | DMG dmgC | 👌 |
-| age/oam/oam-read-dmgC-cgbBC@cgbab | CGB cgbab | 👌 |
-| age/oam/oam-read-dmgC-cgbBC@cgbc | CGB cgbc | 👌 |
-| age/oam/oam-read-ncmBC@cgbab | CGB cgbab | 👌 |
-| age/oam/oam-read-ncmBC@cgbc | CGB cgbc | 👌 |
-| age/oam/oam-read-ncmE | CGB cgbe | 👌 |
-| age/oam/oam-write-cgbBCE@cgbab | CGB cgbab | 👌 |
-| age/oam/oam-write-cgbBCE@cgbc | CGB cgbc | 👌 |
-| age/oam/oam-write-cgbBCE@cgbe | CGB cgbe | 👌 |
-| age/oam/oam-write-ncmBCE@cgbab | CGB cgbab | 👌 |
-| age/oam/oam-write-ncmBCE@cgbc | CGB cgbc | 👌 |
-| age/oam/oam-write-ncmBCE@cgbe | CGB cgbe | 👌 |
-| age/speed-switch/caution/spsw-interrupts-cgbBC@cgbab | CGB cgbab | 👌 |
-| age/speed-switch/caution/spsw-interrupts-cgbBC@cgbc | CGB cgbc | 👌 |
-| age/speed-switch/caution/spsw-interrupts-cgbE | CGB cgbe | 👌 |
-| age/speed-switch/spsw-ch2-lc-delay-cgbBCE@cgbab | CGB cgbab | 👌 |
-| age/speed-switch/spsw-ch2-lc-delay-cgbBCE@cgbc | CGB cgbc | 👌 |
-| age/speed-switch/spsw-ch2-lc-delay-cgbBCE@cgbe | CGB cgbe | 👌 |
-| age/speed-switch/spsw-div-cgbBCE@cgbab | CGB cgbab | 👌 |
-| age/speed-switch/spsw-div-cgbBCE@cgbc | CGB cgbc | 👌 |
-| age/speed-switch/spsw-div-cgbBCE@cgbe | CGB cgbe | 👌 |
-| age/speed-switch/spsw-mode0-cgbBCE@cgbab | CGB cgbab | 👌 |
-| age/speed-switch/spsw-mode0-cgbBCE@cgbc | CGB cgbc | 👌 |
-| age/speed-switch/spsw-mode0-cgbBCE@cgbe | CGB cgbe | 👌 |
-| age/speed-switch/spsw-stop-prefetch-cgbBCE@cgbab | CGB cgbab | 👌 |
-| age/speed-switch/spsw-stop-prefetch-cgbBCE@cgbc | CGB cgbc | 👌 |
-| age/speed-switch/spsw-stop-prefetch-cgbBCE@cgbe | CGB cgbe | 👌 |
-| age/speed-switch/spsw-tima-cgbBC@cgbab | CGB cgbab | 👌 |
-| age/speed-switch/spsw-tima-cgbBC@cgbc | CGB cgbc | 👌 |
-| age/speed-switch/spsw-tima-cgbE | CGB cgbe | 👌 |
-| age/stat-interrupt/stat-int-dmgC-cgbBCE@dmgC | DMG dmgC | 👌 |
-| age/stat-interrupt/stat-int-dmgC-cgbBCE@cgbab | CGB cgbab | 👀 Mooneye: FAIL |
-| age/stat-interrupt/stat-int-dmgC-cgbBCE@cgbc | CGB cgbc | 👀 Mooneye: FAIL |
-| age/stat-interrupt/stat-int-dmgC-cgbBCE@cgbe | CGB cgbe | 👀 Mooneye: FAIL |
-| age/stat-interrupt/stat-int-ncmBCE@cgbab | CGB cgbab | 👌 |
-| age/stat-interrupt/stat-int-ncmBCE@cgbc | CGB cgbc | 👌 |
-| age/stat-interrupt/stat-int-ncmBCE@cgbe | CGB cgbe | 👌 |
-| age/stat-mode-sprites/stat-mode-sprites-dmgC-cgbBCE@dmgC | DMG dmgC | 👌 |
-| age/stat-mode-sprites/stat-mode-sprites-dmgC-cgbBCE@cgbab | CGB cgbab | 👌 |
-| age/stat-mode-sprites/stat-mode-sprites-dmgC-cgbBCE@cgbc | CGB cgbc | 👌 |
-| age/stat-mode-sprites/stat-mode-sprites-dmgC-cgbBCE@cgbe | CGB cgbe | 👌 |
-| age/stat-mode-sprites/stat-mode-sprites-ds-cgbBCE@cgbab | CGB cgbab | 👌 |
-| age/stat-mode-sprites/stat-mode-sprites-ds-cgbBCE@cgbc | CGB cgbc | 👌 |
-| age/stat-mode-sprites/stat-mode-sprites-ds-cgbBCE@cgbe | CGB cgbe | 👌 |
-| age/stat-mode-window/stat-mode-window-cgbBCE@cgbab | CGB cgbab | 👌 |
-| age/stat-mode-window/stat-mode-window-cgbBCE@cgbc | CGB cgbc | 👌 |
-| age/stat-mode-window/stat-mode-window-cgbBCE@cgbe | CGB cgbe | 👌 |
-| age/stat-mode-window/stat-mode-window-dmgC | DMG dmgC | 👌 |
-| age/stat-mode-window/stat-mode-window-ds-cgbBCE@cgbab | CGB cgbab | 👌 |
-| age/stat-mode-window/stat-mode-window-ds-cgbBCE@cgbc | CGB cgbc | 👌 |
-| age/stat-mode-window/stat-mode-window-ds-cgbBCE@cgbe | CGB cgbe | 👌 |
-| age/stat-mode-window/stat-mode-window-ncmBCE@cgbab | CGB cgbab | 👌 |
-| age/stat-mode-window/stat-mode-window-ncmBCE@cgbc | CGB cgbc | 👌 |
-| age/stat-mode-window/stat-mode-window-ncmBCE@cgbe | CGB cgbe | 👌 |
-| age/stat-mode/stat-mode-cgbE | CGB cgbe | 👌 |
-| age/stat-mode/stat-mode-dmgC-cgbBC@dmgC | DMG dmgC | 👌 |
-| age/stat-mode/stat-mode-dmgC-cgbBC@cgbab | CGB cgbab | 👌 |
-| age/stat-mode/stat-mode-dmgC-cgbBC@cgbc | CGB cgbc | 👌 |
-| age/stat-mode/stat-mode-ds-cgbBCE@cgbab | CGB cgbab | 👌 |
-| age/stat-mode/stat-mode-ds-cgbBCE@cgbc | CGB cgbc | 👌 |
-| age/stat-mode/stat-mode-ds-cgbBCE@cgbe | CGB cgbe | 👌 |
-| age/stat-mode/stat-mode-ncmBC@cgbab | CGB cgbab | 👌 |
-| age/stat-mode/stat-mode-ncmBC@cgbc | CGB cgbc | 👌 |
-| age/stat-mode/stat-mode-ncmE | CGB cgbe | 👌 |
-| age/vram/vram-read-cgbBCE@cgbab | CGB cgbab | 👌 |
-| age/vram/vram-read-cgbBCE@cgbc | CGB cgbc | 👌 |
-| age/vram/vram-read-cgbBCE@cgbe | CGB cgbe | 👌 |
-| age/vram/vram-read-dmgC | DMG dmgC | 👌 |
-| age/vram/vram-read-ncmBCE@cgbab | CGB cgbab | 👌 |
-| age/vram/vram-read-ncmBCE@cgbc | CGB cgbc | 👌 |
-| age/vram/vram-read-ncmBCE@cgbe | CGB cgbe | 👌 |
-
-## Game Boy - DocBoy (45/70)
+## Game Boy - DocBoy (53/70)
 
 | Test | Device | Result |
 |------|--------|--------|
 | docboy/dmg/cpu | DMG dmgABC | 👌 11/11 passed |
-| docboy/dmg/ppu | DMG dmgABC | 👀 1208/1260 passed |
+| docboy/dmg/ppu | DMG dmgABC | 👀 1238/1260 passed |
 | docboy/dmg/mbc/mbc1 | DMG dmgABC | 👌 11/11 passed |
 | docboy/dmg/mbc/mbc3 | DMG dmgABC | 👌 18/18 passed |
 | docboy/dmg/mbc/mbc5 | DMG dmgABC | 👌 1/1 passed |
@@ -176,14 +53,14 @@ Device column: the hardware the row is scored on. `cart` = the cart header picks
 | docboy/dmg/boot | DMG dmgABC | 👌 21/21 passed |
 | docboy/dmg/memory | DMG dmgABC | 👌 23/23 passed |
 | docboy/dmg/oam_bug | DMG dmgABC | 👌 258/258 passed |
-| docboy/dmg/stat_write_bug | DMG dmgABC | 👀 25/29 passed |
+| docboy/dmg/stat_write_bug | DMG dmgABC | 👌 29/29 passed |
 | docboy/dmg/timers | DMG dmgABC | 👌 10/10 passed |
-| docboy/dmg/interrupts | DMG dmgABC | 👀 156/158 passed |
+| docboy/dmg/interrupts | DMG dmgABC | 👌 158/158 passed |
 | docboy/dmg/dma | DMG dmgABC | 👌 68/68 passed |
-| docboy/dmg/serial | DMG dmgABC | 👀 58/76 passed |
+| docboy/dmg/serial | DMG dmgABC | 👌 76/76 passed |
 | docboy/dmg/joypad | DMG dmgABC | 👌 32/32 passed |
-| docboy/dmg/apu | DMG dmgABC | 👀 302/307 passed |
-| docboy/cgb/boot | CGB cgbE | 👀 47/68 passed |
+| docboy/dmg/apu | DMG dmgABC | 👀 303/307 passed |
+| docboy/cgb/boot | CGB cgbE | 👀 48/68 passed |
 | docboy/cgb/banks | CGB cgbE | 👌 2/2 passed |
 | docboy/cgb/memory | CGB cgbE | 👌 20/20 passed |
 | docboy/cgb/oam_bug | CGB cgbE | 👌 5/5 passed |
@@ -192,17 +69,17 @@ Device column: the hardware the row is scored on. `cart` = the cart header picks
 | docboy/cgb/interrupts | CGB cgbE | 👌 27/27 passed |
 | docboy/cgb/dma | CGB cgbE | 👌 41/41 passed |
 | docboy/cgb/hdma | CGB cgbE | 👌 639/639 passed |
-| docboy/cgb/serial | CGB cgbE | 👀 13/17 passed |
+| docboy/cgb/serial | CGB cgbE | 👌 17/17 passed |
 | docboy/cgb/ir | CGB cgbE | 👌 1/1 passed |
 | docboy/cgb/mode | CGB cgbE | 👌 6/6 passed |
 | docboy/cgb/undocumented | CGB cgbE | 👌 4/4 passed |
-| docboy/cgb/ppu | CGB cgbE | 👀 382/403 passed |
+| docboy/cgb/ppu | CGB cgbE | 👀 391/403 passed |
 | docboy/cgb/mbc/mbc7 | CGB cgbE | 👌 17/17 passed |
-| docboy/cgb/apu/ch1 | CGB cgbE | 👀 1129/1132 passed |
-| docboy/cgb/apu/ch2 | CGB cgbE | 👀 24/26 passed |
+| docboy/cgb/apu/ch1 | CGB cgbE | 👀 1130/1132 passed |
+| docboy/cgb/apu/ch2 | CGB cgbE | 👌 26/26 passed |
 | docboy/cgb/apu/ch3 | CGB cgbE | 👌 109/109 passed |
 | docboy/cgb/apu/ch4 | CGB cgbE | 👌 69/69 passed |
-| docboy/cgb/double_speed/apu/ch1 | CGB cgbE | 👀 600/613 passed |
+| docboy/cgb/double_speed/apu/ch1 | CGB cgbE | 👀 608/613 passed |
 | docboy/cgb/double_speed/apu/ch2 | CGB cgbE | 👌 63/63 passed |
 | docboy/cgb/double_speed/apu/ch3 | CGB cgbE | 👌 169/169 passed |
 | docboy/cgb/double_speed/apu/ch4 | CGB cgbE | 👀 1846/1925 passed |
@@ -210,9 +87,9 @@ Device column: the hardware the row is scored on. `cart` = the cart header picks
 | docboy/cgb/double_speed/dma | CGB cgbE | 👌 14/14 passed |
 | docboy/cgb/double_speed/hdma | CGB cgbE | 👌 50/50 passed |
 | docboy/cgb/double_speed/interactive | CGB cgbE | 👌 67/67 passed |
-| docboy/cgb/double_speed/interrupts | CGB cgbE | 👀 233/246 passed |
-| docboy/cgb/double_speed/ppu | CGB cgbE | 👀 346/357 passed |
-| docboy/cgb/double_speed/serial | CGB cgbE | 👀 3/4 passed |
+| docboy/cgb/double_speed/interrupts | CGB cgbE | 👌 246/246 passed |
+| docboy/cgb/double_speed/ppu | CGB cgbE | 👌 357/357 passed |
+| docboy/cgb/double_speed/serial | CGB cgbE | 👌 4/4 passed |
 | docboy/cgb/double_speed/timers | CGB cgbE | 👌 76/76 passed |
 | docboy/cgb/double_speed/visual | CGB cgbE | 👌 5/5 passed |
 | docboy/cgb_dmg_mode/apu | CGB cgbE | 👌 2/2 passed |
@@ -224,7 +101,7 @@ Device column: the hardware the row is scored on. `cart` = the cart header picks
 | docboy/cgb_dmg_mode/key1 | CGB cgbE | 👌 1/1 passed |
 | docboy/cgb_dmg_mode/memory | CGB cgbE | 👌 2/2 passed |
 | docboy/cgb_dmg_mode/mode | CGB cgbE | 👌 6/6 passed |
-| docboy/cgb_dmg_mode/ppu | CGB cgbE | 👀 330/440 passed |
+| docboy/cgb_dmg_mode/ppu | CGB cgbE | 👀 374/440 passed |
 | docboy/cgb_dmg_mode/serial | CGB cgbE | 👌 1/1 passed |
 | docboy/cgb_dmg_mode/stat_write_bug | CGB cgbE | 👌 1/1 passed |
 | docboy/cgb_dmg_mode/undocumented | CGB cgbE | 👌 4/4 passed |
@@ -240,1071 +117,60 @@ Device column: the hardware the row is scored on. `cart` = the cart header picks
 
 Each row is one section of a DocBoy manifest (`docboy/<manifest>/<section>`). See [detailed results](results_docboy.md) for individual test outcomes.
 
-## Game Boy - gambatte (23/48)
+## Game Boy - gambatte (45/48)
 
 | Test | Device | Result |
 |------|--------|--------|
 | gambatte/bgen | per-ROM | 👌 2/2 passed |
 | gambatte/bgtiledata | per-ROM | 👌 34/34 passed |
 | gambatte/bgtilemap | per-ROM | 👌 40/40 passed |
-| gambatte/cgbpal_m3 | per-ROM | 👀 33/44 passed |
+| gambatte/cgbpal_m3 | per-ROM | 👀 43/44 passed |
 | gambatte/display_startstate | per-ROM | 👌 14/14 passed |
 | gambatte/div | per-ROM | 👌 8/8 passed |
 | gambatte/dma | per-ROM | 👌 229/229 passed |
 | gambatte/dmgpalette_during_m3 | per-ROM | 👌 17/17 passed |
-| gambatte/enable_display | per-ROM | 👀 164/184 passed |
+| gambatte/enable_display | per-ROM | 👌 184/184 passed |
 | gambatte/halt | per-ROM | 👌 158/158 passed |
-| gambatte/irq_precedence | per-ROM | 👀 56/64 passed |
-| gambatte/lcd_offset | per-ROM | 👀 43/62 passed |
+| gambatte/irq_precedence | per-ROM | 👌 64/64 passed |
+| gambatte/lcd_offset | per-ROM | 👌 62/62 passed |
 | gambatte/lcdirq_precedence | per-ROM | 👌 62/62 passed |
-| gambatte/ly0 | per-ROM | 👀 92/96 passed |
+| gambatte/ly0 | per-ROM | 👌 96/96 passed |
 | gambatte/lyc0int_m0irq | per-ROM | 👌 6/6 passed |
-| gambatte/lyc153int_m2irq | per-ROM | 👀 14/16 passed |
-| gambatte/lycEnable | per-ROM | 👀 191/225 passed |
+| gambatte/lyc153int_m2irq | per-ROM | 👌 16/16 passed |
+| gambatte/lycEnable | per-ROM | 👌 225/225 passed |
 | gambatte/lycint_ly | per-ROM | 👌 6/6 passed |
-| gambatte/lycint_lycflag | per-ROM | 👀 11/12 passed |
+| gambatte/lycint_lycflag | per-ROM | 👌 12/12 passed |
 | gambatte/lycint_lycirq | per-ROM | 👌 4/4 passed |
 | gambatte/lycint_m0stat | per-ROM | 👌 6/6 passed |
 | gambatte/lycm2int | per-ROM | 👌 18/18 passed |
 | gambatte/lywrite | per-ROM | 👌 8/8 passed |
-| gambatte/m0enable | per-ROM | 👀 158/167 passed |
+| gambatte/m0enable | per-ROM | 👌 167/167 passed |
 | gambatte/m0int_m0irq | per-ROM | 👌 4/4 passed |
-| gambatte/m0int_m0stat | per-ROM | 👀 11/12 passed |
+| gambatte/m0int_m0stat | per-ROM | 👌 12/12 passed |
 | gambatte/m0int_m3stat | per-ROM | 👌 6/6 passed |
-| gambatte/m1 | per-ROM | 👀 155/170 passed |
-| gambatte/m2enable | per-ROM | 👀 111/120 passed |
-| gambatte/m2int_m0irq | per-ROM | 👀 67/72 passed |
+| gambatte/m1 | per-ROM | 👌 170/170 passed |
+| gambatte/m2enable | per-ROM | 👌 120/120 passed |
+| gambatte/m2int_m0irq | per-ROM | 👌 72/72 passed |
 | gambatte/m2int_m0stat | per-ROM | 👌 6/6 passed |
 | gambatte/m2int_m2irq | per-ROM | 👌 18/18 passed |
 | gambatte/m2int_m2stat | per-ROM | 👌 8/8 passed |
 | gambatte/m2int_m3stat | per-ROM | 👌 44/44 passed |
-| gambatte/miscmstatirq | per-ROM | 👀 275/279 passed |
-| gambatte/oam_access | per-ROM | 👀 67/69 passed |
-| gambatte/oamdma | per-ROM | 👀 792/802 passed |
-| gambatte/scx_during_m3 | per-ROM | 👀 131/138 passed |
+| gambatte/miscmstatirq | per-ROM | 👌 279/279 passed |
+| gambatte/oam_access | per-ROM | 👌 69/69 passed |
+| gambatte/oamdma | per-ROM | 👌 802/802 passed |
+| gambatte/scx_during_m3 | per-ROM | 👌 138/138 passed |
 | gambatte/scy | per-ROM | 👌 67/67 passed |
-| gambatte/serial | per-ROM | 👀 75/82 passed |
-| gambatte/sound | per-ROM | 👀 286/300 passed |
-| gambatte/speedchange | per-ROM | 👀 239/244 passed |
-| gambatte/sprites | per-ROM | 👀 472/476 passed |
-| gambatte/tima | per-ROM | 👀 224/232 passed |
+| gambatte/serial | per-ROM | 👌 82/82 passed |
+| gambatte/sound | per-ROM | 👌 300/300 passed |
+| gambatte/speedchange | per-ROM | 👌 244/244 passed |
+| gambatte/sprites | per-ROM | 👌 476/476 passed |
+| gambatte/tima | per-ROM | 👌 232/232 passed |
 | gambatte/undef_ops | per-ROM | 👌 20/20 passed |
 | gambatte/vram_m3 | per-ROM | 👀 48/50 passed |
-| gambatte/vramw_m3end | per-ROM | 👀 34/36 passed |
-| gambatte/window | per-ROM | 👀 434/476 passed |
+| gambatte/vramw_m3end | per-ROM | 👌 36/36 passed |
+| gambatte/window | per-ROM | 👀 474/476 passed |
 
 Each row is one gambatte subdirectory. See [detailed results](results_gambatte.md) for individual test outcomes.
-
-## Game Boy - GBMicrotest (462/480)
-
-| Test | Device | Result |
-|------|--------|--------|
-| gbmicrotest/div_inc_timing_a | cart | 👌 |
-| gbmicrotest/div_inc_timing_b | cart | 👌 |
-| gbmicrotest/dma_0x1000 | cart | 👌 |
-| gbmicrotest/dma_0x9000 | cart | 👌 |
-| gbmicrotest/dma_0xA000 | cart | 👌 |
-| gbmicrotest/dma_0xC000 | cart | 👌 |
-| gbmicrotest/dma_0xE000 | cart | 👌 |
-| gbmicrotest/dma_timing_a | cart | 👌 |
-| gbmicrotest/halt_bug | cart | 👌 |
-| gbmicrotest/halt_op_dupe | cart | 👌 |
-| gbmicrotest/hblank_int_di_timing_a | cart | 👌 |
-| gbmicrotest/hblank_int_di_timing_b | cart | 👌 |
-| gbmicrotest/hblank_int_if_a | cart | 👌 |
-| gbmicrotest/hblank_int_if_b | cart | 👌 |
-| gbmicrotest/hblank_int_l0 | cart | 👌 |
-| gbmicrotest/hblank_int_l1 | cart | 👌 |
-| gbmicrotest/hblank_int_l2 | cart | 👌 |
-| gbmicrotest/hblank_int_scx0 | cart | 👌 |
-| gbmicrotest/hblank_int_scx0_if_a | cart | 👌 |
-| gbmicrotest/hblank_int_scx0_if_b | cart | 👌 |
-| gbmicrotest/hblank_int_scx0_if_c | cart | 👌 |
-| gbmicrotest/hblank_int_scx0_if_d | cart | 👌 |
-| gbmicrotest/hblank_int_scx1 | cart | 👌 |
-| gbmicrotest/hblank_int_scx1_if_a | cart | 👌 |
-| gbmicrotest/hblank_int_scx1_if_b | cart | 👌 |
-| gbmicrotest/hblank_int_scx1_if_c | cart | 👌 |
-| gbmicrotest/hblank_int_scx1_if_d | cart | 👌 |
-| gbmicrotest/hblank_int_scx1_nops_a | cart | 👌 |
-| gbmicrotest/hblank_int_scx1_nops_b | cart | 👌 |
-| gbmicrotest/hblank_int_scx2 | cart | 👌 |
-| gbmicrotest/hblank_int_scx2_if_a | cart | 👌 |
-| gbmicrotest/hblank_int_scx2_if_b | cart | 👌 |
-| gbmicrotest/hblank_int_scx2_if_c | cart | 👌 |
-| gbmicrotest/hblank_int_scx2_if_d | cart | 👌 |
-| gbmicrotest/hblank_int_scx2_nops_a | cart | 👌 |
-| gbmicrotest/hblank_int_scx2_nops_b | cart | 👌 |
-| gbmicrotest/hblank_int_scx3 | cart | 👌 |
-| gbmicrotest/hblank_int_scx3_if_a | cart | 👌 |
-| gbmicrotest/hblank_int_scx3_if_b | cart | 👌 |
-| gbmicrotest/hblank_int_scx3_if_c | cart | 👌 |
-| gbmicrotest/hblank_int_scx3_if_d | cart | 👌 |
-| gbmicrotest/hblank_int_scx3_nops_a | cart | 👌 |
-| gbmicrotest/hblank_int_scx3_nops_b | cart | 👌 |
-| gbmicrotest/hblank_int_scx4 | cart | 👌 |
-| gbmicrotest/hblank_int_scx4_if_a | cart | 👌 |
-| gbmicrotest/hblank_int_scx4_if_b | cart | 👌 |
-| gbmicrotest/hblank_int_scx4_if_c | cart | 👌 |
-| gbmicrotest/hblank_int_scx4_if_d | cart | 👌 |
-| gbmicrotest/hblank_int_scx4_nops_a | cart | 👌 |
-| gbmicrotest/hblank_int_scx4_nops_b | cart | 👌 |
-| gbmicrotest/hblank_int_scx5 | cart | 👌 |
-| gbmicrotest/hblank_int_scx5_if_a | cart | 👌 |
-| gbmicrotest/hblank_int_scx5_if_b | cart | 👌 |
-| gbmicrotest/hblank_int_scx5_if_c | cart | 👌 |
-| gbmicrotest/hblank_int_scx5_if_d | cart | 👌 |
-| gbmicrotest/hblank_int_scx5_nops_a | cart | 👌 |
-| gbmicrotest/hblank_int_scx5_nops_b | cart | 👌 |
-| gbmicrotest/hblank_int_scx6 | cart | 👌 |
-| gbmicrotest/hblank_int_scx6_if_a | cart | 👌 |
-| gbmicrotest/hblank_int_scx6_if_b | cart | 👌 |
-| gbmicrotest/hblank_int_scx6_if_c | cart | 👌 |
-| gbmicrotest/hblank_int_scx6_if_d | cart | 👌 |
-| gbmicrotest/hblank_int_scx6_nops_a | cart | 👌 |
-| gbmicrotest/hblank_int_scx6_nops_b | cart | 👌 |
-| gbmicrotest/hblank_int_scx7 | cart | 👌 |
-| gbmicrotest/hblank_int_scx7_if_a | cart | 👌 |
-| gbmicrotest/hblank_int_scx7_if_b | cart | 👌 |
-| gbmicrotest/hblank_int_scx7_if_c | cart | 👌 |
-| gbmicrotest/hblank_int_scx7_if_d | cart | 👌 |
-| gbmicrotest/hblank_int_scx7_nops_a | cart | 👌 |
-| gbmicrotest/hblank_int_scx7_nops_b | cart | 👌 |
-| gbmicrotest/hblank_scx2_if_a | cart | 👌 |
-| gbmicrotest/hblank_scx3_if_a | cart | 👌 |
-| gbmicrotest/hblank_scx3_if_b | cart | 👌 |
-| gbmicrotest/hblank_scx3_if_c | cart | 👌 |
-| gbmicrotest/hblank_scx3_if_d | cart | 👌 |
-| gbmicrotest/hblank_scx3_int_a | cart | 👌 |
-| gbmicrotest/hblank_scx3_int_b | cart | 👌 |
-| gbmicrotest/int_hblank_halt_bug_a | cart | 👌 |
-| gbmicrotest/int_hblank_halt_bug_b | cart | 👌 |
-| gbmicrotest/int_hblank_halt_scx0 | cart | 👌 |
-| gbmicrotest/int_hblank_halt_scx1 | cart | 👌 |
-| gbmicrotest/int_hblank_halt_scx2 | cart | 👌 |
-| gbmicrotest/int_hblank_halt_scx3 | cart | 👌 |
-| gbmicrotest/int_hblank_halt_scx4 | cart | 👌 |
-| gbmicrotest/int_hblank_halt_scx5 | cart | 👌 |
-| gbmicrotest/int_hblank_halt_scx6 | cart | 👌 |
-| gbmicrotest/int_hblank_halt_scx7 | cart | 👌 |
-| gbmicrotest/int_hblank_incs_scx0 | cart | 👌 |
-| gbmicrotest/int_hblank_incs_scx1 | cart | 👌 |
-| gbmicrotest/int_hblank_incs_scx2 | cart | 👌 |
-| gbmicrotest/int_hblank_incs_scx3 | cart | 👌 |
-| gbmicrotest/int_hblank_incs_scx4 | cart | 👌 |
-| gbmicrotest/int_hblank_incs_scx5 | cart | 👌 |
-| gbmicrotest/int_hblank_incs_scx6 | cart | 👌 |
-| gbmicrotest/int_hblank_incs_scx7 | cart | 👌 |
-| gbmicrotest/int_hblank_nops_scx0 | cart | 👌 |
-| gbmicrotest/int_hblank_nops_scx1 | cart | 👌 |
-| gbmicrotest/int_hblank_nops_scx2 | cart | 👌 |
-| gbmicrotest/int_hblank_nops_scx3 | cart | 👌 |
-| gbmicrotest/int_hblank_nops_scx4 | cart | 👌 |
-| gbmicrotest/int_hblank_nops_scx5 | cart | 👌 |
-| gbmicrotest/int_hblank_nops_scx6 | cart | 👌 |
-| gbmicrotest/int_hblank_nops_scx7 | cart | 👌 |
-| gbmicrotest/int_lyc_halt | cart | 👌 |
-| gbmicrotest/int_lyc_incs | cart | 👌 |
-| gbmicrotest/int_lyc_nops | cart | 👌 |
-| gbmicrotest/int_oam_halt | cart | 👌 |
-| gbmicrotest/int_oam_incs | cart | 👌 |
-| gbmicrotest/int_oam_nops | cart | 👌 |
-| gbmicrotest/int_timer_halt | cart | 👌 |
-| gbmicrotest/int_timer_halt_div_a | cart | 👌 |
-| gbmicrotest/int_timer_halt_div_b | cart | 👌 |
-| gbmicrotest/int_timer_incs | cart | 👌 |
-| gbmicrotest/int_timer_nops | cart | 👌 |
-| gbmicrotest/int_timer_nops_div_a | cart | 👌 |
-| gbmicrotest/int_timer_nops_div_b | cart | 👌 |
-| gbmicrotest/int_vblank1_halt | cart | 👌 |
-| gbmicrotest/int_vblank1_incs | cart | 👌 |
-| gbmicrotest/int_vblank1_nops | cart | 👌 |
-| gbmicrotest/int_vblank2_halt | cart | 👌 |
-| gbmicrotest/int_vblank2_incs | cart | 👌 |
-| gbmicrotest/int_vblank2_nops | cart | 👌 |
-| gbmicrotest/is_if_set_during_ime0 | cart | 👌 |
-| gbmicrotest/lcdon_halt_to_vblank_int_a | cart | 👌 |
-| gbmicrotest/lcdon_halt_to_vblank_int_b | cart | 👌 |
-| gbmicrotest/lcdon_nops_to_vblank_int_a | cart | 👌 |
-| gbmicrotest/lcdon_nops_to_vblank_int_b | cart | 👌 |
-| gbmicrotest/lcdon_to_if_oam_a | cart | 👌 |
-| gbmicrotest/lcdon_to_if_oam_b | cart | 👌 |
-| gbmicrotest/lcdon_to_ly1_a | cart | 👌 |
-| gbmicrotest/lcdon_to_ly1_b | cart | 👌 |
-| gbmicrotest/lcdon_to_ly2_a | cart | 👌 |
-| gbmicrotest/lcdon_to_ly2_b | cart | 👌 |
-| gbmicrotest/lcdon_to_ly3_a | cart | 👌 |
-| gbmicrotest/lcdon_to_ly3_b | cart | 👌 |
-| gbmicrotest/lcdon_to_lyc1_int | cart | 👌 |
-| gbmicrotest/lcdon_to_lyc2_int | cart | 👌 |
-| gbmicrotest/lcdon_to_lyc3_int | cart | 👌 |
-| gbmicrotest/lcdon_to_oam_int_l0 | cart | 👌 |
-| gbmicrotest/lcdon_to_oam_int_l1 | cart | 👌 |
-| gbmicrotest/lcdon_to_oam_int_l2 | cart | 👌 |
-| gbmicrotest/lcdon_to_oam_unlock_a | cart | 👌 |
-| gbmicrotest/lcdon_to_oam_unlock_b | cart | 👌 |
-| gbmicrotest/lcdon_to_oam_unlock_c | cart | 👌 |
-| gbmicrotest/lcdon_to_oam_unlock_d | cart | 👌 |
-| gbmicrotest/lcdon_to_stat0_a | cart | 👌 |
-| gbmicrotest/lcdon_to_stat0_b | cart | 👌 |
-| gbmicrotest/lcdon_to_stat0_c | cart | 👌 |
-| gbmicrotest/lcdon_to_stat0_d | cart | 👌 |
-| gbmicrotest/lcdon_to_stat1_a | cart | 👌 |
-| gbmicrotest/lcdon_to_stat1_b | cart | 👌 |
-| gbmicrotest/lcdon_to_stat1_c | cart | 👌 |
-| gbmicrotest/lcdon_to_stat1_d | cart | 👌 |
-| gbmicrotest/lcdon_to_stat1_e | cart | 👌 |
-| gbmicrotest/lcdon_to_stat2_a | cart | 👌 |
-| gbmicrotest/lcdon_to_stat2_b | cart | 👌 |
-| gbmicrotest/lcdon_to_stat2_c | cart | 👌 |
-| gbmicrotest/lcdon_to_stat2_d | cart | 👌 |
-| gbmicrotest/lcdon_to_stat3_a | cart | 👌 |
-| gbmicrotest/lcdon_to_stat3_b | cart | 👌 |
-| gbmicrotest/lcdon_to_stat3_c | cart | 👌 |
-| gbmicrotest/lcdon_to_stat3_d | cart | 👌 |
-| gbmicrotest/line_144_oam_int_a | cart | 👌 |
-| gbmicrotest/line_144_oam_int_b | cart | 👌 |
-| gbmicrotest/line_144_oam_int_c | cart | 👌 |
-| gbmicrotest/line_144_oam_int_d | cart | 👌 |
-| gbmicrotest/line_153_ly_a | cart | 👌 |
-| gbmicrotest/line_153_ly_b | cart | 👌 |
-| gbmicrotest/line_153_ly_c | cart | 👌 |
-| gbmicrotest/line_153_ly_d | cart | 👌 |
-| gbmicrotest/line_153_ly_e | cart | 👌 |
-| gbmicrotest/line_153_ly_f | cart | 👌 |
-| gbmicrotest/line_153_lyc0_int_inc_sled | cart | 👌 |
-| gbmicrotest/line_153_lyc0_stat_timing_a | cart | 👌 |
-| gbmicrotest/line_153_lyc0_stat_timing_b | cart | 👌 |
-| gbmicrotest/line_153_lyc0_stat_timing_c | cart | 👌 |
-| gbmicrotest/line_153_lyc0_stat_timing_d | cart | 👌 |
-| gbmicrotest/line_153_lyc0_stat_timing_e | cart | 👌 |
-| gbmicrotest/line_153_lyc0_stat_timing_f | cart | 👌 |
-| gbmicrotest/line_153_lyc0_stat_timing_g | cart | 👌 |
-| gbmicrotest/line_153_lyc0_stat_timing_h | cart | 👌 |
-| gbmicrotest/line_153_lyc0_stat_timing_i | cart | 👌 |
-| gbmicrotest/line_153_lyc0_stat_timing_j | cart | 👌 |
-| gbmicrotest/line_153_lyc0_stat_timing_k | cart | 👌 |
-| gbmicrotest/line_153_lyc0_stat_timing_l | cart | 👌 |
-| gbmicrotest/line_153_lyc0_stat_timing_m | cart | 👌 |
-| gbmicrotest/line_153_lyc0_stat_timing_n | cart | 👌 |
-| gbmicrotest/line_153_lyc153_stat_timing_a | cart | 👌 |
-| gbmicrotest/line_153_lyc153_stat_timing_b | cart | 👌 |
-| gbmicrotest/line_153_lyc153_stat_timing_c | cart | 👌 |
-| gbmicrotest/line_153_lyc153_stat_timing_d | cart | 👌 |
-| gbmicrotest/line_153_lyc153_stat_timing_e | cart | 👌 |
-| gbmicrotest/line_153_lyc153_stat_timing_f | cart | 👌 |
-| gbmicrotest/line_153_lyc_a | cart | 👌 |
-| gbmicrotest/line_153_lyc_b | cart | 👌 |
-| gbmicrotest/line_153_lyc_c | cart | 👌 |
-| gbmicrotest/line_153_lyc_int_a | cart | 👌 |
-| gbmicrotest/line_153_lyc_int_b | cart | 👌 |
-| gbmicrotest/line_65_ly | cart | 👌 |
-| gbmicrotest/lyc1_int_halt_a | cart | 👌 |
-| gbmicrotest/lyc1_int_halt_b | cart | 👌 |
-| gbmicrotest/lyc1_int_if_edge_a | cart | 👌 |
-| gbmicrotest/lyc1_int_if_edge_b | cart | 👌 |
-| gbmicrotest/lyc1_int_if_edge_c | cart | 👌 |
-| gbmicrotest/lyc1_int_if_edge_d | cart | 👌 |
-| gbmicrotest/lyc1_int_nops_a | cart | 👌 |
-| gbmicrotest/lyc1_int_nops_b | cart | 👌 |
-| gbmicrotest/lyc1_write_timing_a | cart | 👌 |
-| gbmicrotest/lyc1_write_timing_b | cart | 👌 |
-| gbmicrotest/lyc1_write_timing_c | cart | 👌 |
-| gbmicrotest/lyc1_write_timing_d | cart | 👌 |
-| gbmicrotest/lyc2_int_halt_a | cart | 👌 |
-| gbmicrotest/lyc2_int_halt_b | cart | 👌 |
-| gbmicrotest/lyc_int_halt_a | cart | 👌 |
-| gbmicrotest/lyc_int_halt_b | cart | 👌 |
-| gbmicrotest/mbc1_ram_banks | cart | 👌 |
-| gbmicrotest/mbc1_rom_banks | cart | 👌 |
-| gbmicrotest/oam_int_halt_a | cart | 👌 |
-| gbmicrotest/oam_int_halt_b | cart | 👌 |
-| gbmicrotest/oam_int_if_edge_a | cart | 👌 |
-| gbmicrotest/oam_int_if_edge_b | cart | 👌 |
-| gbmicrotest/oam_int_if_edge_c | cart | 👌 |
-| gbmicrotest/oam_int_if_edge_d | cart | 👌 |
-| gbmicrotest/oam_int_if_level_c | cart | 👌 |
-| gbmicrotest/oam_int_if_level_d | cart | 👌 |
-| gbmicrotest/oam_int_inc_sled | cart | 👌 |
-| gbmicrotest/oam_int_nops_a | cart | 👌 |
-| gbmicrotest/oam_int_nops_b | cart | 👌 |
-| gbmicrotest/oam_read_l0_a | cart | 👌 |
-| gbmicrotest/oam_read_l0_b | cart | 👌 |
-| gbmicrotest/oam_read_l0_c | cart | 👌 |
-| gbmicrotest/oam_read_l0_d | cart | 👌 |
-| gbmicrotest/oam_read_l1_a | cart | 👌 |
-| gbmicrotest/oam_read_l1_b | cart | 👌 |
-| gbmicrotest/oam_read_l1_c | cart | 👌 |
-| gbmicrotest/oam_read_l1_d | cart | 👌 |
-| gbmicrotest/oam_read_l1_e | cart | 👌 |
-| gbmicrotest/oam_read_l1_f | cart | 👌 |
-| gbmicrotest/oam_write_l0_a | cart | 👌 |
-| gbmicrotest/oam_write_l0_b | cart | 👌 |
-| gbmicrotest/oam_write_l0_c | cart | 👌 |
-| gbmicrotest/oam_write_l0_d | cart | 👌 |
-| gbmicrotest/oam_write_l0_e | cart | 👌 |
-| gbmicrotest/oam_write_l1_a | cart | 👌 |
-| gbmicrotest/oam_write_l1_b | cart | 👌 |
-| gbmicrotest/oam_write_l1_c | cart | 👌 |
-| gbmicrotest/oam_write_l1_d | cart | 👌 |
-| gbmicrotest/oam_write_l1_e | cart | 👌 |
-| gbmicrotest/oam_write_l1_f | cart | 👌 |
-| gbmicrotest/poweron_bgp_000 | cart | 👌 |
-| gbmicrotest/poweron_div_000 | cart | 👌 |
-| gbmicrotest/poweron_div_004 | cart | 👌 |
-| gbmicrotest/poweron_div_005 | cart | 👌 |
-| gbmicrotest/poweron_dma_000 | cart | 👌 |
-| gbmicrotest/poweron_if_000 | cart | 👌 |
-| gbmicrotest/poweron_joy_000 | cart | 👌 |
-| gbmicrotest/poweron_lcdc_000 | cart | 👌 |
-| gbmicrotest/poweron_ly_000 | cart | 👌 |
-| gbmicrotest/poweron_ly_119 | cart | 👌 |
-| gbmicrotest/poweron_ly_120 | cart | 👌 |
-| gbmicrotest/poweron_ly_233 | cart | 👌 |
-| gbmicrotest/poweron_ly_234 | cart | 👌 |
-| gbmicrotest/poweron_lyc_000 | cart | 👌 |
-| gbmicrotest/poweron_oam_000 | cart | 👌 |
-| gbmicrotest/poweron_oam_005 | cart | 👌 |
-| gbmicrotest/poweron_oam_006 | cart | 👌 |
-| gbmicrotest/poweron_oam_069 | cart | 👌 |
-| gbmicrotest/poweron_oam_070 | cart | 👌 |
-| gbmicrotest/poweron_oam_119 | cart | 👌 |
-| gbmicrotest/poweron_oam_120 | cart | 👌 |
-| gbmicrotest/poweron_oam_121 | cart | 👌 |
-| gbmicrotest/poweron_oam_183 | cart | 👌 |
-| gbmicrotest/poweron_oam_184 | cart | 👌 |
-| gbmicrotest/poweron_oam_233 | cart | 👌 |
-| gbmicrotest/poweron_oam_234 | cart | 👌 |
-| gbmicrotest/poweron_oam_235 | cart | 👌 |
-| gbmicrotest/poweron_obp0_000 | cart | 👌 |
-| gbmicrotest/poweron_obp1_000 | cart | 👌 |
-| gbmicrotest/poweron_sb_000 | cart | 👌 |
-| gbmicrotest/poweron_sc_000 | cart | 👌 |
-| gbmicrotest/poweron_scx_000 | cart | 👌 |
-| gbmicrotest/poweron_scy_000 | cart | 👌 |
-| gbmicrotest/poweron_stat_000 | cart | 👌 |
-| gbmicrotest/poweron_stat_005 | cart | 👌 |
-| gbmicrotest/poweron_stat_006 | cart | 👌 |
-| gbmicrotest/poweron_stat_007 | cart | 👌 |
-| gbmicrotest/poweron_stat_026 | cart | 👌 |
-| gbmicrotest/poweron_stat_027 | cart | 👌 |
-| gbmicrotest/poweron_stat_069 | cart | 👌 |
-| gbmicrotest/poweron_stat_070 | cart | 👌 |
-| gbmicrotest/poweron_stat_119 | cart | 👌 |
-| gbmicrotest/poweron_stat_120 | cart | 👌 |
-| gbmicrotest/poweron_stat_121 | cart | 👌 |
-| gbmicrotest/poweron_stat_140 | cart | 👌 |
-| gbmicrotest/poweron_stat_141 | cart | 👌 |
-| gbmicrotest/poweron_stat_183 | cart | 👌 |
-| gbmicrotest/poweron_stat_184 | cart | 👌 |
-| gbmicrotest/poweron_stat_234 | cart | 👌 |
-| gbmicrotest/poweron_stat_235 | cart | 👌 |
-| gbmicrotest/poweron_tac_000 | cart | 👌 |
-| gbmicrotest/poweron_tima_000 | cart | 👌 |
-| gbmicrotest/poweron_tma_000 | cart | 👌 |
-| gbmicrotest/poweron_vram_000 | cart | 👌 |
-| gbmicrotest/poweron_vram_025 | cart | 👌 |
-| gbmicrotest/poweron_vram_026 | cart | 👌 |
-| gbmicrotest/poweron_vram_069 | cart | 👌 |
-| gbmicrotest/poweron_vram_070 | cart | 👌 |
-| gbmicrotest/poweron_vram_139 | cart | 👌 |
-| gbmicrotest/poweron_vram_140 | cart | 👌 |
-| gbmicrotest/poweron_vram_183 | cart | 👌 |
-| gbmicrotest/poweron_vram_184 | cart | 👌 |
-| gbmicrotest/poweron_wx_000 | cart | 👌 |
-| gbmicrotest/poweron_wy_000 | cart | 👌 |
-| gbmicrotest/ppu_sprite0_scx0_a | cart | 👌 |
-| gbmicrotest/ppu_sprite0_scx0_b | cart | 👌 |
-| gbmicrotest/ppu_sprite0_scx1_a | cart | 👌 |
-| gbmicrotest/ppu_sprite0_scx1_b | cart | 👌 |
-| gbmicrotest/ppu_sprite0_scx2_a | cart | 👌 |
-| gbmicrotest/ppu_sprite0_scx2_b | cart | 👌 |
-| gbmicrotest/ppu_sprite0_scx3_a | cart | 👌 |
-| gbmicrotest/ppu_sprite0_scx3_b | cart | 👌 |
-| gbmicrotest/ppu_sprite0_scx4_a | cart | 👌 |
-| gbmicrotest/ppu_sprite0_scx4_b | cart | 👌 |
-| gbmicrotest/ppu_sprite0_scx5_a | cart | 👌 |
-| gbmicrotest/ppu_sprite0_scx5_b | cart | 👌 |
-| gbmicrotest/ppu_sprite0_scx6_a | cart | 👌 |
-| gbmicrotest/ppu_sprite0_scx6_b | cart | 👌 |
-| gbmicrotest/ppu_sprite0_scx7_a | cart | 👌 |
-| gbmicrotest/ppu_sprite0_scx7_b | cart | 👌 |
-| gbmicrotest/sprite4_0_a | cart | 👌 |
-| gbmicrotest/sprite4_0_b | cart | 👌 |
-| gbmicrotest/sprite4_1_a | cart | 👌 |
-| gbmicrotest/sprite4_1_b | cart | 👌 |
-| gbmicrotest/sprite4_2_a | cart | 👌 |
-| gbmicrotest/sprite4_2_b | cart | 👌 |
-| gbmicrotest/sprite4_3_a | cart | 👌 |
-| gbmicrotest/sprite4_3_b | cart | 👌 |
-| gbmicrotest/sprite4_4_a | cart | 👌 |
-| gbmicrotest/sprite4_4_b | cart | 👌 |
-| gbmicrotest/sprite4_5_a | cart | 👌 |
-| gbmicrotest/sprite4_5_b | cart | 👌 |
-| gbmicrotest/sprite4_6_a | cart | 👌 |
-| gbmicrotest/sprite4_6_b | cart | 👌 |
-| gbmicrotest/sprite4_7_a | cart | 👌 |
-| gbmicrotest/sprite4_7_b | cart | 👌 |
-| gbmicrotest/sprite_0_a | cart | 👌 |
-| gbmicrotest/sprite_0_b | cart | 👌 |
-| gbmicrotest/sprite_1_a | cart | 👌 |
-| gbmicrotest/sprite_1_b | cart | 👌 |
-| gbmicrotest/stat_write_glitch_l0_a | cart | 👌 |
-| gbmicrotest/stat_write_glitch_l0_b | cart | 👌 |
-| gbmicrotest/stat_write_glitch_l0_c | cart | 👌 |
-| gbmicrotest/stat_write_glitch_l143_a | cart | 👌 |
-| gbmicrotest/stat_write_glitch_l143_b | cart | 👌 |
-| gbmicrotest/stat_write_glitch_l143_c | cart | 👌 |
-| gbmicrotest/stat_write_glitch_l143_d | cart | 👌 |
-| gbmicrotest/stat_write_glitch_l154_a | cart | 👌 |
-| gbmicrotest/stat_write_glitch_l154_b | cart | 👌 |
-| gbmicrotest/stat_write_glitch_l154_c | cart | 👌 |
-| gbmicrotest/stat_write_glitch_l1_a | cart | 👌 |
-| gbmicrotest/stat_write_glitch_l1_b | cart | 👌 |
-| gbmicrotest/stat_write_glitch_l1_c | cart | 👌 |
-| gbmicrotest/stat_write_glitch_l1_d | cart | 👌 |
-| gbmicrotest/timer_div_phase_c | cart | 👌 |
-| gbmicrotest/timer_div_phase_d | cart | 👌 |
-| gbmicrotest/timer_tima_inc_256k_a | cart | 👌 |
-| gbmicrotest/timer_tima_inc_256k_b | cart | 👌 |
-| gbmicrotest/timer_tima_inc_256k_c | cart | 👌 |
-| gbmicrotest/timer_tima_inc_256k_d | cart | 👌 |
-| gbmicrotest/timer_tima_inc_256k_e | cart | 👌 |
-| gbmicrotest/timer_tima_inc_256k_f | cart | 👌 |
-| gbmicrotest/timer_tima_inc_256k_g | cart | 👌 |
-| gbmicrotest/timer_tima_inc_256k_h | cart | 👌 |
-| gbmicrotest/timer_tima_inc_256k_i | cart | 👌 |
-| gbmicrotest/timer_tima_inc_256k_j | cart | 👌 |
-| gbmicrotest/timer_tima_inc_256k_k | cart | 👌 |
-| gbmicrotest/timer_tima_inc_64k_a | cart | 👌 |
-| gbmicrotest/timer_tima_inc_64k_b | cart | 👌 |
-| gbmicrotest/timer_tima_inc_64k_c | cart | 👌 |
-| gbmicrotest/timer_tima_inc_64k_d | cart | 👌 |
-| gbmicrotest/timer_tima_phase_a | cart | 👌 |
-| gbmicrotest/timer_tima_phase_b | cart | 👌 |
-| gbmicrotest/timer_tima_phase_c | cart | 👌 |
-| gbmicrotest/timer_tima_phase_d | cart | 👌 |
-| gbmicrotest/timer_tima_phase_e | cart | 👌 |
-| gbmicrotest/timer_tima_phase_f | cart | 👌 |
-| gbmicrotest/timer_tima_phase_g | cart | 👌 |
-| gbmicrotest/timer_tima_phase_h | cart | 👌 |
-| gbmicrotest/timer_tima_phase_i | cart | 👌 |
-| gbmicrotest/timer_tima_phase_j | cart | 👌 |
-| gbmicrotest/timer_tima_reload_256k_a | cart | 👌 |
-| gbmicrotest/timer_tima_reload_256k_b | cart | 👌 |
-| gbmicrotest/timer_tima_reload_256k_c | cart | 👌 |
-| gbmicrotest/timer_tima_reload_256k_d | cart | 👌 |
-| gbmicrotest/timer_tima_reload_256k_e | cart | 👌 |
-| gbmicrotest/timer_tima_reload_256k_f | cart | 👌 |
-| gbmicrotest/timer_tima_reload_256k_g | cart | 👌 |
-| gbmicrotest/timer_tima_reload_256k_h | cart | 👌 |
-| gbmicrotest/timer_tima_reload_256k_i | cart | 👌 |
-| gbmicrotest/timer_tima_reload_256k_j | cart | 👌 |
-| gbmicrotest/timer_tima_reload_256k_k | cart | 👌 |
-| gbmicrotest/timer_tima_write_a | cart | 👌 |
-| gbmicrotest/timer_tima_write_b | cart | 👌 |
-| gbmicrotest/timer_tima_write_c | cart | 👌 |
-| gbmicrotest/timer_tima_write_d | cart | 👌 |
-| gbmicrotest/timer_tima_write_e | cart | 👌 |
-| gbmicrotest/timer_tima_write_f | cart | 👌 |
-| gbmicrotest/timer_tma_write_a | cart | 👌 |
-| gbmicrotest/timer_tma_write_b | cart | 👌 |
-| gbmicrotest/vblank2_int_halt_a | cart | 👌 |
-| gbmicrotest/vblank2_int_halt_b | cart | 👌 |
-| gbmicrotest/vblank2_int_if_a | cart | 👌 |
-| gbmicrotest/vblank2_int_if_b | cart | 👌 |
-| gbmicrotest/vblank2_int_if_c | cart | 👌 |
-| gbmicrotest/vblank2_int_if_d | cart | 👌 |
-| gbmicrotest/vblank2_int_inc_sled | cart | 👌 |
-| gbmicrotest/vblank2_int_nops_a | cart | 👌 |
-| gbmicrotest/vblank2_int_nops_b | cart | 👌 |
-| gbmicrotest/vblank_int_halt_a | cart | 👌 |
-| gbmicrotest/vblank_int_halt_b | cart | 👌 |
-| gbmicrotest/vblank_int_if_a | cart | 👌 |
-| gbmicrotest/vblank_int_if_b | cart | 👌 |
-| gbmicrotest/vblank_int_if_c | cart | 👌 |
-| gbmicrotest/vblank_int_if_d | cart | 👌 |
-| gbmicrotest/vblank_int_inc_sled | cart | 👌 |
-| gbmicrotest/vblank_int_nops_a | cart | 👌 |
-| gbmicrotest/vblank_int_nops_b | cart | 👌 |
-| gbmicrotest/vram_read_l0_a | cart | 👌 |
-| gbmicrotest/vram_read_l0_b | cart | 👌 |
-| gbmicrotest/vram_read_l0_c | cart | 👌 |
-| gbmicrotest/vram_read_l0_d | cart | 👌 |
-| gbmicrotest/vram_read_l1_a | cart | 👌 |
-| gbmicrotest/vram_read_l1_b | cart | 👌 |
-| gbmicrotest/vram_read_l1_c | cart | 👌 |
-| gbmicrotest/vram_read_l1_d | cart | 👌 |
-| gbmicrotest/vram_write_l0_a | cart | 👌 |
-| gbmicrotest/vram_write_l0_b | cart | 👌 |
-| gbmicrotest/vram_write_l0_c | cart | 👌 |
-| gbmicrotest/vram_write_l0_d | cart | 👌 |
-| gbmicrotest/vram_write_l1_a | cart | 👌 |
-| gbmicrotest/vram_write_l1_b | cart | 👌 |
-| gbmicrotest/vram_write_l1_c | cart | 👌 |
-| gbmicrotest/vram_write_l1_d | cart | 👌 |
-| gbmicrotest/win0_a | cart | 👀 actual=0x80 expected=0x83 verdict=0xFF |
-| gbmicrotest/win0_b | cart | 👌 |
-| gbmicrotest/win0_scx3_a | cart | 👀 actual=0x80 expected=0x83 verdict=0xFF |
-| gbmicrotest/win0_scx3_b | cart | 👌 |
-| gbmicrotest/win10_a | cart | 👀 actual=0x80 expected=0x83 verdict=0xFF |
-| gbmicrotest/win10_b | cart | 👌 |
-| gbmicrotest/win10_scx3_a | cart | 👀 actual=0x80 expected=0x83 verdict=0xFF |
-| gbmicrotest/win10_scx3_b | cart | 👌 |
-| gbmicrotest/win11_a | cart | 👀 actual=0x80 expected=0x83 verdict=0xFF |
-| gbmicrotest/win11_b | cart | 👌 |
-| gbmicrotest/win12_a | cart | 👀 actual=0x80 expected=0x83 verdict=0xFF |
-| gbmicrotest/win12_b | cart | 👌 |
-| gbmicrotest/win13_a | cart | 👀 actual=0x80 expected=0x83 verdict=0xFF |
-| gbmicrotest/win13_b | cart | 👌 |
-| gbmicrotest/win14_a | cart | 👀 actual=0x80 expected=0x83 verdict=0xFF |
-| gbmicrotest/win14_b | cart | 👌 |
-| gbmicrotest/win15_a | cart | 👀 actual=0x80 expected=0x83 verdict=0xFF |
-| gbmicrotest/win15_b | cart | 👌 |
-| gbmicrotest/win1_a | cart | 👀 actual=0x80 expected=0x83 verdict=0xFF |
-| gbmicrotest/win1_b | cart | 👌 |
-| gbmicrotest/win2_a | cart | 👀 actual=0x80 expected=0x83 verdict=0xFF |
-| gbmicrotest/win2_b | cart | 👌 |
-| gbmicrotest/win3_a | cart | 👀 actual=0x80 expected=0x83 verdict=0xFF |
-| gbmicrotest/win3_b | cart | 👌 |
-| gbmicrotest/win4_a | cart | 👀 actual=0x80 expected=0x83 verdict=0xFF |
-| gbmicrotest/win4_b | cart | 👌 |
-| gbmicrotest/win5_a | cart | 👀 actual=0x80 expected=0x83 verdict=0xFF |
-| gbmicrotest/win5_b | cart | 👌 |
-| gbmicrotest/win6_a | cart | 👀 actual=0x80 expected=0x83 verdict=0xFF |
-| gbmicrotest/win6_b | cart | 👌 |
-| gbmicrotest/win7_a | cart | 👀 actual=0x80 expected=0x83 verdict=0xFF |
-| gbmicrotest/win7_b | cart | 👌 |
-| gbmicrotest/win8_a | cart | 👀 actual=0x80 expected=0x83 verdict=0xFF |
-| gbmicrotest/win8_b | cart | 👌 |
-| gbmicrotest/win9_a | cart | 👀 actual=0x80 expected=0x83 verdict=0xFF |
-| gbmicrotest/win9_b | cart | 👌 |
-
-## Game Boy - Mealybug Tearoom (71/74)
-
-| Test | Device | Result |
-|------|--------|--------|
-| mealybug/m2_win_en_toggle | DMG | 👀 60.8% correct (14010/23040 pixels match) |
-| mealybug-cgb/m2_win_en_toggle | CGB cgbc | 👀 60.8% correct (14010/23040 pixels match) |
-| mealybug-cgbd/m2_win_en_toggle | CGB cgbd | 👀 60.8% correct (14010/23040 pixels match) |
-| mealybug/m3_bgp_change | DMG | 👌 |
-| mealybug-cgb/m3_bgp_change | CGB cgbc | 👌 |
-| mealybug-cgbd/m3_bgp_change | CGB cgbd | 👌 |
-| mealybug/m3_bgp_change_sprites | DMG | 👌 |
-| mealybug-cgb/m3_bgp_change_sprites | CGB cgbc | 👌 |
-| mealybug-cgbd/m3_bgp_change_sprites | CGB cgbd | 👌 |
-| mealybug/m3_lcdc_bg_en_change | DMG | 👌 |
-| mealybug-cgb/m3_lcdc_bg_en_change | CGB cgbc | 👌 |
-| mealybug-cgbd/m3_lcdc_bg_en_change | CGB cgbd | 👌 |
-| mealybug-cgb/m3_lcdc_bg_en_change2 | CGB cgbc | 👌 |
-| mealybug/m3_lcdc_bg_map_change | DMG | 👌 |
-| mealybug-cgb/m3_lcdc_bg_map_change | CGB cgbc | 👌 |
-| mealybug-cgbd/m3_lcdc_bg_map_change | CGB cgbd | 👌 |
-| mealybug-cgb/m3_lcdc_bg_map_change2 | CGB cgbc | 👌 |
-| mealybug/m3_lcdc_obj_en_change | DMG | 👌 |
-| mealybug-cgb/m3_lcdc_obj_en_change | CGB cgbc | 👌 |
-| mealybug-cgbd/m3_lcdc_obj_en_change | CGB cgbd | 👌 |
-| mealybug/m3_lcdc_obj_en_change_variant | DMG | 👌 |
-| mealybug-cgb/m3_lcdc_obj_en_change_variant | CGB cgbc | 👌 |
-| mealybug-cgbd/m3_lcdc_obj_en_change_variant | CGB cgbd | 👌 |
-| mealybug/m3_lcdc_obj_size_change | DMG | 👌 |
-| mealybug-cgb/m3_lcdc_obj_size_change | CGB cgbc | 👌 |
-| mealybug-cgbd/m3_lcdc_obj_size_change | CGB cgbd | 👌 |
-| mealybug/m3_lcdc_obj_size_change_scx | DMG | 👌 |
-| mealybug-cgb/m3_lcdc_obj_size_change_scx | CGB cgbc | 👌 |
-| mealybug-cgbd/m3_lcdc_obj_size_change_scx | CGB cgbd | 👌 |
-| mealybug/m3_lcdc_tile_sel_change | DMG | 👌 |
-| mealybug-cgb/m3_lcdc_tile_sel_change | CGB cgbc | 👌 |
-| mealybug-cgbd/m3_lcdc_tile_sel_change | CGB cgbd | 👌 |
-| mealybug-cgb/m3_lcdc_tile_sel_change2 | CGB cgbc | 👌 |
-| mealybug/m3_lcdc_tile_sel_win_change | DMG | 👌 |
-| mealybug-cgb/m3_lcdc_tile_sel_win_change | CGB cgbc | 👌 |
-| mealybug-cgbd/m3_lcdc_tile_sel_win_change | CGB cgbd | 👌 |
-| mealybug-cgb/m3_lcdc_tile_sel_win_change2 | CGB cgbc | 👌 |
-| mealybug/m3_lcdc_win_en_change_multiple | DMG | 👌 |
-| mealybug-cgb/m3_lcdc_win_en_change_multiple | CGB cgbc | 👌 |
-| mealybug-cgbd/m3_lcdc_win_en_change_multiple | CGB cgbd | 👌 |
-| mealybug/m3_lcdc_win_en_change_multiple_wx | DMG | 👌 |
-| mealybug/m3_lcdc_win_map_change | DMG | 👌 |
-| mealybug-cgb/m3_lcdc_win_map_change | CGB cgbc | 👌 |
-| mealybug-cgbd/m3_lcdc_win_map_change | CGB cgbd | 👌 |
-| mealybug-cgb/m3_lcdc_win_map_change2 | CGB cgbc | 👌 |
-| mealybug/m3_obp0_change | DMG | 👌 |
-| mealybug-cgb/m3_obp0_change | CGB cgbc | 👌 |
-| mealybug-cgbd/m3_obp0_change | CGB cgbd | 👌 |
-| mealybug/m3_scx_high_5_bits | DMG | 👌 |
-| mealybug-cgb/m3_scx_high_5_bits | CGB cgbc | 👌 |
-| mealybug-cgbd/m3_scx_high_5_bits | CGB cgbd | 👌 |
-| mealybug-cgb/m3_scx_high_5_bits_change2 | CGB cgbc | 👌 |
-| mealybug/m3_scx_low_3_bits | DMG | 👌 |
-| mealybug-cgb/m3_scx_low_3_bits | CGB cgbc | 👌 |
-| mealybug-cgbd/m3_scx_low_3_bits | CGB cgbd | 👌 |
-| mealybug/m3_scy_change | DMG | 👌 |
-| mealybug-cgb/m3_scy_change | CGB cgbc | 👌 |
-| mealybug-cgbd/m3_scy_change | CGB cgbd | 👌 |
-| mealybug-cgb/m3_scy_change2 | CGB cgbc | 👌 |
-| mealybug/m3_window_timing | DMG | 👌 |
-| mealybug-cgb/m3_window_timing | CGB cgbc | 👌 |
-| mealybug-cgbd/m3_window_timing | CGB cgbd | 👌 |
-| mealybug/m3_window_timing_wx_0 | DMG | 👌 |
-| mealybug-cgb/m3_window_timing_wx_0 | CGB cgbc | 👌 |
-| mealybug-cgbd/m3_window_timing_wx_0 | CGB cgbd | 👌 |
-| mealybug/m3_wx_4_change | DMG | 👌 |
-| mealybug/m3_wx_4_change_sprites | DMG | 👌 |
-| mealybug-cgb/m3_wx_4_change_sprites | CGB cgbc | 👌 |
-| mealybug-cgbd/m3_wx_4_change_sprites | CGB cgbd | 👌 |
-| mealybug/m3_wx_5_change | DMG | 👌 |
-| mealybug/m3_wx_6_change | DMG | 👌 |
-| mealybug/dma/hdma_during_halt-C | CGB cgbc | 👌 |
-| mealybug/dma/hdma_timing-C | CGB cgbc | 👌 |
-| mealybug/mbc/mbc3_rtc | cart | 👌 |
-
-## Game Boy - Mooneye (151/152)
-
-| Test | Device | Result |
-|------|--------|--------|
-| mooneye/acceptance/add_sp_e_timing | cart | 👌 |
-| mooneye/acceptance/bits/mem_oam | cart | 👌 |
-| mooneye/acceptance/bits/reg_f | cart | 👌 |
-| mooneye/acceptance/bits/unused_hwio-GS@dmgABC | DMG dmgABC | 👌 |
-| mooneye/acceptance/bits/unused_hwio-GS@mgb | DMG mgb | 👌 |
-| mooneye/acceptance/bits/unused_hwio-GS@sgb | SGB sgb | 👌 |
-| mooneye/acceptance/bits/unused_hwio-GS@sgb2 | SGB sgb2 | 👌 |
-| mooneye/acceptance/boot_div-S@sgb | SGB sgb | 👌 |
-| mooneye/acceptance/boot_div-S@sgb2 | SGB sgb2 | 👌 |
-| mooneye/acceptance/boot_div-dmg0 | DMG dmg0 | 👌 |
-| mooneye/acceptance/boot_div-dmgABCmgb@dmgABC | DMG dmgABC | 👌 |
-| mooneye/acceptance/boot_div-dmgABCmgb@mgb | DMG mgb | 👌 |
-| mooneye/acceptance/boot_div2-S@sgb | SGB sgb | 👌 |
-| mooneye/acceptance/boot_div2-S@sgb2 | SGB sgb2 | 👌 |
-| mooneye/acceptance/boot_hwio-S@sgb | SGB sgb | 👌 |
-| mooneye/acceptance/boot_hwio-S@sgb2 | SGB sgb2 | 👌 |
-| mooneye/acceptance/boot_hwio-dmg0 | DMG dmg0 | 👌 |
-| mooneye/acceptance/boot_hwio-dmgABCmgb@dmgABC | DMG dmgABC | 👌 |
-| mooneye/acceptance/boot_hwio-dmgABCmgb@mgb | DMG mgb | 👌 |
-| mooneye/acceptance/boot_regs-dmg0 | DMG dmg0 | 👌 |
-| mooneye/acceptance/boot_regs-dmgABC | DMG dmgABC | 👌 |
-| mooneye/acceptance/boot_regs-mgb | DMG mgb | 👌 |
-| mooneye/acceptance/boot_regs-sgb | SGB sgb | 👌 |
-| mooneye/acceptance/boot_regs-sgb2 | SGB sgb2 | 👌 |
-| mooneye/acceptance/call_cc_timing | cart | 👌 |
-| mooneye/acceptance/call_cc_timing2 | cart | 👌 |
-| mooneye/acceptance/call_timing | cart | 👌 |
-| mooneye/acceptance/call_timing2 | cart | 👌 |
-| mooneye/acceptance/di_timing-GS@dmgABC | DMG dmgABC | 👌 |
-| mooneye/acceptance/di_timing-GS@mgb | DMG mgb | 👌 |
-| mooneye/acceptance/di_timing-GS@sgb | SGB sgb | 👌 |
-| mooneye/acceptance/di_timing-GS@sgb2 | SGB sgb2 | 👌 |
-| mooneye/acceptance/div_timing | cart | 👌 |
-| mooneye/acceptance/ei_sequence | cart | 👌 |
-| mooneye/acceptance/ei_timing | cart | 👌 |
-| mooneye/acceptance/halt_ime0_ei | cart | 👌 |
-| mooneye/acceptance/halt_ime0_nointr_timing | cart | 👌 |
-| mooneye/acceptance/halt_ime1_timing | cart | 👌 |
-| mooneye/acceptance/halt_ime1_timing2-GS@dmgABC | DMG dmgABC | 👌 |
-| mooneye/acceptance/halt_ime1_timing2-GS@mgb | DMG mgb | 👌 |
-| mooneye/acceptance/halt_ime1_timing2-GS@sgb | SGB sgb | 👌 |
-| mooneye/acceptance/halt_ime1_timing2-GS@sgb2 | SGB sgb2 | 👌 |
-| mooneye/acceptance/if_ie_registers | cart | 👌 |
-| mooneye/acceptance/instr/daa | cart | 👌 |
-| mooneye/acceptance/interrupts/ie_push | cart | 👌 |
-| mooneye/acceptance/intr_timing | cart | 👌 |
-| mooneye/acceptance/jp_cc_timing | cart | 👌 |
-| mooneye/acceptance/jp_timing | cart | 👌 |
-| mooneye/acceptance/ld_hl_sp_e_timing | cart | 👌 |
-| mooneye/acceptance/oam_dma/basic | cart | 👌 |
-| mooneye/acceptance/oam_dma/reg_read | cart | 👌 |
-| mooneye/acceptance/oam_dma/sources-GS@dmgABC | DMG dmgABC | 👌 |
-| mooneye/acceptance/oam_dma/sources-GS@mgb | DMG mgb | 👌 |
-| mooneye/acceptance/oam_dma/sources-GS@sgb | SGB sgb | 👌 |
-| mooneye/acceptance/oam_dma/sources-GS@sgb2 | SGB sgb2 | 👌 |
-| mooneye/acceptance/oam_dma_restart | cart | 👌 |
-| mooneye/acceptance/oam_dma_start | cart | 👌 |
-| mooneye/acceptance/oam_dma_timing | cart | 👌 |
-| mooneye/acceptance/pop_timing | cart | 👌 |
-| mooneye/acceptance/ppu/hblank_ly_scx_timing-GS@dmgABC | DMG dmgABC | 👌 |
-| mooneye/acceptance/ppu/hblank_ly_scx_timing-GS@mgb | DMG mgb | 👌 |
-| mooneye/acceptance/ppu/hblank_ly_scx_timing-GS@sgb | SGB sgb | 👌 |
-| mooneye/acceptance/ppu/hblank_ly_scx_timing-GS@sgb2 | SGB sgb2 | 👌 |
-| mooneye/acceptance/ppu/intr_1_2_timing-GS@dmgABC | DMG dmgABC | 👌 |
-| mooneye/acceptance/ppu/intr_1_2_timing-GS@mgb | DMG mgb | 👌 |
-| mooneye/acceptance/ppu/intr_1_2_timing-GS@sgb | SGB sgb | 👌 |
-| mooneye/acceptance/ppu/intr_1_2_timing-GS@sgb2 | SGB sgb2 | 👌 |
-| mooneye/acceptance/ppu/intr_2_0_timing | cart | 👌 |
-| mooneye/acceptance/ppu/intr_2_mode0_timing | cart | 👌 |
-| mooneye/acceptance/ppu/intr_2_mode0_timing_sprites | cart | 👌 |
-| mooneye/acceptance/ppu/intr_2_mode3_timing | cart | 👌 |
-| mooneye/acceptance/ppu/intr_2_oam_ok_timing | cart | 👌 |
-| mooneye/acceptance/ppu/lcdon_timing-GS@dmgABC | DMG dmgABC | 👌 |
-| mooneye/acceptance/ppu/lcdon_timing-GS@mgb | DMG mgb | 👌 |
-| mooneye/acceptance/ppu/lcdon_timing-GS@sgb | SGB sgb | 👌 |
-| mooneye/acceptance/ppu/lcdon_timing-GS@sgb2 | SGB sgb2 | 👌 |
-| mooneye/acceptance/ppu/lcdon_write_timing-GS@dmgABC | DMG dmgABC | 👌 |
-| mooneye/acceptance/ppu/lcdon_write_timing-GS@mgb | DMG mgb | 👌 |
-| mooneye/acceptance/ppu/lcdon_write_timing-GS@sgb | SGB sgb | 👌 |
-| mooneye/acceptance/ppu/lcdon_write_timing-GS@sgb2 | SGB sgb2 | 👌 |
-| mooneye/acceptance/ppu/stat_irq_blocking | cart | 👌 |
-| mooneye/acceptance/ppu/stat_lyc_onoff | cart | 👌 |
-| mooneye/acceptance/ppu/vblank_stat_intr-GS@dmgABC | DMG dmgABC | 👌 |
-| mooneye/acceptance/ppu/vblank_stat_intr-GS@mgb | DMG mgb | 👌 |
-| mooneye/acceptance/ppu/vblank_stat_intr-GS@sgb | SGB sgb | 👌 |
-| mooneye/acceptance/ppu/vblank_stat_intr-GS@sgb2 | SGB sgb2 | 👌 |
-| mooneye/acceptance/push_timing | cart | 👌 |
-| mooneye/acceptance/rapid_di_ei | cart | 👌 |
-| mooneye/acceptance/ret_cc_timing | cart | 👌 |
-| mooneye/acceptance/ret_timing | cart | 👌 |
-| mooneye/acceptance/reti_intr_timing | cart | 👌 |
-| mooneye/acceptance/reti_timing | cart | 👌 |
-| mooneye/acceptance/rst_timing | cart | 👌 |
-| mooneye/acceptance/serial/boot_sclk_align-dmgABCmgb@dmgABC | DMG dmgABC | 👌 |
-| mooneye/acceptance/serial/boot_sclk_align-dmgABCmgb@mgb | DMG mgb | 👌 |
-| mooneye/acceptance/timer/div_write | cart | 👌 |
-| mooneye/acceptance/timer/rapid_toggle | cart | 👌 |
-| mooneye/acceptance/timer/tim00 | cart | 👌 |
-| mooneye/acceptance/timer/tim00_div_trigger | cart | 👌 |
-| mooneye/acceptance/timer/tim01 | cart | 👌 |
-| mooneye/acceptance/timer/tim01_div_trigger | cart | 👌 |
-| mooneye/acceptance/timer/tim10 | cart | 👌 |
-| mooneye/acceptance/timer/tim10_div_trigger | cart | 👌 |
-| mooneye/acceptance/timer/tim11 | cart | 👌 |
-| mooneye/acceptance/timer/tim11_div_trigger | cart | 👌 |
-| mooneye/acceptance/timer/tima_reload | cart | 👌 |
-| mooneye/acceptance/timer/tima_write_reloading | cart | 👌 |
-| mooneye/acceptance/timer/tma_write_reloading | cart | 👌 |
-| mooneye/emulator-only/mbc1/bits_bank1 | cart | 👌 |
-| mooneye/emulator-only/mbc1/bits_bank2 | cart | 👌 |
-| mooneye/emulator-only/mbc1/bits_mode | cart | 👌 |
-| mooneye/emulator-only/mbc1/bits_ramg | cart | 👌 |
-| mooneye/emulator-only/mbc1/multicart_rom_8Mb | cart | 👌 |
-| mooneye/emulator-only/mbc1/ram_256kb | cart | 👌 |
-| mooneye/emulator-only/mbc1/ram_64kb | cart | 👌 |
-| mooneye/emulator-only/mbc1/rom_16Mb | cart | 👌 |
-| mooneye/emulator-only/mbc1/rom_1Mb | cart | 👌 |
-| mooneye/emulator-only/mbc1/rom_2Mb | cart | 👌 |
-| mooneye/emulator-only/mbc1/rom_4Mb | cart | 👌 |
-| mooneye/emulator-only/mbc1/rom_512kb | cart | 👌 |
-| mooneye/emulator-only/mbc1/rom_8Mb | cart | 👌 |
-| mooneye/emulator-only/mbc2/bits_ramg | cart | 👌 |
-| mooneye/emulator-only/mbc2/bits_romb | cart | 👌 |
-| mooneye/emulator-only/mbc2/bits_unused | cart | 👌 |
-| mooneye/emulator-only/mbc2/ram | cart | 👌 |
-| mooneye/emulator-only/mbc2/rom_1Mb | cart | 👌 |
-| mooneye/emulator-only/mbc2/rom_2Mb | cart | 👌 |
-| mooneye/emulator-only/mbc2/rom_512kb | cart | 👌 |
-| mooneye/emulator-only/mbc5/rom_16Mb | cart | 👌 |
-| mooneye/emulator-only/mbc5/rom_1Mb | cart | 👌 |
-| mooneye/emulator-only/mbc5/rom_2Mb | cart | 👌 |
-| mooneye/emulator-only/mbc5/rom_32Mb | cart | 👌 |
-| mooneye/emulator-only/mbc5/rom_4Mb | cart | 👌 |
-| mooneye/emulator-only/mbc5/rom_512kb | cart | 👌 |
-| mooneye/emulator-only/mbc5/rom_64Mb | cart | 👌 |
-| mooneye/emulator-only/mbc5/rom_8Mb | cart | 👌 |
-| mooneye/madness/mgb_oam_dma_halt_sprites | DMG mgb | 👀 99.9% correct (23022/23040 pixels match) |
-| mooneye/manual-only/sprite_priority | DMG | 👌 |
-| mooneye/misc/bits/unused_hwio-C@cgbc | CGB cgbc | 👌 |
-| mooneye/misc/bits/unused_hwio-C@agb | CGB agb | 👌 |
-| mooneye/misc/boot_div-A | CGB agb | 👌 |
-| mooneye/misc/boot_div-cgb0 | CGB cgb0 | 👌 |
-| mooneye/misc/boot_div-cgbABCDE@cgbab | CGB cgbab | 👌 |
-| mooneye/misc/boot_div-cgbABCDE@cgbc | CGB cgbc | 👌 |
-| mooneye/misc/boot_div-cgbABCDE@cgbd | CGB cgbd | 👌 |
-| mooneye/misc/boot_div-cgbABCDE@cgbe | CGB cgbe | 👌 |
-| mooneye/misc/boot_hwio-C@cgbc | CGB cgbc | 👌 |
-| mooneye/misc/boot_hwio-C@agb | CGB agb | 👌 |
-| mooneye/misc/boot_regs-A | CGB agb | 👌 |
-| mooneye/misc/boot_regs-cgb | CGB cgbc | 👌 |
-| mooneye/misc/ppu/vblank_stat_intr-C@cgbc | CGB cgbc | 👌 |
-| mooneye/misc/ppu/vblank_stat_intr-C@agb | CGB agb | 👌 |
-
-## Game Boy - Mooneye (wilbertpol) (177/184)
-
-| Test | Device | Result |
-|------|--------|--------|
-| mooneye-wilbertpol/acceptance/add_sp_e_timing | cart | 👌 |
-| mooneye-wilbertpol/acceptance/bits/mem_oam | cart | 👌 |
-| mooneye-wilbertpol/acceptance/bits/reg_f | cart | 👌 |
-| mooneye-wilbertpol/acceptance/bits/unused_hwio-GS@dmgABC | DMG dmgABC | 👌 |
-| mooneye-wilbertpol/acceptance/bits/unused_hwio-GS@mgb | DMG mgb | 👌 |
-| mooneye-wilbertpol/acceptance/bits/unused_hwio-GS@sgb | SGB sgb | 👌 |
-| mooneye-wilbertpol/acceptance/bits/unused_hwio-GS@sgb2 | SGB sgb2 | 👌 |
-| mooneye-wilbertpol/acceptance/boot_hwio-G@dmgABC | DMG dmgABC | 👌 |
-| mooneye-wilbertpol/acceptance/boot_hwio-G@mgb | DMG mgb | 👌 |
-| mooneye-wilbertpol/acceptance/boot_regs-dmg | DMG dmgABC | 👌 |
-| mooneye-wilbertpol/acceptance/call_cc_timing | cart | 👌 |
-| mooneye-wilbertpol/acceptance/call_cc_timing2 | cart | 👌 |
-| mooneye-wilbertpol/acceptance/call_timing | cart | 👌 |
-| mooneye-wilbertpol/acceptance/call_timing2 | cart | 👌 |
-| mooneye-wilbertpol/acceptance/di_timing-GS@dmgABC | DMG dmgABC | 👌 |
-| mooneye-wilbertpol/acceptance/di_timing-GS@mgb | DMG mgb | 👌 |
-| mooneye-wilbertpol/acceptance/di_timing-GS@sgb | SGB sgb | 👌 |
-| mooneye-wilbertpol/acceptance/di_timing-GS@sgb2 | SGB sgb2 | 👌 |
-| mooneye-wilbertpol/acceptance/div_timing | cart | 👌 |
-| mooneye-wilbertpol/acceptance/ei_timing | cart | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/hblank_ly_scx_timing-C@cgbe | CGB cgbe | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/hblank_ly_scx_timing-C@agb | CGB agb | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/hblank_ly_scx_timing-GS@dmgABC | DMG dmgABC | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/hblank_ly_scx_timing-GS@mgb | DMG mgb | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/hblank_ly_scx_timing-GS@sgb | SGB sgb | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/hblank_ly_scx_timing-GS@sgb2 | SGB sgb2 | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/hblank_ly_scx_timing_nops | cart | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/hblank_ly_scx_timing_variant_nops | cart | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/intr_0_timing | cart | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/intr_1_2_timing-GS@dmgABC | DMG dmgABC | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/intr_1_2_timing-GS@mgb | DMG mgb | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/intr_1_2_timing-GS@sgb | SGB sgb | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/intr_1_2_timing-GS@sgb2 | SGB sgb2 | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/intr_1_timing | cart | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/intr_2_0_timing | cart | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/intr_2_mode0_scx1_timing_nops | cart | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/intr_2_mode0_scx2_timing_nops | cart | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/intr_2_mode0_scx3_timing_nops | cart | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/intr_2_mode0_scx4_timing_nops | cart | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/intr_2_mode0_scx5_timing_nops | cart | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/intr_2_mode0_scx6_timing_nops | cart | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/intr_2_mode0_scx7_timing_nops | cart | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/intr_2_mode0_scx8_timing_nops | cart | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/intr_2_mode0_timing | cart | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/intr_2_mode0_timing_sprites | cart | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/intr_2_mode0_timing_sprites_nops | cart | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/intr_2_mode0_timing_sprites_scx1_nops | cart | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/intr_2_mode0_timing_sprites_scx2_nops | cart | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/intr_2_mode0_timing_sprites_scx3_nops | cart | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/intr_2_mode0_timing_sprites_scx4_nops | cart | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/intr_2_mode3_timing | cart | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/intr_2_oam_ok_timing | cart | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/intr_2_timing | cart | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/lcdon_mode_timing | cart | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly00_01_mode0_2 | cart | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly00_mode0_2-GS@dmgABC | DMG dmgABC | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly00_mode0_2-GS@mgb | DMG mgb | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly00_mode0_2-GS@sgb | SGB sgb | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly00_mode0_2-GS@sgb2 | SGB sgb2 | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly00_mode1_0-GS@dmgABC | DMG dmgABC | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly00_mode1_0-GS@mgb | DMG mgb | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly00_mode1_0-GS@sgb | SGB sgb | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly00_mode1_0-GS@sgb2 | SGB sgb2 | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly00_mode1_2-C@cgbe | CGB cgbe | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly00_mode1_2-C@agb | CGB agb | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly00_mode2_3 | cart | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly00_mode3_0 | cart | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly143_144_145 | cart | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly143_144_152_153 | cart | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly143_144_mode0_1 | cart | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly143_144_mode3_0 | cart | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly_lyc-C@cgbe | CGB cgbe | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly_lyc-C@agb | CGB agb | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly_lyc-GS@dmgABC | DMG dmgABC | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly_lyc-GS@mgb | DMG mgb | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly_lyc-GS@sgb | SGB sgb | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly_lyc-GS@sgb2 | SGB sgb2 | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly_lyc_0-C@cgbe | CGB cgbe | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly_lyc_0-C@agb | CGB agb | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly_lyc_0-GS@dmgABC | DMG dmgABC | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly_lyc_0-GS@mgb | DMG mgb | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly_lyc_0-GS@sgb | SGB sgb | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly_lyc_0-GS@sgb2 | SGB sgb2 | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly_lyc_0_write-C@cgbe | CGB cgbe | 👀 Mooneye: FAIL |
-| mooneye-wilbertpol/acceptance/gpu/ly_lyc_0_write-C@agb | CGB agb | 👀 Mooneye: FAIL |
-| mooneye-wilbertpol/acceptance/gpu/ly_lyc_0_write-GS@dmgABC | DMG dmgABC | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly_lyc_0_write-GS@mgb | DMG mgb | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly_lyc_0_write-GS@sgb | SGB sgb | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly_lyc_0_write-GS@sgb2 | SGB sgb2 | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly_lyc_144-C@cgbe | CGB cgbe | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly_lyc_144-C@agb | CGB agb | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly_lyc_144-GS@dmgABC | DMG dmgABC | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly_lyc_144-GS@mgb | DMG mgb | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly_lyc_144-GS@sgb | SGB sgb | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly_lyc_144-GS@sgb2 | SGB sgb2 | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly_lyc_153-C@cgbe | CGB cgbe | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly_lyc_153-C@agb | CGB agb | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly_lyc_153-GS@dmgABC | DMG dmgABC | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly_lyc_153-GS@mgb | DMG mgb | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly_lyc_153-GS@sgb | SGB sgb | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly_lyc_153-GS@sgb2 | SGB sgb2 | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly_lyc_153_write-C@cgbe | CGB cgbe | 👀 Mooneye: FAIL |
-| mooneye-wilbertpol/acceptance/gpu/ly_lyc_153_write-C@agb | CGB agb | 👀 Mooneye: FAIL |
-| mooneye-wilbertpol/acceptance/gpu/ly_lyc_153_write-GS@dmgABC | DMG dmgABC | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly_lyc_153_write-GS@mgb | DMG mgb | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly_lyc_153_write-GS@sgb | SGB sgb | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly_lyc_153_write-GS@sgb2 | SGB sgb2 | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly_lyc_write-C@cgbe | CGB cgbe | 👀 Mooneye: FAIL |
-| mooneye-wilbertpol/acceptance/gpu/ly_lyc_write-C@agb | CGB agb | 👀 Mooneye: FAIL |
-| mooneye-wilbertpol/acceptance/gpu/ly_lyc_write-GS@dmgABC | DMG dmgABC | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly_lyc_write-GS@mgb | DMG mgb | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly_lyc_write-GS@sgb | SGB sgb | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly_lyc_write-GS@sgb2 | SGB sgb2 | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly_new_frame-C@cgbe | CGB cgbe | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly_new_frame-C@agb | CGB agb | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly_new_frame-GS@dmgABC | DMG dmgABC | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly_new_frame-GS@mgb | DMG mgb | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly_new_frame-GS@sgb | SGB sgb | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly_new_frame-GS@sgb2 | SGB sgb2 | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/stat_irq_blocking | cart | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/stat_write_if-C@cgbe | CGB cgbe | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/stat_write_if-C@agb | CGB agb | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/stat_write_if-GS@dmgABC | DMG dmgABC | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/stat_write_if-GS@mgb | DMG mgb | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/stat_write_if-GS@sgb | SGB sgb | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/stat_write_if-GS@sgb2 | SGB sgb2 | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/vblank_if_timing | cart | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/vblank_stat_intr-GS@dmgABC | DMG dmgABC | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/vblank_stat_intr-GS@mgb | DMG mgb | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/vblank_stat_intr-GS@sgb | SGB sgb | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/vblank_stat_intr-GS@sgb2 | SGB sgb2 | 👌 |
-| mooneye-wilbertpol/acceptance/halt_ime0_ei | cart | 👌 |
-| mooneye-wilbertpol/acceptance/halt_ime0_nointr_timing | cart | 👌 |
-| mooneye-wilbertpol/acceptance/halt_ime1_timing | cart | 👌 |
-| mooneye-wilbertpol/acceptance/halt_ime1_timing2-GS@dmgABC | DMG dmgABC | 👌 |
-| mooneye-wilbertpol/acceptance/halt_ime1_timing2-GS@mgb | DMG mgb | 👌 |
-| mooneye-wilbertpol/acceptance/halt_ime1_timing2-GS@sgb | SGB sgb | 👌 |
-| mooneye-wilbertpol/acceptance/halt_ime1_timing2-GS@sgb2 | SGB sgb2 | 👌 |
-| mooneye-wilbertpol/acceptance/if_ie_registers | cart | 👌 |
-| mooneye-wilbertpol/acceptance/intr_timing | cart | 👌 |
-| mooneye-wilbertpol/acceptance/jp_cc_timing | cart | 👌 |
-| mooneye-wilbertpol/acceptance/jp_timing | cart | 👌 |
-| mooneye-wilbertpol/acceptance/ld_hl_sp_e_timing | cart | 👌 |
-| mooneye-wilbertpol/acceptance/oam_dma_restart | cart | 👌 |
-| mooneye-wilbertpol/acceptance/oam_dma_start | cart | 👌 |
-| mooneye-wilbertpol/acceptance/oam_dma_timing | cart | 👌 |
-| mooneye-wilbertpol/acceptance/pop_timing | cart | 👌 |
-| mooneye-wilbertpol/acceptance/push_timing | cart | 👌 |
-| mooneye-wilbertpol/acceptance/rapid_di_ei | cart | 👌 |
-| mooneye-wilbertpol/acceptance/ret_cc_timing | cart | 👌 |
-| mooneye-wilbertpol/acceptance/ret_timing | cart | 👌 |
-| mooneye-wilbertpol/acceptance/reti_intr_timing | cart | 👌 |
-| mooneye-wilbertpol/acceptance/reti_timing | cart | 👌 |
-| mooneye-wilbertpol/acceptance/rst_timing | cart | 👌 |
-| mooneye-wilbertpol/acceptance/timer/div_write | cart | 👌 |
-| mooneye-wilbertpol/acceptance/timer/rapid_toggle | cart | 👌 |
-| mooneye-wilbertpol/acceptance/timer/tim00 | cart | 👌 |
-| mooneye-wilbertpol/acceptance/timer/tim00_div_trigger | cart | 👌 |
-| mooneye-wilbertpol/acceptance/timer/tim01 | cart | 👌 |
-| mooneye-wilbertpol/acceptance/timer/tim01_div_trigger | cart | 👌 |
-| mooneye-wilbertpol/acceptance/timer/tim10 | cart | 👌 |
-| mooneye-wilbertpol/acceptance/timer/tim10_div_trigger | cart | 👌 |
-| mooneye-wilbertpol/acceptance/timer/tim11 | cart | 👌 |
-| mooneye-wilbertpol/acceptance/timer/tim11_div_trigger | cart | 👌 |
-| mooneye-wilbertpol/acceptance/timer/tima_reload | cart | 👌 |
-| mooneye-wilbertpol/acceptance/timer/tima_write_reloading | cart | 👌 |
-| mooneye-wilbertpol/acceptance/timer/timer_if | cart | 👌 |
-| mooneye-wilbertpol/acceptance/timer/tma_write_reloading | cart | 👌 |
-| mooneye-wilbertpol/emulator-only/mbc1_rom_4banks | cart | 👌 |
-| mooneye-wilbertpol/madness/mgb_oam_dma_halt_sprites | DMG mgb | 👀 99.9% correct (23022/23040 pixels match) |
-| mooneye-wilbertpol/manual-only/sprite_priority | DMG | 👌 |
-| mooneye-wilbertpol/misc/bits/unused_hwio-C@cgbe | CGB cgbe | 👌 |
-| mooneye-wilbertpol/misc/bits/unused_hwio-C@agb | CGB agb | 👌 |
-| mooneye-wilbertpol/misc/boot_hwio-C@cgbe | CGB cgbe | 👌 |
-| mooneye-wilbertpol/misc/boot_hwio-C@agb | CGB agb | 👌 |
-| mooneye-wilbertpol/misc/boot_hwio-S@sgb | SGB sgb | 👌 |
-| mooneye-wilbertpol/misc/boot_hwio-S@sgb2 | SGB sgb2 | 👌 |
-| mooneye-wilbertpol/misc/boot_regs-A | CGB agb | 👌 |
-| mooneye-wilbertpol/misc/boot_regs-cgb | CGB cgbe | 👌 |
-| mooneye-wilbertpol/misc/boot_regs-mgb | DMG mgb | 👌 |
-| mooneye-wilbertpol/misc/boot_regs-sgb | SGB sgb | 👌 |
-| mooneye-wilbertpol/misc/boot_regs-sgb2 | SGB sgb2 | 👌 |
-| mooneye-wilbertpol/misc/gpu/vblank_stat_intr-C@cgbe | CGB cgbe | 👌 |
-| mooneye-wilbertpol/misc/gpu/vblank_stat_intr-C@agb | CGB agb | 👌 |
-
-## Game Boy - SameSuite APU (69/70)
-
-| Test | Device | Result |
-|------|--------|--------|
-| same-suite/apu/channel_1/channel_1_align | CGB cgbE | 👌 |
-| same-suite/apu/channel_1/channel_1_align_cpu | CGB cgbE | 👌 |
-| same-suite/apu/channel_1/channel_1_delay | CGB cgbE | 👌 |
-| same-suite/apu/channel_1/channel_1_duty | CGB cgbE | 👌 |
-| same-suite/apu/channel_1/channel_1_duty_delay | CGB cgbE | 👌 |
-| same-suite/apu/channel_1/channel_1_extra_length_clocking-cgb0B | CGB cgb0B | 👌 |
-| same-suite/apu/channel_1/channel_1_freq_change | CGB cgbE | 👌 |
-| same-suite/apu/channel_1/channel_1_freq_change_timing-A | CGB A | 👌 |
-| same-suite/apu/channel_1/channel_1_freq_change_timing-cgb0BC | CGB cgb0BC | 👌 |
-| same-suite/apu/channel_1/channel_1_freq_change_timing-cgbDE | CGB cgbDE | 👌 |
-| same-suite/apu/channel_1/channel_1_nrx2_glitch | CGB cgbE | 👌 |
-| same-suite/apu/channel_1/channel_1_nrx2_speed_change | CGB cgbE | 👌 |
-| same-suite/apu/channel_1/channel_1_restart | CGB cgbE | 👌 |
-| same-suite/apu/channel_1/channel_1_restart_nrx2_glitch | CGB cgbE | 👌 |
-| same-suite/apu/channel_1/channel_1_stop_div | CGB cgbE | 👌 |
-| same-suite/apu/channel_1/channel_1_stop_restart | CGB cgbE | 👌 |
-| same-suite/apu/channel_1/channel_1_sweep | CGB cgbE | 👌 |
-| same-suite/apu/channel_1/channel_1_sweep_restart | CGB cgbE | 👌 |
-| same-suite/apu/channel_1/channel_1_sweep_restart_2 | CGB cgbE | 👀 Mooneye: FAIL |
-| same-suite/apu/channel_1/channel_1_volume | CGB cgbE | 👌 |
-| same-suite/apu/channel_1/channel_1_volume_div | CGB cgbE | 👌 |
-| same-suite/apu/channel_2/channel_2_align | CGB cgbE | 👌 |
-| same-suite/apu/channel_2/channel_2_align_cpu | CGB cgbE | 👌 |
-| same-suite/apu/channel_2/channel_2_delay | CGB cgbE | 👌 |
-| same-suite/apu/channel_2/channel_2_duty | CGB cgbE | 👌 |
-| same-suite/apu/channel_2/channel_2_duty_delay | CGB cgbE | 👌 |
-| same-suite/apu/channel_2/channel_2_extra_length_clocking-cgb0B | CGB cgb0B | 👌 |
-| same-suite/apu/channel_2/channel_2_freq_change | CGB cgbE | 👌 |
-| same-suite/apu/channel_2/channel_2_nrx2_glitch | CGB cgbE | 👌 |
-| same-suite/apu/channel_2/channel_2_nrx2_speed_change | CGB cgbE | 👌 |
-| same-suite/apu/channel_2/channel_2_restart | CGB cgbE | 👌 |
-| same-suite/apu/channel_2/channel_2_restart_nrx2_glitch | CGB cgbE | 👌 |
-| same-suite/apu/channel_2/channel_2_stop_div | CGB cgbE | 👌 |
-| same-suite/apu/channel_2/channel_2_stop_restart | CGB cgbE | 👌 |
-| same-suite/apu/channel_2/channel_2_volume | CGB cgbE | 👌 |
-| same-suite/apu/channel_2/channel_2_volume_div | CGB cgbE | 👌 |
-| same-suite/apu/channel_3/channel_3_and_glitch | CGB cgbE | 👌 |
-| same-suite/apu/channel_3/channel_3_delay | CGB cgbE | 👌 |
-| same-suite/apu/channel_3/channel_3_extra_length_clocking-cgb0 | CGB cgb0 | 👌 |
-| same-suite/apu/channel_3/channel_3_extra_length_clocking-cgbB | CGB cgbB | 👌 |
-| same-suite/apu/channel_3/channel_3_first_sample | CGB cgbE | 👌 |
-| same-suite/apu/channel_3/channel_3_freq_change_delay | CGB cgbE | 👌 |
-| same-suite/apu/channel_3/channel_3_restart_delay | CGB cgbE | 👌 |
-| same-suite/apu/channel_3/channel_3_restart_during_delay | CGB cgbE | 👌 |
-| same-suite/apu/channel_3/channel_3_restart_stop_delay | CGB cgbE | 👌 |
-| same-suite/apu/channel_3/channel_3_shift_delay | CGB cgbE | 👌 |
-| same-suite/apu/channel_3/channel_3_shift_skip_delay | CGB cgbE | 👌 |
-| same-suite/apu/channel_3/channel_3_stop_delay | CGB cgbE | 👌 |
-| same-suite/apu/channel_3/channel_3_stop_div | CGB cgbE | 👌 |
-| same-suite/apu/channel_3/channel_3_wave_ram_dac_on_rw | CGB cgbE | 👌 |
-| same-suite/apu/channel_3/channel_3_wave_ram_locked_write | CGB cgbE | 👌 |
-| same-suite/apu/channel_3/channel_3_wave_ram_sync | CGB cgbE | 👌 |
-| same-suite/apu/channel_4/channel_4_align | CGB cgbE | 👌 |
-| same-suite/apu/channel_4/channel_4_delay | CGB cgbE | 👌 |
-| same-suite/apu/channel_4/channel_4_equivalent_frequencies | CGB cgbE | 👌 |
-| same-suite/apu/channel_4/channel_4_extra_length_clocking-cgb0B | CGB cgb0B | 👌 |
-| same-suite/apu/channel_4/channel_4_freq_change | CGB cgbE | 👌 |
-| same-suite/apu/channel_4/channel_4_frequency_alignment | CGB cgbE | 👌 |
-| same-suite/apu/channel_4/channel_4_lfsr | CGB cgbE | 👌 |
-| same-suite/apu/channel_4/channel_4_lfsr15 | CGB cgbE | 👌 |
-| same-suite/apu/channel_4/channel_4_lfsr_15_7 | CGB cgbE | 👌 |
-| same-suite/apu/channel_4/channel_4_lfsr_7_15 | CGB cgbE | 👌 |
-| same-suite/apu/channel_4/channel_4_lfsr_restart | CGB cgbE | 👌 |
-| same-suite/apu/channel_4/channel_4_lfsr_restart_fast | CGB cgbE | 👌 |
-| same-suite/apu/channel_4/channel_4_volume_div | CGB cgbE | 👌 |
-| same-suite/apu/div_trigger_volume_10 | CGB cgbE | 👌 |
-| same-suite/apu/div_write_trigger | CGB cgbE | 👌 |
-| same-suite/apu/div_write_trigger_10 | CGB cgbE | 👌 |
-| same-suite/apu/div_write_trigger_volume | CGB cgbE | 👌 |
-| same-suite/apu/div_write_trigger_volume_10 | CGB cgbE | 👌 |
-
-## Game Boy - Screenshot suites (19/21)
-
-| Test | Device | Result |
-|------|--------|--------|
-| bully/bully | CGB | 👌 |
-| strikethrough/strikethrough-dmg | DMG | 👀 100.0% correct (23033/23040 pixels match) |
-| strikethrough/strikethrough-cgb | CGB | 👀 100.0% correct (23033/23040 pixels match) |
-| scribbltests/lycscx | DMG | 👌 |
-| scribbltests/lycscy | DMG | 👌 |
-| scribbltests/palettely | DMG | 👌 |
-| scribbltests/scxly | DMG | 👌 |
-| scribbltests/statcount-auto | DMG | 👌 |
-| turtle-tests/window_y_trigger | DMG | 👌 |
-| turtle-tests/window_y_trigger_wx_offscreen | DMG | 👌 |
-| cgb-acid-hell/cgb-acid-hell | CGB | 👌 |
-| little-things-gb/firstwhite | DMG | 👌 |
-| little-things-gb/tellinglys-dmg | DMG | 👌 |
-| little-things-gb/tellinglys-cgb | CGB | 👌 |
-| mbc3-tester/mbc3-tester | DMG | 👌 |
-| rtc3test/basic-tests-dmg | DMG | 👌 |
-| rtc3test/basic-tests-cgb | CGB | 👌 |
-| rtc3test/range-tests-dmg | DMG | 👌 |
-| rtc3test/range-tests-cgb | CGB | 👌 |
-| rtc3test/sub-second-writes-dmg | DMG | 👌 |
-| rtc3test/sub-second-writes-cgb | CGB | 👌 |
 
 ## GBA - Other test ROMs (12/13)
 
@@ -1356,7 +222,7 @@ Everything skipped on purpose, with the reason and the builder that skips it. If
 - **DocBoy: MBC3 RTC latch on a $00-then-$01 pair only (3)** — `mbc3_rtc_latch_{0_to_2,1_to_0,1_to_1}` want no latch unless $00 is followed by $01; CasualPokePlayer's `latch-rtc-test` hardware capture has ANY write to `$6000-$7FFF` latch (51/51 of its cells under that rule, 23/51 under a bit-0 edge rule; mbc3.nim), and SameBoy fails these three as well. (build_docboy_rows, DocboyNotScored)
 - **DocBoy: the window tile under a mid-fetch LCDC.5 clear (43)** — `dmg/ppu/visual/window_turn_off_*`: LCDC.5 cleared during the window's first tile fetch. On 40 rows the write lands between the window map read and its bitplane reads and DocBoy draws that tile from the BACKGROUND's row; mealybug's hardware notes have the disable "take effect at the end of the current window tile", and SameBoy (DMG B) draws dingbat's frame pixel for pixel on all 40; on the other 3 all three emulators differ. Hardware check pending: `window_turn_off_nops22_sprite_x4` on an MGB, line 8, x = 9..16 (docs/gb-failure-triage.md I6). The window retrigger and resume rows ARE scored. (build_docboy_rows, DocboyNotScored)
 - **DocBoy: single-unit OAM-bug margins (10)** — `oam_bug_ld_{hl,hli}_a_round3_{fe5c,fe5e_noisy,fe5f}` and `_round23_{fe46,fe47}`: in these truth tables of DocBoy's DMG the written bit as it lands in row 0 depends on row 0's old bits, or a word-3 write also rewrites word 2's low byte, where the sibling tables in the same position on other byte lanes (`fe58`..`fe5b`, `fe5d`) give the written bit, the maintainer marks `fe5b`/`fe5d`/`fe5e` noisy (hardware runs that did not repeat), and SameBoy gives the written bit on all ten. The other 258 rows of the family ARE scored. Hardware check pending: the ten on an MGB (docs/gb-failure-triage.md I5). (build_docboy_rows, DocboyNotScored)
-- **DocBoy: a CGB retrigger shortly before a sweep clock (2)** — `cgb/apu/ch1/ch1_period_sweep_change_period_nr14_during_recalc_{delay14284,step0_delay14284_round1}` want the clock 2 M-cycles after a retrigger to take the new frequency. They disagree with SameSuite `channel_1_sweep_restart_2` (CGB hardware) and gambatte `sound/ch1_init_reset_sweep_counter_timing_10` [cgb04c] on the CGB's trigger lead (SWEEP_TRIGGER_LEAD_T_CGB, re-fit pending), and SameBoy (CGB E) fails both. The DMG rows of the same family ARE scored and pass (docs/gb-failure-triage.md I2). (build_docboy_rows, DocboyNotScored)
+- **DocBoy: a CGB retrigger shortly before a sweep clock (2)** — `cgb/apu/ch1/ch1_period_sweep_change_period_nr14_during_recalc_{delay14284,step0_delay14284_round1}` want the clock 2 M-cycles after a retrigger to take the new frequency. They disagree with SameSuite `channel_1_sweep_restart_2` (CGB hardware) and gambatte `sound/ch1_init_reset_sweep_counter_timing_10` [cgb04c] on the CGB's trigger lead (SWEEP_TRIGGER_LEAD_T_CGB = 8, where they want 4), and SameBoy (CGB E) fails both. The DMG rows of the same family ARE scored and pass (docs/gb-failure-triage.md I2). (build_docboy_rows, DocboyNotScored)
 - **DocBoy: compat-mode window frames under mid-line LCDC.5 pulses (51)** — `cgb_dmg_mode/ppu/visual/m3_lcdc_win_en_change_multiple_wx_*`: mealybug's ROM (WX = LY, LCDC.5 pulsed low twice in mode 3) with DocBoy's tile data, on a CPU CGB E with a DMG cart. mealybug ships captures of this ROM for the DMG only, so no CGB picture of it was measured. dingbat matches SameBoy (CGB E) on all but 18 of the 7,344 lines; on about 520 DocBoy alone draws other bytes for a window tile cut short by LCDC.5 (cut k <= 4 dots after the WX match: the high plane is the tile index; k = 0: two colour-0 tiles), on 87 SameBoy alone differs. The same ROMs' timing twins (`m3_lcdc_win_en_change_multiple_wx_timing_*`, 90) ARE scored and pass; DocBoy disables two signed-addressing variants itself ("glitch is different"). (docs/gb-failure-triage.md I3; build_docboy_rows, DocboyNotScored)
 - **DocBoy: the CGB LCDC.4 tile-data glitch, DocBoy's variations (73)** — `change_{bg,win}_tile_data_glitch_*` in `cgb_dmg_mode/ppu/visual` (63) and `cgb/ppu/visual` (10): LCDC.4 flipped across a bitplane read with objects and windows at other phases. Per line over the 73 frames: 1,562 lines are DocBoy's alone, 1,831 SameBoy's alone (SameBoy, CGB E, passes none), 954 three-way, 82 dingbat's alone. dingbat's glitch (CGB_TDSEL_GLITCH) is fitted to the hardware captures mealybug ships for CGB C and D (`m3_lcdc_tile_sel_change`, `_change2`, `_win_change`) and to cgb-acid-hell, all of which pass; the family's other 56 rows (26 `mealybug_shift*`, 24 `mealybug_var*`, 6 `sprites_nops*`) ARE scored and pass. (docs/gb-failure-triage.md I3; build_docboy_rows, DocboyNotScored)
 - **DocBoy: the CGB background column resumed after the window at WX = 25 (1)** — `cgb/ppu/visual/window_bg_reprise_wx25`: the window disabled on the WY line, the background resuming where the fetcher stood. DocBoy differs in 3 pixels on line 12 (x = 26, 32, 33); SameBoy (CGB E) draws dingbat's frame pixel for pixel, and the 17 CGB siblings (`_wx8`..`_wx24`, the same rule at every other WX) ARE scored and pass. (docs/gb-failure-triage.md I12; build_docboy_rows, DocboyNotScored)

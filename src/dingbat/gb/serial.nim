@@ -59,7 +59,12 @@ proc serial_finish_transfer*(serial: GbSerial; gb: GB) =
   serial.sc = serial.sc and not 0x80'u8
   serial.bits_remaining = 0
   serial.serial_update_shifting()
-  gb.interrupts.serial_interrupt = true
+  when IRQ_SAMPLE_CGB_TIMER_SERIAL_ADD != 0:
+    # A CGB dispatch that took the serial line still holds it acknowledged.
+    if not irq_ack_swallows(gb.interrupts, INT_SERIAL, gb.scheduler.cycles):
+      gb.interrupts.serial_interrupt = true
+  else:
+    gb.interrupts.serial_interrupt = true
   when defined(gb_io_trace):
     echo "SERIALIF ly=", gb.ppu.ly, " dot=", gb.ppu.cycle_counter, " sched=", gb.scheduler.cycles
 
@@ -245,10 +250,22 @@ proc serial_read*(serial: GbSerial; gb: GB; idx: int): uint8 =
   of 0xFF02: serial.sc or serial_sc_unused_bits(gb)
   else: 0xFF'u8
 
-const SERIAL_SC_WRITE_LEAD_T* {.intdefine.} = 0
+const SERIAL_SC_WRITE_LEAD_T* {.intdefine.} = 4
   ## T-cycles before the divider's present count at which an SC store samples
   ## the tap it restarts the slot sequence from (0 = the present count,
-  ## serial_prime_history). Re-fit pending; neutral value 0.
+  ## serial_prime_history). 4 ships: the store's M-cycle has already run its
+  ## bus half when the byte is committed, so 4 back is the divider at the top
+  ## of the M-cycle, where a CPU write lands (SERIAL_DIV_WRITE_LEAD_T is the
+  ## same statement for a DIV write). 1..4 are indistinguishable (the tap's
+  ## edges are on the M-cycle grid). 0 loses 28 rows: DocBoy `dmg/serial/
+  ## serial_timing_{nops0,nops64,sb_bit0..7,change_sb_during_transfer_*,
+  ## reset_div_during_transfer_*}_round{1,2}`, `cgb/serial/
+  ## serial_timing_high_speed_nops{0,2,32}_round2` and gambatte `serial/
+  ## nopx1_start{,83}_wait_read_if_2`, `start83_late_div_write_wait_read_if_
+  ## {1b,2b}`; 5 and up lose 12 (`serial_timing_nops{1,65}_round1`, the CGB
+  ## high-speed rows again, gambatte `nopx2_start_wait_read_if_1` on both
+  ## devices). Clean-room: derived from test ROM sources/outputs and
+  ## dingbat's own trace runs; no emulator source consulted.
 
 proc serial_write_commit(serial: GbSerial; gb: GB; idx: int; val: uint8) =
   case idx

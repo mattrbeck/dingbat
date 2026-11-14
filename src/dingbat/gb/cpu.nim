@@ -258,38 +258,72 @@ proc cpu_lock*(cpu: GbCpu) =
   cpu.halted = true
   cpu.locked = true
 
-# Dispatch push order and the IF clear's place inside it: removed 2026-11-13
-# for a clean rewrite (dispatch_interrupt pushes first, then clears IF at
-# IRQ_SAMPLE_T).
+# ---- The dispatch's five M-cycles -------------------------------------------
+#
+# Pan Docs, "Interrupt Handling": two wait M-cycles, the two pushes of PC,
+# then the jump, 5 M-cycles in all. Counted from the instruction boundary the
+# interrupt is taken on, as dingbat counts instructions (opcode fetch first),
+# the first of the five is the fetch the dispatch discards, the two waits
+# follow, and the pushes are the fourth and fifth: the handler's own opcode
+# fetch is the "jump". The vector is chosen between the two pushes (mooneye
+# acceptance/interrupts/ie_push) and the taken line's IF bit is cleared
+# inside the fifth M-cycle, while PC's low byte is on the bus (IRQ_SAMPLE_T).
+# Clean-room: derived from test ROM sources/outputs and dingbat's own trace
+# runs; no emulator source consulted. docs/gb-derivations.md, "The dispatch
+# pushes in its fourth and fifth M-cycles".
+const DISPATCH_PUSH_MCYCLE* {.intdefine.} = 4
+  ## Which of the dispatch's five M-cycles writes PC's high byte (the low
+  ## byte is the next). 4 ships. gambatte `oamdma/oamdma_src0000_busyint0002`
+  ## (both devices) takes a timer interrupt with SP = $0002 while an OAM DMA
+  ## from $0000 is on its last bytes, 156 M-cycles after the FF46 write
+  ## (`ld c,$26` / 38 x `dec c; jr nz` / `nop` / `ei` / `nop`), so the pushes
+  ## to $0001 and $0000 collide with the transfer on the cartridge bus and
+  ## the CPU's bytes land in OAM where the transfer stands. The handler reads
+  ## $FE9E = $FF (PC high) and $FE9F = $94 (PC low): the transfer's last two
+  ## bytes, M-cycles 160 and 161 after the write, the dispatch's fourth and
+  ## fifth. 3 reads $94 $87 (one slot early, the source's own last byte
+  ## after it), 2 reads $76 $87. With IRQ_SAMPLE_T held at 18 the vector
+  ## choice and the clear move with the pushes: 3 loses 29 rows (this one,
+  ## irq_precedence/late_m0irq_vs_tima_scx{2,3}{,_halt}_1 and most
+  ## `*_late_retrigger_2` arms, both devices), 2 loses 42.
+static: doAssert DISPATCH_PUSH_MCYCLE in 2 .. 4
 
-const IRQ_SAMPLE_T_DS* {.intdefine.} = 16
-  ## IRQ_SAMPLE_T for a dispatch taken in double speed, in CPU T-cycles (an
-  ## odd value is off the dot grid). Re-fit pending, jointly with
-  ## STAT_M0_LEAD_DS and CGB_M0_HALT_BLIND_DS_DOTS; neutral value 16.
+const IRQ_SAMPLE_T_DS* {.intdefine.} = 18
+  ## IRQ_SAMPLE_T for a dispatch taken in double speed, in CPU T-cycles; the
+  ## PPU's sources are judged in dots, two T-cycles each, so 18 and 19 are
+  ## one value. 18 ships, the single-speed figure: one dot into the fifth
+  ## M-cycle. 16 (and 17) lose gambatte `irq_precedence/
+  ## late_m0irq_retrigger_scx1_ds_2`, `serial/
+  ## start_wait_trigger_int8_read_if_ds_2` and `tima/
+  ## tc00_irq_late_retrigger_ds_2` [cgb] (with
+  ## IRQ_SAMPLE_CGB_TIMER_SERIAL_ADD the clear no longer reaches the
+  ## M-cycle's end); 20 loses the seven `*_late_retrigger_ds_1` rows
+  ## (`late_m0irq_retrigger_ds_1`, `ly0/lycint152_lyc{0,153}irq_`,
+  ## `lyc153int_m2irq_`, `m1/lycint143_m1irq_`, `m1/lycint_vblankirq_`,
+  ## `m2int_m2irq_late_retrigger_ds_1`).
+  ## Clean-room: derived from test ROM sources/outputs and dingbat's own trace
+  ## runs; no emulator source consulted.
 const IRQ_SAMPLE_T* {.intdefine.} = 18
   ## T-cycles into the 5 M-cycle interrupt dispatch at which the taken line's
-  ## IF bit is cleared: inside the fifth M-cycle, after the two waits and two
-  ## pushes (Pan Docs, "Interrupt Handling"). Only the clear is here; which
-  ## line is taken is decided between the push bytes (dispatch_interrupt;
-  ## mooneye acceptance/interrupts/ie_push).
+  ## IF bit is cleared: 2 T into the fifth M-cycle, the one that writes PC's
+  ## low byte (DISPATCH_PUSH_MCYCLE; mem_write_head, memory.nim). Only the
+  ## clear is here; which line is taken is decided between the push bytes
+  ## (dispatch_interrupt; mooneye acceptance/interrupts/ie_push).
   ##
-  ## Bracket: gambatte *_late_retrigger (six STAT sources and the timer, both
-  ## devices) re-request the handler's own interrupt one M-cycle later per
-  ## member and read IF inside the second dispatch, so each family measures
-  ## the clear against its source's next rise. 16 (the fifth M-cycle's first
-  ## T) loses the `_2` arms of ly0/lycint152_lyc0irq and irq_precedence/
-  ## late_m0irq_retrigger, whose sources rise mid-M-cycle (the snapback's
-  ## LYC = 0 match, the mode-0 source at STAT_M0_LEAD_T); 17 takes only the
-  ## first pair; 18 takes both (+4); 19 loses late_m0irq_retrigger_scx1_1,
-  ## and 20 also m2int_m2irq_late_retrigger_1 (both devices).
-  ##
-  ## Open (docs/gb-failure-triage.md A2): the `_2` arms of the LYC-, mode-1-
-  ## and timer-first families (12 rows) want the clear at 20 while the mode-2-
-  ## first families want it below 19, one full M-cycle apart with the same
-  ## handler bytes. The dispatch cannot be in two places, so those sources
-  ## reach the dispatch one M-cycle later, relative to the instant IF rises,
-  ## than the mode-2 source does. Settling the per-source rise phases (A3) is
-  ## what moves them, not this constant.
+  ## Bracket: gambatte *_late_retrigger (six STAT sources, the timer and the
+  ## serial port, both devices) re-request the handler's own interrupt one
+  ## M-cycle later per member and read IF inside the second dispatch, so each
+  ## family measures the clear against its source's next rise. 16 and 17
+  ## lose the `_2` arms of irq_precedence/late_m0irq_retrigger, ly0/
+  ## lycint152_lyc{0,153}irq, lyc153int_m2irq, m1/lycint143_m1irq and m1/
+  ## lycint_vblankirq on both devices (sources that rise on the second dot of
+  ## an M-cycle: the comparator's step and what rides it, STAT_LYC_LY_LEAD_
+  ## DOTS, and the mode-0 source at STAT_M0_LEAD_T), 14 rows with the CGB's
+  ## timer and serial `_2` arms (IRQ_SAMPLE_CGB_TIMER_SERIAL_ADD counts from
+  ## here); 19 loses late_m0irq_retrigger_scx1_1 (both devices); 20 also
+  ## m2int_m2irq_late_retrigger_1 and, on a DMG, tima/tc00_irq_late_
+  ## retrigger_2 and serial/start_wait_trigger_int8_read_if_2 (the clear
+  ## would reach the request the unit raises on T 20).
 const HDMA_DISPATCH_FETCH* {.intdefine.} = 1
   ## The end of an interrupt dispatch's first M-cycle (the first of the two
   ## wait M-cycles Pan Docs lists under "Interrupt Handling") is a hand-over
@@ -309,9 +343,6 @@ const HDMA_DISPATCH_FETCH* {.intdefine.} = 1
   ## Only a dispatch under an armed HBlank transfer or a requested burst runs
   ## that M-cycle ahead of its pushes here; 0 = no hand-over inside a
   ## dispatch.
-const IRQ_SAMPLE_CGB_TIMER_SERIAL_ADD* {.intdefine.} = 0
-  ## T-cycles past IRQ_SAMPLE_T at which a CGB dispatch clears a TIMER or
-  ## SERIAL request (0 = with the LCD lines). Re-fit pending; neutral value 0.
 proc dispatch_interrupt(cpu: GbCpu; gb: GB) {.noinline.} =
   ## The taken half of handle_interrupts: push PC, vector, charge 5 M-cycles.
   ## Out of line: two inlined mem_writes give handle_interrupts a prologue
@@ -331,18 +362,24 @@ proc dispatch_interrupt(cpu: GbCpu; gb: GB) {.noinline.} =
     echo "IRQ ly=", gb.fifo_ppu.ly, " dot=", gb.fifo_ppu.cycle_counter,
          " if=", toHex(irq_read(gb.interrupts, 0xFF0F), 2),
          " pc=", toHex(cpu.pc, 4)
-  var elapsed = 8
-  when HDMA_DISPATCH_FETCH != 0 and HDMA_GRANT_FETCH_DOTS >= 0:
-    if unlikely(gb.ppu.hdma_active or gb.ppu.hdma_block_due):
-      # The dispatch's first wait M-cycle, at whose end an owed HBlank
-      # block or a requested burst takes the bus (HDMA_DISPATCH_FETCH).
-      mem_tick_components(gb.memory, gb, 4)
-      elapsed += 4
-      if gb.ppu.hdma_block_due:
-        hdma_grant(gb, 0, cpu.pc, read_byte(gb.memory, gb, int(cpu.pc)), 1)
   # The same OAM-bug M-cycles as PUSH (cpu_push16; Pan Docs lists interrupt
   # handling with it): the SP step here, the two writes in mem_write.
+  let pushed_pc = cpu.pc
+  # The wait M-cycles ahead of the pushes; SP steps in the last of them.
+  var waits = 4 * (DISPATCH_PUSH_MCYCLE - 2)
+  when HDMA_DISPATCH_FETCH != 0 and HDMA_GRANT_FETCH_DOTS >= 0 and
+       DISPATCH_PUSH_MCYCLE > 2:
+    if unlikely(gb.ppu.hdma_active or gb.ppu.hdma_block_due):
+      # The end of the dispatch's first M-cycle, where an owed HBlank block
+      # or a requested burst takes the bus (HDMA_DISPATCH_FETCH). The
+      # transfer's own time is beside the dispatch's five M-cycles.
+      mem_tick_components(gb.memory, gb, 4)
+      waits -= 4
+      if gb.ppu.hdma_block_due:
+        hdma_grant(gb, 0, cpu.pc, read_byte(gb.memory, gb, int(cpu.pc)), 1)
+  mem_tick_components(gb.memory, gb, waits)
   oam_bug_if(gb, cpu.sp, obIdu)
+  mem_tick_components(gb.memory, gb, 4)
   cpu.sp = cpu.sp - 1
   mem_write(gb.memory, gb, int(cpu.sp), uint8(cpu.pc shr 8))
   # Which line is taken is decided between the two push bytes, not at the
@@ -350,18 +387,45 @@ proc dispatch_interrupt(cpu: GbCpu; gb: GB) {.noinline.} =
   # and vectors to $0000 from SP = $0000 (new IE seen) but $0050 from $0001.
   let interrupt = highest_priority(gb.interrupts)
   cpu.sp = cpu.sp - 1
-  mem_write(gb.memory, gb, int(cpu.sp), uint8(cpu.pc and 0xFF))
   cpu.pc = interrupt
-  # Run out to the sample point before clearing IF (IRQ_SAMPLE_T). One call,
-  # not one per M-cycle.
+  # The low byte's M-cycle is the dispatch's last, and the IF clear is inside
+  # it (IRQ_SAMPLE_T): the byte lands, the PPU runs to the sample point, the
+  # bit is cleared, the M-cycle's remaining dots run. The CPU-clocked units
+  # (timer, serial) have run the whole M-cycle by then (mem_tick_bus), so a
+  # request they raise on its last T-cycle is cleared with it.
   let sample_t =
     if gb.memory.current_speed == 1: IRQ_SAMPLE_T_DS else: IRQ_SAMPLE_T
-  if sample_t > elapsed:
-    mem_tick_components(gb.memory, gb, sample_t - elapsed)
-  when IRQ_SAMPLE_CGB_TIMER_SERIAL_ADD != 0:
-    if gb.cgb_enabled and (interrupt == INT_TIMER or interrupt == INT_SERIAL):
-      mem_tick_components(gb.memory, gb, IRQ_SAMPLE_CGB_TIMER_SERIAL_ADD)
+  let rest = mem_write_head(gb.memory, gb, int(cpu.sp), uint8(pushed_pc and 0xFF),
+                            sample_t - 4 * DISPATCH_PUSH_MCYCLE)
   clear_interrupt(gb.interrupts, interrupt)
+  # The timer and the serial port are on the CPU's clock and raise their
+  # request where two M-cycles meet. Counted from the dispatch's first
+  # T-cycle that is T 16, 20, 24...; the clear at `ack_t` takes the ones at
+  # or before it. A CGB clears these two lines later than the LCD's
+  # (IRQ_SAMPLE_CGB_TIMER_SERIAL_ADD, gb.nim).
+  let cpu_line = interrupt == INT_TIMER or interrupt == INT_SERIAL
+  let ack_t = sample_t +
+    (if cpu_line and gb.cgb_enabled: IRQ_SAMPLE_CGB_TIMER_SERIAL_ADD else: 0)
+  when SERIAL_CPU_SAMPLE_T < 4:
+    # The serial tap's edge sits on this M-cycle's last T-cycle (T 20) and
+    # the bus half has already run it: a byte it finished is after the clear
+    # unless the clear reaches T 20.
+    if interrupt == INT_SERIAL and ack_t < 20 and
+       gb.serial.serial_cpu_pre(gb) and gb.serial.serial_edge_finished_byte():
+      gb.interrupts.serial_interrupt = true
+  when IRQ_SAMPLE_CGB_TIMER_SERIAL_ADD != 0:
+    # What the clear still takes after this M-cycle, in the raise sites' own
+    # time (scheduler cycles, which stand at the end of the M-cycle being
+    # run): a serial byte finishing on T n is raised with the scheduler at
+    # n, a TIMA reload landing on T n with it at n + 4 (the reload is on its
+    # M-cycle's first T-cycle, i.e. on the boundary before it).
+    if cpu_line and ack_t >= 20:
+      gb.interrupts.ack_line  = interrupt
+      gb.interrupts.ack_until = gb.scheduler.cycles - CycleCount(20) +
+        CycleCount(ack_t + (if interrupt == INT_TIMER: 4 else: 0))
+    else:
+      gb.interrupts.ack_line = 0'u16
+  mem_write_finish(gb.memory, gb, rest)
   mem_tick_extra(gb.memory, gb, 20)
 
 proc handle_interrupts*(cpu: GbCpu; gb: GB) =

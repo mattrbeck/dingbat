@@ -1,6 +1,6 @@
 # DocBoy Test Suite - Detailed Results
 
-*Generated: 2026-11-13 17:30:19 · Docheinstein/docboy 01e04d3d*
+*Generated: 2026-11-13 17:47:39 · Docheinstein/docboy 01e04d3d*
 
 DocBoy's own ROMs (`docboy/` in its tests/config manifests), each
 scored by the verdict its manifest names, the way DocBoy's runner
@@ -11,47 +11,18 @@ run on a DMG ABC, the three CGB manifests on a CPU CGB E with the
 cart header picking the mode. See tests/README.md for the mechanism
 and docs/gb-failure-triage.md for the failing families.
 
-**8602/8984 passed.**
+**8751/8984 passed.**
 
 ## docboy/dmg/cpu
 
 All 11 tests passed (DMG dmgABC).
 
-## docboy/dmg/ppu (1208/1260 passed)
+## docboy/dmg/ppu (1238/1260 passed)
 
-1208/1260 tests passed on DMG dmgABC, 52 failed:
+1238/1260 tests passed on DMG dmgABC, 22 failed:
 
 | Test | Result |
 |------|--------|
-| dmg/docboy/ppu/oam_scan_blocked_by_dma_nops101_round1 | $FFF0=$02 = fail value (tick 400000) |
-| dmg/docboy/ppu/oam_scan_blocked_by_dma_nops102_round1 | $FFF0=$02 = fail value (tick 400000) |
-| dmg/docboy/ppu/oam_scan_blocked_by_dma_nops103_round1 | $FFF0=$02 = fail value (tick 400000) |
-| dmg/docboy/ppu/oam_scan_blocked_by_dma_nops104_round1 | $FFF0=$02 = fail value (tick 400008) |
-| dmg/docboy/ppu/oam_scan_blocked_by_dma_nops105_round1 | $FFF0=$02 = fail value (tick 400000) |
-| dmg/docboy/ppu/oam_scan_blocked_by_dma_nops116_round1 | $FFF0=$02 = fail value (tick 400000) |
-| dmg/docboy/ppu/oam_scan_blocked_by_dma_nops117_round1 | $FFF0=$02 = fail value (tick 400004) |
-| dmg/docboy/ppu/oam_scan_blocked_by_dma_nops118_round1 | $FFF0=$02 = fail value (tick 400004) |
-| dmg/docboy/ppu/oam_scan_blocked_by_dma_nops119_round1 | $FFF0=$02 = fail value (tick 400004) |
-| dmg/docboy/ppu/oam_scan_blocked_by_dma_nops120_round1 | $FFF0=$02 = fail value (tick 400000) |
-| dmg/docboy/ppu/pixel_transfer_timing_window_wx0_round1 | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/ppu/pixel_transfer_timing_window_wx0_round2 | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/ppu/pixel_transfer_timing_window_wx15_round1 | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/ppu/pixel_transfer_timing_window_wx17_round1 | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/ppu/pixel_transfer_timing_window_wx1_round1 | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/ppu/pixel_transfer_timing_window_wx1_round2 | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/ppu/pixel_transfer_timing_window_wx7_scx0_round1 | $FFF0=$02 = fail value (tick 100004) |
-| dmg/docboy/ppu/pixel_transfer_timing_window_wx7_scx7_round1 | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/ppu/pixel_transfer_timing_window_wx8_scx7_round1 | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/ppu/pixel_transfer_timing_window_wx_reenable_retrigger_wx128_round1 | $FFF0=$02 = fail value (tick 400000) |
-| dmg/docboy/ppu/pixel_transfer_timing_window_wx_reenable_retrigger_wx129_round1 | $FFF0=$02 = fail value (tick 400000) |
-| dmg/docboy/ppu/pixel_transfer_timing_window_wx_reenable_retrigger_wx130_round1 | $FFF0=$02 = fail value (tick 400000) |
-| dmg/docboy/ppu/pixel_transfer_timing_window_wx_reenable_retrigger_wx131_round1 | $FFF0=$02 = fail value (tick 400000) |
-| dmg/docboy/ppu/pixel_transfer_timing_window_wx_reenable_retrigger_wx132_round1 | $FFF0=$02 = fail value (tick 400000) |
-| dmg/docboy/ppu/pixel_transfer_timing_window_wx_reenable_retrigger_wx133_round1 | $FFF0=$02 = fail value (tick 400000) |
-| dmg/docboy/ppu/pixel_transfer_timing_window_wx_reenable_retrigger_wx134_round1 | $FFF0=$02 = fail value (tick 400000) |
-| dmg/docboy/ppu/pixel_transfer_timing_window_wx_reenable_retrigger_wx135_round1 | $FFF0=$02 = fail value (tick 400000) |
-| dmg/docboy/ppu/pixel_transfer_timing_winon_bgoff_round1 | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/ppu/turn_on_ly0_sprites_round2 | $FFF0=$02 = fail value (tick 100004) |
 | dmg/docboy/ppu/interactive/stop_read_ly_alt_alt_round1 | $FFF0=$02 = fail value (tick 100000) |
 | dmg/docboy/ppu/interactive/stop_read_ly_alt_alt_round2 | $FFF0=$02 = fail value (tick 100000) |
 | dmg/docboy/ppu/interactive/stop_read_ly_alt_round1 | $FFF0=$02 = fail value (tick 100000) |
@@ -68,7 +39,6 @@ All 11 tests passed (DMG dmgABC).
 | dmg/docboy/ppu/visual/stop_during_pixel_transfer | timeout, last check: 23040/23040 pixels differ, first at row 0 col 0: got $84A0 want $AD00 |
 | dmg/docboy/ppu/visual/stop_during_vblank | timeout, last check: 23040/23040 pixels differ, first at row 0 col 0: got $84A0 want $AD00 |
 | dmg/docboy/ppu/visual/stop_ppu_off | timeout, last check: 23040/23040 pixels differ, first at row 0 col 0: got $84A0 want $AD00 |
-| dmg/docboy/ppu/visual/window_trigger_win_disabled_blink_enabled | timeout, last check: 2268/23040 pixels differ, first at row 13 col 1: got $84A0 want $4B40 |
 | dmg/docboy/ppu/visual/window_wx0_scx1 | timeout, last check: 8/23040 pixels differ, first at row 0 col 7: got $1200 want $84A0 |
 | dmg/docboy/ppu/visual/window_wx0_scx2 | timeout, last check: 8/23040 pixels differ, first at row 0 col 6: got $1200 want $84A0 |
 | dmg/docboy/ppu/visual/window_wx0_scx3 | timeout, last check: 8/23040 pixels differ, first at row 0 col 5: got $1200 want $84A0 |
@@ -113,78 +83,44 @@ All 23 tests passed (DMG dmgABC).
 
 All 258 tests passed (DMG dmgABC).
 
-## docboy/dmg/stat_write_bug (25/29 passed)
+## docboy/dmg/stat_write_bug
 
-25/29 tests passed on DMG dmgABC, 4 failed:
-
-| Test | Result |
-|------|--------|
-| dmg/docboy/stat_write_bug/stat_write_bug_hblank_scx1_round2 | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/stat_write_bug/stat_write_bug_hblank_scx2_round2 | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/stat_write_bug/stat_write_bug_hblank_scx5_round2 | $FFF0=$02 = fail value (tick 100004) |
-| dmg/docboy/stat_write_bug/stat_write_bug_hblank_scx6_round2 | $FFF0=$02 = fail value (tick 100004) |
+All 29 tests passed (DMG dmgABC).
 
 ## docboy/dmg/timers
 
 All 10 tests passed (DMG dmgABC).
 
-## docboy/dmg/interrupts (156/158 passed)
+## docboy/dmg/interrupts
 
-156/158 tests passed on DMG dmgABC, 2 failed:
-
-| Test | Result |
-|------|--------|
-| dmg/docboy/interrupts/hblank_stat_interrupt_reset_if_scx3_round2 | $FFF0=$02 = fail value (tick 100012) |
-| dmg/docboy/interrupts/hblank_stat_interrupt_reset_if_scx7_round3 | $FFF0=$02 = fail value (tick 100000) |
+All 158 tests passed (DMG dmgABC).
 
 ## docboy/dmg/dma
 
 All 68 tests passed (DMG dmgABC).
 
-## docboy/dmg/serial (58/76 passed)
+## docboy/dmg/serial
 
-58/76 tests passed on DMG dmgABC, 18 failed:
-
-| Test | Result |
-|------|--------|
-| dmg/docboy/serial/serial_timing_change_sb_during_transfer_sb_round1 | $FFF0=$02 = fail value (tick 100004) |
-| dmg/docboy/serial/serial_timing_change_sb_during_transfer_sb_round2 | $FFF0=$02 = fail value (tick 100004) |
-| dmg/docboy/serial/serial_timing_change_sb_during_transfer_sc_round1 | $FFF0=$02 = fail value (tick 100004) |
-| dmg/docboy/serial/serial_timing_change_sb_during_transfer_sc_round2 | $FFF0=$02 = fail value (tick 100004) |
-| dmg/docboy/serial/serial_timing_nops0_round2 | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/serial/serial_timing_nops64_round2 | $FFF0=$02 = fail value (tick 100004) |
-| dmg/docboy/serial/serial_timing_reset_div_during_transfer_sc_alt_round2 | $FFF0=$02 = fail value (tick 100004) |
-| dmg/docboy/serial/serial_timing_reset_div_during_transfer_sc_round2 | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/serial/serial_timing_reset_div_during_transfer_ticks_alt_sb_round2 | $FFF0=$02 = fail value (tick 100012) |
-| dmg/docboy/serial/serial_timing_reset_div_during_transfer_ticks_sb | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/serial/serial_timing_sb_bit0_round2 | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/serial/serial_timing_sb_bit1_round2 | $FFF0=$02 = fail value (tick 100008) |
-| dmg/docboy/serial/serial_timing_sb_bit2_round2 | $FFF0=$02 = fail value (tick 100004) |
-| dmg/docboy/serial/serial_timing_sb_bit3_round2 | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/serial/serial_timing_sb_bit4_round2 | $FFF0=$02 = fail value (tick 100004) |
-| dmg/docboy/serial/serial_timing_sb_bit5_round2 | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/serial/serial_timing_sb_bit6_round2 | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/serial/serial_timing_sb_bit7_round2 | $FFF0=$02 = fail value (tick 100000) |
+All 76 tests passed (DMG dmgABC).
 
 ## docboy/dmg/joypad
 
 All 32 tests passed (DMG dmgABC).
 
-## docboy/dmg/apu (302/307 passed)
+## docboy/dmg/apu (303/307 passed)
 
-302/307 tests passed on DMG dmgABC, 5 failed:
+303/307 tests passed on DMG dmgABC, 4 failed:
 
 | Test | Result |
 |------|--------|
 | dmg/docboy/apu/ch1_period_sweep_change_direction_twice_period_overflow_round1_2 | $FFF0=$02 = fail value (tick 100012) |
-| dmg/docboy/apu/ch1_period_sweep_change_period_nr14_during_recalc_delay14285_round2 | $FFF0=$02 = fail value (tick 300000) |
 | dmg/docboy/apu/ch1_period_sweep_change_step_6_to_5_period152_round2 | $FFF0=$02 = fail value (tick 200012) |
 | dmg/docboy/apu/ch1_period_sweep_step6_period93_round2 | $FFF0=$02 = fail value (tick 200000) |
 | dmg/docboy/apu/ch1_period_sweep_step7_period247 | $FFF0=$02 = fail value (tick 600000) |
 
-## docboy/cgb/boot (47/68 passed)
+## docboy/cgb/boot (48/68 passed)
 
-47/68 tests passed on CGB cgbE, 21 failed:
+48/68 tests passed on CGB cgbE, 20 failed:
 
 | Test | Result |
 |------|--------|
@@ -208,7 +144,6 @@ All 32 tests passed (DMG dmgABC).
 | cgb/docboy/boot/boot_div_title_BF__cgb_flag_00_old_license_01_new_license_00_round2 | $FFF0=$02 = fail value (tick 100000) |
 | cgb/docboy/boot/boot_div_title_F4-_cgb_flag_00_old_license_01_new_license_00_round1 | $FFF0=$02 = fail value (tick 100004) |
 | cgb/docboy/boot/boot_div_title_F4-_cgb_flag_00_old_license_01_new_license_00_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/boot/boot_regs_cgb | $FFF0=$02 = fail value (tick 100000) |
 
 ## docboy/cgb/banks
 
@@ -242,16 +177,9 @@ All 41 tests passed (CGB cgbE).
 
 All 639 tests passed (CGB cgbE).
 
-## docboy/cgb/serial (13/17 passed)
+## docboy/cgb/serial
 
-13/17 tests passed on CGB cgbE, 4 failed:
-
-| Test | Result |
-|------|--------|
-| cgb/docboy/serial/serial_timing_change_to_high_speed_during_transfer_alt_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/serial/serial_timing_high_speed_nops0_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/serial/serial_timing_high_speed_nops2_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/serial/serial_timing_high_speed_nops32_round2 | $FFF0=$02 = fail value (tick 100012) |
+All 17 tests passed (CGB cgbE).
 
 ## docboy/cgb/ir
 
@@ -265,25 +193,16 @@ All 6 tests passed (CGB cgbE).
 
 All 4 tests passed (CGB cgbE).
 
-## docboy/cgb/ppu (382/403 passed)
+## docboy/cgb/ppu (391/403 passed)
 
-382/403 tests passed on CGB cgbE, 21 failed:
+391/403 tests passed on CGB cgbE, 12 failed:
 
 | Test | Result |
 |------|--------|
-| cgb/docboy/ppu/visual/change_wx_glitch_wx6_nops16 | timeout, last check: 3042/23040 pixels differ, first at row 10 col 6: got $39C7 want $FFE0 |
-| cgb/docboy/ppu/visual/change_wx_glitch_wx6_nops17 | timeout, last check: 7353/23040 pixels differ, first at row 8 col 10: got $FFE0 want $39C7 |
-| cgb/docboy/ppu/visual/change_wx_glitch_wx7_nops17 | timeout, last check: 2895/23040 pixels differ, first at row 14 col 10: got $39C7 want $FFE0 |
-| cgb/docboy/ppu/visual/change_wx_glitch_wx8_nops17 | timeout, last check: 2895/23040 pixels differ, first at row 14 col 10: got $39C7 want $FFE0 |
 | cgb/docboy/ppu/visual/change_wx_glitch_wx8_nops18 | timeout, last check: 4/23040 pixels differ, first at row 17 col 2: got $39C7 want $FFE0 |
 | cgb/docboy/ppu/visual/change_wx_glitch_wx8_nops18_alt | timeout, last check: 4/23040 pixels differ, first at row 17 col 2: got $FFE0 want $39C7 |
 | cgb/docboy/ppu/visual/stop_during_pixel_transfer_alt | timeout, last check: 22801/23040 pixels differ, first at row 1 col 79: got $FFFF want $FFE0 |
 | cgb/docboy/ppu/visual/stop_ly42_during_hblank | timeout, last check: 6880/23040 pixels differ, first at row 0 col 0: got $0000 want $07FF |
-| cgb/docboy/ppu/visual/window_bg_reprise_wx14 | timeout, last check: 8/23040 pixels differ, first at row 12 col 23: got $39C7 want $F81F |
-| cgb/docboy/ppu/visual/window_bg_reprise_wx15 | timeout, last check: 8/23040 pixels differ, first at row 12 col 24: got $39C7 want $F81F |
-| cgb/docboy/ppu/visual/window_bg_reprise_wx22 | timeout, last check: 8/23040 pixels differ, first at row 12 col 23: got $39C7 want $F81F |
-| cgb/docboy/ppu/visual/window_bg_reprise_wx23 | timeout, last check: 8/23040 pixels differ, first at row 12 col 24: got $39C7 want $F81F |
-| cgb/docboy/ppu/visual/window_bg_reprise_wx23 #2 | timeout, last check: 8/23040 pixels differ, first at row 12 col 24: got $39C7 want $F81F |
 | cgb/docboy/ppu/visual/window_wx0_scx1 | timeout, last check: 64/23040 pixels differ, first at row 0 col 0: got $39C7 want $FFE0 |
 | cgb/docboy/ppu/visual/window_wx0_scx1_fancy_tile0 | timeout, last check: 1016/23040 pixels differ, first at row 0 col 0: got $39C7 want $F81F |
 | cgb/docboy/ppu/visual/window_wx0_scx2 | timeout, last check: 56/23040 pixels differ, first at row 0 col 0: got $39C7 want $FFE0 |
@@ -297,24 +216,18 @@ All 4 tests passed (CGB cgbE).
 
 All 17 tests passed (CGB cgbE).
 
-## docboy/cgb/apu/ch1 (1129/1132 passed)
+## docboy/cgb/apu/ch1 (1130/1132 passed)
 
-1129/1132 tests passed on CGB cgbE, 3 failed:
+1130/1132 tests passed on CGB cgbE, 2 failed:
 
 | Test | Result |
 |------|--------|
 | cgb/docboy/apu/ch1/ch1_period_sweep_change_pace_4_to_6_during_recalc_round1_1 | $FFF0=$02 = fail value (tick 1500000) |
-| cgb/docboy/apu/ch1/ch1_period_sweep_change_period_nr14_during_recalc_delay14285_round2 | $FFF0=$02 = fail value (tick 300004) |
 | cgb/docboy/apu/ch1/ch1_period_sweep_change_step_during_recalc_0_to_4_alt_round1_2 | $FFF0=$02 = fail value (tick 600004) |
 
-## docboy/cgb/apu/ch2 (24/26 passed)
+## docboy/cgb/apu/ch2
 
-24/26 tests passed on CGB cgbE, 2 failed:
-
-| Test | Result |
-|------|--------|
-| cgb/docboy/apu/ch2/ch2_volume_sweep_retrigger_divapu0_round1 | $FFF0=$02 = fail value (tick 200008) |
-| cgb/docboy/apu/ch2/ch2_volume_sweep_retrigger_divapu0_round2 | $FFF0=$02 = fail value (tick 200012) |
+All 26 tests passed (CGB cgbE).
 
 ## docboy/cgb/apu/ch3
 
@@ -324,22 +237,14 @@ All 109 tests passed (CGB cgbE).
 
 All 69 tests passed (CGB cgbE).
 
-## docboy/cgb/double_speed/apu/ch1 (600/613 passed)
+## docboy/cgb/double_speed/apu/ch1 (608/613 passed)
 
-600/613 tests passed on CGB cgbE, 13 failed:
+608/613 tests passed on CGB cgbE, 5 failed:
 
 | Test | Result |
 |------|--------|
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_change_period_nr14_during_recalc_delay12241_round2 | $FFF0=$02 = fail value (tick 400000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_change_period_nr14_during_recalc_delay12242_round2 | $FFF0=$02 = fail value (tick 400000) |
 | cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_change_period_nr14_during_recalc_delay12243_period_round2 | $FFF0=$02 = fail value (tick 300000) |
 | cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_change_period_nr14_during_recalc_delay12243_period_round4 | $FFF0=$02 = fail value (tick 300000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_change_period_nr14_during_recalc_double_trigger_delay0_delay12243_round1 | $FFF0=$02 = fail value (tick 400000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_change_period_nr14_during_recalc_double_trigger_delay0_delay12244_round1 | $FFF0=$02 = fail value (tick 400000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_change_period_nr14_during_recalc_double_trigger_delay1_delay12244_round1 | $FFF0=$02 = fail value (tick 400000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_change_period_nr14_during_recalc_double_trigger_delay1_delay12245_round1 | $FFF0=$02 = fail value (tick 400000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_change_period_nr14_during_recalc_double_trigger_delay2_delay12245_round1 | $FFF0=$02 = fail value (tick 400000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_change_period_nr14_during_recalc_double_trigger_delay2_delay12246_round1 | $FFF0=$02 = fail value (tick 400000) |
 | cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_change_step_7_to_0_during_recalc_delay16_after_trigger | $FFF0=$02 = fail value (tick 100002) |
 | cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_disable_on_triple_trigger_step4_delay4_2_round1 | $FFF0=$02 = fail value (tick 100006) |
 | cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_disable_on_triple_trigger_step4_delay4_3_round1 | $FFF0=$02 = fail value (tick 100006) |
@@ -454,51 +359,17 @@ All 50 tests passed (CGB cgbE).
 
 All 67 tests passed (CGB cgbE).
 
-## docboy/cgb/double_speed/interrupts (233/246 passed)
+## docboy/cgb/double_speed/interrupts
 
-233/246 tests passed on CGB cgbE, 13 failed:
+All 246 tests passed (CGB cgbE).
 
-| Test | Result |
-|------|--------|
-| cgb/docboy/double_speed/interrupts/double_speed_interrupt_stat_a_scx1 | $FFF0=$02 = fail value (tick 100006) |
-| cgb/docboy/double_speed/interrupts/double_speed_interrupt_stat_a_scx3 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/interrupts/double_speed_interrupt_stat_b_scx1 | $FFF0=$02 = fail value (tick 100004) |
-| cgb/docboy/double_speed/interrupts/double_speed_interrupt_stat_b_scx3 | $FFF0=$02 = fail value (tick 100006) |
-| cgb/docboy/double_speed/interrupts/single_speed_interrupt_vblank_c | $FFF0=$02 = fail value (tick 500012) |
-| cgb/docboy/double_speed/interrupts/single_speed_interrupt_vblank_c_halted_round1 | $FFF0=$02 = fail value (tick 500004) |
-| cgb/docboy/double_speed/interrupts/single_speed_interrupt_vblank_d_halted_round1 | $FFF0=$02 = fail value (tick 500004) |
-| cgb/docboy/double_speed/interrupts/speed_switch_to_double_interrupt_stat_aligned_with_stop_nops_36_scx1_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/interrupts/speed_switch_to_double_interrupt_stat_aligned_with_stop_nops_36_scx3_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/interrupts/speed_switch_to_double_interrupt_stat_aligned_with_stop_nops_37_scx3_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/interrupts/speed_switch_to_double_interrupt_stat_scx1_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/interrupts/speed_switch_to_double_interrupt_stat_scx3_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/interrupts/speed_switch_to_single_interrupt_vblank_c_round1 | $FFF0=$02 = fail value (tick 400002) |
+## docboy/cgb/double_speed/ppu
 
-## docboy/cgb/double_speed/ppu (346/357 passed)
+All 357 tests passed (CGB cgbE).
 
-346/357 tests passed on CGB cgbE, 11 failed:
+## docboy/cgb/double_speed/serial
 
-| Test | Result |
-|------|--------|
-| cgb/docboy/double_speed/ppu/double_speed_ppu_d3_oam_round2 | $FFF0=$02 = fail value (tick 300000) |
-| cgb/docboy/double_speed/ppu/double_speed_ppu_d3_px_round2 | $FFF0=$02 = fail value (tick 300000) |
-| cgb/docboy/double_speed/ppu/double_speed_ppu_hblank_if_a_scx1_round1 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/ppu/double_speed_ppu_hblank_if_a_scx3_round1 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/ppu/double_speed_ppu_hblank_if_b_scx1_round1 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/ppu/double_speed_ppu_hblank_if_b_scx3_round1 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/ppu/double_speed_ppu_vram_write_block_timing_ly0_1_out_of_4 | $FFF0=$02 = fail value (tick 3900000) |
-| cgb/docboy/double_speed/ppu/single_speed_ppu_s3_vblank_round1 | $FFF0=$02 = fail value (tick 300000) |
-| cgb/docboy/double_speed/ppu/single_speed_ppu_s3b_vblank_round1 | $FFF0=$02 = fail value (tick 300002) |
-| cgb/docboy/double_speed/ppu/single_speed_ppu_s4b_vblank_round1 | $FFF0=$02 = fail value (tick 300002) |
-| cgb/docboy/double_speed/ppu/single_speed_ppu_sx_vblank_round1 | $FFF0=$02 = fail value (tick 1500000) |
-
-## docboy/cgb/double_speed/serial (3/4 passed)
-
-3/4 tests passed on CGB cgbE, 1 failed:
-
-| Test | Result |
-|------|--------|
-| cgb/docboy/double_speed/serial/double_speed_serial_high_speed_round2 | $FFF0=$02 = fail value (tick 100000) |
+All 4 tests passed (CGB cgbE).
 
 ## docboy/cgb/double_speed/timers
 
@@ -549,58 +420,14 @@ All 2 tests passed (CGB cgbE).
 
 All 6 tests passed (CGB cgbE).
 
-## docboy/cgb_dmg_mode/ppu (330/440 passed)
+## docboy/cgb_dmg_mode/ppu (374/440 passed)
 
-330/440 tests passed on CGB cgbE, 110 failed:
+374/440 tests passed on CGB cgbE, 66 failed:
 
 | Test | Result |
 |------|--------|
-| cgb_dmg_mode/docboy/ppu/m3_lcdc_win_en_change_multiple_wx_timing_ly32_sprites_x79 | $FFF0=$02 = fail value (tick 300004) |
-| cgb_dmg_mode/docboy/ppu/m3_lcdc_win_en_change_multiple_wx_timing_ly32_sprites_x81 | $FFF0=$02 = fail value (tick 300008) |
-| cgb_dmg_mode/docboy/ppu/m3_lcdc_win_en_change_multiple_wx_timing_ly32_sprites_x82 | $FFF0=$02 = fail value (tick 300008) |
-| cgb_dmg_mode/docboy/ppu/m3_lcdc_win_en_change_multiple_wx_timing_ly32_sprites_x83 | $FFF0=$02 = fail value (tick 300008) |
-| cgb_dmg_mode/docboy/ppu/m3_lcdc_win_en_change_multiple_wx_timing_ly32_sprites_x84 | $FFF0=$02 = fail value (tick 300008) |
-| cgb_dmg_mode/docboy/ppu/m3_lcdc_win_en_change_multiple_wx_timing_ly32_sprites_x85 | $FFF0=$02 = fail value (tick 300004) |
-| cgb_dmg_mode/docboy/ppu/m3_lcdc_win_en_change_multiple_wx_timing_ly32_sprites_x86 | $FFF0=$02 = fail value (tick 300004) |
-| cgb_dmg_mode/docboy/ppu/m3_lcdc_win_en_change_multiple_wx_timing_ly32_sprites_x87 | $FFF0=$02 = fail value (tick 300004) |
-| cgb_dmg_mode/docboy/ppu/m3_lcdc_win_en_change_multiple_wx_timing_ly33_sprites_x79 | $FFF0=$02 = fail value (tick 300000) |
-| cgb_dmg_mode/docboy/ppu/m3_lcdc_win_en_change_multiple_wx_timing_ly33_sprites_x81 | $FFF0=$02 = fail value (tick 300000) |
-| cgb_dmg_mode/docboy/ppu/m3_lcdc_win_en_change_multiple_wx_timing_ly33_sprites_x82 | $FFF0=$02 = fail value (tick 300000) |
-| cgb_dmg_mode/docboy/ppu/m3_lcdc_win_en_change_multiple_wx_timing_ly33_sprites_x83 | $FFF0=$02 = fail value (tick 300000) |
-| cgb_dmg_mode/docboy/ppu/m3_lcdc_win_en_change_multiple_wx_timing_ly33_sprites_x84 | $FFF0=$02 = fail value (tick 300000) |
-| cgb_dmg_mode/docboy/ppu/m3_lcdc_win_en_change_multiple_wx_timing_ly33_sprites_x85 | $FFF0=$02 = fail value (tick 300000) |
-| cgb_dmg_mode/docboy/ppu/m3_lcdc_win_en_change_multiple_wx_timing_ly33_sprites_x86 | $FFF0=$02 = fail value (tick 300000) |
-| cgb_dmg_mode/docboy/ppu/m3_lcdc_win_en_change_multiple_wx_timing_ly33_sprites_x87 | $FFF0=$02 = fail value (tick 300000) |
-| cgb_dmg_mode/docboy/ppu/m3_lcdc_win_en_change_multiple_wx_timing_ly34_sprites_x79 | $FFF0=$02 = fail value (tick 300004) |
-| cgb_dmg_mode/docboy/ppu/m3_lcdc_win_en_change_multiple_wx_timing_ly34_sprites_x80 | $FFF0=$02 = fail value (tick 300000) |
-| cgb_dmg_mode/docboy/ppu/m3_lcdc_win_en_change_multiple_wx_timing_ly34_sprites_x83 | $FFF0=$02 = fail value (tick 300000) |
-| cgb_dmg_mode/docboy/ppu/m3_lcdc_win_en_change_multiple_wx_timing_ly34_sprites_x84 | $FFF0=$02 = fail value (tick 300000) |
-| cgb_dmg_mode/docboy/ppu/m3_lcdc_win_en_change_multiple_wx_timing_ly34_sprites_x85 | $FFF0=$02 = fail value (tick 300004) |
-| cgb_dmg_mode/docboy/ppu/m3_lcdc_win_en_change_multiple_wx_timing_ly34_sprites_x86 | $FFF0=$02 = fail value (tick 300004) |
-| cgb_dmg_mode/docboy/ppu/m3_lcdc_win_en_change_multiple_wx_timing_ly34_sprites_x87 | $FFF0=$02 = fail value (tick 300004) |
-| cgb_dmg_mode/docboy/ppu/m3_lcdc_win_en_change_multiple_wx_timing_ly34_sprites_x88 | $FFF0=$02 = fail value (tick 300000) |
-| cgb_dmg_mode/docboy/ppu/m3_lcdc_win_en_change_multiple_wx_timing_ly35_sprites_x79 | $FFF0=$02 = fail value (tick 300008) |
-| cgb_dmg_mode/docboy/ppu/m3_lcdc_win_en_change_multiple_wx_timing_ly35_sprites_x80 | $FFF0=$02 = fail value (tick 300000) |
-| cgb_dmg_mode/docboy/ppu/m3_lcdc_win_en_change_multiple_wx_timing_ly35_sprites_x84 | $FFF0=$02 = fail value (tick 300012) |
-| cgb_dmg_mode/docboy/ppu/m3_lcdc_win_en_change_multiple_wx_timing_ly35_sprites_x85 | $FFF0=$02 = fail value (tick 300008) |
-| cgb_dmg_mode/docboy/ppu/m3_lcdc_win_en_change_multiple_wx_timing_ly35_sprites_x86 | $FFF0=$02 = fail value (tick 300008) |
-| cgb_dmg_mode/docboy/ppu/m3_lcdc_win_en_change_multiple_wx_timing_ly35_sprites_x87 | $FFF0=$02 = fail value (tick 300008) |
-| cgb_dmg_mode/docboy/ppu/m3_lcdc_win_en_change_multiple_wx_timing_ly35_sprites_x88 | $FFF0=$02 = fail value (tick 300000) |
-| cgb_dmg_mode/docboy/ppu/m3_lcdc_win_en_change_multiple_wx_timing_ly36_sprites_x79 | $FFF0=$02 = fail value (tick 300000) |
-| cgb_dmg_mode/docboy/ppu/m3_lcdc_win_en_change_multiple_wx_timing_ly36_sprites_x80 | $FFF0=$02 = fail value (tick 300000) |
-| cgb_dmg_mode/docboy/ppu/m3_lcdc_win_en_change_multiple_wx_timing_ly36_sprites_x85 | $FFF0=$02 = fail value (tick 300000) |
-| cgb_dmg_mode/docboy/ppu/m3_lcdc_win_en_change_multiple_wx_timing_ly36_sprites_x86 | $FFF0=$02 = fail value (tick 300000) |
-| cgb_dmg_mode/docboy/ppu/m3_lcdc_win_en_change_multiple_wx_timing_ly36_sprites_x87 | $FFF0=$02 = fail value (tick 300000) |
-| cgb_dmg_mode/docboy/ppu/m3_lcdc_win_en_change_multiple_wx_timing_ly36_sprites_x88 | $FFF0=$02 = fail value (tick 300000) |
-| cgb_dmg_mode/docboy/ppu/m3_lcdc_win_en_change_multiple_wx_timing_ly37_sprites_x79 | $FFF0=$02 = fail value (tick 300000) |
-| cgb_dmg_mode/docboy/ppu/m3_lcdc_win_en_change_multiple_wx_timing_ly37_sprites_x80 | $FFF0=$02 = fail value (tick 300004) |
-| cgb_dmg_mode/docboy/ppu/m3_lcdc_win_en_change_multiple_wx_timing_ly37_sprites_x85 | $FFF0=$02 = fail value (tick 300000) |
-| cgb_dmg_mode/docboy/ppu/m3_lcdc_win_en_change_multiple_wx_timing_ly37_sprites_x86 | $FFF0=$02 = fail value (tick 300000) |
-| cgb_dmg_mode/docboy/ppu/m3_lcdc_win_en_change_multiple_wx_timing_ly37_sprites_x87 | $FFF0=$02 = fail value (tick 300000) |
-| cgb_dmg_mode/docboy/ppu/m3_lcdc_win_en_change_multiple_wx_timing_ly37_sprites_x88 | $FFF0=$02 = fail value (tick 300004) |
 | cgb_dmg_mode/docboy/ppu/visual/change_bgp_or_bug_checksum_d1 | timeout, last check: 23040/23040 pixels differ, first at row 0 col 0: got $0318 want $FA89 |
 | cgb_dmg_mode/docboy/ppu/visual/change_bgp_or_bug_checksum_d1_first_dot | timeout, last check: 23040/23040 pixels differ, first at row 0 col 0: got $0318 want $FA89 |
-| cgb_dmg_mode/docboy/ppu/visual/enable_win_during_pixel_transfer_round1 | timeout, last check: 128/23040 pixels differ, first at row 8 col 15: got $0318 want $FFFF |
 | cgb_dmg_mode/docboy/ppu/visual/palettes_checksum_01 | timeout, last check: 2816/23040 pixels differ, first at row 8 col 0: got $7FE6 want $FD6C |
 | cgb_dmg_mode/docboy/ppu/visual/palettes_checksum_0c | timeout, last check: 2816/23040 pixels differ, first at row 8 col 0: got $7FE6 want $FD6C |
 | cgb_dmg_mode/docboy/ppu/visual/palettes_checksum_10 | timeout, last check: 2816/23040 pixels differ, first at row 8 col 0: got $7FE6 want $FD6C |

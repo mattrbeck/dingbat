@@ -76,14 +76,21 @@ proc skip_boot*(t: GbTimer; gb: GB) =
     # The length gate goes with the step, as memory.skip_boot sets it.
     gb.apu.first_half_of_length_period = (gb.apu.frame_sequencer_stage and 1) == 1
 
-const TAC_SELECT_LEAD_T* {.intdefine.} = 4
+const TAC_SELECT_LEAD_T* {.intdefine.} = 0
   ## T-cycles before the end of a TAC write's M-cycle at which the newly
   ## selected divider bit is sampled; the bit being left stays the latched
   ## `previous_bit`. A select change can tick TIMA by itself (Pan Docs, "Timer
-  ## Obscure Behaviour"). 0 (compiled out): both taps are judged at the end
-  ## of the write. Re-fit pending; neutral value 4. A $FF05 read DOES see an
-  ## increment or reload that landed in its own M-cycle (unlike SB/SC/IF, see
-  ## SERIAL_CPU_SAMPLE_T); a pre-edge latch for TIMA loses 18+ tima rows.
+  ## Obscure Behaviour"). 0 ships (compiled out): both taps are judged at
+  ## the end of the write's M-cycle, the divider as the write leaves it.
+  ## gambatte `tima/tc00_late_tc01_{1..8}` (both devices) switch the tap from
+  ## bit 9 to bit 3 one M-cycle apart around a TIMA tick and read TIMA; 1, 2,
+  ## 3 and 4 each lose `_5` and `_7` on both devices (the old tap's fall and
+  ## the new tap's level are then judged four divider counts apart and the
+  ## switch makes, or swallows, a tick hardware does not). A $FF05 read DOES
+  ## see an increment or reload that landed in its own M-cycle (unlike
+  ## SB/SC/IF, see SERIAL_CPU_SAMPLE_T); a pre-edge latch for TIMA loses 18+
+  ## tima rows. Clean-room: derived from test ROM sources/outputs and
+  ## dingbat's own trace runs; no emulator source consulted.
 
 const SPEED_SWITCH_IRQ_LEAF_HOLD_T* {.intdefine.} = 8
   ## T-cycles the divider stops counting (`GbTimer.hold_t`) after a speed
@@ -130,7 +137,12 @@ proc timer_reload_tima(t: GbTimer; gb: GB) =
     # Diagnostic (tools only): the divider the overflow reload landed on, the
     # anchor of the gambatte speedchange*_tima0N_* rows.
     echo "TIMAIRQ tdiv=", t.tdiv, " tap=", t.bit_for_tima
-  gb.interrupts.timer_interrupt = true
+  when IRQ_SAMPLE_CGB_TIMER_SERIAL_ADD != 0:
+    # A CGB dispatch that took the timer line still holds it acknowledged.
+    if not irq_ack_swallows(gb.interrupts, INT_TIMER, gb.scheduler.cycles):
+      gb.interrupts.timer_interrupt = true
+  else:
+    gb.interrupts.timer_interrupt = true
   when defined(gb_io_trace):
     echo "TIMERIF ly=", gb.ppu.ly, " dot=", gb.ppu.cycle_counter, " sched=", gb.scheduler.cycles
   t.tima = t.tma

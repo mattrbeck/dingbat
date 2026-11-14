@@ -823,13 +823,28 @@ proc mem_write_tail(mem: GbMemory; gb: GB) {.noinline.} =
     mem_tick_ppu(mem, gb, 4)
   mem_flush_deferred(mem, gb)
 
-const IF_WRITE_LAND_DOTS* {.intdefine.} = 0
+const IF_WRITE_LAND_DOTS* {.intdefine.} = 1
   ## Dots into its M-cycle at which a CPU write to IF lands: an interrupt
-  ## request raised in those dots is overwritten by the write rather than
-  ## surviving it (0 = at the top of the M-cycle). Re-fit pending, jointly
-  ## with LYC_SRC_RELATCH_ADJ; neutral value 0.
-const IF_WRITE_LAND_DOTS_DS* {.intdefine.} = 0
-  ## The same in double speed, in dots. Re-fit pending; neutral value 0.
+  ## request the PPU raises in those dots is overwritten by the write rather
+  ## than surviving it (0 = at the top of the M-cycle). 1 ships: a request
+  ## rising on the write's first dot is lost, one rising on its second
+  ## survives. 0 loses gambatte `m2int_m0irq/m2int_m0irq_scx3_ifw_{2,4}`
+  ## (both devices; IF cleared on the dot the mode-0 source rises, read back
+  ## clear) and DocBoy `dmg/interrupts/hblank_stat_interrupt_reset_if_
+  ## scx3_round2`, `_scx7_round3`; 2 loses 21, among them `ly0/
+  ## lycint152_lyc{0,153}irq_ifw_1`, `lyc153int_m2irq_ifw_1`, `m1/
+  ## lycint143_m1irq_ifw_1`, `m2int_m0irq_scx4_ifw_{1,3}` (both devices) and
+  ## DocBoy `hblank_stat_interrupt_reset_if_scx0_round1`, `_scx4_round2`,
+  ## `vblank_interrupt_reset_if_round2`; 3 and 4 lose 23.
+const IF_WRITE_LAND_DOTS_DS* {.intdefine.} = 1
+  ## The same in double speed, in dots. 1 ships (half the M-cycle): 0 loses
+  ## `m2int_m0irq/m2int_m0irq_scx3_ifw_ds_2` [cgb]; 2 (the whole M-cycle)
+  ## loses eight `*_ifw_ds_1` rows (`ly0/lycint152_lyc{0,153}irq_ifw_ds_1`,
+  ## `lyc153int_m2irq_ifw_ds_1`, `m1/lycint143_m1irq_ifw_ds_1`, `m1/
+  ## m2m1irq_ifw_ds_{1,2}`, `m2int_m0irq_scx4_ifw_ds_1`,
+  ## `m2int_m2irq_ifw_ds_1`).
+  ## Clean-room: derived from test ROM sources/outputs and dingbat's own trace
+  ## runs; no emulator source consulted.
 const VRAM_WRITE_M3_END_DOTS* {.intdefine.} = 3
   ## Dots into its M-cycle at which a VRAM write issued in mode 3 asks the
   ## lock: a mode 3 that ends in those dots lets it through (0 = off, the
@@ -907,6 +922,43 @@ proc mem_write*(mem: GbMemory; gb: GB; idx: int; val: uint8) {.hot_bus_inline.} 
   # store, STAT-line edge), so the common path pays a single test.
   if mem.write_deferred: mem_write_tail(mem, gb)
   else:                  mem_tick_ppu(mem, gb, 4)
+
+proc mem_write_head*(mem: GbMemory; gb: GB; idx: int; val: uint8;
+                     head_t: int): int {.noinline.} =
+  ## mem_write for the interrupt dispatch's last push, stopped `head_t` CPU
+  ## T-cycles into the M-cycle's PPU half so the caller can clear IF there
+  ## (dispatch_interrupt, IRQ_SAMPLE_T); returns the dots mem_write_finish
+  ## still has to run. Same order as mem_write: the bus half, the byte, the
+  ## dots. A push that parks something for the M-cycle to finish (a PPU
+  ## register under SP) runs whole, and the clear follows the M-cycle.
+  when defined(cpu_testbus):
+    mem_tick_components(mem, gb, 4)
+    gb_testbus_write(idx, val)
+    return 0
+  mem_tick_bus(mem, gb, 4)
+  if mem.dma_busy:
+    mem_write_busy(mem, gb, idx, val)
+  elif idx >= 0xFE00 and idx <= 0xFEFF:
+    oam_bug_access(gb, obWrite, uint16(idx), val)
+    if OAM_WRITE_SAMPLE_END != 0 and idx <= 0xFE9F:
+      mem_tick_ppu(mem, gb, 4)
+      mem_write_open(mem, gb, idx, val, sampled_late = true)
+      if mem.write_deferred: mem_flush_deferred(mem, gb)
+      return 0
+    mem_write_open(mem, gb, idx, val)
+  else:
+    mem_write_open(mem, gb, idx, val)
+  if mem.write_deferred:
+    mem_write_tail(mem, gb)
+    return 0
+  let dots = mem_mdots(mem)
+  let head = clamp(head_t shr mem.current_speed, 0, dots)
+  if head > 0: mem_tick_ppu(mem, gb, head, ignore_speed = true)
+  dots - head
+
+proc mem_write_finish*(mem: GbMemory; gb: GB; rest: int) {.inline.} =
+  ## The dots mem_write_head left.
+  if rest > 0: mem_tick_ppu(mem, gb, rest, ignore_speed = true)
 
 proc mem_read_word*(mem: GbMemory; gb: GB; idx: int): uint16 =
   # A word access at $FFFF wraps to $0000 for its second byte (gambatte

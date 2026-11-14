@@ -142,12 +142,78 @@ a reference PNG, `mGBA suite <section>` a section of mGBA's test ROM.
   pair, where the disable landing on the latency's last dot still blocks;
   a strict comparison loses six other CGB rows, so that source's window is
   one dot longer, an open row of triage A3.
-- The DMG's LYC write is the same disable through the comparator, after
-  `LYC_DROP_LATENCY_DMG` dots (re-fit pending; neutral value 0). Whether a
-  DMG LYC write in the M-cycle of the line boundary drops the line is
-  `LYC_DROP_BOUNDARY_SKIP` (boolean; re-fit pending, neutral value 0). The
-  CGB's LYC write does not come through here: "CGB LYC write: a sampled
-  comparator", section 7.
+- The DMG's LYC write is the same disable through the comparator, one dot
+  after the top of its M-cycle (`LYC_DROP_LATENCY_DMG = 1`), and a write
+  whose M-cycle holds the line boundary does not drop the line there
+  (`LYC_DROP_BOUNDARY_SKIP = 1`): the write lands on the dot the
+  comparator's own LY steps on (line end - 2, "The comparator's LY steps two
+  dots before the line boundary", section 7), so old match and new are one
+  level. Rows and brackets in that entry. The CGB's LYC write does not come
+  through here: "CGB LYC write: a sampled comparator", section 7.
+
+### The STAT line falls where a line's OAM pulse ends
+- Ships: `M2_PULSE_END_EDGE = 1` (`ppu.nim`), `stat_m2_pulse_settle`.
+- Claim: the OAM source is a pulse (`STAT_M2_PULSE`), and with nothing else
+  enabled the STAT line is low again a few dots into mode 2, not at mode 3.
+  A source enabled later in mode 2 is therefore a rising edge.
+- Evidence: gambatte `lycEnable/late_ff41_enable_after_m2int` and
+  `late_ff41_enable_after_m2int_disable` (both devices) take the mode-2
+  interrupt of the line LYC matches and write STAT $60 / $40 from dot 49:
+  hardware requests again. Off loses the four rows and nothing else moves.
+- Site: the pulse's last dot is not a stop of the idle skip (a stop there
+  would be paid on every line). Between the pulse's end and mode 3 only a
+  CPU write can move the line, so the fall is taken by the first STAT or LYC
+  write that looks at it: at the write's commit, and where a STAT write's
+  byte lands at the end of its M-cycle (under the old enables: the pulse
+  ended first).
+- Clean-room: derived from test ROM sources/outputs and dingbat's own trace
+  runs; no emulator source consulted.
+
+### A STAT write with the LCD off meets the comparator's frozen answer
+- Ships: `STAT_WRITE_LCD_OFF = 1` (`gb.nim`), `ppu_stat_write_lcd_off`
+  (`ppu.nim`).
+- Claim: switching the LCD off stops the comparator, it does not clear it
+  (mooneye `stat_lyc_onoff`: the coincidence bit freezes). The frozen answer
+  stays an input of the STAT line, so with the LCD off a STAT write that
+  enables the LYC source over a frozen match raises the line, and one that
+  disables it lets the line fall. On a DMG every STAT write passes through
+  its all-enabled phase first (Pan Docs, "Spurious STAT interrupts") and
+  finds the frozen match whatever it writes.
+- Evidence: gambatte `lycEnable/lcdoff_lycirqen_{1,2,3,4}`. `_1` (LCD off on
+  the matching line, then STAT $00, IF cleared, STAT $40) reads IF bit 1 set
+  on both devices; `_2` (no match when the LCD went off; LYC then written
+  equal to the LY the register reads back) reads it clear, so the comparator
+  is not running; `_3` ($40 rewritten over $40, the line never fell) clear;
+  `_4` ($00 twice) set on a DMG, clear on a CGB. Off loses `_1` on both
+  devices and `_4` [dmg].
+- Clean-room: derived from test ROM sources/outputs and dingbat's own trace
+  runs; no emulator source consulted.
+
+### The mode-0 request does not wait for work that starts on the last pixel
+- Ships: `M0_REQ_LAST_PX = 1` (`gb.nim`), `fifo_tail_m0_request`,
+  `fetch_work_pending(for_irq)` (`fifo_ppu.nim`).
+- Claim: an object at X = 167 and a window at WX = 166 both match on pixel
+  159. Their fetch holds the mode flag at 3 (and the VRAM/OAM locks with
+  it), but the mode-0 STAT request rises where it does on a line without
+  them: the request follows the pixel counter reaching the end of the line,
+  the flag follows the fetcher. One pixel to the left the match is ordinary
+  work and the request waits for it.
+- Evidence: gambatte `sprites/10spritesPrLine_10xposA7_m3stat_{1,2}` read
+  mode 3 at dot 305 and mode 0 at 309 with ten X = 167 objects (the flag),
+  while `10spritesPrLine_10xposA7_m0irq_{1,2}` (both devices) read IF clear
+  from dot 249 and set from 253, the bare line's dots (the request);
+  `10spritesPrLine_10xposA6_m0irq_{1,2}` find the request after the X = 166
+  fetches. `window/m2int_wxA6_m0irq_{1,2}`, `m2int_wxA6_m0irq2_{1,2}` [cgb]
+  (the CGB holds the flag for the last-pixel window, `CGB_WIN_TAIL_LAST`),
+  `m2int_wxA6_spxA7_m0irq_{1,2}` (both devices), `m0enable/
+  enable_wxA6_2x_spxA7_ds_{1,2}` [cgb]. Off loses eight rows: the `_2` arm
+  of each `m0irq` pair on the devices named and the two `_ds_` rows.
+- Site: the request is raised from the mode-3 loop's tail branch (the last
+  `m3_lead` pixels), `adv - lead` dots after the first dot on which nothing
+  but last-pixel work is pending, the hand-off the ordinary retire makes
+  through `m3_hold`. The loop's hot path keeps its one `lx` compare.
+- Clean-room: derived from test ROM sources/outputs and dingbat's own trace
+  runs; no emulator source consulted.
 
 ### CPU VRAM/OAM locks close on the live mode and open with the STAT bits
 - Site: `cpu_vram_open` / `cpu_oam_open`, checked on the CPU bus
@@ -971,36 +1037,158 @@ Dots are dingbat's line dots; W is the first dot of the writing M-cycle
   Blue; the untried reduction is to skip the split when the PPU's idle-skip
   target is past the M-cycle's end.
 
+### The dispatch pushes in its fourth and fifth M-cycles
+- Ships: `DISPATCH_PUSH_MCYCLE = 4` (`cpu.nim`, `dispatch_interrupt`).
+- Claim: Pan Docs, "Interrupt Handling": two wait M-cycles, two pushes, the
+  jump. Counted as dingbat counts an instruction (from the boundary the
+  interrupt is taken on, the opcode fetch first), the first of the five
+  M-cycles is the fetch the dispatch throws away, the waits are the second
+  and third, and PC's high and low bytes are written in the fourth and
+  fifth; the "jump" is the handler's own fetch. The vector is chosen
+  between the two writes (mooneye `acceptance/interrupts/ie_push`).
+- Evidence: gambatte `oamdma/oamdma_src0000_busyint0002` (both devices)
+  starts an OAM DMA from $0000, burns 154 M-cycles, and takes a timer
+  interrupt with SP = $0002, so the two pushes go to the cartridge bus the
+  transfer is on and the CPU's bytes land in OAM where the transfer stands
+  (section 6). The handler reads $FE9E = $FF and $FE9F = $94, PC's two
+  bytes in the transfer's last two slots: M-cycles 160 and 161 after the
+  FF46 write, the fourth and fifth of the dispatch. Pushes in the third and
+  fourth read $94 $87; in the second and third (or first and second, as the
+  tree stood) $76 $87. gambatte `irq_precedence/late_m0irq_vs_tima_scx{2,3}
+  {,_halt}_1` (both devices, eight rows) come with it: which of a mode-0
+  STAT request and a timer request rising during the dispatch is taken
+  depends on where "between the pushes" is.
+- Clean-room: derived from test ROM sources/outputs and dingbat's own trace
+  runs; no emulator source consulted.
+
 ### The dispatch clears IF inside its fifth M-cycle
-- Ships: `IRQ_SAMPLE_T = 18` (`cpu.nim`). Double speed: `IRQ_SAMPLE_T_DS`
-  (T-cycles into the dispatch), re-fit pending; neutral value 16.
-- Claim: the taken line's IF bit is cleared after the two waits and two
-  pushes (Pan Docs, "Interrupt Handling"), 2 T into the fifth M-cycle in
-  single speed.
+- Ships: `IRQ_SAMPLE_T = 18`, `IRQ_SAMPLE_T_DS = 18` (`cpu.nim`): T-cycles
+  from the dispatch's first; 2 T (one dot at double speed) into the M-cycle
+  that writes PC's low byte (`mem_write_head`, `memory.nim`).
+- Claim: the taken line's IF bit is cleared part-way through the last
+  M-cycle. A PPU request rising on a dot before the clear is lost with it;
+  one rising after survives. The timer and the serial port are on the CPU's
+  clock and raise their requests where two M-cycles meet, T 16, 20, 24 of
+  the dispatch: the clear at 18 takes the T 16 one and leaves T 20.
 - Evidence: gambatte `*_late_retrigger` (six STAT sources and the timer):
   the handler's IF re-request moves one M-cycle per member and the second
   dispatch's read of IF says whether the clear beat the source's next rise.
-  16 loses the `_2` arms of `ly0/lycint152_lyc0irq` and
-  `irq_precedence/late_m0irq_retrigger` (sources that rise mid-M-cycle), 17
-  takes the first pair, 18 both (+4, nothing lost, 2026-09-22), 19 loses
-  `late_m0irq_retrigger_scx1_1`, 20 also `m2int_m2irq_late_retrigger_1`.
-- Open: the LYC-, mode-1- and timer-first families' `_2` arms (12 rows) want
-  20 where the mode-2-first families want below 19 — a per-source phase
-  question, `docs/gb-failure-triage.md` A2.
+  Single speed, both devices: 16 and 17 lose the `_2` arms of
+  `irq_precedence/late_m0irq_retrigger`, `ly0/lycint152_lyc{0,153}irq`,
+  `lyc153int_m2irq`, `m1/lycint143_m1irq` and `m1/lycint_vblankirq` (their
+  sources rise on the second dot of an M-cycle); 19 loses
+  `late_m0irq_retrigger_scx1_1`; 20 also `m2int_m2irq_late_retrigger_1`
+  and, on a DMG, the timer and serial `_2` arms. `tima/
+  tc00_irq_late_retrigger_{1,2,3}` [dmg] (overflow reload on T 24, 20, 16:
+  kept, kept, lost) and `serial/start_wait_trigger_int8_read_if_{1,2,3}`
+  [dmg] (the eighth shift on T 24, 20, 16: the same) are the CPU-clocked
+  pair. Double speed: 16 and 17 lose `irq_precedence/
+  late_m0irq_retrigger_scx1_ds_2`, `serial/
+  start_wait_trigger_int8_read_if_ds_2`, `tima/tc00_irq_late_retrigger_ds_2`
+  [cgb]; 18 and 19 are one value (a dot is two T-cycles); 20 loses the seven
+  `*_late_retrigger_ds_1` rows.
+- A serial byte finished by the tap edge of the fifth M-cycle is on T 20,
+  after the clear, although dingbat runs the bus half (and the edge) at the
+  top of the M-cycle: the request is put back (`SERIAL_CPU_SAMPLE_T`'s
+  ordering, applied to the clear).
+- Clean-room: derived from test ROM sources/outputs and dingbat's own trace
+  runs; no emulator source consulted.
 
-### The comparator's LY may step before the line boundary
-- `STAT_LYC_LY_LEAD_DOTS` (gb.nim): dots before the LY increment at which
-  the comparator's LY steps to the next line, single speed;
-  `STAT_LYC_LY_LEAD_DS` the same at double speed. Re-fit pending; neutral
-  value 0. At 0 the CGB line-end model (`CGB_LINE_END_ACTIVE`) is dormant.
-  Below, S names the dot the comparator's LY steps on (the line end less the
-  lead).
-- `STAT_M1_LEAD`, `VBLANK_IRQ_LEAD`: whether the mode-1 STAT source and the
-  vblank request rise at the comparator's step on line 143; `STAT_M2_LY0_LEAD`:
-  whether line 0's OAM pulse rises at line 153's step. Site:
-  `fifo_lyc_ly_lead` (fifo_ppu.nim). Re-fit pending; neutral value 0 each.
-- A vblank line's comparator blind window after the comparator has stepped:
-  removed 2026-11-13 for a clean rewrite.
+### A CGB clears a timer or serial request at the end of the dispatch
+- Ships: `IRQ_SAMPLE_CGB_TIMER_SERIAL_ADD = 2` (`gb.nim`): T-cycles past
+  `IRQ_SAMPLE_T` at which a CGB dispatch clears the TIMER or SERIAL line.
+  `GbInterrupts.ack_line` / `ack_until`, `irq_ack_swallows`
+  (`interrupts.nim`), asked where the timer reload and the serial
+  completion raise their request.
+- Claim: on a CGB the clear of these two lines reaches T 20, the end of the
+  dispatch, so the request the unit raises on that boundary is lost with
+  the one being served; the LCD lines keep T 18 on both devices.
+- Evidence: gambatte `tima/tc00_irq_late_retrigger_2` reads IF $E4 on a DMG
+  and $E0 on a CGB, `_1` $E4 and `_3` $E0 on both; `serial/
+  start_wait_trigger_int8_read_if_2` $E8 / $E0 likewise, and the `_ds_`
+  pairs agree. 0 and 1 lose the four CGB `_2` / `_ds_2` rows; 2..5 are one
+  value (the clear past T 20, short of T 24); 6 loses the four `_1` /
+  `_ds_1` rows.
+- Not serialized: the acknowledge is open for one M-cycle past the dispatch
+  and `step_frame` runs an instruction past a frame edge that would cut it.
+- Clean-room: derived from test ROM sources/outputs and dingbat's own trace
+  runs; no emulator source consulted.
+
+### The comparator's LY steps two dots before the line boundary
+- Ships: `STAT_LYC_LY_LEAD_DOTS = 2`, `STAT_LYC_LY_LEAD_DS = 0`,
+  `STAT_M1_LEAD = 1`, `VBLANK_IRQ_LEAD = 1` (`gb.nim`),
+  `STAT_M2_LY0_LEAD = 1` (`ppu.nim`), `LYC_STEPPED_VBLANK_SHUT = 1`
+  (`gb.nim`); `fifo_lyc_ly_lead` (`fifo_ppu.nim`). Below, S names the dot
+  the comparator's LY steps on (the line end less the lead: 454 at single
+  speed, the boundary at double).
+- Claim: at single speed the LY the LY = LYC comparator sees moves to the
+  next line on dot 454, half a CPU M-cycle before the readable LY and the
+  mode flag. Three other things ride that dot rather than the boundary: at
+  the end of line 143 the mode-1 STAT source and the vblank request, and at
+  the end of line 153 line 0's OAM pulse. At double speed all of them are
+  on the boundary.
+- Evidence for 2: every source's `*_late_retrigger_{1,2}` pair (the handler
+  re-requests itself one M-cycle later per member; the second dispatch's IF
+  clear, `IRQ_SAMPLE_T`, falls either side of the source's next rise), the
+  `lcd_offset` families (a KEY1 round trip puts the CPU on each of the four
+  dot phases, so an interrupt-driven read brackets the source's dot from
+  both sides), and the CGB LYC-write model below, whose sample grid sits on
+  S and whose quiet window (`ff45_enable_weirdpoint`, writes from 449..452)
+  is one grid period ending on 454. 1 loses 54 rows, 3 loses 36 (lists at
+  the constant); `STAT_LYC_LY_LEAD_DS` 1, 2, 3, 4 lose 70, 288, 102, 97.
+- `STAT_M1_LEAD` 0 loses ten rows (`m1/lycint143_m1irq_late_retrigger_2` on
+  both devices, `m1/m1irq_m0disable_{2,3}`, `m1irq_m2disable_lycdisable_
+  {2,3}`, `m1irq_m2enable_lyc_1`, `m2m1irq_ifw_2`, `lcdirq_precedence/
+  m1irq_lcdstat18`, `lcd_offset/offset2_lyc8fint_m1irq_2` [cgb]).
+  `VBLANK_IRQ_LEAD` 0 loses nine (`m1/lycint_vblankirq_late_retrigger_2` on
+  both devices, `lcd_offset/offset{1,2}_lyc99int_m2irq_count_2`,
+  `offset2_lyc8fint_m1irq_2` [cgb], DocBoy `double_speed/interrupts/
+  single_speed_interrupt_vblank_c`, `_c_halted_round1`, `_d_halted_round1`,
+  `speed_switch_to_single_interrupt_vblank_c_round1`). `STAT_M2_LY0_LEAD` 0
+  loses eight (`lyc153int_m2irq/lyc153int_m2irq_late_retrigger_2` on both
+  devices, `m1/m1irq_late_enable_2`, `m2enable/late_enable_m1disable_ly0_2`,
+  `late_m1disable_ly0_2`, `lyc0_late_m2enable_lycdisable_2`, `lcd_offset/
+  offset{1,2}_lyc99int_m2irq_count_2` [cgb]).
+- A vblank line's boundary leaves a stepped comparator alone
+  (`LYC_STEPPED_VBLANK_SHUT`): between two vblank lines nothing happens on
+  the boundary (the mode does not change), and the comparator's answer for
+  the new line has been on the STAT line since S. Opening the boundary's
+  blind window as well (`ly_advance_vblank`) drops and re-raises the match
+  two dots after it rose. gambatte `ly0/lycint152_lyc153irq_late_retrigger_
+  {1,2}` (both devices): `_2` dispatches from dot 437 of line 152, clears IF
+  on 455, one dot after the LYC = 153 match rose, and reads IF clear; with
+  the window it reads the second request. Off loses `_2` on both devices.
+  A rendered line's boundary keeps its window: the OAM pulse sits inside it
+  (`ly_advance_line`).
+- The DMG's LYC write against S: `LYC_DROP_LATENCY_DMG = 1` (the comparator
+  sees a new LYC one dot into the write's M-cycle; gambatte `m0enable/
+  lycdisable_ff45_*` [dmg]: 0 loses `lycdisable_ff45_scx3_3`, 2 loses
+  `lycdisable_ff45_3`, 3 and 4 more) and `LYC_DROP_BOUNDARY_SKIP = 1` (a
+  write from dot 453 lands on S, where the comparator's LY steps too: a
+  match moved from the line ending to the line starting is one level;
+  0 loses `lycEnable/ff45_enable_weirdpoint_3` and
+  `lyc153_late_ff45_enable_3` [dmg]). When the LYC replaced did not match
+  the line ending there is no level to carry, and the line start is the
+  ordinary one with its blind window (`LYC_PARK_OPEN_DMG = 1`): gambatte
+  `miscmstatirq/lycwirq_trigger_m0_late_ly44_lyc45_4` [dmg] (STAT $48, the
+  line held by the mode-0 source, LYC written to the next line from dot
+  453) requests, the mode-0 source falling before the new match answers.
+  Off loses that row; opening the window for every parked LYC write loses
+  `ff45_enable_weirdpoint_3` [dmg]. The CGB's side of the same statement is
+  `CGB_LYC_BRIDGE`, below.
+- Rows that now wait on other rules (2026-11-13). With the LYC interrupt
+  taken from S, gambatte `vram_m3/preread_lcdoffset1_2` and
+  `prewrite_lcdoffset1_2` [cgb] touch VRAM in an M-cycle that begins on
+  mode 3's first dot and want the lock shut
+  (`VRAM_READ_CGB_M3_EDGE_SS` / `VRAM_WRITE_CGB_M3_EDGE_SS`, `ppu.nim`,
+  re-fit pending); with the lead at 0 they passed because the dispatch was
+  one M-cycle late. `window/late_wy_lcdoffset1_1`, `window/arg/
+  late_wy_{1,2}toFF_2` and `window/late_enable_afterVblank_lcdoffset1_1`
+  [cgb] wait on the window's WY check (`WIN_CHECK_DEFER_*`, and the
+  next-line check that sits on S in `fifo_lyc_ly_lead`); the last passes at
+  any `WIN_CHECK_DEFER_CGB` of 1..4 with nothing else changed.
+- Clean-room: derived from test ROM sources/outputs and dingbat's own trace
+  runs; no emulator source consulted.
 
 ### CGB LYC write: a sampled comparator
 - Ships: `CGB_LYC_CMP_LATCH = true`, `CGB_LYC_LAND_T = 2`,
@@ -1119,9 +1307,11 @@ Dots are dingbat's line dots; W is the first dot of the writing M-cycle
   -0.07..+0.16%, run-to-run noise being about 0.1%.
   `-d:LYC_STOP_FOLD=false` is the explicit compare, the same machine frame
   for frame.
-- Open: the grid is anchored to whatever dot the comparator's LY steps on
-  (`STAT_LYC_LY_LEAD_DOTS`, `STAT_LYC_LY_LEAD_DS`). The DMG's LYC write keeps
-  its own spelling (`LYC_DROP_LATENCY_DMG`, `LYC_DROP_BOUNDARY_SKIP`).
+- The grid is anchored to the dot the comparator's LY steps on
+  (`STAT_LYC_LY_LEAD_DOTS = 2`, `STAT_LYC_LY_LEAD_DS = 0`, re-fitted
+  2026-11-13: "The comparator's LY steps two dots before the line
+  boundary"). The DMG's LYC write keeps its own spelling
+  (`LYC_DROP_LATENCY_DMG`, `LYC_DROP_BOUNDARY_SKIP`, `LYC_PARK_OPEN_DMG`).
 - Clean-room: derived from test ROM sources/outputs and dingbat's own trace
   runs; no emulator source consulted. (Every figure above is a gambatte
   test ROM's own filename verdict against dingbat's trace of the write's
@@ -1247,20 +1437,119 @@ Dots are dingbat's line dots; W is the first dot of the writing M-cycle
   `lyc153_src_held` (ppu.nim), `mem_flush_deferred` (memory.nim),
   `fifo_line153_edge` (fifo_ppu.nim).
 
-### An IF write may land inside its M-cycle
-- `IF_WRITE_LAND_DOTS` / `IF_WRITE_LAND_DOTS_DS` (memory.nim): dots into the
-  IF-writing M-cycle at which the write lands; a request raised before then
-  is overwritten. `LYC_SRC_RELATCH_ADJ` (ppu.nim): dots added to the line-153
-  LYC = 0 source relatch. Re-fit pending; neutral value 0 each.
-- Rows: gambatte `m2int_m0irq/m2int_m0irq_scx3_ifw_{2,4}` (both devices),
-  `ly0/lycint152_lyc0irq_ifw_1`.
+### An IF write lands one dot into its M-cycle
+- Ships: `IF_WRITE_LAND_DOTS = 1`, `IF_WRITE_LAND_DOTS_DS = 1`
+  (`memory.nim`); `LYC_SRC_RELATCH_ADJ = 1` (`ppu.nim`).
+- Claim: a CPU write to IF replaces the register one dot after the top of
+  its M-cycle, at either speed: a request the PPU raises on the M-cycle's
+  first dot is overwritten, one raised on its second survives. Line 153's
+  LY = LYC source answers for LY = 0 one dot later than the M-cycle-early
+  figure (`LYC_SRC_RELATCH_LEAD`): dot 6 at single speed, dot 8 at double.
+  The two are fitted together because the `_ifw_` rows that clear IF across
+  the LYC = 0 relatch read one against the other.
+- Evidence, `IF_WRITE_LAND_DOTS`: 0 loses gambatte `m2int_m0irq/
+  m2int_m0irq_scx3_ifw_{2,4}` (both devices) and DocBoy `dmg/interrupts/
+  hblank_stat_interrupt_reset_if_scx3_round2`, `_scx7_round3` (IF cleared
+  on the dot the mode-0 source rises: hardware reads it back clear); 2
+  loses 21 (`ly0/lycint152_lyc{0,153}irq_ifw_1`, `lyc153int_m2irq_ifw_1`,
+  `m1/lycint143_m1irq_ifw_1`, `m2int_m0irq_scx4_ifw_{1,3}` on both devices,
+  DocBoy `hblank_stat_interrupt_reset_if_scx0_round1`, `_scx4_round2`,
+  `vblank_interrupt_reset_if_round2` among them); 3 and 4 lose 23.
+  `_DS`: 0 loses `m2int_m0irq_scx3_ifw_ds_2` [cgb]; 2 loses eight
+  `*_ifw_ds_1` rows.
+- Evidence, `LYC_SRC_RELATCH_ADJ`: 0 loses ten rows (`ly0/
+  lycint152_lyc0irq_ifw_1` on both devices, `lycEnable/lyc0_ff45_disable_1`,
+  `lyc0_ff41_disable_ds_1`, `lyc0_m1disable_ds_1`, `lyc153_late_ff41_enable_
+  {ds_1,lcdoffset1_1}` [cgb] among them), -1 and -2 fourteen; 2 loses nine
+  (`ly0/lycint152_lyc0irq_late_retrigger_2` on both devices, `lycEnable/
+  lyc0_ff41_disable_2`, `lyc0_m1disable_2`, `lyc153_late_ff41_enable_2`,
+  `lyc0int_m0irq/lyc0int_m0irq_ds_1` [cgb] among them).
+- Clean-room: derived from test ROM sources/outputs and dingbat's own trace
+  runs; no emulator source consulted.
 
-### A CGB dispatch may clear a timer or serial request later than the LCD ones
-- `IRQ_SAMPLE_CGB_TIMER_SERIAL_ADD` (cpu.nim): T-cycles added to the CGB
-  dispatch's IF clear for the timer and serial lines. Re-fit pending; neutral
-  value 0.
-- Rows: gambatte `tima/tc00_irq_late_retrigger_3` [cgb],
-  `serial/start_wait_trigger_int8_read_if_2` [cgb].
+### Double speed: the mode-0 source, the line-144 pulse, the LCD-on line
+- Ships: `STAT_M0_LEAD_DS = 0`, `CGB_M0_HALT_BLIND_DS_DOTS = 0`,
+  `M2_144_EARLY_DOT_DS = 454`, `STAT_READ_M23_LEAD_DS = 1`,
+  `LYC_JUST_CHANGED_HOLD_DS = 2`, `LYC153_HOLD_DS = 1` (`ppu.nim`);
+  `IRQ_SAMPLE_T_DS = 18` (`cpu.nim`); `LCDON_M0_LAG_DS = 8`,
+  `IF_READ_M2_144_TIE_DS = 0` (`gb.nim`).
+- Claims, each two-sided at the constant with the others at their shipping
+  values:
+  - The mode-0 STAT source rises with the mode flag (no lead), and a halted
+    CGB sees it in the M-cycle it rises in. DocBoy `double_speed/interrupts/
+    double_speed_interrupt_stat_{a,b}_scx{0..3}` and their `_halted_` and
+    `speed_switch_to_double_` twins, `double_speed/ppu/
+    double_speed_ppu_hblank_if_{a,b}_scx{1,3}_round1`: a lead of 1 dot loses
+    30 rows (the odd SCX), 2 loses 64; blindness 1 loses
+    `double_speed_interrupt_stat_halted_{a,b}_scx{0,2}_round1` and gambatte
+    `halt/m0int_m0stat_scx2_ds_1`, `halt/m0irq_m0stat_scx2_ds_1`.
+  - The dispatch clears IF one dot into its fifth M-cycle, as at single
+    speed (entry above).
+  - The line-144 OAM pulse rises one CPU M-cycle before line 143 ends, dot
+    454, as every other line's pulse does: 452 loses five rows
+    (`enable_display/frame{0,1}_m2irq_count_ds_1`, `lcd_offset/
+    offset1_lyc99int_m2irq_count_ds_1`, `m1/lyc143_late_m2enable_lycdisable_
+    ds_1`, `m1/m2m1irq_ifw_ds_1`), 453 three, 455 `enable_display/
+    frame{0,1}_m2irq_count_ds_2`. With the pulse there an IF read needs no
+    tie rule (`IF_READ_M2_144_TIE_DS` 1 loses `offset1_lyc99int_m2irq_count_
+    ds_1`).
+  - On the LCD-on line the mode-0 source trails the flag by one M-cycle
+    (2 dots): gambatte `enable_display/ly0_m0irq_scx{0,1}_ds_{1,2}`,
+    `frame0_m0irq_count_scx{2,3}_ds_{1,2}`; 0..4 scheduler cycles lose the
+    `_ds_1` rows, 9 and up the `_ds_2` rows, 5..8 are one M-cycle.
+  - A STAT read sees modes 2 and 3 one dot sooner than the mode-0 edge's
+    double-speed sample point gives: 0 loses DocBoy `double_speed_ppu_d3_
+    {oam,px}_round2` and gambatte `lcd_offset/offset1_lyc99int_{m2stat,
+    m3stat}_count_ds_2`; 2 loses 36.
+  - A STAT read in the M-cycle LY stepped still shows the old line's
+    coincidence while the dot counter is below 2: 0 and 1 lose
+    `enable_display/frame{0,1}_m2stat_count_ds_1`, `ly0/
+    lycint152_lyc0flag_ds_3`, `lycint_lycflag/lycint_lycflag_ds_3`; 3 and 4
+    lose `lcd_offset/offset1_lyc8fint_m1stat_ds_1`. And CPU CGB C holds the
+    LYC = 153 comparison through the snapback at double speed, as CGB D+ do
+    at both (`ly0/lycint152_lyc153flag_ds_3` reads $C5).
+- Clean-room: derived from test ROM sources/outputs and dingbat's own trace
+  runs; no emulator source consulted.
+
+### STAT reads at vblank entry; the DMG STAT-write bug at the mode-0 edge
+- Ships: `STAT_READ_M1_LAG = 1` (`ppu.nim`), `STAT_GLITCH_M0_LEAD = 1`
+  (`gb.nim`).
+- Claim: at single speed a STAT read keeps showing mode 0 for one dot more
+  into line 144 than the other mode edges' sample point gives. On a DMG the
+  STAT-write bug's all-enabled phase finds the mode-0 source one dot after
+  the source's own rise (which is `STAT_M0_LEAD_T` ahead of the flag).
+- Evidence: DocBoy `cgb/double_speed/ppu/single_speed_ppu_s{0..5,1b..4b,x}_
+  vblank_round{1,2}` (a KEY1 round trip leaves the CPU on each dot phase;
+  STAT read one M-cycle apart across line 144's start) and gambatte
+  `lcd_offset/offset{1,2,3}_lyc8fint_m1stat_{1,2}` [cgb]: 0 loses
+  `single_speed_ppu_{s3,s3b,s4b,sx}_vblank_round1` and
+  `offset3_lyc8fint_m1stat_1`; 2 loses `single_speed_ppu_s5_vblank_round2`
+  and `offset2_lyc8fint_m1stat_2`; 3 loses six, 4 twenty. The STAT-write
+  bug: gambatte `miscmstatirq/m0statwirq_scx{2,5}_2` [dmg] and DocBoy
+  `dmg/stat_write_bug/stat_write_bug_hblank_scx{1,2,5,6}_round2`: 0, 3 and
+  4 lose all six, 2 loses three.
+- Clean-room: derived from test ROM sources/outputs and dingbat's own trace
+  runs; no emulator source consulted.
+
+### A TAC write judges both taps where it ends; an SC write samples its tap where it starts
+- Ships: `TAC_SELECT_LEAD_T = 0` (`timer.nim`), `SERIAL_SC_WRITE_LEAD_T = 4`
+  (`serial.nim`).
+- Claim: a TAC write that changes the selected divider bit compares the old
+  tap and the new one at the same instant, the end of the write's M-cycle
+  (Pan Docs, "Timer Obscure Behaviour": the mux output's falling edge
+  ticks TIMA). An SC write restarts the serial slot sequence from the tap's
+  level at the top of its M-cycle, where a CPU write lands (the divider
+  four counts back from where the bus half has left it).
+- Evidence: gambatte `tima/tc00_late_tc01_{1..8}` (both devices): a lead of
+  1, 2, 3 or 4 T loses `_5` and `_7` on both. Serial: 0 loses 28 rows
+  (DocBoy `dmg/serial/serial_timing_{nops0,nops64,sb_bit0..7,
+  change_sb_during_transfer_*,reset_div_during_transfer_*}`, `cgb/serial/
+  serial_timing_high_speed_nops{0,2,32}_round2`, `double_speed/serial/
+  double_speed_serial_high_speed_round2`, gambatte `serial/
+  nopx1_start{,83}_wait_read_if_2`, `start83_late_div_write_wait_read_if_
+  {1b,2b}`); 1..4 are one value; 5 and up lose 12.
+- Clean-room: derived from test ROM sources/outputs and dingbat's own trace
+  runs; no emulator source consulted.
 
 ### The window's WY comparator sample after a CGB write
 - See §2, "The window's WY comparator: when it samples".
