@@ -331,10 +331,9 @@ Dots are dingbat's line dots; W is the first dot of the writing M-cycle
     `late_enable_afterVblank_ds_1`. Not half the single-speed five.
 - **The line-end cut-off.** At single speed a write's sample landing in the
   last `WIN_CHECK_CUT_DOTS = 2` dots of a line (dot 454 on) latches nothing
-  for the line being drawn. Dot 454 is where the LY = LYC comparator's LY
-  steps to the next line (`STAT_LYC_LY_LEAD_DOTS = 2`, section 7): from
-  there a sample is no longer about this line, and the written value is in
-  place for the next line's own sample. gambatte
+  for the line being drawn. Dot 454 is also the dot the LY = LYC
+  comparator's LY steps (`STAT_LYC_LY_LEAD_DOTS = 2`, section 7); the
+  written value is in place for the next line's own sample. gambatte
   `late_wy_FFto0_ly2_{1,2,3}`, `late_wy_10to0_ly1_{1,2,3}`,
   `late_wy_FFto1_ly2_{1,2,3}` and `window/late_enable_afterVblank_{1,2,3}`,
   `arg/late_enable_afterVblank_{3,4,5}` write on W = 445 / 449 / 453: the DMG
@@ -1606,7 +1605,8 @@ Dots are dingbat's line dots; W is the first dot of the writing M-cycle
 - Evidence, the close edge: `cgbpal_m3start_*`, `cgbpal_read_m3start_*`,
   `cgbpal_write_m3start_*`. Double speed 2 is a strict optimum (1 loses the
   three `_ds_1` rows, 3 loses `cgbpal_{read,write}_m3start_ds_lcdoffset1_2`).
-  Single speed 1 is a strict optimum: 2 loses the three `_2` rows (an
+  Single speed 1 is a strict optimum: 2 loses the three `_2` rows and
+  `enable_display/ly1_late_cgbpw_2` (an
   M-cycle starting on dot 81 is locked) and 0 loses
   `cgbpal_read_m3start_lcdoffset1_1` (one starting on dot 80, mode 3's
   first, still reads the palette, where the VRAM lock is already shut:

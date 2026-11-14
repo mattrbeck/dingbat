@@ -13,8 +13,7 @@ cite them by ID. The tests that still fail are DocBoy's (section I). Other
 closed buckets are one line each at the end. "Not recorded" below means the
 test passes and this file does not say which change closed it.
 
-Status 2026-11-13, after the clean-room re-derivation of the 2026-09-22/23
-rules (docs/gb-derivations.md): gambatte, AGE, mooneye, wilbertpol, mealybug,
+Status 2026-11-13 (rules and brackets: docs/gb-derivations.md): gambatte, AGE, mooneye, wilbertpol, mealybug,
 GBMicrotest and SameSuite score every row; what is red is DocBoy's (bucket
 I). The gambatte and AGE row lists in buckets A to H are kept as the record
 of what each bucket measures and which knob answered it; a "Rows (n)" count
@@ -2015,9 +2014,8 @@ idea is not tried again as a knob.
 
 One line each; the knob's own comment carries the derivation.
 
-* Re-derived clean-room 2026-11-13 (docs/gb-derivations.md has an entry
-  for each, with its rows): the rules and values of the 2026-09-22/23
-  small-families and oracle passes. HBlank DMA across HALT/STOP and against
+* Closed 2026-11-13 (docs/gb-derivations.md has an entry for each, with
+  its rows): HBlank DMA across HALT/STOP and against
   a same-dot dispatch, GDMA's hand-over point, the LCD-off HBlank block
   (section 5); OAM DMA across HALT and an FF46 restart's bus, the OAM
   scan's view inside a transfer (section 6); the HALT-with-IME-pending
@@ -2035,7 +2033,7 @@ One line each; the knob's own comment carries the derivation.
   sweep and power-on leads, CGB C's double-speed trigger and PCM12's
   channel 2 arm (H, H1; section 11); SVBK's readback and the printer's
   status sequence (section 8). No knob is left at a placeholder value.
-  Closed with them from the oracle pass's open list:
+  Also closed:
   `oamdma_src0000_busyint0002`, `tima/tc00_late_tc01_{5,7}`, the gambatte
   `lcd_offset` and `lcdoffset` rows, `window/late_disable_scx5_ds_1`.
   `scx_during_m3/scx_0761c0` (C3) passes as well.

@@ -503,8 +503,8 @@ const CRAM_LOCK_ON_LAT_DS* {.intdefine.} = 2
   ## (VRAM_READ_CGB_M3_EDGE_SS). 0 loses gambatte
   ## cgbpal_m3/cgbpal_read_m3start_lcdoffset1_1 (a read whose M-cycle starts
   ## on mode 3's first dot still gets the palette) and 2 loses
-  ## `cgbpal_m3start_2`, `cgbpal_read_m3start_2` and
-  ## `cgbpal_write_m3start_2` (from the dot after it). Double speed: 2 is
+  ## `cgbpal_m3start_2`, `cgbpal_read_m3start_2`, `cgbpal_write_m3start_2`
+  ## and `enable_display/ly1_late_cgbpw_2` (from the dot after it). Double speed: 2 is
   ## a strict optimum (1 loses `cgbpal_m3start_ds_1` and the `read`/`write`
   ## `_m3start_ds_1` pair, 3 loses `cgbpal_{read,write}_m3start_ds_lcdoffset1_2`).
 const CRAM_LOCK_OFF_LAT*   {.intdefine.} = 2
