@@ -264,7 +264,13 @@ proc save_dma_state(dma: DMA; w: var Writer) =
   # IMM_NEEDS_EDGE's DMA.imm_blocked, one bit per channel; rev-11 builds
   # without it wrote 0 there
   w.write_u8(dma.fifo_chain[0] or (dma.imm_blocked shl 4))
-  w.write_u8(dma.fifo_chain[1])
+  # The second byte's high nibble (spare too) carries two bus flags a burst
+  # leaves behind: bit 4 Bus.dma_bus_left (the last top-level burst ran under
+  # a HALT, so the next one before the wake keeps its bus value), bit 5
+  # Bus.dma_first_rom. Builds before wrote 0 there, which loads as both clear.
+  let bus = dma.gba.bus
+  w.write_u8(dma.fifo_chain[1] or (if bus.dma_bus_left: 0x10'u8 else: 0'u8) or
+             (if bus.dma_first_rom: 0x20'u8 else: 0'u8))
 
 proc load_dma_state(dma: DMA; r: var Reader; rev: uint32) =
   r.expect_tag(GBA_SEC_DMA)
@@ -285,6 +291,9 @@ proc load_dma_state(dma: DMA; r: var Reader; rev: uint32) =
   # edge, in the spare high nibble (none before it was kept there)
   dma.imm_blocked = dma.fifo_chain[0] shr 4
   dma.fifo_chain[0] = dma.fifo_chain[0] and 0x0F'u8
+  dma.gba.bus.dma_bus_left = (dma.fifo_chain[1] and 0x10'u8) != 0
+  dma.gba.bus.dma_first_rom = (dma.fifo_chain[1] and 0x20'u8) != 0
+  dma.fifo_chain[1] = dma.fifo_chain[1] and 0x0F'u8
   # Arbitration state is idle at frame boundaries; not serialized
   dma.pending = 0
   dma.current_priority = 4
@@ -1324,6 +1333,12 @@ proc gba_apply_state(gba: GBA; payload: string; rev: uint32;
       "reconstructed (it would resume with a corrupted stack pointer)")
   load_bus_state(gba.bus, r, rev)
   gba.bus.sd_tw_active = false   # an HLE sound pass's timing is not stored
+  # The tilt sensor's latch is not stored: a loaded core reads what a new one
+  # does until the game latches again (it latches before each read)
+  gba.bus.tilt_armed = false
+  gba.bus.tilt_x = 0
+  gba.bus.tilt_y = 0
+  gba.rebased = 0                # the debug clock restarts with the state
   gba.wl_unsafe = true           # the waitloop detector starts over
   # Derived, not stored: at a frame boundary it is the executing mode's lead,
   # or 0 while the CPU runs off the gamepak (PF_RUNS_OFF_ROM, cpu.nim)
