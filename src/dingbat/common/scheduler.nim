@@ -301,6 +301,8 @@ proc load_from*(s: Scheduler; r: var Reader; pad = false) =
   let cycles = r.read_u64()
   let speed = r.read_u8()
   let n = int(r.read_u8())
+  # No dispatch is in progress at a frame boundary; a new scheduler's 0
+  s.tick_left = 0
   if n > MAX_EVENTS:
     raise state_error("too many scheduler events in state")
   s.cycles = CycleCount(cycles)

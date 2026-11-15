@@ -4086,6 +4086,10 @@ proc step_frame*(gb: GB) =
   # the bus to yet (GDMA_GRANT_FETCH, HDMA_START_GRANT_FETCH): the request is
   # scratch, and the next opcode fetch answers it.
   if gb.gdma_req or gb.hdma_start_req: gb.cpu.tick(gb)
+  # And a CGB dispatch's hold on its timer or serial line (GbInterrupts.
+  # clear_line, under 16 T-cycles), whether or not the LCD is on: it is not in
+  # the format either.
+  while irq_clear_live(gb.interrupts, gb.scheduler.cycles): gb.cpu.tick(gb)
   # And a DMG HALT still inside its minimum window (DMG_HALT_MIN_MCYCLES):
   # its start is not in the format, so the boundary waits it out (at most
   # that many halted M-cycles; a wake ends it).
@@ -4107,6 +4111,10 @@ proc step_frame*(gb: GB) =
   let moved = gb.gb_rebase()
   # The HALT start is a scheduler time too (wrapping, so the age survives).
   when DMG_HALT_MIN_MCYCLES > 1: gb.halt_start -= moved
+  # Times the rebase would leave pointing into the new frame: a dispatch's
+  # line hold (settled above, so over) and the serial tap edge's M-cycle.
+  gb.interrupts.clear_line = 0
+  when SERIAL_CPU_SAMPLE_T < 4: gb.serial.edge_cycle = high(CycleCount)
 
 method run_until_frame*(gb: GB) = gb.step_frame()
 

@@ -3101,6 +3101,11 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
               ppu.wx < uint8(WIN_LINE_START_WX) and ppu.window_trigger)
           fifo_reset_sprite(ppu)
           when CGB_WE_ENABLE_FETCH_LATE != 0: gb.we_on_dot = int32.low
+          # A fall from an earlier line has reached the fetcher long ago,
+          # and a double-speed window start recorded on one is not this
+          # line's to undo (WIN_REVOKE_DS_PUSH)
+          gb.we_off_dot = int32.low
+          gb.wd_ds_push = false
           when M0_REQ_LAST_PX != 0: gb.m0_tail_dot = -1'i32
           when CGB_WIN_TAIL_LAST != 0: ppu.obj_last_px = false
           when WIN_TAIL_FLAG_LEAD != 0: ppu.win_tail_end = 0

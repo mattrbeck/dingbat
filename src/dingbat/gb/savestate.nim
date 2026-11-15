@@ -181,10 +181,13 @@ proc save_machine_state(gb: GB; w: var Writer) =
   # (HDMA_HALT_REQ, gb.nim): the latched byte + 1, 0 = none. A reserved slot
   # of rev 6, so the format is unchanged.
   w.write_i16(if gb.hdma_halt_taken: int16(gb.hdma_latch) + 1 else: 0'i16)
-  # Reserved (rev 6): i16, u64, then i32 (-1).
-  w.write_i16(0)
+  # The HBlank DMA edge detector's registered mode + 1 (HDMA_HALT_M0_BLIND:
+  # frozen while the CPU is halted, so not derivable from the payload) and,
+  # in the i32, the dot of the HALT that froze it. Reserved slots of rev 6
+  # (0 and -1 there: not carried).
+  w.write_i16(int16(gb.ppu.hdma_seen_mode) + 1)
   w.write_u64(0)
-  w.write_i32(-1)
+  w.write_i32(gb.ppu.hdma_halt_dot)
 
 proc load_machine_state(gb: GB; r: var Reader; rev: uint32) =
   if rev < 6:
@@ -201,10 +204,14 @@ proc load_machine_state(gb: GB; r: var Reader; rev: uint32) =
   let req = r.read_i16()
   gb.hdma_halt_taken = req >= 1 and req <= 0x100
   gb.hdma_latch    = if gb.hdma_halt_taken: uint8(req - 1) else: 0'u8
-  # The reserved slots (read and dropped).
-  discard r.read_i16()
+  # The edge detector's registered mode and HALT dot; a state written before
+  # they were carried has 0 / -1 there and takes the mode the PPU loads with
+  # (gb_apply_state) and dot 0, a new core's.
+  let seen = r.read_i16()
   discard r.read_u64()
-  discard r.read_i32()
+  let halt_dot = r.read_i32()
+  gb.ppu.hdma_seen_mode = if seen >= 1 and seen <= 4: uint8(seen - 1) else: 0xFF'u8
+  gb.ppu.hdma_halt_dot = if halt_dot >= 0 and halt_dot < 1024: halt_dot else: 0'i32
 
 # ---- Memory ----
 
@@ -1266,6 +1273,19 @@ proc gb_apply_state(gb: GB; payload: string; rev: uint32;
   gb.hdma_switch_stall   = false
   gb.gdma_req       = false
   gb.hdma_start_req = false
+  if gb.ppu.hdma_seen_mode == 0xFF'u8:
+    gb.ppu.hdma_seen_mode = gb.ppu.lcd_status and 3'u8
+  # A CGB dispatch's hold on its timer or serial line never spans a frame
+  # boundary (step_frame), nor does a serial tap edge's M-cycle; the idle-loop
+  # skip's snapshot starts over (none taken: wl_head -1, as a new core).
+  gb.interrupts.clear_line = 0
+  gb.interrupts.clear_until = 0
+  when SERIAL_CPU_SAMPLE_T < 4: gb.serial.edge_cycle = high(CycleCount)
+  # Per-line window records, reset at every mode-3 entry (fifo_ppu.nim)
+  gb.we_off_dot = int32.low
+  gb.wd_ds_push = false
+  gb.cpu.wl_head = -1
+  gb.cpu.wl_edge = false
   # A DMG HALT's minimum window (DMG_HALT_MIN_MCYCLES) never spans a frame
   # boundary (step_frame), so a halted CPU here is already past it.
   when DMG_HALT_MIN_MCYCLES > 1:
