@@ -75,7 +75,8 @@ A game counts as changed when any dingbat configuration differs from the
 baseline in pass/fail or in any hash: a checkpoint or its frame window, the
 audio dump, the battery file, a `[load]` cell. Verdicts: fixed, regressed,
 mixed, neutral (hashes moved, verdicts did not), interaction (only the
-combination does it), conflict, build-failed; `tests/test_train.py` covers
+combination does it), conflict, build-failed, harness-failed (a suite in
+which every game is an ERROR: nothing was compared or cached); `tests/test_train.py` covers
 the comparison. State lives in `~/.cache/dingbat-train`. Whoever waits when
 no train is running drives it, under a machine-wide lock that a full
 `suite` also waits for (`--no-lock` to bypass; subsets never wait).

@@ -95,6 +95,7 @@ flips.
 | `conflict` | does not merge onto `origin/main` | rebase and resubmit |
 | deferred | conflicts with an earlier candidate in the same train | nothing: it rides the next train first |
 | `build-failed` | does not build on `origin/main` | fix and resubmit |
+| `harness-failed` | a suite played no game: every row an ERROR, or no rows (the note has the first game's last log line: a ROM directory this process cannot read, a Python without numpy) | fix the machine, not the change; resubmit. Nothing was cached |
 | noise | a cell that differs between two runs of base itself (or matches a value an earlier run of this base produced): listed, never attributed, never makes a verdict `changed` | nothing; a cell that keeps coming back is a harness or reference flake worth a look |
 
 The report (`~/.cache/dingbat-train/runs/<run>/report.md`) lists, per

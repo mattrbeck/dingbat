@@ -3,7 +3,7 @@
 build, play the corpus once, and rerun only the games that changed on each
 candidate alone to say whose change it was.
 
-  train.py submit REF [--name N] [--wait]   queue a commit (exit 0 clean, 1 changes, 2 conflict/build)
+  train.py submit REF [--name N] [--wait]   queue a commit (exit 0 clean, 1 changes, 2 conflict/build/harness)
   train.py run [--once]                     drive trains until the queue is empty
   train.py status                           queue, the running train, recent verdicts
   train.py show ID                          a candidate's verdict (or a run's report)
@@ -86,7 +86,38 @@ REF_BINS = ['mgba_driver', 'nba_driver', 'screenread']
 # "unknown", not "different"
 LENIENT = ('audio', 'win:')
 NICE = 10      # --nice: what a train's suites run at
-EXIT = {'clean': 0, 'landed': 0, 'skipped': 0, 'changed': 1, 'conflict': 2, 'build-failed': 2}
+EXIT = {'clean': 0, 'landed': 0, 'skipped': 0, 'changed': 1, 'conflict': 2, 'build-failed': 2,
+        'harness-failed': 2}
+
+
+class HarnessFailed(Exception):
+    """A suite that played no game: every row an ERROR, or no rows at all.
+    Compared with each other, two such runs agree on everything, so it would
+    pass as clean."""
+
+
+def suite_failure(rows, asked):
+    """Why a suite asked to play `asked` games played none of them (a
+    reason string), or None. rows: its index.json rows. One game erroring is
+    a change to report; every game erroring is the harness or the machine
+    (a ROM directory the process cannot read, a missing module)."""
+    if not asked:
+        return None
+    if not rows:
+        return f'0 rows for {asked} games'
+    if any(r.get('status') != 'ERROR' for r in rows):
+        return None
+    why = ''
+    for r in rows:
+        try:
+            with open(r.get('log') or '', errors='replace') as fh:
+                lines = [l.strip() for l in fh if l.strip()]
+            if lines:
+                why = lines[-1]
+                break
+        except OSError:
+            continue
+    return f'every one of {len(rows)} games is an ERROR' + (f' (first: {why[:200]})' if why else '')
 
 
 # ============================================================ comparison
@@ -860,8 +891,13 @@ def run_suite(wt, outroot, tag, games, refs_from, jobs, log, runner, label):
             p.send_signal(signal.SIGTERM)
             p.wait()
             raise
-    n = len((read_json(os.path.join(sdir, 'index.json'), {}) or {}).get('games', []))
-    log(f'  {label}: done in {(time.time() - t0) / 60:.1f} min ({n} rows, log {slog})')
+    rows = (read_json(os.path.join(sdir, 'index.json'), {}) or {}).get('games', [])
+    want = {s for s, _ in games}
+    log(f'  {label}: done in {(time.time() - t0) / 60:.1f} min ({len(rows)} rows, log {slog})')
+    why = suite_failure([r for r in rows if r.get('sha1') in want], len(games))
+    if why:
+        log(f'  {label}: played no game: {why}')
+        raise HarnessFailed(f'{label}: {why} (log {slog})')
     return sdir
 
 
@@ -1002,7 +1038,13 @@ def ensure_results(key, refkey, games, blobs, tree, opts, log, runner, label, re
     wt = tree()
     keep_driver(wt, sroot)
     before = (read_json(os.path.join(sdir, 'index.json'), {}) or {}).get('games', [])
-    run_suite(wt, os.path.join(sroot, 'out'), 'baseline', missing, refs_from, opts.jobs, log, runner, label)
+    try:
+        run_suite(wt, os.path.join(sroot, 'out'), 'baseline', missing, refs_from, opts.jobs, log, runner, label)
+    except HarnessFailed:
+        # nothing played: the store keeps what it had, so no later train
+        # compares against these rows
+        write_json(os.path.join(sdir, 'index.json'), {'tag': 'baseline', 'games': before})
+        raise
     keep_displaced(sdir, before)
     write_json(os.path.join(sroot, 'baseline.json'), {'key': key, 'refkey': refkey, 'updated': time.time()})
     # every row just played counts, an ERROR without a run directory too (a
@@ -1137,6 +1179,17 @@ def train_once(car, opts):
                                                                         if k not in ('func',)}}
     try:
         return _train(car, opts, run_id, rd, log, runner, trees, run)
+    except HarnessFailed as e:
+        # every candidate still undecided (not one deferred to the next train)
+        # fails with it; the ones decided before the suite keep their verdicts
+        verdicts = {}
+        for c in car:
+            v = verdict_of(c['id'])
+            if v and v.get('run') == run_id:
+                verdicts[c['id']] = v
+            elif not v and (read_json(path('queue', f"{c['id']}.json"), {}) or {}).get('deferred_from') != run_id:
+                verdicts[c['id']] = set_verdict(c, 'harness-failed', run_id, str(e))
+        return finish(run, rd, log, verdicts, car)
     finally:
         trees.cleanup()
         runner.done()

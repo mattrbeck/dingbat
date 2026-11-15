@@ -428,6 +428,50 @@ class Store(unittest.TestCase):
             self.assertEqual(len(json.load(open(os.path.join(d, 'displaced.json')))), 1)
 
 
+class Harness(unittest.TestCase):
+    """A suite that played no game fails the train instead of passing as
+    clean (two all-ERROR runs agree on everything)."""
+
+    def test_suite_failure(self):
+        with tempfile.TemporaryDirectory() as d:
+            lg = os.path.join(d, 'g.log')
+            with open(lg, 'w') as f:
+                f.write("Traceback ...\nPermissionError: [Errno 1] Operation not permitted: 'x.gba'\n")
+            err = {'sha1': 'g', 'status': 'ERROR', 'log': lg}
+            self.assertIsNone(train.suite_failure([], 0))
+            self.assertIn('0 rows', train.suite_failure([], 3))
+            why = train.suite_failure([err, dict(err, sha1='h', log=None)], 2)
+            self.assertIn('every one of 2 games', why)
+            self.assertIn('Operation not permitted', why)
+            # one game that ran is a result: its errors are changes to report
+            self.assertIsNone(train.suite_failure([err, {'sha1': 'h', 'status': 'PASS'}], 2))
+            self.assertIsNone(train.suite_failure([err, {'sha1': 'h', 'status': 'KNOWN'}], 2))
+
+    def test_a_failed_suite_leaves_the_store_as_it_was(self):
+        with tempfile.TemporaryDirectory() as home:
+            old_home, old_run = train.HOME, train.run_suite
+            train.HOME = home
+            try:
+                sdir = train.store_suite('k', 'r')
+                os.makedirs(sdir)
+                kept = [{'sha1': 'old', 'status': 'PASS', 'outdir': None}]
+                dump({'tag': 'baseline', 'games': kept}, os.path.join(sdir, 'index.json'))
+
+                def fake_run(wt, outroot, tag, games, *a, **k):
+                    dump({'games': [{'sha1': s, 'status': 'ERROR'} for s, _ in games]},
+                         os.path.join(sdir, 'index.json'))
+                    raise train.HarnessFailed('baseline: every one of 1 games is an ERROR')
+                train.run_suite = fake_run
+                opts = type('O', (), {'jobs': 1})()
+                with self.assertRaises(train.HarnessFailed):
+                    train.ensure_results('k', 'r', [('g', 'G')], {'g': 'b'}, lambda: home, opts,
+                                         lambda *a: None, None, 'baseline', refs_from='x')
+                self.assertEqual(json.load(open(os.path.join(sdir, 'index.json')))['games'], kept)
+                self.assertEqual(train.EXIT['harness-failed'], 2)
+            finally:
+                train.HOME, train.run_suite = old_home, old_run
+
+
 class Suites(unittest.TestCase):
     def test_load_suite_reads_windows_from_phase_results(self):
         with tempfile.TemporaryDirectory() as d:
