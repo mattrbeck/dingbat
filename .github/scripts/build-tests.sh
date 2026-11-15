@@ -73,6 +73,7 @@ build gblcdonpacing   dingbat_gblcdonpacing_test    tests/gb_lcd_on_pacing_test.
 build psgagb         dingbat_psgagb_test           tests/psg_agb_test.nim
 build statesoak       dingbat_state_soak_test       tests/state_soak_test.nim -d:gba_quirky=false
 build silentaudio     dingbat_silent_audio_test     tests/silent_audio_test.nim --path:tests -d:soak_lib
+build statehygiene    dingbat_state_hygiene_test    tests/state_hygiene_test.nim --path:tests -d:soak_lib -d:gba_quirky=false
 # The iOS app's C API; its audio ring is pthread C, so not on Windows.
 case "$(uname -s)" in
   MINGW*|MSYS*|CYGWIN*) ;;

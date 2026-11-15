@@ -149,6 +149,10 @@ task test_statesoak, "Run the range-checked serialize-while-running soak (both c
   exec "nim c -r -d:test_harness -d:release -d:gba_quirky=false --path:src " &
        "-o:dingbat_state_soak_test tests/state_soak_test.nim"
 
+task test_statehygiene, "Check a state loaded into a running core leaves it as a new core loaded with it":
+  exec "nim c -r -d:test_harness -d:release -d:soak_lib -d:gba_quirky=false --path:src --path:tests " &
+       "-o:dingbat_state_hygiene_test tests/state_hygiene_test.nim"
+
 task test_silentaudio, "Check a core that skips mixing (muted) runs exactly as one that mixes":
   exec "nim c -r -d:test_harness -d:release -d:soak_lib --path:src --path:tests " &
        "-o:dingbat_silent_audio_test tests/silent_audio_test.nim"

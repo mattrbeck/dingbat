@@ -192,6 +192,14 @@ jobs:
         # stop storms (the one place the catch-up cadence shows).
         shell: bash
         run: ./dingbat_silent_audio_test
+      - name: A load leaves a running core as it leaves a new one (both cores)
+        # Every few frames of the soak's cases the core's payload is loaded
+        # back into it and into a newly built core; any field the two then
+        # disagree on (one the payload does not carry and the load does not
+        # reset) fails unless LoadScratch lists why it is dead at a frame
+        # boundary.
+        shell: bash
+        run: ./dingbat_state_hygiene_test
       - name: iOS app C API (load, states, rewind scrubber, run-ahead, cheats, SGB)
         # src/dingbat_ios.nim through its exported symbols, as the Swift
         # shell calls it. Not built on Windows (pthread audio ring).

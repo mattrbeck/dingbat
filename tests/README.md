@@ -645,6 +645,10 @@ EventType ordinals / payload revisions), `test_cheats`, `test_rewind`, `test_cli
 rewinds, replays and loads into a newly built core, over every committed ROM and a seeded
 random register-writing program per core; known core issues print `[KNOWN]`,
 `DINGBAT_SOAK_STRICT=1` fails on them; an argument filters the cases),
+`test_statehygiene` (over the soak's cases, a core's payload loaded back into it and
+into a newly built core must leave the two equal field by field; a field the payload
+does not carry and the load does not reset fails unless `LoadScratch` says why it is
+dead at a frame boundary; `DINGBAT_HYGIENE_ALL=1` lists every differing field),
 `test_silentaudio` (a core toggling `APU.silent`, the muted no-mix path, must match a
 mixing twin's payload every frame: committed ROMs, the soak's random programs and
 channel-1 stop storms), `test_gbtimedinput` (`--input` lands on its M-cycle; see
