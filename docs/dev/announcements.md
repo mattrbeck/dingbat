@@ -53,13 +53,18 @@ file can't stop anyone playing. Both lists take any number of entries.
 Everything except `id` and `text` is optional:
 
 - `show`: where it appears. Either or both of:
-  - `"toast"`: once per device. Web shows it for 30 s; iOS uses its own toast
-    stack. Up to three show per check; the rest wait for the next check.
+  - `"toast"`: passing news, once per device: 8 s, or 12 s with its link as
+    the toast's action. One shows per check (launch, then hourly) and the rest
+    follow at later checks, so the app's own launch offers (Resume) are never
+    pushed out of the three-toast stack.
   - `"banner"`: a card at the top of the home screen, until the player
-    dismisses it or `until` passes. Every banner shows at once.
+    dismisses it or `until` passes. Every banner shows at once, and the last
+    check's banners are kept on the device so they are there at launch,
+    offline too, instead of appearing a moment later.
 
   Leave it out (or name only places a build doesn't know) and it's a toast.
-  Use banners when you post several at a time.
+  Use banners for anything that must be seen, or when you post several at a
+  time.
 - `id`: what "seen" and "dismissed" remember. Change the id to show the same
   text again.
 - `url`: must be https. It adds a button labelled `label` (default "Read more").
@@ -92,9 +97,10 @@ and `scope`:
 
 - `"scope": "app"` (the default): a card ("Update Required") with no way out but **Update**.
   A game in progress is paused, then saved before the update.
-- `"scope": "link"`: the card ("Link Cable Needs an Update") offers
-  **Not now**, once per launch. After that the app runs as usual, but every
-  way into the link cable brings the card back instead:
+- `"scope": "link"`: "Link Cable Needs an Update" with **Not Now** and
+  **Update**, once per launch: a card on web, a system alert on iOS (as the
+  app's other questions). After that the app runs as usual, but every way into
+  the link cable brings it back instead:
   - web: Connect Link Cable (online and same-browser) and local 2P;
   - iOS: the link sheet and two-player.
 - Any other scope is treated as `"app"` by builds that don't know it. A build

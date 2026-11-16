@@ -9283,21 +9283,30 @@ const writeIds = (key, ids) => {
   try { localStorage.setItem(key, JSON.stringify(ids.slice(-STATUS_IDS_MAX))); } catch {}
 };
 
-// Toasts: as many as the stack holds (TOAST_MAX) per check, each marked seen
-// as it shows; the rest wait for the next check.
-const showAnnouncementToasts = (list) => {
+// Toasts: one per check, marked seen as it shows; the rest wait for the next
+// check. More at once would push the boot's own offers (Resume, a retried
+// load) out of the TOAST_MAX stack. A toast is passing news: plain, or with
+// its link as the action; what must stay up is a banner.
+const ANNOUNCEMENT_TOAST_MS = 8000;
+const ANNOUNCEMENT_LINK_TOAST_MS = 12000;
+const showAnnouncementToast = (list) => {
   const seen = readIds(STATUS_SEEN_KEY);
-  const due = list.filter((a) => announcementShows(a).includes("toast") && !seen.includes(a.id));
-  for (const a of due.slice(0, TOAST_MAX)) {
-    seen.push(a.id);
-    const link = announcementLink(a);
-    showActionToast(a.text, a.label || (link ? "Read more" : "OK"),
-      () => { if (link) window.open(link, "_blank", "noopener"); }, 30000);
+  const a = list.find((a) => announcementShows(a).includes("toast") && !seen.includes(a.id));
+  if (!a) return;
+  writeIds(STATUS_SEEN_KEY, [...seen, a.id]);
+  const link = announcementLink(a);
+  if (link) {
+    showActionToast(a.text, a.label || "Read more",
+      () => window.open(link, "_blank", "noopener"), ANNOUNCEMENT_LINK_TOAST_MS);
+  } else {
+    pushToast(a.text, ANNOUNCEMENT_TOAST_MS, null);
   }
-  writeIds(STATUS_SEEN_KEY, seen);
 };
 
 const homeNotes = document.getElementById("home-notes");
+// The last check's banners, drawn at boot before status.json answers: the
+// home screen is whole at its first paint, not pushed down a moment later.
+const STATUS_BANNERS_KEY = "dingbat_banners";
 
 const renderBanners = () => {
   if (!homeNotes) return;
@@ -9309,7 +9318,6 @@ const renderBanners = () => {
   for (const a of shown) {
     const note = document.createElement("div");
     note.className = "home-note";
-    note.setAttribute("role", "status");
     const text = document.createElement("p");
     text.className = "home-note-text";
     text.textContent = a.text;
@@ -9345,20 +9353,28 @@ const renderBanners = () => {
 const showAnnouncements = (list) => {
   const now = Date.now();
   const live = (Array.isArray(list) ? list : []).filter((a) => announcementApplies(a, now));
-  showAnnouncementToasts(live);
-  statusBanners = live.filter((a) => announcementShows(a).includes("banner"));
+  showAnnouncementToast(live);
+  statusBanners = live.filter((a) => announcementShows(a).includes("banner"))
+    .map(({ id, text, url, label, until }) => ({ id, text, url, label, until }));
+  try { localStorage.setItem(STATUS_BANNERS_KEY, JSON.stringify(statusBanners)); } catch {}
   renderBanners();
 };
+
+try {
+  const cached = JSON.parse(localStorage.getItem(STATUS_BANNERS_KEY) || "[]");
+  if (Array.isArray(cached)) statusBanners = cached.filter((a) => a && typeof a.id === "string" && typeof a.text === "string");
+} catch {}
+renderBanners();
 
 const requiredModal = document.getElementById("required-modal");
 // [title, message when status.json gives none, the line under it].
 const REQUIRED_COPY = {
   app: ["Update Required", "This version of dingbat has a problem that the update fixes.",
-    "Your games and saves stay on this device. dingbat reloads when the update is ready."],
+    "Your games and saves stay on this device."],
   link: ["Link Cable Needs an Update", "This version can't link with the current one. Update to link with friends again.",
-    "Everything else keeps working. Your games and saves stay on this device."],
+    "Everything else keeps working."],
 };
-const REQUIRED_IN_GAME_FOOT = "Your game is paused and saved first. Your games and saves stay on this device.";
+const REQUIRED_IN_GAME_FOOT = "Your game is saved before the update.";
 
 const showRequired = (/** @type {"app" | "link"} */ kind, req) => {
   if (!requiredModal) return;
@@ -9373,7 +9389,6 @@ const showRequired = (/** @type {"app" | "link"} */ kind, req) => {
   if (text) text.textContent = typeof req.message === "string" && req.message ? req.message : REQUIRED_COPY[kind][1];
   if (foot) foot.textContent = kind === "app" && currentRomName ? REQUIRED_IN_GAME_FOOT : REQUIRED_COPY[kind][2];
   if (later) later.hidden = kind !== "link";
-  requiredModal.classList.toggle("link", kind === "link");
   requiredModal.classList.add("open");
   trapFocus(requiredModal);
 };

@@ -7,20 +7,21 @@ import UIKit
 /// at launch and on a return to the app at most hourly; any failure means
 /// nothing to say.
 ///
-/// A required update's scope "link" offers Not now and holds the link cable
-/// (NetLink.openSheet, AppModel.launchTwoPlayer) until the update; any other
-/// scope, or one this build doesn't know, covers the app. Unlike the web
+/// A required update's scope "link" asks with an alert (Not Now / Update) and
+/// holds the link cable (NetLink.openSheet, AppModel.launchTwoPlayer) until
+/// the update; any other scope, or one this build doesn't know, covers the app. Unlike the web
 /// build this one can't see whether a newer build is out, so status.json
 /// names an iOS minBuild only once the build that meets it is on the App
 /// Store (or TestFlight), and its `url` is where to get it.
 final class AppStatus: ObservableObject {
     static let shared = AppStatus()
 
-    struct Announcement: Identifiable, Equatable {
+    struct Announcement: Identifiable, Equatable, Codable {
         let id: String
         let text: String
         let url: URL?
         let label: String?
+        let until: Date?
     }
 
     struct Required: Equatable {
@@ -30,8 +31,8 @@ final class AppStatus: ObservableObject {
     }
 
     @Published private(set) var banners: [Announcement] = []
-    /// The card on screen: an app-wide requirement, or a link one the
-    /// player can put off.
+    /// On screen: an app-wide requirement (RequiredUpdateView), or a link
+    /// one the player can put off (RootView's alert).
     @Published private(set) var required: Required?
     /// The link-scope requirement this build is under, holding the link cable.
     private(set) var linkRequired: Required?
@@ -54,14 +55,19 @@ final class AppStatus: ObservableObject {
     private static let interval: TimeInterval = 60 * 60
     private static let seenKey = "seenAnnouncements"
     private static let dismissedKey = "dismissedBanners"
+    /// The last check's banners, shown at launch before status.json answers
+    /// (web STATUS_BANNERS_KEY): the home screen doesn't shift a moment later.
+    private static let bannersKey = "announcementBanners"
     private static let idsMax = 64
-    /// web TOAST_MAX: the rest wait for the next check.
-    private static let toastsPerCheck = 3
 
     private var checkedAt = Date.distantPast
     private var linkNoticeShown = false
 
     private init() {
+        if let data = UserDefaults.standard.data(forKey: Self.bannersKey),
+           let cached = try? JSONDecoder().decode([Announcement].self, from: data) {
+            banners = Self.showable(cached)
+        }
         NotificationCenter.default.addObserver(forName: UIApplication.didBecomeActiveNotification,
                                                object: nil, queue: .main) { [weak self] _ in
             guard let self, Date().timeIntervalSince(self.checkedAt) >= Self.interval else { return }
@@ -106,7 +112,8 @@ final class AppStatus: ObservableObject {
                 guard let before = Self.parse(a["builtBefore"] as? String), let built, built < before else { continue }
             }
             let url = (a["url"] as? String).flatMap(URL.init(string:)).flatMap { $0.scheme == "https" ? $0 : nil }
-            let item = Announcement(id: id, text: text, url: url, label: a["label"] as? String)
+            let item = Announcement(id: id, text: text, url: url, label: a["label"] as? String,
+                                    until: Self.parse(a["until"] as? String))
             // Where it goes; no place this build knows means a toast.
             var show = ((a["show"] as? [String]) ?? []).filter { $0 == "toast" || $0 == "banner" }
             if show.isEmpty { show = ["toast"] }
@@ -114,18 +121,28 @@ final class AppStatus: ObservableObject {
             if show.contains("banner") { banners.append(item) }
         }
 
-        var seen = UserDefaults.standard.stringArray(forKey: Self.seenKey) ?? []
-        for a in toasts.filter({ !seen.contains($0.id) }).prefix(Self.toastsPerCheck) {
-            seen.append(a.id)
-            let action: (String, () -> Void) = a.url.map { url in
-                (a.label ?? "Read More", { UIApplication.shared.open(url) })
-            } ?? (a.label ?? "OK", {})
-            AppModel.shared.toast(a.text, action: action, duration: 30)
+        // One toast a check (web showAnnouncementToast): more would push the
+        // launch's own offers out of the three-toast stack. Plain, or with
+        // its link as the action; what must stay up is a banner.
+        let seen = UserDefaults.standard.stringArray(forKey: Self.seenKey) ?? []
+        if let a = toasts.first(where: { !seen.contains($0.id) }) {
+            UserDefaults.standard.set(Array((seen + [a.id]).suffix(Self.idsMax)), forKey: Self.seenKey)
+            if let url = a.url {
+                AppModel.shared.toast(a.text, action: (a.label ?? "Read More", { UIApplication.shared.open(url) }),
+                                      duration: 12)
+            } else {
+                AppModel.shared.toast(a.text, duration: 8)
+            }
         }
-        UserDefaults.standard.set(Array(seen.suffix(Self.idsMax)), forKey: Self.seenKey)
 
-        let dismissed = UserDefaults.standard.stringArray(forKey: Self.dismissedKey) ?? []
-        self.banners = banners.filter { !dismissed.contains($0.id) }
+        UserDefaults.standard.set(try? JSONEncoder().encode(banners), forKey: Self.bannersKey)
+        self.banners = Self.showable(banners)
+    }
+
+    private static func showable(_ list: [Announcement]) -> [Announcement] {
+        let dismissed = UserDefaults.standard.stringArray(forKey: dismissedKey) ?? []
+        let now = Date()
+        return list.filter { !dismissed.contains($0.id) && !($0.until.map { $0 <= now } ?? false) }
     }
 
     func dismissBanner(_ a: Announcement) {
@@ -168,35 +185,41 @@ final class AppStatus: ObservableObject {
     }
 
     /// The link cable's ways in: true when a link-scope requirement holds
-    /// it, the card up in its place.
+    /// it, the alert up in its place. A sheet goes first (the tile menu's
+    /// 2P): an alert under a sheet never shows, nor one raised while it goes.
     func blocksLink() -> Bool {
         guard let link = linkRequired else { return false }
-        if required == nil { required = link }
+        guard required == nil else { return true }
+        let model = AppModel.shared
+        if model.sheet != nil {
+            model.sheet = nil
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { [weak self] in
+                if self?.required == nil { self?.required = link }
+            }
+        } else {
+            required = link
+        }
         return true
     }
 
-    /// Not now, on a link-scope card.
+    /// Not Now (or Update, which leaves for the store), on the link alert.
     func later() {
         if required?.link == true { required = nil }
     }
 }
 
-/// A required update. App-wide: the whole screen, nothing behind it to reach,
-/// the button at the bottom within the thumb's reach. Link scope: a card over
-/// the dimmed app, with Not now under the update (web #required-modal).
+/// An app-wide required update: the whole screen, nothing behind it to reach,
+/// the button at the bottom within the thumb's reach. (A link-scope one is
+/// RootView's alert.)
 struct RequiredUpdateView: View {
     let required: AppStatus.Required
     @Environment(\.palette) private var palette
 
-    private var updateLabel: String {
-        (required.url?.host ?? "").hasSuffix("apple.com") ? "Update on the App Store" : "Update"
+    static func updateLabel(_ url: URL?) -> String {
+        (url?.host ?? "").hasSuffix("apple.com") ? "Update on the App Store" : "Update"
     }
 
     var body: some View {
-        if required.link { linkCard } else { fullScreen }
-    }
-
-    private var fullScreen: some View {
         VStack(spacing: 0) {
             Spacer()
             VStack(spacing: 14) {
@@ -214,9 +237,7 @@ struct RequiredUpdateView: View {
                     .font(.system(size: 17))
                     .foregroundColor(palette.text)
                     .fixedSize(horizontal: false, vertical: true)
-                Text(GameSession.shared.game != nil
-                     ? "Your game is saved. Your games and saves stay on this device."
-                     : "Your games and saves stay on this device.")
+                Text(GameSession.shared.game != nil ? "Your game is saved." : "Your games and saves stay on this device.")
                     .font(.system(size: 15))
                     .foregroundColor(palette.textDim)
                     .fixedSize(horizontal: false, vertical: true)
@@ -225,8 +246,14 @@ struct RequiredUpdateView: View {
             .frame(maxWidth: 340)
             Spacer()
             if let url = required.url {
-                updateButton(url)
-                    .frame(maxWidth: 480)
+                Button { UIApplication.shared.open(url) } label: {
+                    Text(Self.updateLabel(url))
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundColor(palette.accentInk)
+                        .frame(maxWidth: .infinity, minHeight: 52)
+                        .background(RoundedRectangle(cornerRadius: 14).fill(palette.accent))
+                }
+                .frame(maxWidth: 480)
             }
         }
         .padding(.horizontal, 28)
@@ -234,56 +261,6 @@ struct RequiredUpdateView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(palette.bg.ignoresSafeArea())
         .accessibilityAddTraits(.isModal)
-    }
-
-    private var linkCard: some View {
-        ZStack {
-            palette.stage.opacity(0.6).ignoresSafeArea()
-            VStack(spacing: 10) {
-                Image(systemName: "link")
-                    .font(.system(size: 26, weight: .semibold))
-                    .foregroundColor(palette.accent)
-                    .accessibilityHidden(true)
-                Text("Link Cable Needs an Update")
-                    .font(.system(size: 20, weight: .bold))
-                    .foregroundColor(palette.text)
-                Text(required.message)
-                    .font(.system(size: 16))
-                    .foregroundColor(palette.text)
-                    .fixedSize(horizontal: false, vertical: true)
-                Text("Everything else keeps working.")
-                    .font(.system(size: 14))
-                    .foregroundColor(palette.textDim)
-                VStack(spacing: 8) {
-                    if let url = required.url { updateButton(url) }
-                    Button { AppStatus.shared.later() } label: {
-                        Text("Not Now")
-                            .font(.system(size: 17, weight: .semibold))
-                            .foregroundColor(palette.text)
-                            .frame(maxWidth: .infinity, minHeight: 50)
-                            .background(RoundedRectangle(cornerRadius: 14).fill(palette.surface3))
-                    }
-                }
-                .padding(.top, 10)
-            }
-            .multilineTextAlignment(.center)
-            .padding(EdgeInsets(top: 24, leading: 20, bottom: 20, trailing: 20))
-            .background(RoundedRectangle(cornerRadius: 20).fill(palette.surface1))
-            .overlay(RoundedRectangle(cornerRadius: 20).stroke(palette.border2, lineWidth: 1))
-            .frame(maxWidth: 400)
-            .padding(24)
-        }
-        .accessibilityAddTraits(.isModal)
-    }
-
-    private func updateButton(_ url: URL) -> some View {
-        Button { UIApplication.shared.open(url) } label: {
-            Text(updateLabel)
-                .font(.system(size: 17, weight: .semibold))
-                .foregroundColor(palette.accentInk)
-                .frame(maxWidth: .infinity, minHeight: 52)
-                .background(RoundedRectangle(cornerRadius: 14).fill(palette.accent))
-        }
     }
 }
 
@@ -309,10 +286,6 @@ struct AnnouncementBanners: View {
     private func banner(_ a: AppStatus.Announcement) -> some View {
         let wide = sizeClass == .regular
         return HStack(alignment: wide ? .center : .top, spacing: 12) {
-            Image(systemName: "info.circle")
-                .font(.system(size: 18))
-                .foregroundColor(palette.accent)
-                .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 6) {
                 Text(a.text)
                     .font(.system(size: 15))
@@ -331,7 +304,7 @@ struct AnnouncementBanners: View {
             }
             .accessibilityLabel("Dismiss")
         }
-        .padding(.leading, 14)
+        .padding(.leading, 16)
         .padding(.trailing, 6)
         .padding(.vertical, wide ? 8 : 12)
         .background(RoundedRectangle(cornerRadius: 12).fill(palette.surface2))

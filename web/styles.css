@@ -4664,26 +4664,6 @@ body.game-menu-open #toast {
   z-index: 550;
 }
 
-/* The required card's mark before its title: a download, or a link for a
-   link-scope update (index.js showRequired). */
-#required-title {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-#required-title::before {
-  content: "";
-  flex: none;
-  width: 22px;
-  height: 22px;
-  background: var(--accent);
-  -webkit-mask: var(--required-icon) center / contain no-repeat;
-  mask: var(--required-icon) center / contain no-repeat;
-  --required-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 4v11'/%3E%3Cpath d='m7 10 5 5 5-5'/%3E%3Cpath d='M5 20h14'/%3E%3C/svg%3E");
-}
-#required-modal.link #required-title::before {
-  --required-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M9 7H6a5 5 0 0 0 0 10h3'/%3E%3Cpath d='M15 7h3a5 5 0 0 1 0 10h-3'/%3E%3Cpath d='M8 12h8'/%3E%3C/svg%3E");
-}
 #required-text {
   color: var(--text);
 }
@@ -4694,7 +4674,9 @@ body.game-menu-open #toast {
 
 /* status.json's home-screen banners: the brand's 480px measure on the empty
    state, the library's width beside a library. A narrow banner puts its link
-   under the text; a wide one (the container query) beside it. */
+   under the text; a wide one (the container query) beside it. The card's
+   surface sets it apart from the tiles: no mark, as the modals and toasts
+   carry none. */
 #home-notes {
   width: 100%;
   max-width: 480px;
@@ -4715,7 +4697,7 @@ body.lib-has-games #home-notes {
   align-items: flex-start;
   column-gap: 12px;
   row-gap: 8px;
-  padding: 12px 6px 12px 14px;
+  padding: 12px 6px 12px 16px;
   border-radius: 12px;
   background: linear-gradient(180deg, var(--surface-3), var(--surface-2));
   border: 1px solid var(--border-2);
@@ -4723,16 +4705,6 @@ body.lib-has-games #home-notes {
   color: var(--text);
   font-size: 14px;
   line-height: 1.45;
-}
-.home-note::before {
-  content: "";
-  flex: none;
-  width: 20px;
-  height: 20px;
-  margin-top: 1px;
-  background: var(--accent);
-  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round'%3E%3Ccircle cx='12' cy='12' r='9'/%3E%3Cpath d='M12 11v5'/%3E%3Cpath d='M12 7.5v.5'/%3E%3C/svg%3E") center / contain no-repeat;
-  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round'%3E%3Ccircle cx='12' cy='12' r='9'/%3E%3Cpath d='M12 11v5'/%3E%3Cpath d='M12 7.5v.5'/%3E%3C/svg%3E") center / contain no-repeat;
 }
 .home-note-text {
   flex: 1 1 200px;
@@ -4758,7 +4730,6 @@ body.lib-has-games #home-notes {
 .home-note-actions {
   flex-basis: 100%;
   order: 3;
-  padding-left: 32px;
 }
 .home-note-link {
   font-size: 13.5px;
@@ -4774,7 +4745,6 @@ body.lib-has-games #home-notes {
     align-items: center;
     padding-block: 8px;
   }
-  .home-note::before,
   .home-note-close {
     margin-block: 0;
   }

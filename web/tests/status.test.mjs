@@ -74,25 +74,35 @@ test("a toast announcement shows once, then never again in this browser", async 
   assert.equal(notes(app).length, 0, "a toast is not a banner");
 });
 
-test("several at once: banners all show, toasts as many as the stack holds, the rest next check", async () => {
+test("several at once: banners all show; toasts one per check, never pushing out the boot's offers", async () => {
   const app = await loadApp();
+  app.runIn("showActionToast('Last session saved just now', 'Resume', () => {}, 20000)");
   const announcements = [
-    ...[1, 2, 3, 4].map((i) => ({ id: "t" + i, text: "Toast " + i })),
+    ...[1, 2, 3].map((i) => ({ id: "t" + i, text: "Toast " + i })),
     { id: "b1", text: "Banner one", show: ["banner"] },
     { id: "b2", text: "Banner two", show: ["banner"], url: "https://dingbat.gg/news", label: "News" },
     { id: "both", text: "Both ways", show: ["toast", "banner"] },
   ];
   serve(app, { status: { announcements } });
   await app.runIn("checkStatus()");
-  const max = app.runIn("TOAST_MAX");
-  assert.equal(app.toasts.filter((t) => /Toast \d|Both ways/.test(t)).length, max);
+  assert.deepEqual(app.toasts.filter((t) => /Toast \d|Both ways/.test(t)), ["Toast 1"]);
+  assert.ok(app.liveToasts().some((t) => /Last session saved/.test(t)), "the Resume offer is still up");
   assert.deepEqual(notes(app).map(noteText), ["Banner one", "Banner two", "Both ways"]);
   assert.equal(notes(app)[1].children[2].children[0].href, "https://dingbat.gg/news");
   assert.equal(notes(app)[1].children[2].children[0].textContent, "News");
-  await app.runIn("checkStatus()");
-  const shown = new Set(app.toasts.filter((t) => /Toast \d|Both ways/.test(t)));
-  assert.equal(shown.size, 5, "the toasts left over show on the next check");
+  for (let i = 0; i < 3; i++) await app.runIn("checkStatus()");
+  assert.deepEqual(app.toasts.filter((t) => /Toast \d|Both ways/.test(t)),
+    ["Toast 1", "Toast 2", "Toast 3", "Both ways"], "the rest follow, one a check");
   assert.equal(notes(app).length, 3, "banners stay until dismissed");
+});
+
+test("the last check's banners are drawn at boot, before status.json answers", async () => {
+  const banners = [{ id: "kept", text: "Kept from last time" }, { id: "old", text: "Over", until: "2020-01-01T00:00:00Z" }];
+  const app = await loadApp({ localStorageSeed: { dingbat_banners: JSON.stringify(banners) } });
+  assert.deepEqual(notes(app).map(noteText), ["Kept from last time"], "past its until, a cached banner stays gone");
+  serve(app, { status: { announcements: [] } });
+  await app.runIn("checkStatus()");
+  assert.equal(notes(app).length, 0, "a banner taken out of status.json goes at the next check");
 });
 
 test("a dismissed banner stays dismissed; a banner past its until goes", async () => {
@@ -129,7 +139,7 @@ test("platforms, the from/until window and builtBefore pick who sees an announce
       ],
     },
   });
-  await app.runIn("checkStatus()");
+  for (let i = 0; i < 4; i++) await app.runIn("checkStatus()");
   const shown = app.toasts.join("\n");
   assert.match(shown, /Web and iOS/);
   assert.match(shown, /A place this build doesn't know/, "an unknown show falls back to a toast");
@@ -164,7 +174,7 @@ test("an app-wide required update blocks with its message, and Update now saves 
   assert.equal(modalOpen(app), true);
   assert.equal(app.elements.get("required-text").textContent, "Saves can be lost on this build.");
   assert.equal(app.elements.get("required-later").hidden, true, "no Not now");
-  assert.match(app.elements.get("required-foot").textContent, /paused and saved first/);
+  assert.equal(app.elements.get("required-foot").textContent, "Your game is saved before the update.");
   assert.equal(app.elements.get("required-title").textContent, "Update Required");
   assert.equal(app.runIn("paused"), true, "the game waits behind the card");
   app.runIn("closeRequired()"); // Escape's closer
@@ -181,7 +191,7 @@ test("a link-scope update offers Not now, then holds the link cable with the car
   await app.runIn("checkStatus()");
   assert.equal(modalOpen(app), true);
   assert.equal(app.elements.get("required-title").textContent, "Link Cable Needs an Update");
-  assert.equal(app.elements.get("required-modal").classList.contains("link"), true);
+  assert.equal(app.elements.get("required-foot").textContent, "Everything else keeps working.");
   assert.equal(app.elements.get("required-later").hidden, false);
   app.elements.get("required-later").click();
   assert.equal(modalOpen(app), false, "Not now closes it");
