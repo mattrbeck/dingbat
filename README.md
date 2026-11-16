@@ -1,4 +1,4 @@
-<p align="center"><img src="README/dingbat_large.png"></p>
+<p align="center"><img alt="dingbat" src="README/dingbat_large.png"></p>
 
 <h3 align="center">dingbat</h3>
 
@@ -51,4 +51,4 @@ with insightful feedback and targeted test ROMs:
 dingbat is MIT licensed; the licences of the components compiled into the binaries are
 listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
-<p align="center"><img width="800" src="README/GoldenSun.gif"></p>
+<p align="center"><img width="800" alt="Golden Sun running in dingbat" src="README/GoldenSun.gif"></p>
