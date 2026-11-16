@@ -1,13 +1,11 @@
 ## Whether dingbat opens fullscreen: it does when it quit fullscreen and the
 ## platform's convention is to bring a window back as the user left it.
 ##
-## macOS leaves that to the user: System Settings > Desktop & Dock > "Close
-## windows when quitting an application" (NSQuitAlwaysKeepsWindows, the
-## inverse). AppKit apps come back fullscreen only when it is off; SDL opts
-## dingbat out of AppKit's restoration (ApplePersistenceIgnoreState), so the
-## setting is read here. Windows and Linux have no such setting, and the
-## apps people play on them (browsers' F11 in Firefox and Chrome, games'
-## display mode) come back the way they were left.
+## macOS: System Settings > Desktop & Dock > "Close windows when quitting
+## an application" (NSQuitAlwaysKeepsWindows, the inverse). SDL opts dingbat
+## out of AppKit's restoration (ApplePersistenceIgnoreState), so the setting
+## is read here. Windows and Linux have no such setting; apps there (browser
+## F11, games' display mode) come back as they were left.
 ##
 ## And, while running, whether the window is fullscreen however it got
 ## there (`FullscreenTrack`).
@@ -82,9 +80,9 @@ proc observe*(t: var FullscreenTrack; real, believed: bool): FullscreenChange =
   else: fcLeft
 
 proc take_refit*(t: var FullscreenTrack; real: bool): bool =
-  ## Whether to size the window to the picture now: it is a window again,
-  ## and a sizing came while it was not (a game loaded, a Super Game Boy
-  ## border, the frame size), or it would come back the old game's shape.
+  ## Size the window to the picture now: it is a window again and a sizing
+  ## came while fullscreen (game load, SGB border, frame size); otherwise it
+  ## would come back the old game's shape.
   if t.refit and not real:
     t.refit = false
     return true

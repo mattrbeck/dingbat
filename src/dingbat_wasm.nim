@@ -28,11 +28,10 @@ var stateGba:      GBA         = nil
 var stateGb:       GB          = nil
 var frameCount {.exportc.}: cint = 0
 
-# Session handles, hoisted above their blocks because earlier procs guard on
-# them. Module-scope heap globals in this build must stay nil/empty here and
-# be allocated only from JS-invoked procs: main() returns after init (JS
-# drives frames via rAF) and Nim's exit teardown destroys anything allocated
-# at module init.
+# Session handles, declared early because earlier procs guard on them.
+# Module-scope heap globals must stay nil/empty here and be allocated only
+# from JS-invoked procs: main() returns after init (JS drives frames via
+# rAF) and Nim's exit teardown destroys anything allocated at module init.
 var stateNet: NetCore = nil                        # online link (netlink_*)
 var stateRollback: RollbackSession = nil           # input-rollback online play,
 var stateGbRollback: gbrb.GbRollbackSession = nil  # mutually exclusive
@@ -50,9 +49,9 @@ var netOut: string = ""       # drained frames awaiting pickup by JS
 var netErrorMsg: string = ""  # sticky protocol/handshake failure for the UI
 var curRomPath: string = ""   # FS path of the running GBA ROM (for netlink_attach)
 # CRC32 of the running GBA ROM, hashed from the cartridge buffer at load so
-# netlink never re-reads the FS copy (a 16 MB transient allocation on a
-# memory-pressured phone). The FS copy must stay: reset and save-import
-# reboots call loadRom again without re-staging the ROM.
+# netlink never re-reads the FS copy (16 MB transient on a memory-pressured
+# phone). The FS copy must stay: reset and save-import reboots call loadRom
+# again without re-staging the ROM.
 var curRomCrc: uint32 = 0
 var curRomCrcValid = false
 
@@ -68,8 +67,8 @@ var rgbaBuffer: seq[uint32] = @[]
 var colorCorrect = true  # matches the desktop default (cfg.color_correction)
 
 proc build_color_luts(correct: bool) =
-  ## With `correct` unset both tables are a plain 5 -> 8 bit expansion. Every
-  ## present path reads them, so rebuilding is enough to toggle correction.
+  ## With `correct` unset both tables are a plain 5 -> 8 bit expansion.
+  ## Rebuilding is enough to toggle correction.
   for i in 0 ..< 0x8000:
     let r5 = float64(i and 0x1F) / 31.0
     let g5 = float64((i shr 5) and 0x1F) / 31.0
@@ -115,11 +114,9 @@ proc wasm_set_color_correction(on: cint) {.exportc.} =
   build_color_luts(colorCorrect)
   sync_lcd_panel()
 
-# --- Core-construction settings ---
-# Take effect at the next core construction (ROM load / reset), not on the
-# running core.
-# sgbRequested defaults OFF: the embed never calls applySystemSettings, and an
-# embedded game should play the cart as the cart is.
+# --- Core-construction settings: take effect at the next ROM load / reset.
+# sgbRequested defaults off: the embed never calls applySystemSettings, and
+# an embedded game should play as the cart is.
 var sgbRequested  = false
 var sgbBorderWanted = true
 var optGbaBiosMode: cint = 0  # 0 = HLE, 1 = real BIOS, 2 = real BIOS boot + HLE SWIs
@@ -146,17 +143,16 @@ proc make_gba(rom_path: string): GBA =
   result.apu.set_fifo_interp(optFifoInterp)
 
 # LCD response (common/lcd_response.nim): a per-pixel model of how the panel
-# settles, so a sprite flickered every other frame reads as translucent
-# instead of strobing. Presentation-only, safe to change mid-frame. lcdResp's
-# seqs are allocated from JS-invoked procs only (module-teardown rule above).
+# settles, so a sprite flickered every other frame reads as translucent.
+# Presentation-only, safe to change mid-frame. lcdResp's seqs are allocated
+# from JS-invoked procs only (module-teardown rule above).
 var lcdOn = false
 var lcdResp: LcdResponse
 
 proc sync_lcd_panel() =
-  ## Resolve the panel against the running core (set_panel early-outs when
-  ## nothing changed). The GBA correction shader linearizes with gamma 4.0, so
-  ## the AGB table is built for that chain; GB's branch keeps the 2.2 input
-  ## curve, so only the GBA case passes a gamma.
+  ## Resolve the panel for the running core (set_panel early-outs when
+  ## nothing changed). Only GBA passes a gamma: its correction shader
+  ## linearizes with 4.0, while GB's keeps the 2.2 input curve.
   let gb = stateKind == ekGB and stateGb != nil
   lcdResp.set_panel(lcdOn.resolve(
     gba = stateKind == ekGBA,
@@ -171,8 +167,8 @@ proc wasm_set_lcd_response(on: cint) {.exportc.} =
   lcdResp.reset()   # drop stale cell state
 
 proc wasm_set_mp2k_hle(on: cint) {.exportc.} =
-  ## MP2K/M4A sound-engine HLE: remembered for later cores and applied to the
-  ## live GBA core. Only engages when runtime detection finds the engine.
+  ## MP2K/M4A sound-engine HLE: remembered for later cores and applied live.
+  ## Engages only when runtime detection finds the engine.
   optMp2kHle = on != 0
   if stateKind == ekGBA and stateGba != nil:
     stateGba.mp2k_hle = optMp2kHle
@@ -190,10 +186,10 @@ proc wasm_mp2k_available(): cint {.exportc.} =
      stateGba.mp2k.engaged: 1 else: 0
 
 proc wasm_hle_audio_active(): cint {.exportc.} =
-  ## 1 when a sound-engine HLE is enabled and substituting audio right now:
-  ## MP2K engaged with its mixer live (engaged alone can idle while the game
-  ## streams its own audio), or the Camelot "Bon" driver engaged. Drives the
-  ## "HLE audio" indicator.
+  ## 1 when a sound-engine HLE is substituting audio right now (the "HLE
+  ## audio" indicator): MP2K engaged with its mixer live (engaged alone can
+  ## idle while the game streams its own audio), or the Camelot "Bon" driver
+  ## engaged.
   if stateKind != ekGBA or stateGba == nil or not stateGba.mp2k_hle: return 0
   if stateGba.mp2k != nil and stateGba.mp2k.engaged and
      stateGba.mp2k.mixer_live(): return 1
@@ -203,9 +199,9 @@ proc wasm_hle_audio_active(): cint {.exportc.} =
 # --- WebGL2 present path ---
 # JS uploads the raw BGR555 framebuffer (gamePtr) to a WebGL2 texture each
 # frame; color correction and scanlines run in the shader (web/index.js). The
-# LUTs above serve only the low-rate consumers of wasm_fb_ptr (ambient glow,
-# paused thumbnail). The LCD response runs on the CPU once per EMULATED frame,
-# so a 120 Hz display or a dropped present cannot change how the panel settles.
+# LUTs above serve only wasm_fb_ptr (ambient glow, paused thumbnail). The LCD
+# response runs once per EMULATED frame, so a 120 Hz display or a dropped
+# present cannot change how the panel settles.
 var gamePtr: pointer = nil       # pointer JS uploads this frame
 
 proc prepare_game_frame(fb: ptr UncheckedArray[uint16]; pixels: int) =
@@ -220,10 +216,9 @@ proc wasm_game_fb_ptr(): pointer {.exportc.} =
   gamePtr
 
 proc wasm_native_fb_ptr(): pointer {.exportc.} =
-  ## The console's own picture: the core's BGR555 framebuffer (GB/GBC
-  ## 160x144, GBA 240x160), before the LCD response, colour correction, the
-  ## DMG shades, the SGB border and every upscale filter. What clips,
-  ## recordings and screenshots are made of; readable at any time.
+  ## The core's BGR555 framebuffer (GB/GBC 160x144, GBA 240x160), before the
+  ## LCD response, colour correction, DMG shades, SGB border and upscale
+  ## filters. Clips, recordings and screenshots use it; readable any time.
   case stateKind
   of ekGBA: (if stateGba != nil: cast[pointer](addr stateGba.ppu.framebuffer[0]) else: nil)
   of ekGB:  (if stateGb  != nil: cast[pointer](addr stateGb.ppu.framebuffer[0]) else: nil)
@@ -269,8 +264,8 @@ proc wasm_sgb_backdrop(): cint {.exportc.} =
     cint(stateGb.sgb_backdrop()) else: 0
 
 proc wasm_out_w(): cint {.exportc.} =
-  ## The presented picture's native width, which the canvas backing store is
-  ## sized from; the only source that knows a border appeared mid-session.
+  ## The presented picture's native width (sizes the canvas backing store);
+  ## the only source that knows a border appeared mid-session.
   if wasm_sgb_border() != 0: cint(SGB_BORDER_W)
   elif stateKind == ekGB: cint(GB_W)
   elif stateKind == ekGBA: cint(GBA_W)
@@ -287,10 +282,10 @@ proc wasm_panel_gbc(): cint {.exportc.} =
   if stateKind == ekGB: 1 else: 0
 
 # --- Ambient-glow sampler ---
-# Composites the way the presenter does (border over Game Boy window over
-# backdrop), skipping upscale filters and scanlines (a point sample on a dark
+# Composites as the presenter does (border over Game Boy window over
+# backdrop), without upscale filters or scanlines (a point sample on a dark
 # row would flicker the halo). The DMG shade palette is passed in, not
-# stored: it never reaches the core, so states, rewind and netplay stay identical.
+# stored, so it never reaches the core.
 
 var glowBuffer: seq[uint32]
 
@@ -355,9 +350,8 @@ proc wasm_glow_sample(gw, gh: cint; remap: cint;
   addr glowBuffer[0]
 
 proc wasm_fb_ptr(): pointer {.exportc.} =
-  ## Corrected RGBA8888 of the current framebuffer, converted on demand. Not
-  ## on the present path: only the ambient-glow sampler (~10 Hz) and the
-  ## paused-game thumbnail call this.
+  ## Corrected RGBA8888 of the current framebuffer, converted on demand.
+  ## Low-rate only: the ambient glow (~10 Hz) and the paused thumbnail.
   let fbp = case stateKind
     of ekGBA: (if stateGba != nil: cast[pointer](addr stateGba.ppu.framebuffer[0]) else: nil)
     of ekGB:  (if stateGb  != nil: cast[pointer](addr stateGb.ppu.framebuffer[0]) else: nil)
@@ -373,9 +367,9 @@ proc wasm_fb_ptr(): pointer {.exportc.} =
 # float32 stereo samples for Web Audio; JS reads and clears after each frame.
 var audioBuffer: seq[float32] = @[]
 
-# True while a muted core's etAPUSample is being dispatched (2P link plays
-# player 1 only). The sample is computed and rescheduled as usual; only the
-# append is dropped, so the linked cores stay bit-identical.
+# True while a muted core's etAPUSample is dispatched. The sample is still
+# computed and rescheduled; only the append is dropped, so linked cores stay
+# bit-identical.
 var audioSuppressed = false
 
 # Slow motion: JS doubles the wall-clock step, so the core makes half the
@@ -385,10 +379,9 @@ var slowmoStretch = false
 
 # A clip replay (clip_begin .. clip_tick / clip_abort) is running.
 var clipReplaying = false
-# The player's 2x / slow motion while a replay runs. Both reshape the core's
-# sample stream (half / twice the samples a frame) and neither is in a state,
-# so a replay would inherit them: the clip's sound would run at half or
-# double the length of its pictures. A replay is a recording at 1x; a speed
+# The player's 2x / slow motion, held while a replay runs at 1x. Both change
+# the samples per frame and neither is in a state, so an inherited speed
+# would make the clip's sound half or double its pictures' length. A speed
 # set meanwhile lands here and reaches the core when the replay ends.
 var clipHeldTurbo = false
 var clipHeldSlowmo = false
@@ -415,14 +408,12 @@ proc clearAudioBuffer() {.exportc.} =
 # interleaves with the RAF callback, so they always run at a frame boundary:
 # the only place state_bytes / load_state_bytes are valid.
 
-# Retained so the pointer from wasm_state_data stays valid until the next
-# wasm_state_size call.
+# Retained: wasm_state_data's pointer is valid until the next wasm_state_size.
 var stateImage: string = ""
 
 proc wasm_state_size(): cint {.exportc.} =
-  ## Serialize the full state (same bytes as desktop .state files: packed,
-  ## see pack_state) into a retained buffer; returns its length, 0 when no
-  ## core runs.
+  ## Serialize the full state (packed, the same bytes as a desktop .state
+  ## file) into the retained buffer; its length, 0 when no core runs.
   case stateKind
   of ekGBA: stateImage = pack_state(stateGba.state_bytes())
   of ekGB:  stateImage = pack_state(stateGb.state_bytes())
@@ -445,8 +436,7 @@ proc wasm_state_data(): pointer {.exportc.} =
 
 proc wasm_pack_state(data: pointer; len: cint): cint {.exportc.} =
   ## Pack a plain state image (one stored before states were deflated) into
-  ## the retained buffer for wasm_state_data; returns its length. Needs no
-  ## core: the packing is the container's alone.
+  ## the retained buffer; its length. Needs no core.
   if data == nil or len <= 0: return 0
   var image = newString(int(len))
   copyMem(addr image[0], data, int(len))
@@ -454,10 +444,10 @@ proc wasm_pack_state(data: pointer; len: cint): cint {.exportc.} =
   cint(stateImage.len)
 
 proc wasm_flush_save() {.exportc.} =
-  ## The solo core's battery RAM into its file now, if it changed. Both cores
-  ## flush once a frame, but a paused one runs no frames: a state loaded while
-  ## paused carries its RAM, marks it dirty, and nothing writes it until the
-  ## game runs again. JS calls this before it reads the file to persist it.
+  ## The solo core's battery RAM into its file now, if it changed. Cores
+  ## flush once a frame, but a paused one runs none, so a state loaded while
+  ## paused leaves dirty RAM unwritten. JS calls this before it reads the
+  ## file to persist it.
   case stateKind
   of ekGBA:
     if stateGba != nil: stateGba.storage.write_save()
@@ -467,9 +457,9 @@ proc wasm_flush_save() {.exportc.} =
 
 proc wasm_set_turbo(on: cint) {.exportc.} =
   ## 2x speed: the APU drops every other sample, so JS gets realtime-rate
-  ## (pitched-up) audio at double the frames per second. In online rollback
-  ## the live cores are the session's, so set it there (both peers run 2x in
-  ## lockstep; turbo only affects sample output, not timing).
+  ## (pitched-up) audio at double the frames per second. In rollback it goes
+  ## to the session's cores (both peers run 2x in lockstep; turbo affects
+  ## sample output only, not timing).
   let t = on != 0
   if stateRollback != nil:
     for core in stateRollback.link.cores: core.apu.turbo = t
@@ -489,9 +479,8 @@ proc wasm_set_slowmo(on: cint) {.exportc.} =
   else: slowmoStretch = on != 0
 
 proc wasm_set_pitch_correct_ff(on: cint) {.exportc.} =
-  ## When on, 2x speed uses a WSOLA time-stretch to keep pitch. Local-only:
-  ## it changes how the APU reduces the stream, never timing, so it cannot
-  ## desync a link. Mirrored onto live rollback cores.
+  ## When on, 2x speed uses a WSOLA time-stretch to keep pitch. Never changes
+  ## timing, so it cannot desync a link; mirrored onto live rollback cores.
   let t = on != 0
   if stateRollback != nil:
     for core in stateRollback.link.cores: core.apu.set_pitch_correct_ff(t)
@@ -507,10 +496,9 @@ var optSilent = false  # the player hears nothing: muted or volume 0
 var chanMutes: cint = 0  # Settings › Audio › Channels: bit i mutes channel i of the heard core
 
 proc apply_channel_mutes() =
-  ## APU.channel_mask on the core the player hears (the others are silent):
-  ## GBA bits 0-5 = Square 1, Square 2, Wave, Noise, Sample A, Sample B; GB
-  ## bits 0-3 the same four. Output only, like the volume: emulation, states
-  ## and links are unaffected.
+  ## APU.channel_mask on the core the player hears: GBA bits 0-5 = Square 1,
+  ## Square 2, Wave, Noise, Sample A, Sample B; GB bits 0-3 the same four.
+  ## Output only: emulation, states and links are unaffected.
   template mask(apu: untyped; n: int) =
     for i in 0 ..< n: apu.channel_mask[i] = (chanMutes and (1.cint shl i)) == 0
   if stateRollback != nil: mask(stateRollback.link.cores[rbLocal].apu, 6)
@@ -551,8 +539,7 @@ proc wasm_set_channel_mutes(bits: cint) {.exportc.} =
 
 proc wasm_set_audio_silent(on: cint) {.exportc.} =
   ## 1 while the player cannot hear the game (muted, volume 0): the cores
-  ## skip mixing (APU.silent; emulation is unchanged). Remembered for later
-  ## cores.
+  ## skip mixing (APU.silent; emulation unchanged). Kept for later cores.
   optSilent = on != 0
   apply_audio_silent()
 
@@ -567,10 +554,10 @@ proc wasm_state_error_kind(): cint {.exportc.} =
   cint(ord(last_state_reject_kind))
 
 proc wasm_load_state(data: pointer; len: cint; keepRewind: cint): cint {.exportc.} =
-  ## Apply a state image (same bytes as desktop .state files). Returns 1 on
-  ## success; 0 on rejection with the core untouched. Success drops the rewind
-  ## ring unless keepRewind != 0, which is for undoing a scrubber commit,
-  ## where the ring really is this state's own past.
+  ## Apply a state image (same bytes as desktop .state files). 1 on success;
+  ## 0 on failure with the core untouched. Success drops the rewind ring
+  ## unless keepRewind != 0 (undoing a scrubber commit, whose ring is this
+  ## state's own past).
   last_state_error = ""
   if data == nil or len <= 0: return 0
   if stateNet != nil: return 0  # loading a state mid-link would desync the pair
@@ -581,8 +568,7 @@ proc wasm_load_state(data: pointer; len: cint; keepRewind: cint): cint {.exportc
     of ekGB:  stateGb.load_state_bytes(image)
     of ekNone: false
   if ok and keepRewind == 0 and rewindHistory != nil:
-    # A loaded state starts a new timeline; the ring holds the old one, and
-    # hold-to-rewind would walk into moments that never preceded the screen.
+    # A loaded state starts a new timeline; rewinding must not walk into the old one.
     rewindHistory.clear()
   if ok: 1 else: 0
 
@@ -602,16 +588,16 @@ proc isStopped(): cint {.exportc.} =
 
 proc wasm_rumble(): cint {.exportc.} =
   ## 1 while the running cart's rumble motor is on (GB MBC5 rumble types
-  ## 0x1C-0x1E, GBA GPIO rumble). stateKind is only set in single-core
-  ## sessions, so link modes return 0. JS polls this per RAF tick.
+  ## 0x1C-0x1E, GBA GPIO rumble). Link modes return 0 (stateKind is solo
+  ## only). JS polls this per RAF tick.
   if stateKind == ekGB and stateGb != nil and stateGb.cartridge.mbc_rumble(): 1
   elif stateKind == ekGBA and stateGba != nil and stateGba.bus.gpio.gpio_rumble(): 1
   else: 0
 
 proc wasm_set_tilt(x, y: cdouble) {.exportc.} =
-  ## Accelerometer input, -1..1 per axis (flick transients may exceed 1),
-  ## 0 = level. MBC7 on GB, the tilt window or gyro on GBA; a no-op
-  ## elsewhere, so JS can feed it unconditionally.
+  ## Accelerometer input, -1..1 per axis (flicks may exceed 1), 0 = level.
+  ## MBC7 on GB, the tilt window or gyro on GBA; a no-op elsewhere, so JS
+  ## can feed it unconditionally.
   if stateKind == ekGB and stateGb != nil:
     stateGb.cartridge.set_accelerometer(float(x), float(y))
   elif stateKind == ekGBA and stateGba != nil:
@@ -631,27 +617,24 @@ proc wasm_cart_has_tilt(): cint {.exportc.} =
   elif stateKind == ekGBA and stateGba != nil and stateGba.bus.gpio.gyro_present: 2
   else: 0
 
-# Strip thumbnails: 120-wide BGR555, the same geometry as the save-state
-# thumbnail trailer, so one JS decoder serves rewind strips, clip strips and
-# state thumbnails.
+# Strip thumbnails: 120-wide BGR555, the geometry of the save-state
+# thumbnail trailer, so one JS decoder serves all three.
 const SCRUB_THUMB_W = 120
 const GBA_SCRUB_THUMB_H = SCRUB_THUMB_W * GBA_H div GBA_W  # 3:2  -> 120x80
 const GB_SCRUB_THUMB_H  = SCRUB_THUMB_W * GB_H  div GB_W   # 10:9 -> 120x108
 
 # --- Retroactive clip capture ---
 # A rolling ring of state anchors (one per second) plus a per-frame input log;
-# deterministic replay from the anchor at or before the chosen start rebuilds
-# the frames the player saw while JS records the canvas. Separate from the
-# rewind ring: rewind may be off and keeps no inputs. Known divergence: the
-# GBA RTC reads wall clock, so a replayed clock can differ by the clip length.
-
+# replay from the anchor at or before the chosen start rebuilds the frames
+# the player saw while JS records the canvas. Separate from the rewind ring:
+# rewind may be off and keeps no inputs. Known divergence: the GBA RTC reads
+# wall clock, so a replayed clock can differ by the clip length.
 # Anchors double as the scrubber strip, so one cadence serves both.
 const CLIP_SNAP_INTERVAL = 60          # anchor + thumbnail cadence (frames)
 const CLIP_MAX_FRAMES = 60 * 60        # rolling history window (~60 s)
 const CLIP_CAP_BYTES = 12 * 1024 * 1024
-  ## Byte budget for the anchor ring, smaller than rewind's because the window
-  ## is time-bounded too. JS lowers it on iOS, where memory pressure gets the
-  ## wasm JIT demoted.
+  ## Byte budget for the anchor ring (the window is time-bounded too). JS
+  ## lowers it on iOS, where memory pressure gets the wasm JIT demoted.
 
 type ClipAnchor = object
   frame: int          # canonical frame index this state is the start of
@@ -746,8 +729,7 @@ proc clip_note_frame() =
       clipAnchorBytes += clip_anchor_size(a)
   clipInputs.add(clipCurButtons)
   inc clipFrameIndex
-  # Time bound and byte bound both evict from the front; on a game that
-  # compresses badly the byte bound is what holds.
+  # Evict from the front by time, then by bytes.
   let oldest = clipFrameIndex - CLIP_MAX_FRAMES
   while clipAnchors.len > 1 and clipAnchors[1].frame <= oldest:
     clipAnchorBytes -= clip_anchor_size(clipAnchors[0])
@@ -807,15 +789,13 @@ proc clip_scrub_generate(maxSamples: cint): cint {.exportc.} =
   clipStripThumbs = @[]
   clipStripAgo = @[]
   if not clip_available(): return 0
-  # Newest-first ordering, and only anchors that carry a picture.
   var usable: seq[int] = @[]
   for i in countdown(clipAnchors.high, 0):
     if clipAnchors[i].thumb.len > 0: usable.add(i)
   if usable.len == 0: return 0
   let n = min(max(1, int(maxSamples)), usable.len)
   for s in 0 ..< n:
-    # Evenly spaced picks spanning the whole strip; a fixed stride never
-    # reaches the oldest frame when the count doesn't divide.
+    # Not a fixed stride: that misses the oldest frame when the count doesn't divide.
     let i = usable[if n == 1: 0 else: s * (usable.len - 1) div (n - 1)]
     var pixels: seq[byte]
     try:
@@ -835,16 +815,15 @@ proc clip_scrub_thumbs_ptr(): pointer {.exportc.} =
   if clipStripThumbs.len > 0: addr clipStripThumbs[0] else: nil
 
 proc clip_scrub_frames_ago(sample: cint): cint {.exportc.} =
-  ## How far back sample `i` sits, in frames (0 = the live moment).
+  ## How far back `sample` sits, in frames (0 = the live moment).
   if sample < 0 or sample >= clipStripAgo.len: return 0
   cint(clipStripAgo[int(sample)])
 
 proc clip_begin(startAgo, endAgo: cint): cint {.exportc.} =
-  ## Arm a replay of [startAgo, endAgo) frames before now. Stashes the live
-  ## state, restores the anchor at or before the start, silently re-emulates
-  ## up to the start frame and presents it. Returns the number of frames the
-  ## replay will run (JS steps them via clip_tick), or 0 with no usable
-  ## history / a linked mode active.
+  ## Arm a replay of [startAgo, endAgo) frames before now: stash the live
+  ## state, restore the anchor at or before the start, silently re-emulate
+  ## to the start frame and present it. Returns the frames JS will step via
+  ## clip_tick, or 0 with no usable history or a linked mode active.
   if not clip_available(): return 0
   if clipReplaying or clipAnchors.len == 0: return 0
   var startFrame = clipFrameIndex - max(0, int(startAgo))
@@ -876,8 +855,7 @@ proc clip_begin(startAgo, endAgo: cint): cint {.exportc.} =
   clip_speed_1x()
   # A replay re-sends serial bytes the printer already processed; mute it.
   if statePrinter != nil: statePrinter.muted = true
-  # Silent pre-roll (at most CLIP_SNAP_INTERVAL-1 frames, audio dropped,
-  # nothing presented) so the range starts on exactly the chosen frame.
+  # Silent pre-roll (< CLIP_SNAP_INTERVAL frames) to the exact start frame.
   audioSuppressed = true
   while clipCursor < startFrame:
     let idx = clipCursor - clipInputsStart
@@ -940,8 +918,8 @@ proc clip_abort() {.exportc.} =
 
 # --- Game Boy Printer ---
 # Every solo GB core has a printer from the start (gb/printer.nim: the
-# opening INIT resolves inside one frame, so attaching on demand cannot
-# work). JS pops finished prints as 8-bit grayscale.
+# opening INIT resolves inside one frame, so attaching on demand fails).
+# JS pops finished prints as 8-bit grayscale.
 var printerTakeBuf: seq[uint8] = @[]
 
 proc printer_attach() =
@@ -1024,11 +1002,11 @@ proc setInput(inputId: cint; pressed: cint) {.exportc.} =
   let down = pressed != 0
   if down: clipCurButtons = clipCurButtons or (1'u16 shl inputId)
   else: clipCurButtons = clipCurButtons and not (1'u16 shl inputId)
-  # During a clip replay the input log owns the core; live presses only
-  # update the mask, which clip_tick re-applies when the replay ends.
+  # During a clip replay the input log owns the core; clip_tick re-applies
+  # the live mask when it ends.
   if clipReplaying: return
-  # While an online link is live, input goes through the netcore so a
-  # speculative rollback replays the exact press timing.
+  # Online, input goes through the netcore so a speculative rollback
+  # replays the exact press timing.
   if stateNet != nil:
     stateNet.note_input(inp, down)
     return
@@ -1048,9 +1026,8 @@ var rewindCapBytes: int = REWIND_CAP_BYTES
 proc setRewindCapBytes(n: cint) {.exportc.} =
   if n > 0: rewindCapBytes = int(n)
 
-# Master rewind on/off. Off means the ring is never allocated, so loop_tick
-# skips the per-interval state_payload() + thumbnail push entirely. Live both
-# ways; history does not survive a trip through off.
+# Rewind on/off. Off frees the ring, so loop_tick skips the push; history
+# does not survive a trip through off.
 var rewindEnabled: bool = true
 
 proc setRewindEnabled(on: cint) {.exportc.} =
@@ -1058,9 +1035,8 @@ proc setRewindEnabled(on: cint) {.exportc.} =
   if not rewindEnabled:
     rewindHistory = nil
   elif rewindHistory == nil and stateKind != ekNone and stateNet == nil:
-    # Live single core only: linked modes keep the ring nil (rewinding one
-    # side desyncs the pair), and they tear the solo session down or hold
-    # stateNet, so both are excluded here.
+    # Solo only: rewinding one side of a link desyncs the pair. Linked
+    # modes either clear stateKind or hold stateNet.
     rewindHistory = new_rewind(rewindCapBytes)
 
 proc gba_rewind_thumb(g: GBA): RewindThumb =
@@ -1101,18 +1077,16 @@ proc loop_tick() {.exportc.} =
   of ekNone:
     return
 
-# Run-ahead: each tick runs one canonical frame (audio kept), snapshots,
-# silently runs N more with the same input, presents that future frame and
-# restores the snapshot, so a press appears N frames sooner. The future frame
-# needs its own buffer: ppu.framebuffer is serialized, so apply_state_payload
-# would revert the pixels gamePtr points at. Notes: docs/run-ahead.md.
+# Run-ahead (docs/run-ahead.md): each tick runs one canonical frame (audio
+# kept), snapshots, silently runs N more with the same input, presents that
+# future frame and restores the snapshot. The future frame needs its own
+# buffer: ppu.framebuffer is serialized, so the restore would revert it.
 var runaheadFrame: seq[uint16] = @[]
 
 proc runahead_tick(n: cint) {.exportc.} =
   ## loop_tick with N frames of run-ahead (n <= 0 is plain loop_tick).
-  ## Single-core only: linked modes are frame-synced with a peer, 2P already
-  ## runs two cores per frame, and stateGba/stateGb may be stale there; the
-  ## guards make a mistimed JS call a no-op.
+  ## Single-core only; in linked modes stateGba/stateGb may be stale, and
+  ## the guards make a mistimed JS call a no-op.
   if stateNet != nil: return
   if stateLink != nil or stateGbLink != nil: return
   if stateRollback != nil or stateGbRollback != nil: return
@@ -1198,9 +1172,8 @@ proc wasm_rewind_pop(): cint {.exportc.} =
   1
 
 # --- Rewind scrubber (bug-report timeline) ---
-# Hands JS a strip of thumbnails sampled across rewind history. The strip is
-# copied out of the ring, which stored each picture at push time: nothing is
-# applied to the live core and the cost is O(samples), not O(history).
+# Thumbnails sampled across rewind history, copied from those the ring
+# stored at push time: nothing is applied to the live core, O(samples).
 
 var scrubThumbs: seq[byte] = @[]   # packed BGR555 thumbnails, one after another
 var scrubIds: seq[int] = @[]       # absolute rewind ID of each sample
@@ -1281,30 +1254,26 @@ proc wasm_rewind_scrub_state_size(sample: cint): cint {.exportc.} =
 # --- Committing to a scrubbed moment ---
 
 proc cart_save_bytes(): seq[byte] =
-  ## The bytes that reach the .sav file, not the whole storage section: that
-  ## also carries controller state (flash bank/command phase, EEPROM shift
-  ## register), which differs whenever a save was mid-command with no save
-  ## data change, and would raise the "discards your save" prompt on games
-  ## that merely poll their flash chip.
+  ## The bytes that reach the .sav file, not the whole storage section: its
+  ## controller state (flash bank/command phase, EEPROM shift register)
+  ## differs mid-command and would raise the "discards your save" prompt on
+  ## games that merely poll their flash chip.
   case stateKind
   of ekGBA:
     if stateGba != nil and stateGba.storage != nil: stateGba.storage.memory
     else: @[]
   of ekGB:
-    # No battery means no .sav, so rolling the RAM back costs nothing to
-    # warn about.
+    # No battery, no .sav: nothing to warn about.
     if stateGb != nil and stateGb.cartridge != nil and stateGb.cartridge.has_battery:
       stateGb.cartridge.ram
     else: @[]
   of ekNone: @[]
 
 proc wasm_rewind_scrub_save_differs(sample: cint): cint {.exportc.} =
-  ## 1 when committing to `sample` would change the cartridge save data. An
-  ## exact byte comparison, so it cannot miss or invent a change; it cannot
-  ## know intent (a game scribbling in SRAM unprompted still reports one, the
-  ## safe direction). Stash and restore per call: holding a stash across the
-  ## sheet's lifetime turns every early return or ROM switch into a corrupted
-  ## live session, and a round trip is ~4 ms.
+  ## 1 when committing to `sample` would change the cartridge save data
+  ## (exact byte comparison). Stash and restore per call (~4 ms): a stash
+  ## held across the sheet's lifetime turns every early return or ROM switch
+  ## into a corrupted live session.
   if sample < 0 or sample >= scrubIds.len or rewindHistory == nil: return 0
   let now = cart_save_bytes()
   if now.len == 0: return 0
@@ -1323,11 +1292,9 @@ proc wasm_rewind_scrub_save_differs(sample: cint): cint {.exportc.} =
   if differs: 1 else: 0
 
 proc wasm_rewind_commit(sample: cint): cint {.exportc.} =
-  ## Rewind the live core to `sample` and drop every newer snapshot, so the
-  ## strip, hold-to-rewind and the next push agree on the newest moment.
-  ## Returns 1, or 0 when the sample is gone or a linked mode owns the core.
-  ## JS keeps its own pre-commit image for the Undo toast; nothing here
-  ## preserves the discarded snapshots.
+  ## Rewind the live core to `sample` and drop every newer snapshot. Returns
+  ## 1, or 0 when the sample is gone or a linked mode owns the core. JS keeps
+  ## its own pre-commit image for Undo; the dropped snapshots are gone.
   if rewindHistory == nil: return 0
   if stateNet != nil or stateLink != nil or stateGbLink != nil: return 0
   if stateRollback != nil or stateGbRollback != nil: return 0
@@ -1353,15 +1320,14 @@ proc wasm_rewind_commit(sample: cint): cint {.exportc.} =
   1
 
 # --- 2P local link mode ---
-# Two cores running the same ROM over the in-process lockstep link
-# (gba/link.nim, gb/link.nim). JS drives frames via link_tick and blits each
-# core from the per-core RGBA buffers below (same color LUT as the solo
-# path). Allocated from JS-invoked procs only (module-teardown rule above).
+# Two cores on the same ROM over the in-process lockstep link (gba/link.nim,
+# gb/link.nim). JS drives link_tick and blits each core's RGBA buffer below.
+# Allocated from JS-invoked procs only (module-teardown rule above).
 var linkRgba: array[2, seq[uint32]]
 
 # A monochrome cart's screen in the DMG shade palette, per player: JS sets it
 # after link_init / rollback_init (which clear it) and when the palette
-# changes. A display substitution the cores never see, as the glow's remap.
+# changes. Display only; the cores never see it.
 var linkShadeOn: array[2, bool]
 var linkShades: array[2, array[4, uint32]]
 
@@ -1430,8 +1396,7 @@ proc link_init(rom1_path, rom2_path: cstring): cint {.exportc.} =
     let core = make_gba(path)
     core.post_init()
     cores.add(core)
-  # Player 1's APU is the only audible one: core 2 is silent (APU.silent,
-  # emulation identical).
+  # Only player 1 is heard (apply_audio_silent).
   stateLink = new_link(cores)
   apply_audio_silent()
   for p in 0 .. 1:
@@ -1479,11 +1444,10 @@ proc link_input(player, inputId, pressed: cint) {.exportc.} =
 
 # --- Input-rollback online play ---
 # Both cores run locally; only per-frame input bitmasks cross the network. JS
-# drives rollback_tick per RAF, ships the returned frame's input to the peer
-# and feeds peer inputs via rollback_feed; the session predicts and rolls
-# back internally (gba/rollback.nim, gb/rollback.nim). Determinism needs an
-# identical build/ROM/save and a deterministic RTC. rbLocal (declared with
-# the session globals) is this peer's core index.
+# calls rollback_tick per RAF, ships the frame's input to the peer and feeds
+# peer inputs via rollback_feed; the session predicts and rolls back
+# (gba/rollback.nim, gb/rollback.nim). Determinism needs an identical
+# build/ROM/save and a deterministic RTC.
 var rbEpoch: int64 = 0
 
 proc wrap_rollback_audio(core: GBA) =
@@ -1554,9 +1518,9 @@ proc rollback_exit() {.exportc.} =
   audioSuppressed = false
 
 proc rollback_exit_to_single(): cint {.exportc.} =
-  ## Leave the session but keep playing: promote this peer's core (with its
-  ## progress) to the solo core, unplug its cable, drop the peer's core and
-  ## the link. Returns 1; JS then clears rollback mode.
+  ## Leave the session but keep playing: this peer's core becomes the solo
+  ## core, cable unplugged; the peer's core and the link are dropped.
+  ## Returns 1; JS then clears rollback mode.
   if stateGbRollback != nil:
     let gcore = stateGbRollback.link.cores[rbLocal]
     gcore.cartridge.mbc_save()
@@ -1565,7 +1529,7 @@ proc rollback_exit_to_single(): cint {.exportc.} =
     stateGb = gcore
     stateKind = ekGB
     apply_audio_silent()
-    # Back to solo play: plug the printer in (every solo GB core has one).
+    # Every solo GB core has a printer.
     printer_attach()
     rgbaBuffer.setLen(GB_W * GB_H)
     lcdResp.reset()
@@ -1655,10 +1619,9 @@ proc rollback_confirmed(): cint {.exportc.} =
   elif stateRollback == nil: -1 else: cint(stateRollback.confirmed)
 
 proc rollback_load_state(player: cint; data: pointer; len: cint): cint {.exportc.} =
-  ## Seed core `player` from a full save-state so the session continues from
-  ## where each player was. Call before the first tick. The deterministic RTC
-  ## is re-applied after: the state carries the solo wall-clock RTC, which
-  ## would desync. Returns 1 on success.
+  ## Seed core `player` from a full save-state. Call before the first tick.
+  ## The deterministic RTC is re-applied after: the state carries the solo
+  ## wall-clock RTC, which would desync. Returns 1 on success.
   if player < 0 or player > 1 or data == nil or len <= 0: return 0
   var image = newString(int(len))
   copyMem(addr image[0], data, int(len))
@@ -1673,9 +1636,8 @@ proc rollback_load_state(player: cint; data: pointer; len: cint): cint {.exportc
 
 var rbDumpImage: string = ""
 proc rollback_dump_size(player: cint): cint {.exportc.} =
-  ## Debug: serialize rollback core `player`'s full save-state into a buffer
-  ## and return its length (0 if no session). Pair with rollback_dump_data;
-  ## captures a live desync for offline reproduction.
+  ## Debug: rollback core `player`'s full save-state into a buffer (read with
+  ## rollback_dump_data) to capture a desync; its length, 0 with no session.
   if player < 0 or player > 1: return 0
   if stateGbRollback != nil:
     rbDumpImage = stateGbRollback.link.cores[player].state_bytes()
@@ -1690,10 +1652,9 @@ proc rollback_dump_data(): pointer {.exportc.} =
   if rbDumpImage.len > 0: addr rbDumpImage[0] else: nil
 
 proc rollback_transfers(): cint {.exportc.} =
-  ## Monotonic count of SIO transfers on the emulated cable. A linked game
-  ## fires these continuously and stops when it closes the link, so JS
-  ## watches this for "no activity => done"; the SIO mode register stays
-  ## latched in multi mode after a game finishes, so it cannot serve.
+  ## Monotonic count of SIO transfers on the emulated cable; JS watches it
+  ## for "no activity => done". The SIO mode register cannot serve: it stays
+  ## in multi mode after a game finishes.
   if stateGbRollback != nil: return cint(stateGbRollback.link.transfers and 0x7fffffff)
   if stateRollback == nil: return 0
   cint(stateRollback.link.transfers and 0x7fffffff)
@@ -1731,9 +1692,8 @@ proc load_cheats(text: cstring): cstring {.exportc.} =
 
 proc initFromEmscripten(rom_path: cstring) {.exportc.} =
   link_exit()
-  # A rollback session's cores go too (their files are their own, rbrom*.sav).
-  # JS ends a session before it boots a solo game; one left behind would be
-  # promoted over this core by its teardown (rollback_exit_to_single), and
+  # A rollback session's cores go too (their files are rbrom*.sav). One left
+  # behind would be promoted over this core by rollback_exit_to_single and
   # persisted under this game's name.
   rollback_exit()
   clip_reset()  # capture history belongs to the previous core
@@ -1741,11 +1701,9 @@ proc initFromEmscripten(rom_path: cstring) {.exportc.} =
   stateNet = nil  # JS closes the channel
   netOut.setLen(0)
   netErrorMsg.setLen(0)
-  # No flush of the outgoing GB core here. Every solo game's battery file is
-  # the one `rom.sav`, and by now JS has persisted the outgoing game and
-  # written the incoming game's save to that file: a flush would put the old
-  # cart's RAM under the new game, and the first autosave would make it that
-  # game's save.
+  # Do not flush the outgoing GB core: every solo game's battery file is the
+  # one `rom.sav`, and JS has already written the incoming game's save there,
+  # so a flush would put the old cart's RAM under the new game.
   let path = $rom_path
   let ext = path.splitFile().ext.toLowerAscii()
   if ext in GB_ROM_EXTS:
@@ -1775,11 +1733,10 @@ proc initFromEmscripten(rom_path: cstring) {.exportc.} =
   apply_audio_silent()
 
 # --- Online link mode ---
-# One local GBA core linked to a remote peer over a byte transport JS
-# provides (a WebRTC DataChannel). The protocol state machine is
-# gba/netcore.nim, shared with the native TCP transport. JS shuttles wire
-# bytes with netlink_feed/netlink_drain and drives frames with netlink_tick;
-# rendering, audio and input reuse the solo paths.
+# One local GBA core linked to a remote peer over a JS byte transport (a
+# WebRTC DataChannel); the protocol is gba/netcore.nim, shared with the
+# native TCP transport. JS moves bytes with netlink_feed/netlink_drain and
+# drives frames with netlink_tick; render, audio and input use the solo paths.
 
 proc net_collect() =
   if stateNet == nil: return
@@ -1788,12 +1745,11 @@ proc net_collect() =
 
 proc netlink_init(rom_path: cstring; is_host: cint;
                   allow_crc_mismatch: cint): cint {.exportc.} =
-  ## Set up the solo session on a ROM already in the FS, then bind the
-  ## protocol core (host = unit 0, the multi-mode parent). Our HELLO is queued
-  ## immediately; drain and send it once the channel opens. With
-  ## allow_crc_mismatch, differing CRCs are accepted and reported via
-  ## netlink_crc_mismatch (cross-version trades); the UI confirms before
-  ## ticking. Returns 1 on success.
+  ## Boot the ROM already in the FS, then bind the protocol core (host =
+  ## unit 0, the multi-mode parent). Our HELLO is queued at once; drain and
+  ## send it when the channel opens. allow_crc_mismatch accepts differing
+  ## CRCs (cross-version trades), reported via netlink_crc_mismatch for the
+  ## UI to confirm before ticking. Returns 1 on success.
   initFromEmscripten(rom_path)  # also tears down any previous session
   if stateKind != ekGBA: return 0
   rewindHistory = nil  # rewinding one side would desync the pair
@@ -1807,17 +1763,15 @@ proc netlink_init(rom_path: cstring; is_host: cint;
   1
 
 proc gba_awaiting_link(): cint {.exportc.} =
-  ## 1 when an un-linked GBA game is polling multi-player serial mode with
-  ## no cable: games only enter that SIO mode to link, so it is the "wants a
-  ## partner" badge signal. 0 once online mode is active.
+  ## 1 when an unlinked GBA game is in multi-player SIO mode, which games
+  ## enter only to link (the "wants a partner" badge). 0 once online.
   if stateNet != nil or stateKind != ekGBA or stateGba == nil: return 0
   if stateGba.serial.sio_mode() == smMulti: 1 else: 0
 
 proc netlink_attach(is_host: cint; allow_crc_mismatch: cint): cint {.exportc.} =
-  ## Bind the protocol core to the already-running GBA core without the
-  ## reboot netlink_init does. The link clock is rebaselined to the core's
-  ## current cycle so both sides start near zero; bounded-lead sync absorbs
-  ## the remaining skew. Returns 1 on success.
+  ## Bind the protocol core to the running GBA core without netlink_init's
+  ## reboot. The link clock is rebaselined to the core's current cycle;
+  ## bounded-lead sync absorbs the remaining skew. Returns 1 on success.
   if stateKind != ekGBA or stateGba == nil or stateNet != nil: return 0
   if not curRomCrcValid: return 0
   rewindHistory = nil  # rewinding one side would desync the pair
@@ -1827,18 +1781,18 @@ proc netlink_attach(is_host: cint; allow_crc_mismatch: cint): cint {.exportc.} =
                           lead = NETLINK_LEAD_RAF,
                           speculative = specEnabled)
   stateNet.rebaseline()
-  # A multi-mode transfer left mid-flight by the no-cable driver is stuck
-  # busy with no completion scheduled; clear it so the game's retry
-  # re-initiates through the remote driver. No data is latched.
+  # A multi-mode transfer started under the no-cable driver is stuck busy
+  # with no completion scheduled; clear it so the game's retry goes through
+  # the remote driver. No data is latched.
   if (stateGba.serial.siocnt and 0x0080'u16) != 0:
     stateGba.serial.siocnt = stateGba.serial.siocnt and not 0x0080'u16
   net_collect()
   1
 
 proc netlink_exit() {.exportc.} =
-  ## Queue BYE, flush the battery save, keep the game running unlinked (a
-  ## yanked cable). JS must drain once more to deliver the BYE, then switch
-  ## the RAF driver back to loop_tick.
+  ## Queue BYE, flush the battery save, keep the game running unlinked. JS
+  ## must drain once more to deliver the BYE, then switch the RAF driver
+  ## back to loop_tick.
   if stateNet == nil: return
   stateNet.send_bye(LINK_BYE_SHUTDOWN)
   net_collect()

@@ -1,20 +1,15 @@
 ## A DS game on the desktop (Settings > General > Advanced > DS Beta): the
-## parts of running one that need no window, so tests/desktop_nds_test.nim
-## builds them headless. The web's src/dingbat_nds_wasm.nim + web/index.js
-## "Nintendo DS" and the iOS app's src/dingbat_ios.nim "Nintendo DS" are the
-## other two front ends; this follows them (docs/nds/desktop.md):
+## windowless parts, so tests/desktop_nds_test.nim builds them headless.
+## Follows the web (src/dingbat_nds_wasm.nim) and iOS (src/dingbat_ios.nim)
+## front ends; docs/nds/desktop.md.
 ##
-## - optional BIOS / firmware dumps, the HLE BIOS and the built-in firmware
-##   without them;
-## - the cart's save chip in `<rom>.sav` beside the ROM, as the GB/GBA
-##   battery is;
-## - the console's firmware flash (the user's name, birthday, language,
-##   Wi-Fi settings a game or the DS menu wrote) kept once per computer in
-##   the config folder, shared by every DS game;
-## - the sound, queued to SDL's legacy audio device as the GB/GBA APUs queue
-##   theirs (not under -d:test_harness: no SDL there);
-## - save states in the desktop's slot files;
-## - HD 3D: the screens the presenter shows at the 3D resolution set.
+## - optional BIOS / firmware dumps; HLE BIOS and built-in firmware without;
+## - the cart's save chip in `<rom>.sav` beside the ROM;
+## - the firmware flash (name, birthday, language, Wi-Fi) kept once per
+##   computer in the config folder, shared by every DS game;
+## - sound queued to SDL's legacy audio device (not under -d:test_harness:
+##   no SDL there);
+## - save states in the desktop's slot files; HD 3D screens.
 
 import std/[os, strformat, strutils]
 import ../common/[atomicfile, input, rom_exts, serialize, timestretch]
@@ -111,14 +106,13 @@ proc is_nds_file*(path: string): bool =
   looks_like_nds_rom(head)
 
 # ──────────────────────────── The firmware flash ────────────────────────────
-# What a game or the DS menu writes to the flash is one console's, kept with
-# the firmware base it was written on: "built-in" or the user's dump's
-# signature (fnv1a32 ":" length, the web's saveSignature). The next boot gets
-# it only on that base: over a dump, the written image whole; on the
-# built-in firmware, only its user area (Wi-Fi connections and both
-# user-settings copies) laid over this build's synth_firmware, so a later fix
-# to the built-in header or wifi calibration still reaches it. The record is
-# the iOS app's: the image, then the base, its length (u32 LE) and a magic.
+# The written flash is kept with the firmware base it was written on:
+# "built-in" or the dump's signature (fnv1a32 ":" length, the web's
+# saveSignature), and the next boot uses it only on that base. Over a dump:
+# the written image whole. On the built-in firmware: only its user area,
+# laid over this build's synth_firmware, so later fixes to the built-in
+# header or wifi calibration still reach it. Record format is the iOS app's:
+# image, base, base length (u32 LE), magic.
 
 const NDS_FW_BUILTIN = "built-in"
 const NDS_FLASH_MAGIC = "DGBNDSFW"
@@ -177,10 +171,9 @@ proc firmware_for(flash_path: string; dump: seq[uint8]; base: string): seq[uint8
 # ──────────────────────────── Loading, saving ────────────────────────────
 
 proc build_nds*(rom_path: string; paths: NdsPaths): BuiltNds =
-  ## Builds a DS on `rom_path` without touching the running game: a file
-  ## that is not a DS ROM, or a core that cannot be built, says why. The
-  ## cart's chip starts from `<rom>.sav` (the core's set_data rules,
-  ## docs/nds/saves.md); every boot starts with the lid open.
+  ## Builds a DS on `rom_path` without touching the running game; `error`
+  ## says why on failure. The chip starts from `<rom>.sav` (set_data rules,
+  ## docs/nds/saves.md); the lid starts open.
   let name = rom_path.extractFilename()
   try:
     var rom = read_bytes(rom_path)
@@ -201,9 +194,8 @@ proc build_nds*(rom_path: string; paths: NdsPaths): BuiltNds =
     result = BuiltNds(error: &"Couldn't load {name}.", detail: e.msg)
 
 proc flush*(g: NdsGame): string =
-  ## The battery file when the game wrote the chip, and the flash when a
-  ## game wrote it. A write that fails stays dirty for the next flush;
-  ## returns its reason ("" when nothing failed).
+  ## Writes the battery file and the flash if dirty. A failed write stays
+  ## dirty for the next flush; returns its reason ("" when none failed).
   if g == nil or g.core == nil: return ""
   g.frames_unsaved = 0
   let b = g.core.cart.backup
@@ -224,8 +216,8 @@ proc flush*(g: NdsGame): string =
       echo "DS: could not keep the firmware settings: ", e.msg
 
 proc after_frame*(g: NdsGame) =
-  ## Once a frame: the battery file follows the chip a second behind while
-  ## the game writes it (and at every flush: a game switch, quit).
+  ## Once a frame: flushes NDS_SAVE_EVERY frames after the cart save or
+  ## firmware goes dirty.
   if g.core.cart.backup.dirty or g.core.spi.firmware_dirty:
     inc g.frames_unsaved
     if g.frames_unsaved >= NDS_SAVE_EVERY: discard g.flush()
@@ -243,10 +235,9 @@ proc press*(g: NdsGame; inp: DsInput; pressed: bool) =
   g.core.set_button(NDS_EXTRA_OF[inp], pressed)
 
 proc touch_point*(mx, my: int; view: (int, int, int, int)): tuple[x, y: int; bottom: bool] =
-  ## A window point (top-left origin) to the bottom screen's pixels, through
-  ## the letterboxed rect the picture is drawn in (`view`: x, y from the
-  ## top, w, h). `bottom`: the point is on the bottom screen; x and y are
-  ## clamped to it either way, for a stylus dragged off its edge.
+  ## A window point (top-left origin) to bottom-screen pixels via the
+  ## letterboxed `view` (x, y from the top, w, h). `bottom`: the point is on
+  ## the bottom screen; x, y are clamped to it either way (stylus dragged off).
   let (vx, vy, vw, vh) = view
   if vw <= 0 or vh <= 0: return (0, 0, false)
   let px = (mx - vx) * NDS_W div vw
@@ -256,8 +247,7 @@ proc touch_point*(mx, my: int; view: (int, int, int, int)): tuple[x, y: int; bot
   result.y = clamp(py - NDS_SCREEN_H, 0, NDS_SCREEN_H - 1)
 
 proc set_touch*(g: NdsGame; x, y: int; down: bool) =
-  ## The stylus on the bottom screen (clamped to it). A closed lid has no
-  ## touch screen to reach: no touch lands while it is.
+  ## The stylus on the bottom screen; no touch lands while the lid is shut.
   g.stylus = down and not g.lid_closed
   g.core.set_touch(x, y, g.stylus)
 
@@ -278,8 +268,8 @@ proc state_identity*(g: NdsGame): uint32 =
   rom_identity(g.core.cart.rom)
 
 proc save_state_file*(g: NdsGame; path: string): bool =
-  ## A slot file, with both screens' thumbnail. A DS the game switched off
-  ## has nothing to come back to (the web's rule): refused.
+  ## A slot file with both screens' thumbnail. Fails when the game switched
+  ## the DS off (the web's rule).
   last_state_error = ""
   if g.core.powered_off():
     last_state_error = "the game switched the DS off"
@@ -294,9 +284,8 @@ proc save_state_file*(g: NdsGame; path: string): bool =
     false
 
 proc load_state_file*(g: NdsGame; path: string): bool =
-  ## A slot file; refused with the machine untouched (`last_state_reject_kind`
-  ## says why). The lid stays where the player has it, not where the state
-  ## had it.
+  ## A slot file; on failure the machine is untouched (`last_state_reject_kind`
+  ## says why). The lid stays where the player has it, not the state's.
   last_state_error = ""
   last_state_reject_kind = srkNone
   if not fileExists(path):
@@ -345,20 +334,18 @@ proc rewind_apply*(g: NdsGame; snap: string): bool =
 
 # ──────────────────────────── The screens ────────────────────────────
 # HD 3D (Settings > Video > 3D resolution, docs/nds/hd3d.md): at 2..4 the
-# core also draws both screens at that multiple of 256x192, the 3D scene
-# rendered at that resolution, and those are what is shown. Display only:
-# the 1x screens, the machine and its states are the same either way, and
-# the window and the touch screen keep to the 1x picture.
+# core also draws both screens at that multiple of 256x192, 3D at that
+# resolution, and those are shown. Display only: 1x screens, machine and
+# states are unchanged; window and touch screen keep to the 1x picture.
 
 proc hd_scale*(g: NdsGame): int = g.core.hd_scale
 
 proc set_hd*(g: NdsGame; scale: int) =
-  ## 1 = off, 2..4; nothing when unchanged (the presenter asks every frame).
-  ## The HD screens show the 1x ones scaled up until the next frame draws
-  ## them (Gpu.hd_restart: what follows is what turning HD on draws), so a
-  ## paused game changed shows its picture, not black. The core keeps the
-  ## scale through state loads and rewinds; a reboot is a new core, set
-  ## again by the frontend.
+  ## 1 = off, 2..4; no-op when unchanged (the presenter calls every frame).
+  ## Gpu.hd_restart shows the 1x screens scaled up until the next frame, so a
+  ## paused game shows its picture, not black. The core keeps the scale
+  ## through loads and rewinds; a reboot is a new core, set again by the
+  ## frontend.
   let k = clamp(scale, 1, 4)
   if k == g.core.hd_scale: return
   g.core.set_hd_scale(k)
@@ -390,10 +377,9 @@ proc compose*(g: NdsGame; dst: var seq[uint16]; hd = false) =
 
 # ──────────────────────────── Sound ────────────────────────────
 # The SPU's interleaved float32 stereo at 33513982 / 1024 Hz (io/spu.nim),
-# queued after each frame to the audio queue (common/audio_out.nim), which
-# each core opens for itself (the GB/GBA APUs replace it with their own), at
-# the DS rate rounded to a whole Hz. Pacing is the GB APU's in sample frames:
-# ahead past 512 queued, the blocking backstop past 4096.
+# queued each frame to common/audio_out.nim, which each core opens for
+# itself, at the DS rate rounded to a whole Hz. Pacing is the GB APU's, in
+# sample frames: ahead past 512 queued, blocking backstop past 4096.
 
 const
   NDS_AUDIO_RATE* = int(SAMPLE_RATE + 0.5)                    # 32728 (32728.498)
@@ -402,8 +388,8 @@ const
   NDS_SYNC_BACKSTOP_BYTES = 4096'u32 * 8
 
 proc open_audio*(g: NdsGame) =
-  ## Take the audio queue for the DS's rate (when the game takes over
-  ## from the one before: a core built and refused must not have taken it).
+  ## Take the audio queue at the DS rate. Call only once the game takes
+  ## over: a core built and then rejected must not have taken it.
   when not defined(test_harness):
     if not audio_open(sfF32, NDS_AUDIO_RATE):
       echo "Warning: DS failed to open audio device"
@@ -418,9 +404,9 @@ proc audio_ahead*(g: NdsGame): bool =
   g.sync and g.audio_queued_bytes() > NDS_SYNC_AHEAD_BYTES
 
 proc queue_audio*(g: NdsGame; volume: int; mute, pitch_correct: bool) =
-  ## This frame's samples to the device, after volume and 2x. Asleep or
-  ## switched off the SPU stands still, but time does not: a frame's worth
-  ## of silence keeps the device's clock pacing the frames at real speed.
+  ## This frame's samples to the device, after volume and 2x. Asleep or off,
+  ## the SPU makes nothing, so a frame of silence keeps the device clock
+  ## pacing frames at real speed.
   let spu = g.core.spu
   let made = spu.sample_count
   let n = if g.core.asleep(): max(made, NDS_FRAME_SAMPLES) else: made

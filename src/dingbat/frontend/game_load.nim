@@ -24,11 +24,10 @@ const
   ROM_EXTS_DS* = @ROM_EXTS & @[NDS_ROM_EXT]
   ROM_DIALOG_EXTS_DS* = @ROM_DIALOG_EXTS & @[NDS_ROM_EXT[1 .. ^1]]
 
-# The smallest file taken as a ROM. Both cores run any length (the GB core
-# pads to a whole cartridge with $FF, the GBA core reads open bus past the
-# file), so this is only what is too short to be a game: a Game Boy file
-# that cannot hold the cartridge header ($0100-$014F), or an empty file.
-# GBA test ROMs as short as 56 bytes exist, header or not.
+# The smallest file taken as a ROM. Both cores run any length (GB pads with
+# $FF, GBA reads open bus past the file), so this only rejects a GB file
+# that cannot hold the header ($0100-$014F), or an empty file. GBA test ROMs
+# as short as 56 bytes exist.
 const
   GB_MIN_ROM  = 0x150
   GBA_MIN_ROM = 1
@@ -62,9 +61,9 @@ proc is_rom_file*(path: string): bool =
 
 
 proc build_core*(rom_path: string; o: CoreOptions): BuiltCore =
-  ## Builds and post-inits the core for `rom_path` into a value of its own, so
-  ## a file that is not a ROM leaves the running game as it was. A file too
-  ## short to be a game (GB_MIN_ROM) is refused before a constructor runs.
+  ## Builds and post-inits the core for `rom_path` apart from the running
+  ## game, which a bad file leaves as it was. A file under GB_MIN_ROM /
+  ## GBA_MIN_ROM fails before a constructor runs.
   let name = rom_path.extractFilename()
   let gb = is_gb_rom(rom_path)
   var size = 0'i64
@@ -92,13 +91,11 @@ proc build_core*(rom_path: string; o: CoreOptions): BuiltCore =
     result = BuiltCore(error: &"Couldn't load {name}.", detail: e.msg)
 
 proc flush_batteries*(gba: GBA; gb: GB): string =
-  ## Writes the loaded core's battery RAM if the game changed it. The core
-  ## writes once a frame while running; this covers what no frame will: the
-  ## last frame's write before the core is dropped for another game or at
-  ## quit, and a state loaded while paused (restoring one marks the battery
-  ## dirty). `mbc_save` / `write_save` catch a failed write (the RAM stays
-  ## dirty, `save_error` says why); returns that reason, "" when the write
-  ## landed or nothing was dirty.
+  ## Writes the core's battery RAM if dirty. The core writes once a frame
+  ## while running; this covers what no frame will: before the core is
+  ## dropped (game switch, quit) and after a state loaded while paused
+  ## (which marks the battery dirty). A failed write leaves the RAM dirty;
+  ## returns `save_error`, "" when it landed or nothing was dirty.
   if gb != nil:
     gb.cartridge.mbc_save()
     if gb.cartridge.save_error.len > 0: return gb.cartridge.save_error
@@ -113,10 +110,9 @@ proc canonical_path(path: string): string =
   except OSError: absolutePath(path)
 
 proc zip_cache_dir*(cache_root, zip_path: string): string =
-  ## One folder per zip file however its path was spelled (relative from a
-  ## terminal, absolute from a drop or the file dialog), so the .sav written
-  ## next to the extracted ROM is found again. crc32 of the canonical path,
-  ## not `hashes.hash`, whose value is the standard library's to change.
+  ## One folder per zip however its path is written (relative, absolute),
+  ## so the .sav beside the extracted ROM is found again. crc32 of the
+  ## canonical path, not `hashes.hash`, which the stdlib may change.
   let canon = canonical_path(zip_path)
   cache_root / &"{canon.splitFile().name}-{crc32(canon):08x}"
 
@@ -126,11 +122,9 @@ proc legacy_zip_cache_dir(cache_root, zip_path: string): string =
 
 proc extract_zip_rom*(cache_root, zip_path: string;
                       exts: openArray[string] = ROM_EXTS): string =
-  ## Extract the first ROM (`exts`: `ROM_EXTS`, or `ROM_EXTS_DS` with DS
-  ## Beta on) in a zip into its cache folder and return its path ("" if
-  ## none / unreadable). Re-opening the same zip reuses the folder, which
-  ## keeps the emulator's .sav (written next to the ROM) persistent across
-  ## sessions.
+  ## Extract the zip's first ROM (`exts`: `ROM_EXTS`, or `ROM_EXTS_DS` with
+  ## DS Beta on) into its cache folder; returns its path ("" if none or
+  ## unreadable). The folder is reused, so the .sav beside the ROM persists.
   try:
     let reader = openZipArchive(zip_path)
     defer: reader.close()

@@ -1,8 +1,7 @@
-## WASM entry for the DS core: the main web app (web/index.js, lazy-loads
-## web/nds/nds.js when a .nds game starts) and the standalone dev page
-## (web/nds.html). Separate from dingbat_wasm.nim while the DS core is a
-## prototype. Built MODULARIZE'd (createNdsCore) so its Module never meets
-## em.js's global one. Build: nim c -d:emscripten src/dingbat_nds_wasm.nim
+## WASM entry for the DS core: the web app (web/index.js lazy-loads
+## web/nds/nds.js for a .nds game) and the dev page (web/nds.html). Built
+## MODULARIZE'd (createNdsCore) so its Module never meets em.js's global one.
+## Build: nim c -d:emscripten src/dingbat_nds_wasm.nim
 ##
 ## Loading a game: nds_rom_alloc(len) returns a buffer inside the core, the
 ## page writes the ROM there once, then nds_boot(...) builds the core on it
@@ -68,10 +67,9 @@ proc nds_boot(b9: pointer; b9_len: cint; b7: pointer; b7_len: cint;
 
 proc nds_reboot(save: pointer; save_len: cint): cint {.exportc.} =
   ## Power-cycle the running game: a fresh core on the same ROM (moved out of
-  ## the old one) and BIOS, starting from `save`. The firmware is the flash
-  ## as the old core left it: a power cycle keeps what the game or the menu
-  ## wrote to it (GBATEK "DS Firmware Serial Flash Memory": flash, not RAM),
-  ## still dirty if the page has not stored it yet.
+  ## the old one) and BIOS, starting from `save`. The firmware is kept as the
+  ## old core left it (GBATEK "DS Firmware Serial Flash Memory": flash, not
+  ## RAM), still dirty if the page has not stored it yet.
   if core == nil or core.cart.rom.len == 0: return 0
   var rom = move(core.cart.rom)
   let fw_dirty = core.spi.firmware_dirty
@@ -104,8 +102,8 @@ proc nds_frame_count(): cint {.exportc.} =
 
 proc nds_powered_off(): cint {.exportc.} =
   ## 1 once the program has shut the DS down (power manager register 0 bit
-  ## 6): both screens are black, nothing runs and no sound comes out; only
-  ## nds_reboot (or another nds_boot) turns it back on.
+  ## 6): screens black, nothing runs, no sound. Only nds_reboot or
+  ## nds_boot turns it back on.
   if core != nil and core.powered_off(): 1 else: 0
 
 # Video: each screen is 256x192 BGR555 (bit 15 unused), read in place by the
@@ -150,9 +148,9 @@ proc nds_hd_fb555_bottom(): pointer {.exportc.} =
   else: addr core.gpu.hd_bottom[0]
 
 # Host-GPU 3D (docs/nds/gpu3d.md): with nds_set_gpu(1) each frame's 3D
-# scene and engine A's composite planes are exported for web/nds/gpu3d.js,
-# which draws the 3D at HD on the GPU; nds_gpu_frames counts the frames
-# exported (it never goes back, unlike the machine's frame count).
+# scene and engine A's composite planes are exported for web/nds/gpu3d.js.
+# nds_gpu_frames counts exported frames and never goes back, unlike the
+# machine's frame count.
 
 proc nds_set_gpu(on: cint) {.exportc.} =
   let was = gpuOn
@@ -344,20 +342,17 @@ proc nds_state_size(thumbnail: cint): cint {.exportc.} =
   cint(stateImage.len)
 
 proc nds_state_plain_size(): cint {.exportc.} =
-  ## As nds_state_size, the image left plain (about a millisecond, where
-  ## packing takes 20-30): the page deflates it in a worker
-  ## (web/ckptworker.js) or keeps it in memory as an undo.
+  ## As nds_state_size, left plain (~1 ms; packing takes 20-30): the page
+  ## deflates it in a worker (web/ckptworker.js) or keeps it as an undo.
   stateImage = if core == nil: "" else: core.state_bytes()
   cint(stateImage.len)
 
 proc nds_state_data(): pointer {.exportc.} =
   if stateImage.len > 0: addr stateImage[0] else: nil
 
-# screensReplacedAt: the export's frame count when the core's screens were
-# last replaced by something other than a frame (a state load, a rewind pop
-# or commit, the export turned on): the page's GPU picture is then of
-# another moment until the next frame (nds_gpu_current). A new core starts
-# from -1 (boot_with).
+# Called when the screens are replaced by something other than a frame
+# (state load, rewind pop or commit): the page's GPU picture is then of
+# another moment until the next frame (nds_gpu_current).
 proc screens_replaced() =
   if core != nil: screensReplacedAt = core.gpu.gpu_frames
 
@@ -368,15 +363,14 @@ proc nds_gpu_current(): cint {.exportc.} =
 
 proc nds_put_screens(top, bottom: pointer) {.exportc.} =
   ## The 1x screens as shown (the GPU's, 256x192 BGR555 each) into the
-  ## core's, which lack the 3D under the skip: a state then carries them.
-  ## Display output only: nothing on the machine reads them, and the next
-  ## frame draws them again.
+  ## core's, which lack the 3D under the skip, so a state carries them.
+  ## Display only: nothing on the machine reads them; the next frame redraws.
   if core == nil or top == nil or bottom == nil: return
   copyMem(addr core.gpu.top[0], top, 256 * 192 * 2)
   copyMem(addr core.gpu.bottom[0], bottom, 256 * 192 * 2)
 
 proc nds_state_load_keep(data: pointer; len: cint; keep_rewind: cint): cint {.exportc.} =
-  ## Apply a state (packed or plain). 1 on success; 0 on refusal with the
+  ## Apply a state (packed or plain). 1 on success; 0 on failure with the
   ## machine untouched (nds_state_error_kind / nds_state_error say why).
   ## Success empties the rewind ring unless keep_rewind (undoing a
   ## scrubber commit, whose ring is this state's past).
@@ -402,9 +396,8 @@ proc nds_state_error(): cstring {.exportc.} =
   cstring(last_state_error)
 
 # --- Cheats (nds/cheats.nim: Action Replay DS, unencrypted CodeBreaker DS).
-# The list lives here, not in the core: a reset (nds_reboot) keeps it. Run
-# after every frame while one is on; with none on nothing runs, so frames,
-# sound and states are what they are without cheats.
+# The list lives here, not in the core, so nds_reboot keeps it. Run after
+# every frame while one is on; with none on, nothing runs.
 
 var cheatList: DsCheats = nil   # made on first use: a heap global set at
                                  # module scope dangles once main() returns
@@ -442,10 +435,10 @@ proc nds_load_cheats(text: pointer; len: cint): cstring {.exportc.} =
   cstring(cheatErr)
 
 # --- Rewind (common/rewind.nim, nds/rewinding.nim): a payload every
-# REWIND_INTERVAL frames into a ring of XOR deltas, popped while the rewind
-# button is held, with a thumbnail of both screens once a second for the
-# scrubber and Report a Bug's timeline. A DS payload is ~6-7 MB raw; the
-# ring keeps the newest whole and the rest as sparse zlib'd deltas.
+# REWIND_INTERVAL frames, popped while the rewind button is held, with a
+# thumbnail of both screens once a second for the scrubber. A DS payload is
+# ~6-7 MB raw; the ring keeps the newest whole and the rest as sparse
+# zlib'd XOR deltas.
 
 var rewindWanted = false
 var rewindCap = REWIND_CAP_BYTES
@@ -481,11 +474,11 @@ proc nds_rewind_depth(): cint {.exportc.} =
 proc nds_rewind_bytes(): cint {.exportc.} =
   if rewindRing == nil: 0 else: cint(rewindRing.mem_used)
 
-# --- The rewind scrubber and Report a Bug's timeline: the GB/GBA core's
-# wasm_rewind_scrub_* (src/dingbat_wasm.nim) for the DS ring. Samples are
-# held by snapshot ID, so one evicted since the strip was drawn is gone
-# rather than another moment. A look at a sample and straight back keeps
-# the save chips' dirty flags (as_new = false): the same timeline.
+# --- The rewind scrubber and Report a Bug's timeline: wasm_rewind_scrub_*
+# (src/dingbat_wasm.nim) for the DS ring. Samples are held by snapshot ID,
+# so one evicted since the strip was drawn is gone rather than another
+# moment. A look at a sample and straight back keeps the save chips' dirty
+# flags (as_new = false).
 
 var scrubThumbs: seq[byte]
 var scrubIds: seq[int]
@@ -570,11 +563,9 @@ proc step_frame() =
   rewindRing.nds_rewind_tick(core)
 
 # --- Run-ahead: after a frame is run (and its sound taken by the page),
-# nds_runahead(n) snapshots the machine, runs n more frames with the same
-# input, keeps their screens for the presenter, drops their sound and goes
-# back to the snapshot. The page shows the future frame, so a press shows n
-# frames sooner. The canonical timeline is untouched: the snapshot holds
-# every saved field, and the save chips' dirty flags are kept as they were.
+# nds_runahead(n) snapshots, runs n more frames with the same input, keeps
+# their screens, drops their sound and restores the snapshot, so a press
+# shows n frames sooner. The save chips' dirty flags are kept as they were.
 
 proc nds_runahead(n: cint): cint {.exportc.} =
   ## 1 when the screens now come from n frames ahead (nds_fb555_* point

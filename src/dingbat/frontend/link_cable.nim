@@ -3,11 +3,10 @@
 ## hand-off to gba/netlink.nim, and ending a link. No SDL, ImGui or GL, so
 ## tests/desktop_netlink_test.nim drives it over real loopback sockets.
 ##
-## Nothing here waits on the network: accepts are polled, connects are
-## non-blocking (one attempt per LINK_PROBE_INTERVAL_MS of wall time, each
-## checked on later iterations), and the HELLO handshake is polled too
-## (begin_net_link / poll_hello), so the window keeps drawing, and Cancel,
-## closing it or loading a game end the wait, whatever the peer does.
+## Nothing here waits on the network: accepts, connects (one attempt per
+## LINK_PROBE_INTERVAL_MS) and the HELLO handshake (poll_hello) are all
+## polled, so the window keeps drawing and Cancel, closing it or loading a
+## game end the wait whatever the peer does.
 
 import std/[net, nativesockets, monotimes, strutils]
 when defined(windows):
@@ -182,11 +181,10 @@ proc auto_listen(lc: var LinkCable): bool =
 
 proc begin_handshake*(lc: var LinkCable; sock: Socket; id: int; gba: GBA;
                       rom_path: string) =
-  ## A peer is connected: send our HELLO and wait for theirs in lsHandshake,
-  ## which service_setup polls. Refused (the socket closed, `status` says
-  ## why) when there is no GBA core to link or the ROM file can't be read.
-  ## Auto-pairing stops either way, so the window shows the outcome rather
-  ## than "Waiting to pair...".
+  ## A peer is connected: send our HELLO and wait for theirs in lsHandshake
+  ## (service_setup polls). Fails (socket closed, `status` says why) with no
+  ## GBA core or an unreadable ROM file. Auto-pairing stops either way, so
+  ## the window shows the outcome rather than "Waiting to pair...".
   lc.auto = false
   lc.setup = lsNone
   if gba == nil:
@@ -215,9 +213,8 @@ proc begin_handshake*(lc: var LinkCable; sock: Socket; id: int; gba: GBA;
 
 proc poll_handshake(lc: var LinkCable): NetLink =
   ## lsHandshake, once per iteration, never waiting: the new link once the
-  ## peer's HELLO is in; nil while it is awaited, or when the handshake
-  ## failed (refused, the peer hung up, or hello_timeout_ms of wall time
-  ## passed), with `status` saying why.
+  ## peer's HELLO is in; nil while waiting, or on failure (rejected, peer
+  ## hung up, hello_timeout_ms passed) with `status` saying why.
   if lc.setup != lsHandshake: return nil
   let nl = lc.pending
   try:
@@ -327,9 +324,8 @@ proc service_setup*(lc: var LinkCable; gba: GBA; rom_path: string;
     if state < 0:
       lc.close_conn()
       if lc.auto and lc.probes >= LINK_AUTO_CONNECT_TRIES:
-        # After a few quick probes with no host answering, become the host.
-        # If the bind is refused (a peer grabbed the port first, or a
-        # simultaneous-start race), keep probing so we reach that peer.
+        # No host answered: become the host. If the bind fails (a peer took
+        # the port first, or a simultaneous start), keep probing that peer.
         if not lc.auto_listen():
           lc.probes = 0
       return nil
@@ -380,9 +376,9 @@ proc parse_host_port*(s: string): tuple[host: string, port: int, ok: bool] =
 
 proc start_cli*(lc: var LinkCable; listen_port: int; connect_to: string;
                 ready: bool): bool =
-  ## `--listen PORT` / `--connect HOST:PORT`: Advanced > Host / Join, begun
-  ## before the main loop and serviced by it (service_setup) like the
-  ## window's, never waiting here. true: open the window on the status.
+  ## `--listen PORT` / `--connect HOST:PORT`: Advanced > Host / Join begun
+  ## before the main loop, which services it. true: open the window on the
+  ## status.
   if not ready:
     echo "NETLINK: link mode needs a GBA ROM; continuing single-player"
     return false

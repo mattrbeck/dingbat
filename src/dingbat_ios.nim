@@ -1,27 +1,25 @@
 # iOS C API for the core (static library, ios/build-core.sh; header
-# ios/include/dingbat.h), the sibling of src/dingbat_wasm.nim: the same
-# features the web build exports, under dingbat_* names.
+# ios/include/dingbat.h): the web build's features (src/dingbat_wasm.nim)
+# under dingbat_* names.
 #
 # Audio is pull-based: the build omits -d:test_harness/-d:emscripten so the
-# APUs take their desktop audio-queue path (common/audio_out.nim), and
-# src/dingbat_ios_audio.c provides its calls as a ring buffer drained from an
-# AVAudioSourceNode render block. Pacing is the desktop model: the shell runs
-# frames only while dingbat_audio_ahead() is 0, so the 32768 Hz audio clock
-# paces emulation; the
-# C file breaks get_sample()'s blocking backstop after ~250 ms of stalled
+# APUs take the desktop audio-queue path (common/audio_out.nim), which
+# src/dingbat_ios_audio.c implements as a ring drained by an
+# AVAudioSourceNode render block. The shell runs frames only while
+# dingbat_audio_ahead() is 0, so the 32768 Hz audio clock paces emulation.
+# The C file breaks get_sample()'s blocking backstop after ~250 ms of stalled
 # playback so the shell cannot deadlock.
 #
-# Every function here must be called from one thread (the shell's main thread
-# via CADisplayLink); only the plain-C dingbat_audio_* functions are safe from
+# Call every function from one thread (the shell's main thread via
+# CADisplayLink); only the plain-C dingbat_audio_* functions are safe from
 # the CoreAudio render thread.
 #
-# Nintendo DS games run on the DS core (dingbat/nds, the web's
-# dingbat_nds_wasm.nim is its other front end), behind the same calls: one
+# DS games run on the DS core (dingbat/nds) behind the same calls: one
 # 256x384 picture (top screen over bottom), the same audio ring at the DS's
-# own rate, the same states and battery files. "Nintendo DS" below has the
-# DS-only parts; everything the DS core lacks (clips, cheats, run-ahead,
-# link, SGB and the cart peripherals) is a no-op or a refusal. Rewind is
-# the GB/GBA ring fed the DS's aligned payloads (nds/rewinding.nim).
+# rate, the same states and battery files. DS-only calls are under
+# "Nintendo DS"; what the DS core lacks (clips, cheats, run-ahead, link, SGB,
+# cart peripherals) is a no-op or fails. Rewind feeds the GB/GBA ring the
+# DS's aligned payloads (nds/rewinding.nim).
 
 import std/[os, strutils, math]
 import zippy  # clip anchors and their thumbnails are stored deflated
@@ -69,7 +67,7 @@ var biosPath:  string  = ""
 var statePrinter: GbPrinter = nil      # always attached on a GB core
 var rewindHistory: Rewind = nil
 
-# Clip capture state (the procs are at the end, "Retroactive clip capture").
+# Clip capture state (procs under "Retroactive clip capture").
 const CLIP_SNAP_INTERVAL = 60          # anchor + thumbnail cadence (frames)
 const CLIP_MAX_FRAMES = 60 * 60        # rolling history window (~60 s)
 const CLIP_CAP_BYTES = 24 * 1024 * 1024
@@ -93,10 +91,10 @@ var clipEnd = 0
 var clipReplaying = false
 
 # Online link (input rollback, web rollback_*): both players' cores run here
-# and only inputs cross the network. While a session runs, its local core is
-# also stateGba/stateGb, so the picture, audio and save exports serve it;
-# everything that would move that core outside the session (frames, input,
-# states, rewind, cheats, reset) refuses.
+# and only inputs cross the network. The session's local core is also
+# stateGba/stateGb, so the picture, audio and save exports serve it; anything
+# that would move it outside the session (frames, input, states, rewind,
+# cheats, reset) fails.
 var rbGba: gbarb.RollbackSession = nil
 var rbGb: gbrb.GbRollbackSession = nil
 var rbLocal = 0                         # the core this player drives
@@ -104,8 +102,8 @@ var rbEpoch: int64 = 0                  # the shared RTC clock
 proc rb_active(): bool {.inline.} = rbGba != nil or rbGb != nil
 proc dingbat_rollback_exit() {.exportc, cdecl.}
 # Local 2P (web link_*): two cores of one ROM on the in-process cable. Player
-# 1's core is the live one as above (its save is the game's, its sound the
-# one heard); player 2's runs silent on its own battery file.
+# 1's core is the live one (the game's save, the sound heard); player 2's
+# runs silent on its own battery file.
 var lkGba: gbalink.Link = nil
 var lkGb: gblink.GbLink = nil
 proc lk_active(): bool {.inline.} = lkGba != nil or lkGb != nil
@@ -217,14 +215,12 @@ var gamePtr: pointer = nil
 var ndsComposite: seq[uint16] = @[]
 
 # HD 3D (docs/nds/hd3d.md): with dingbat_nds_set_hd(k), k = 2..4, the core
-# also draws both screens at 256k x 192k (the 3D scene at that resolution,
-# the 2D layers scaled up); they are stacked the same way into a second
-# composite, 256k x 384k, which only the presenter reads. Everything else
-# (thumbnails, the glow, states) keeps the 1x one.
+# also draws both screens at 256k x 192k (3D at that resolution, 2D scaled
+# up), stacked into a second 256k x 384k composite that only the presenter
+# reads. Thumbnails, the glow and states use the 1x one.
 var ndsHdScale = 1                  # kept across DS boots, a display setting
-# The 3D on the host GPU (docs/nds/gpu3d.md; the app's NdsGpu3d.swift, a
-# Metal port of web/nds/gpu3d.js): each kept across DS boots, as the HD
-# scale is.
+# 3D on the host GPU (docs/nds/gpu3d.md; the app's NdsGpu3d.swift, a Metal
+# port of web/nds/gpu3d.js): kept across DS boots, like the HD scale.
 var ndsGpuOn = false                # the export
 var ndsGpuSkip = false              # ...and the skip of the CPU's 3D where the machine reads none
 var ndsGpuHandback = false          # ...and the handback of frames the CPU draws whole (at 1x)
@@ -342,10 +338,9 @@ proc apply_audio() =
   apply_channel_mutes()
 
 # --- Nintendo DS ---
-# The DS-only half of the API (the web's dingbat_nds_wasm.nim + index.js
-# "Nintendo DS", docs/nds/web.md): boot on optional BIOS/firmware dumps, the
-# battery file beside the ROM, the console's firmware flash kept per device,
-# the lid, and the sound queued into the same ring as the GB/GBA APUs'.
+# DS-only API (as the web's dingbat_nds_wasm.nim, docs/nds/web.md): optional
+# BIOS/firmware dumps, the battery file beside the ROM, the firmware flash
+# kept per device, the lid, sound into the GB/GBA audio ring.
 
 var ndsBios9Path, ndsBios7Path, ndsFirmwarePath: string  # "" = HLE / synthesized
 var ndsFlashPath = ""            # where the console's flash is kept ("" = nowhere)
@@ -395,14 +390,13 @@ proc is_nds_file(path: string): bool =
     close(f)
   looks_like_nds_rom(head)
 
-# The firmware flash (docs/nds/web.md "Firmware settings"). What a game or
-# the DS menu writes to it is one console's, shared by every DS game, and
-# kept with the firmware base it was written on: "built-in" or the user's
-# dump's signature (the web's saveSignature: fnv1a32 ":" length). The next
-# boot gets it only on that base: over a dump, the written image whole; on
-# the built-in firmware, only its user area (Wi-Fi connections and both
-# user-settings copies) laid over this build's synth_firmware, so a later
-# fix to the built-in header or wifi calibration still reaches it.
+# The firmware flash (docs/nds/web.md "Firmware settings"): one per console,
+# shared by every DS game, kept with the base it was written on: "built-in"
+# or the dump's signature (the web's saveSignature: fnv1a32 ":" length). The
+# next boot gets it only on that base: over a dump, the whole written image;
+# on the built-in firmware, only its user area (Wi-Fi connections and both
+# user-settings copies) over this build's synth_firmware, so later fixes to
+# the built-in header or wifi calibration still reach it.
 
 const NDS_FW_BUILTIN = "built-in"
 const NDS_FLASH_MAGIC = "DGBNDSFW"
@@ -478,10 +472,9 @@ proc nds_flush() =
 
 # Sound: the SPU's interleaved float32 stereo at 33513982 / 1024 Hz
 # (io/spu.nim), queued after each frame to the same ring (audio_out.nim,
-# dingbat_ios_audio.c), as float32 like the GB APU's, at the DS rate
-# rounded to a whole Hz (the ring's reader resamples by more than that
-# difference anyway). The pacing thresholds are the GB APU's in frames:
-# ahead past 512 queued, the blocking backstop past 4096.
+# dingbat_ios_audio.c) at that rate rounded to a whole Hz (the reader
+# resamples by more than the difference anyway). Pacing thresholds are the
+# GB APU's, in frames: ahead past 512 queued, blocking backstop past 4096.
 
 const NDS_AUDIO_RATE = int(SAMPLE_RATE + 0.5)                # 32728 (32728.498)
 const NDS_FRAME_SAMPLES = int(FRAME_CYCLES div SPU_TICK_CYCLES)  # 547 a frame
@@ -608,13 +601,11 @@ proc flush_current_save() =
 
 # --- Core faults ---
 # An exception out of a core (a Defect: an index or range check) must not
-# cross into Swift: under goto exceptions it leaves Nim's error flag set, and
-# every later export then bails early with junk (bug report 2026-10-31: SGB
-# active, rumble on, a nil picture, a reset that did nothing until the app
-# relaunched). The exports that run a core catch it here instead, and the core
-# is *faulted*: its state is mid-frame and not to be trusted, so it runs no
-# frames, gives no state and drives no motor until something replaces it (going
-# back, a reset, a load). The shell asks dingbat_fault() after running frames.
+# cross into Swift: under goto exceptions it leaves Nim's error flag set and
+# every later export bails early with junk. The exports that run a core catch
+# it here and the core is *faulted*: its state is mid-frame, so it runs no
+# frames, gives no state and drives no motor until something replaces it
+# (going back, a reset, a load). The shell asks dingbat_fault() after frames.
 
 var coreFault = ""            # "" while the core is sound, else what stopped it
 var coreFaultFrame = -1       # canonical frame (clipFrameIndex) it stopped on; -1 on the DS
@@ -633,13 +624,12 @@ proc snapshot_frame(id: int): int
 proc current_payload(): string
 
 # Session replay (a fault's bug report): every frame since the live core last
-# started fresh (power-on, or a state put onto it: a load, a rewind, a look at
-# another moment and back), as that start plus the buttons held on each
-# frame. Replaying from the device's own start carries what a save state
-# leaves out, since a load resets it there and here alike; a replay from any
-# other moment cannot. The 2026-10-31 PPU bug came back only from power-on.
-# Run-ahead puts the core's own state back onto it after each frame, so such
-# a frame is marked SEG_AHEAD for the replay to do the same.
+# started fresh (power-on, or a state put onto it: load, rewind, a look at
+# another moment and back), as that start plus the buttons held each frame.
+# Only a replay from the device's own start carries what a save state leaves
+# out, since a load resets it there and here alike. Run-ahead puts the core's
+# own state back after each frame, so such a frame is marked SEG_AHEAD for
+# the replay to do the same.
 const SEG_AHEAD = 0x8000'u16
 const SEG_MAX_RUNS* = 200_000      # button changes; ~1.6 MB, hours of play
 var segMaxRuns* = SEG_MAX_RUNS     # the cap in force (tests lower it)
@@ -950,9 +940,8 @@ proc dingbat_framebuffer(): ptr uint16 {.exportc, cdecl.} =
 
 proc dingbat_framebuffer_rgba(): ptr uint32 {.exportc, cdecl.} =
   ## Colour-corrected RGBA8888 (R first in memory) of the core's framebuffer,
-  ## converted on call: thumbnails, the library picture and the ambient glow.
-  ## The DS composite is converted straight (5 to 8 bits): colour correction
-  ## models the GBA and GBC panels, not the DS's.
+  ## converted on call (thumbnails, library picture, glow). The DS composite
+  ## is converted straight 5->8 bit: correction models only GBA/GBC panels.
   let fb = live_fb()
   if fb == nil: return nil
   let n = game_pixels()
@@ -978,10 +967,9 @@ proc dingbat_nds_top_rgba(): ptr uint32 {.exportc, cdecl.} =
   addr ndsTopRgba[0]
 
 proc dingbat_nds_set_hd(k: cint) {.exportc, cdecl.} =
-  ## HD 3D at k x (1 = off, 2..4; the web's nds_set_hd): kept for every DS
-  ## boot from here on, and applied to the running game. Until its next
-  ## frame the HD picture is the 1x one scaled up (Gpu.hd_restart), not
-  ## black.
+  ## HD 3D at k x (1 = off, 2..4): kept for later DS boots and applied to the
+  ## running game. Until its next frame the HD picture is the 1x one scaled
+  ## up (Gpu.hd_restart), not black.
   ndsHdScale = clamp(int(k), 1, 4)
   if stateKind != ekNDS or stateNds.hd_scale() == ndsHdScale: return
   stateNds.set_hd_scale(ndsHdScale)
@@ -1005,9 +993,8 @@ proc dingbat_nds_hd_fb_width(): cint {.exportc, cdecl.} =
 proc dingbat_nds_hd_fb_height(): cint {.exportc, cdecl.} =
   if stateKind != ekNDS or ndsHdComposite.len == 0: 0 else: cint(NDS_H * ndsHdK)
 
-# --- The 3D on the host GPU (docs/nds/gpu3d.md): the web build's nds_gpu_*
-# exports (src/dingbat_nds_wasm.nim), read by the app's Metal renderer
-# after each frame. All nil / 0 with no DS game.
+# --- 3D on the host GPU (docs/nds/gpu3d.md): the web's nds_gpu_* exports,
+# read by the app's Metal renderer after each frame. nil / 0 with no DS game.
 
 proc dingbat_nds_set_gpu(on: cint) {.exportc, cdecl.} =
   let was = ndsGpuOn
@@ -1096,11 +1083,10 @@ proc dingbat_nds_gpu_current(): cint {.exportc, cdecl.} =
      stateNds.gpu.gpu_frames != ndsScreensReplacedAt: 1 else: 0
 
 proc dingbat_nds_put_screens(top, bottom: ptr UncheckedArray[uint16]) {.exportc, cdecl.} =
-  ## The 1x screens as shown (the host GPU's, 256x192 BGR555 each) into the
-  ## core's: under the skip the core's lack the 3D, and its pictures (the
-  ## top screen, the composite, a state's screens and thumbnail) are taken
-  ## from them. Display output only: nothing on the machine reads them, and
-  ## the next frame draws them again.
+  ## The host GPU's 1x screens (256x192 BGR555 each) into the core's: under
+  ## the skip the core's lack the 3D, and the top screen, composite, a
+  ## state's screens and thumbnail are taken from them. Display only: the
+  ## machine never reads them and the next frame redraws them.
   if stateKind != ekNDS or top == nil or bottom == nil: return
   copyMem(addr stateNds.gpu.top[0], top, NDS_W * NDS_SCREEN_H * 2)
   copyMem(addr stateNds.gpu.bottom[0], bottom, NDS_W * NDS_SCREEN_H * 2)
@@ -1485,9 +1471,9 @@ var stateImage: string = ""
 
 proc dingbat_state_size(): cint {.exportc, cdecl.} =
   ## Serialize the full state (same bytes as desktop .state files) into a
-  ## retained buffer; returns its length, 0 when no core runs. A DS switched
-  ## off has none (nothing to come back to: the web's rule), nor a faulted
-  ## core (a checkpoint of it would resume the fault).
+  ## retained buffer; returns its length, 0 when no core runs, the DS is
+  ## switched off (nothing to come back to) or the core is faulted (its
+  ## checkpoint would resume the fault).
   if faulted():
     stateImage = ""
     return 0
@@ -1668,10 +1654,9 @@ proc dingbat_rewind_scrub_save_differs(sample: cint): cint {.exportc, cdecl.} =
   if differs: 1 else: 0
 
 proc dingbat_rewind_scrub_state_size(sample: cint): cint {.exportc, cdecl.} =
-  ## Build the chosen sample's full .state image (header + payload +
-  ## thumbnail) into the dingbat_state_data() buffer, put the live core
-  ## back, and return the size (0 when the sample is gone). Report a Bug
-  ## attaches it.
+  ## Build the sample's full .state image into the dingbat_state_data()
+  ## buffer (for Report a Bug), put the live core back, and return the size
+  ## (0 when the sample is gone).
   if sample < 0 or sample >= scrubIds.len or rewindHistory == nil:
     return 0
   # By absolute ID: a positional index would slide onto a different moment
@@ -1745,11 +1730,11 @@ proc dingbat_load_cheats(text: cstring): cstring {.exportc, cdecl.} =
   cstring(cheatErrBuf)
 
 # --- Retroactive clip capture ("Clip that!", dingbat_wasm.nim's clip_*) ---
-# A rolling ring of state anchors (one per second) plus a per-frame input
-# log; deterministic replay from the anchor at or before the chosen start
-# rebuilds the frames the player saw, which the shell encodes. Separate from
-# the rewind ring: rewind may be off and keeps no inputs. The GBA RTC reads
-# wall clock, so a replayed clock can differ by the clip's length.
+# A ring of state anchors (one per second) plus a per-frame input log; replay
+# from the anchor at or before the start rebuilds the frames the player saw,
+# which the shell encodes. Separate from the rewind ring: rewind may be off
+# and keeps no inputs. The GBA RTC reads wall clock, so a replayed clock can
+# differ by the clip's length.
 
 proc clip_reset() =
   clipAnchors.setLen(0)
@@ -1914,8 +1899,8 @@ proc dingbat_clip_begin(start_ago, end_ago: cint): cint {.exportc, cdecl.} =
     broke = true
   dingbat_audio_set_mode(mode)
   if broke:
-    # The replay reached a core bug the live game is past or short of: the
-    # live state comes back untouched and the clip is refused.
+    # The replay hit a core bug: the live state comes back untouched and the
+    # clip fails.
     dingbat_clip_abort()
     return 0
   cint(clipEnd - clipCursor)
@@ -2101,12 +2086,11 @@ proc dingbat_fault_report_size(seconds: cint): cint {.exportc, cdecl.} =
   ## live core last started fresh, and every frame's buttons from there
   ## through the faulting one as runs at dingbat_fault_report_runs (bit 15: a
   ## run-ahead frame, whose state went back onto the core after it). From
-  ## power-on there is no state (0 is returned and
-  ## dingbat_fault_report_power_on() is 1); else that start's full .state image
-  ## is in the dingbat_state_data() buffer and its size is returned. Without
-  ## the record (a link session, an unusually long one), the clip anchor
-  ## `seconds` before the fault stands in: exact for all a save state holds.
-  ## -1: nothing to replay. The live core is put back as it was.
+  ## power-on: returns 0 and dingbat_fault_report_power_on() is 1. Else that
+  ## start's .state image is in the dingbat_state_data() buffer and its size
+  ## is returned. Without the record (a link session, an overlong one) the
+  ## clip anchor `seconds` before the fault stands in, exact for all a save
+  ## state holds. -1: nothing to replay. The live core is put back.
   stateImage = ""
   faultRuns = ""
   faultFrames = 0
@@ -2196,11 +2180,11 @@ proc dingbat_fault_report_checks(): cstring {.exportc, cdecl.} =
 
 # --- Online link: input rollback (dingbat_wasm.nim's rollback_*) ---
 # The shell runs dingbat_rollback_tick once per frame with this player's
-# buttons, ships the returned frame and those buttons to the friend, and
-# feeds the friend's with dingbat_rollback_feed; the session predicts and
-# rolls back itself (gba/rollback.nim, gb/rollback.nim). Determinism needs
-# the same ROMs, states and core build on both sides and the shared RTC
-# epoch. Core 0 is the host's game, core 1 the guest's.
+# buttons, sends the returned frame and buttons to the friend, and feeds the
+# friend's with dingbat_rollback_feed; the session predicts and rolls back
+# (gba/rollback.nim, gb/rollback.nim). Determinism needs the same ROMs,
+# states, core build and RTC epoch on both sides. Core 0 is the host's game,
+# core 1 the guest's.
 
 var rbRomPaths: array[2, string]
 
@@ -2255,7 +2239,7 @@ proc dingbat_rollback_init(rom0, rom1: cstring; local_player: cint;
   ## at its real path, so its battery save is the game's); `local_player`
   ## (0/1) the core this player drives; `epoch` the shared unix-seconds RTC
   ## seed both sides pass. The solo core is flushed and dropped. Returns 1,
-  ## or 0 with no game loaded. A DS game (either side) is refused up front
+  ## or 0 with no game loaded. A DS game (either side) returns 0 up front
   ## with nothing touched: the DS core has no link.
   if rom0 != nil and rom1 != nil and (is_nds_file($rom0) or is_nds_file($rom1)): return 0
   dingbat_rollback_exit()
@@ -2443,7 +2427,7 @@ proc dingbat_rollback_dump_data(): pointer {.exportc, cdecl.} =
 proc dingbat_link_init(rom0, rom1: cstring): cint {.exportc, cdecl.} =
   ## Player 1 on `rom0` (the game's own file), player 2 on `rom1`. The solo
   ## core is flushed and dropped. Returns 1, or 0 with no game loaded. A DS
-  ## game is refused up front with nothing touched (no DS link).
+  ## game returns 0 up front with nothing touched (no DS link).
   if rom0 != nil and rom1 != nil and (is_nds_file($rom0) or is_nds_file($rom1)): return 0
   dingbat_link_exit()
   dingbat_rollback_exit()

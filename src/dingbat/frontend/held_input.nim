@@ -2,12 +2,11 @@
 ## No SDL, ImGui or GL here, so the tests build it headless; dingbat.nim
 ## feeds it the SDL events and applies what it returns.
 ##
-## The core has one bit per input, but the keyboard, every open pad's buttons
-## and every pad's left stick can each hold the same input. Each source's
-## holds are kept apart, keyed by what was pressed (the key code, the pad
-## button) together with the input that press meant, and the core is told
-## their union. So a release lets go of exactly what its own press held,
-## whatever the bindings are by then and whatever else holds that input.
+## The keyboard, each pad's buttons and each pad's left stick can hold the
+## same input. Each source's holds are kept apart, keyed by what was pressed
+## with the input that press meant, and the core is told their union. So a
+## release lets go of exactly what its own press held, whatever the bindings
+## are by then and whatever else holds that input.
 
 import std/tables
 import ../common/input
@@ -111,11 +110,10 @@ proc route_key*(h: var HeldInput; bindings: Table[cint, Input]; key: cint;
                 ds_bindings: Table[cint, DsInput] = initTable[cint, DsInput]()): KeyRoute =
   ## One KeyDown (`pressed`) or KeyUp. A release lets go of what its press
   ## held before anything filters the keyboard: whatever has the keyboard now
-  ## (an ImGui text field or modal, a binding capture, Cmd/Ctrl held) got it
-  ## after the game saw the press, and a release it swallowed would leave the
-  ## button, or rewind, held with nobody holding it. Everything else acts on
-  ## the press, so letting go of a key while Cmd/Ctrl is down, or SDL
-  ## releasing every held key when the window loses focus, fires nothing.
+  ## (ImGui field or modal, binding capture, Cmd/Ctrl) took it after the game
+  ## saw the press, and a swallowed release would leave the button or rewind
+  ## stuck. Everything else acts on the press, so releases under Cmd/Ctrl,
+  ## or SDL releasing all keys on focus loss, fire nothing.
   ## `ds_bindings` (a DS game's X and Y; empty otherwise) come first.
   if not pressed:
     h.keys.del(key)
@@ -142,11 +140,10 @@ proc route_key*(h: var HeldInput; bindings: Table[cint, Input]; key: cint;
 
 proc modal_key_of*(appearing, escape, enter: bool): ModalKey =
   ## A key press (not a repeat) as an open modal takes it. The game never
-  ## gets it: a modal sets ImGui's WantCaptureKeyboard, so `route_key` gives
-  ## the press to nothing, and the release comes once the modal is gone and
-  ## lets go of nothing. A press on the frame the modal appears is not for
-  ## it: that is the press that closed the one before (a queued notice opens
-  ## the frame the one ahead of it closes), or one the game was given.
+  ## gets it: the modal sets WantCaptureKeyboard, so `route_key` drops the
+  ## press. A press on the frame the modal appears is not for it: it closed
+  ## the modal before (a queued notice opens the frame the previous one
+  ## closes), or the game was given it.
   if appearing: mkNone
   elif escape: mkCancel
   elif enter: mkDefault
@@ -193,12 +190,11 @@ proc trigger_held*(h: HeldInput): bool =
   false
 
 proc apply_trigger*(h: var HeldInput; s: var Speed; linked: bool) =
-  ## The right trigger is fast forward while held, from any pad. A pull
-  ## while fast forward is already on (Tab latched it) or while linked (it
-  ## would run ahead of the peer) changes nothing, and neither does its
-  ## release. A pull clears 2x Speed, as the menu's radio does; the release
-  ## brings back the speed before the pull, unless the speed was changed
-  ## during the hold.
+  ## The right trigger, from any pad, is fast forward while held. A pull
+  ## while fast forward is already on (Tab) or while linked (it would run
+  ## ahead of the peer) does nothing, nor does its release. A pull clears 2x
+  ## Speed, as the menu's radio does; the release restores the prior speed
+  ## unless it was changed during the hold.
   let pulled = h.trigger_held()
   if pulled == h.trigger_seen: return
   h.trigger_seen = pulled

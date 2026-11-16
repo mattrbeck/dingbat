@@ -66,14 +66,13 @@ void main() {
 }
 """
 
-# Color correction has one model per panel (selected by panel_gbc):
+# Color correction, one model per panel (panel_gbc):
 #  - GBA: the ares colour model (ISC, see THIRD_PARTY_NOTICES.md): linearize
 #    γ4.0, mix, re-gamma. Matches bgr555_to_rgb and the wasm LUT.
-#  - GB/GBC: Pokefan531's "GBC-Color" model. The CGB panel is far less washed
-#    out than the AGB's, so the GBA curve would crush its colors.
-#
-# Upscale filters: the hq4x- and xBR-style branches follow the public
-# algorithm descriptions. Mirrored in web/glpresent.js's GLSL ES shader.
+#  - GB/GBC: Pokefan531's "GBC-Color" model. The GBA curve would crush the
+#    less washed-out CGB panel's colors.
+# Upscale filters follow the public hq4x/xBR descriptions. Mirrored in
+# web/glpresent.js's GLSL ES shader.
 const FRAG_SRC = """
 #version 330 core
 in vec2 tex_coord;
@@ -396,13 +395,11 @@ proc setup_border_texture(): GLuint =
   glBindTexture(GL_TEXTURE_2D, result)
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GLint(GL_NEAREST))
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GLint(GL_NEAREST))
-  # Wrap mode is deliberately left at the default REPEAT, matching the game
-  # texture. VERT_SRC emits tex_coord.y in [0, -1] (it flips the image by
-  # dividing by -2), so every fetch is at a negative V and only REPEAT brings
-  # it back into range. CLAMP_TO_EDGE here pins the whole border to row 0 --
-  # which looks like "the border is a set of vertical stripes".
-  # RGB5_A1 with 1_5_5_5_REV is exactly the core's border format: BGR555 in
-  # bits 0-14 and the opaque flag in bit 15 land straight in RGB and A.
+  # Wrap stays at the default REPEAT: VERT_SRC emits tex_coord.y in [0, -1],
+  # so every fetch is at a negative V. CLAMP_TO_EDGE pins the whole border to
+  # row 0 (vertical stripes).
+  # RGB5_A1 with 1_5_5_5_REV is the core's border format: BGR555 in bits 0-14,
+  # opaque flag in bit 15.
   glTexImage2D(GL_TEXTURE_2D, 0, GLint(GL_RGB5_A1), GLsizei(256), GLsizei(224),
                0, GL_RGBA, GL_UNSIGNED_SHORT_1_5_5_5_REV, nil)
   glActiveTexture(GL_TEXTURE0)
@@ -428,9 +425,8 @@ type AppState = ref object
   io:              ptr ImGuiIO
   game_texture:    GLuint
   nds_tex_scale:   int      # a DS game's texture: 256x384 times this (HD 3D)
-  # SGB border layer, 256x224 RGB5_A1. Allocated once; only uploaded (and only
-  # sampled) while the loaded cart is running as a Super Game Boy and has
-  # actually transferred a border.
+  # SGB border layer, 256x224 RGB5_A1. Uploaded and sampled only while the
+  # cart runs as a Super Game Boy and has transferred a border.
   border_texture:  GLuint
   border_shown:    bool     # what the last present decided; drives window sizing
   border_gen:      uint32   # last border generation uploaded to the texture
@@ -448,8 +444,8 @@ type AppState = ref object
   scale:           int
   running:         bool
   paused:          bool
-  # Save states execute only at frame boundaries: the menu/hotkey sets a
-  # pending flag and the main loop services it right after run_until_frame
+  # Save states run only at frame boundaries: the main loop services these
+  # right after run_until_frame.
   pending_save:    bool
   pending_load:    bool
   pending_step:    bool  # frame advance: run exactly one frame while paused
@@ -459,7 +455,7 @@ type AppState = ref object
   # Set when a ROM could not be loaded; render_load_notice draws it.
   load_notice:       string
   load_notice_hint:  string
-  # This window's hold on its game's files: a second window is refused
+  # This window's hold on its game's files: a second window fails to open it
   game_lock:       GameLock
   # Command-line BIOS choices: for this run only, never written to cfg
   boot_overrides:  BootOverrides
@@ -470,13 +466,11 @@ type AppState = ref object
   rewind_ds:       bool    # `rewind` is a DS game's ring (no keyframes)
   rewinding:       bool    # true while the rewind key is held
   last_rewind_pop: uint64
-  # Active 2-player network link (nil = single-player). While non-nil the
-  # local GBA core is driven by netlink.step_frame instead of run_until_frame
-  # so the socket stays pumped and the two sides stay in sync; rewind, frame
-  # advance, turbo and save-state load are suppressed (they would desync).
+  # Active 2-player network link (nil = single-player). While set, the core
+  # runs via netlink.step_frame (keeps the socket pumped and both sides in
+  # sync); rewind, frame advance, turbo and state load are off (they desync).
   netlink:         NetLink
-  # ImGui "Link Cable" window; establishment is non-blocking so the UI keeps
-  # rendering while waiting for a peer.
+  # ImGui "Link Cable" window; pairing is non-blocking.
   link_window:     bool
   link_window_min_h: float32  # its content's height last frame
   link:            LinkCable  # pairing state (frontend/link_cable.nim)
@@ -491,28 +485,27 @@ var app: AppState
 # Emulated-frames FPS (not the UI framerate), updated once a second
 var emu_fps = 0.0
 
-# LCD response (common/lcd_response.nim): per-pixel panel model,
-# presentation-only, so safe to change live. Cell state is dropped on ROM load.
+# LCD response (common/lcd_response.nim): presentation-only, safe to change
+# live. Cell state is dropped on ROM load.
 var lcd_resp: LcdResponse
 
-# MBC5 rumble (GB cart types 0x1C-0x1E): update_rumble polls the cart's motor
-# once per main-loop iteration into rumble_on, which render_game reads for
-# the viewport shake; rumble_flip alternates the jitter direction per present.
+# MBC5 rumble (GB cart types 0x1C-0x1E): update_rumble polls the motor into
+# rumble_on each loop; render_game shakes the viewport, rumble_flip alternating
+# the direction per present.
 var rumble_on         = false
 var rumble_flip       = false
 var rumble_last_pulse = 0'u64
 
-# The running core's frame period in performance-counter ticks, which the
-# main loop's frame scheduler paces by: the GB/GBA's 280896 cycles at
-# 16.777216 MHz, or the DS's. Set in main; load_rom picks the core's.
+# Frame period in performance-counter ticks, which the frame scheduler paces
+# by: GB/GBA 280896 cycles at 16.777216 MHz, or the DS's. Set in main; load_rom
+# picks the core's.
 var gbx_frame_ticks, nds_frame_ticks, frame_ticks: uint64
 
 # ──────────────────────────── ROM Loading ────────────────────────────
 
 proc flush_saves() =
-  ## Before a core is dropped (a switch, a Reset) and at quit: the last
-  ## frame's battery write, or a state loaded while paused, is on disk. A
-  ## failure is the core's to log (once) and poll_battery_notice's to show.
+  ## Call before a core is dropped (switch, Reset) and at quit. A failure is
+  ## the core's to log and poll_battery_notice's to show.
   discard flush_batteries(app.gba_emu, app.gb_emu)
   if app.nds != nil: discard app.nds.flush()
 
@@ -523,9 +516,8 @@ proc apply_color_correction() =
   glUniform1i(loc, GLint(if app.cfg.color_correction and app.emu_kind != ekNDS: 1
                          else: 0))
 
-# The shade palette a black-and-white game is drawn in: Night's, as the web
-# and iOS default (web GB_DEFAULT_SHADES), lightest first, 0xRRGGBB. The
-# core's four greys are a code, never shown as they are.
+# Black-and-white game palette: Night's, the web and iOS default (web
+# GB_DEFAULT_SHADES), lightest first, 0xRRGGBB. The core's greys are codes.
 const DMG_SHADES = [0xF7F3FF'u32, 0xC6B0FF'u32, 0xA26FCF'u32, 0x3A2463'u32]
 
 proc dmg_shades_on(): bool =
@@ -560,22 +552,17 @@ proc output_size(): (int, int) =
 
 proc window_units(window: Window; s: int): float =
   ## Window units per native pixel at Frame size s: s times the UI scale,
-  ## kept a whole number of back-buffer pixels, which is what keeps every
-  ## native pixel the same size. Windows and X11 size windows in pixels, so
-  ## there the UI scale is what makes 3x the size it was when Windows
-  ## stretched the window itself (SDL 2): 3.75x at 125%, made 4x, and 4.5x
-  ## at 150%, made 5x. With a fractional pixel density (Wayland at 125% or
-  ## 150%) 3x in window units would be 3.75x or 4.5x in pixels, made whole
-  ## the same way. At a density of 1 or 2 and a UI scale of 1 (a macOS
-  ## window, a Windows one at 100%) this is exactly s.
+  ## rounded to whole back-buffer pixels so every native pixel is the same
+  ## size. Windows and X11 size windows in pixels, so the UI scale applies
+  ## there (3x at 125% is 3.75x, made 4x). A fractional density (Wayland at
+  ## 125%) is made whole the same way. On macOS, or Windows at 100%, this is s.
   var d = float(getWindowPixelDensity(window))
   if d <= 0: d = 1.0
   max(1.0, round(float(s) * float(ui_scale) * d)) / d
 
 proc window_scale(): int =
-  ## The window's multiple of the picture: Frame size, except that a DS
-  ## picture (twice as tall as it is wide) takes the largest multiple that
-  ## still fits the screen's usable height, title bar allowed for.
+  ## Frame size, except a DS picture takes the largest multiple that fits the
+  ## screen's usable height, title bar allowed for.
   if app.emu_kind != ekNDS: return app.scale
   var r: Rect
   if not getDisplayUsableBounds(getDisplayForWindow(app.window), r):
@@ -594,11 +581,9 @@ proc set_window_to(w, h, s: int) =
 var ui_base_style: ImGuiStyle  # ImGui's dark style at 100%, scaled from afresh
 
 proc display_ui_scale(window: Window): float32 =
-  ## The display's content scale, less what the pixel density covers: the
-  ## 125% or 150% of a Windows display, X11's Xft.dpi, and 1 on a Mac or
-  ## Wayland, whose density is the whole scale (a window there is sized in
-  ## points and drawn at its density). DINGBAT_UI_SCALE=<x> sets it instead,
-  ## to try a scaled UI where the display has none.
+  ## The display's content scale less the pixel density: Windows' 125%/150%,
+  ## X11's Xft.dpi, and 1 on macOS or Wayland (density is the whole scale).
+  ## DINGBAT_UI_SCALE=<x> overrides it.
   try:
     let forced = parseFloat(getEnv("DINGBAT_UI_SCALE", "0"))
     if forced > 0: return clamp(float32(forced), 0.5, 4)
@@ -608,12 +593,9 @@ proc display_ui_scale(window: Window): float32 =
   if d <= 0 or s <= 0: 1'f32 else: s / d
 
 proc apply_ui_scale(s: float32) =
-  ## Size ImGui's padding, spacing, rounding and scrollbars, its font and the
-  ## sizes the UI code spells in pixels (ui_px) by s. Scaled from the 100%
-  ## style each time, as ScaleAllSizes rounds down. The font is the built-in
-  ## 13 px pixel font, sized to a whole pixel (16 px at 125%, 20 at 150%):
-  ## only 26 px would draw its pixels whole again, and that is a 200% size,
-  ## so this keeps the size asked for, its edges softened a little.
+  ## Scale ImGui's style, font and ui_px sizes by s. Scaled from the 100% style
+  ## each time, as ScaleAllSizes rounds down. The built-in 13 px pixel font is
+  ## sized to a whole pixel (16 px at 125%), edges softened a little.
   ui_scale = s
   let style = igGetStyle()
   style[] = ui_base_style
@@ -622,8 +604,7 @@ proc apply_ui_scale(s: float32) =
 
 proc resize_to_output() =
   ## Size the window to an integer multiple of the native picture. In
-  ## fullscreen the letterbox does the work, and the window is sized once
-  ## it is a window again (track_fullscreen).
+  ## fullscreen this is deferred to track_fullscreen.
   if app.fullscreen:
     app.fs_track.refit = true
     return
@@ -631,8 +612,7 @@ proc resize_to_output() =
   set_window_to(w, h, window_scale())
 
 proc remember_fullscreen(on: bool) =
-  ## The menu's checkmark, and saved, so the next start can come back this
-  ## way (window_restore.nim).
+  ## Saved so the next start comes back this way (window_restore.nim).
   app.fullscreen = on
   if app.cfg.fullscreen != on:
     app.cfg.fullscreen = on
@@ -649,10 +629,8 @@ proc window_is_fullscreen(): bool =
   (getWindowFlags(app.window) and WINDOW_FULLSCREEN) != 0
 
 proc track_fullscreen() =
-  ## On a window resize: take up a fullscreen the OS entered or left for the
-  ## window, and size a window back from fullscreen to the picture if a
-  ## sizing was deferred meanwhile (else a Game Boy game loaded while
-  ## fullscreen came back in a GBA-shaped window, letterboxed).
+  ## On a window resize: adopt a fullscreen change the OS made, and apply a
+  ## sizing deferred while fullscreen (a GB game loaded in fullscreen).
   let real = window_is_fullscreen()
   case app.fs_track.observe(real, app.fullscreen)
   of fcNone: discard
@@ -680,9 +658,7 @@ proc game_viewport(): (GLint, GLint, GLint, GLint) =
   letterbox(pw, ph)
 
 proc apply_panel_uniforms() =
-  ## Select the panel's color-correction model and pixel-row height for the
-  ## scanline effect. Depends only on the core kind, so this runs when a core
-  ## is (re)loaded rather than per frame.
+  ## Depends only on the core kind: run on core (re)load, not per frame.
   glUseProgram(app.game_shader)
   let gbc = app.emu_kind == ekGB
   let ds = app.emu_kind == ekNDS
@@ -692,9 +668,8 @@ proc apply_panel_uniforms() =
               if gbc: GLfloat(GB_H) elif ds: GLfloat(NDS_H) else: GLfloat(GBA_H))
   glUniform1f(glGetUniformLocation(app.game_shader, "tex_width"),
               if gbc: GLfloat(GB_W) elif ds: GLfloat(NDS_W) else: GLfloat(GBA_W))
-  # Bind the two samplers to their texture units once. Without this the border
-  # sampler defaults to unit 0 and samples the Game Boy texture as its own
-  # border, which reads as "the border is a smeared copy of the game".
+  # Without this the border sampler defaults to unit 0 and samples the game
+  # texture as its border.
   glUniform1i(glGetUniformLocation(app.game_shader, "input_texture"), 0)
   glUniform1i(glGetUniformLocation(app.game_shader, "border_texture"), 1)
 
@@ -715,14 +690,12 @@ proc apply_pitch_correct_ff() =
     app.gb_emu.apu.set_pitch_correct_ff(app.cfg.pitch_correct_ff)
 
 proc apply_audio_lowpass() =
-  # Analog-output low-pass models the GBA's cap/speaker smoothing; only the
-  # GBA DirectSound path has the FIFO imaging it targets.
+  # Models the GBA's cap/speaker smoothing; GBA only (DirectSound imaging).
   if app.gba_emu != nil:
     app.gba_emu.apu.set_audio_lowpass(app.cfg.audio_lowpass)
 
 proc apply_mp2k_hle() =
-  # Arming costs nothing: the HLE engages only when mp2k.nim's runtime
-  # detection recognizes the engine in the loaded game.
+  # Free to arm: engages only when mp2k.nim detects the engine.
   if app.gba_emu != nil:
     app.gba_emu.mp2k_hle = app.cfg.mp2k_hle
 
@@ -742,13 +715,11 @@ proc link_auto_stop()
 
 # ──────────────────────────── Input log ────────────────────────────
 # DINGBAT_INPUT_LOG=<path> records a GBA session's keypad as "<frame> <mask>"
-# lines (mask in KEYINPUT bit order, set before that frame runs) for
-# tools/playtest, which replays it headless and turns it into a script. Loading
-# a state or rewinding breaks the frame timeline; the log says so. Every 60
-# frames a "hash" line carries the framebuffer hash the playtest drivers
-# compute, so a replay can prove it is still in step; F9 writes a "mark" (the
-# player saying "check this screen"). The RTC is frozen at the playtest
-# harness's epoch while recording, so a clock-reading game replays the same.
+# lines (KEYINPUT bit order, set before that frame runs) for tools/playtest to
+# replay headless. State loads and rewinds break the timeline; the log says so.
+# Every 60 frames a "hash" line holds the playtest framebuffer hash so a replay
+# can check it is in step; F9 writes a "mark". The RTC is frozen at the
+# playtest epoch while recording.
 
 const INPUT_LOG_RTC_EPOCH = 1136073600'i64   # tools/playtest DEFAULT_RTC
 
@@ -819,8 +790,8 @@ proc load_notice(text, hint: string) =
   app.load_notice_hint = hint
 
 proc nds_paths(): NdsPaths =
-  ## The DS's dumps from Settings > BIOS, and where this computer's DS keeps
-  ## its firmware settings (one console's flash, shared by every DS game)
+  ## The DS dumps from Settings > BIOS, and the one firmware flash every DS
+  ## game shares
   NdsPaths(bios9: app.cfg.nds_bios9_path, bios7: app.cfg.nds_bios7_path,
            firmware: app.cfg.nds_firmware_path,
            flash: config_dir() / "nds" / "flash.bin")
@@ -845,8 +816,8 @@ proc load_rom(path: string; keep_ds = false) =
   let as_ds = ds_beta and is_nds_file(rom_path)
   # Before the new core reads the .sav: a Reset reloads the same file
   flush_saves()
-  # A game another dingbat window has open is refused before its .sav is
-  # read; a Reset keeps this window's own lock
+  # A game another dingbat window has open fails before its .sav is read; a
+  # Reset keeps this window's own lock
   let lock_dir = config_dir() / "locks"
   var claim: GameLock
   if not app.game_lock.claim_files(lock_dir, rom_path, claim):
@@ -886,17 +857,17 @@ proc load_rom(path: string; keep_ds = false) =
                                       rom_path.extractFilename())
     load_notice(text, hint)
     return
-  # The link, or a setup still waiting for a peer, belongs to the outgoing
-  # core: left up, the netlink keeps driving that core unseen, and a peer
-  # arriving later is bound to whatever is loaded then, a GB game included
+  # The link (or a pending setup) belongs to the outgoing core: left up, it
+  # keeps driving that core unseen, and a late peer binds to whatever is
+  # loaded then, a GB game included
   if app.netlink == nil and app.link.setup != lsNone:
     app.link.status = "Link ended: another game was loaded."
   link_auto_stop()
   link_cancel_setup()
   teardown_netlink("another game was loaded")
-  # A Quick Save asked for in this same batch of input is the outgoing
-  # game's: saved now, not dropped. With the link gone the core is at a frame
-  # boundary (teardown finishes a frame the link left torn).
+  # A Quick Save pending in this batch of input is the outgoing game's: save
+  # it now. With the link gone the core is at a frame boundary (teardown
+  # finishes a torn frame).
   if app.pending_save:
     app.pending_save = false
     if not save_state_slot(0):
@@ -955,7 +926,7 @@ proc load_rom(path: string; keep_ds = false) =
     frame_ticks = if as_ds: nds_frame_ticks else: gbx_frame_ticks
   lcd_resp.reset()  # fresh core: don't ghost the previous game's frame
   # A DS payload is ~6 MB: its ring keeps no keyframes (each a 2 MB zlib, a
-  # stall every few seconds), as the web's does; the 64 MB cap is the same
+  # stall every few seconds), as on the web; same 64 MB cap
   if as_ds:
     app.rewind = new_rewind(REWIND_CAP_BYTES, key_every = 0)
     app.rewind_ds = true
@@ -968,9 +939,8 @@ proc load_rom(path: string; keep_ds = false) =
   glDisable(GL_BLEND)
   glUseProgram(app.game_shader)
   glBindTexture(GL_TEXTURE_2D, app.game_texture)
-  # Allocate the texture storage once here; per-frame uploads use
-  # glTexSubImage2D, which avoids a driver-side reallocation every frame
-  # (glTexImage2D each frame cost ~0.4 ms on macOS's GL-on-Metal stack)
+  # Allocate storage once; per-frame uploads use glTexSubImage2D
+  # (glTexImage2D each frame costs ~0.4 ms on macOS's GL-on-Metal)
   let (tw, th) = if app.emu_kind == ekGBA: (GBA_W, GBA_H)
                  elif app.emu_kind == ekNDS: (NDS_W, NDS_H)
                  else: (GB_W, GB_H)
@@ -989,14 +959,13 @@ proc load_rom(path: string; keep_ds = false) =
   app.paused = false
   app.pending_save = false
   app.pending_load = false
-  # An open Save States window re-reads the new game's slots before its Save,
-  # Load or Delete act on them (mark_stale also drops the old game's notice)
+  # An open Save States window re-reads the new game's slots before acting
+  # (mark_stale also drops the old game's notice)
   app.save_states.mark_stale()
   new_core_takes_held_input()
 
 proc reset_game() =
-  ## Restart the running game: the file it was loaded from, whatever became
-  ## of the Recent list since.
+  ## Reload the file the running game was loaded from.
   if app.cur_path.len > 0: load_rom(app.cur_path, keep_ds = app.emu_kind == ekNDS)
 
 # ──────────────────────────── Save States ────────────────────────────
@@ -1074,8 +1043,8 @@ proc state_prior_identity(): uint32 =
   of ekNone: 0'u32
 
 proc state_is_ours(data: string): bool =
-  ## An older build's slot file (named by the ROM file name alone, or with
-  ## the 1 MB identity) belongs to this game only if the state says so.
+  ## An older slot file name (ROM name alone, or with the 1 MB identity) is
+  ## this game's only if the state says so.
   case app.emu_kind
   of ekGBA: app.gba_emu.state_is_for(data)
   of ekGB:  app.gb_emu.state_is_for(data)
@@ -1083,9 +1052,8 @@ proc state_is_ours(data: string): bool =
   of ekNone: false
 
 proc state_file_path(slot = 0): string =
-  ## Where a slot is written: named by the ROM's file name and identity
-  ## (persist.nim), so same-named games keep their own slots. Slot 0 is the
-  ## Quick slot.
+  ## Named by ROM file name and identity (persist.nim), so same-named games
+  ## keep their own slots. Slot 0 is the Quick slot.
   let rom = current_rom_path()
   if rom.len == 0: return ""
   states_dir() / state_file_name(rom, state_identity(), slot)
@@ -1111,9 +1079,8 @@ proc save_state_slot(slot: int): bool =
   if result: echo "State saved: ", path
 
 proc load_state_slot(slot: int): bool =
-  # A linked core's state is half of a two-player session: loading one would
-  # put the two games out of step. Refused here, whoever asks (menu, hotkey,
-  # the Save States window), so no caller can miss it.
+  # Loading into a linked core would desync the two games. Checked here so
+  # every caller (menu, hotkey, Save States window) gets it.
   if app.netlink != nil:
     last_state_error = ""
     return false
@@ -1127,9 +1094,7 @@ proc load_state_slot(slot: int): bool =
   if result:
     echo "State loaded: ", path
     input_log_event("state_load")
-    # The ring holds the timeline the load just replaced; rewinding into it
-    # would step back through frames that never led here (the web drops it
-    # the same way).
+    # The ring holds the timeline the load replaced (the web drops it too).
     app.rewind.clear()
 
 proc state_reject_sentence(): string =
@@ -1179,9 +1144,8 @@ proc delete_state_slot(slot: int) =
       echo "Delete state failed: ", getCurrentExceptionMsg()
 
 proc refresh_state_slots() =
-  ## Scan the nine slot files, decode each embedded thumbnail into a GL texture,
-  ## and hand the metadata to the Save States widget. Called when the window
-  ## opens and right after a save — never on the hot path.
+  ## Decode each slot's thumbnail into a GL texture for the Save States
+  ## widget. Called on window open and after a save, never on the hot path.
   let w = app.save_states
   w.have_rom = app.emu_kind != ekNone
   for i in 0 ..< NUM_SLOTS:
@@ -1219,14 +1183,12 @@ proc refresh_state_slots() =
                  tex = uint64(app.state_slot_texs[i]),
                  tw = float32(tw), th = float32(th))
     else:
-      # File exists but carries no thumbnail (older save / quick-save on a
-      # pre-thumbnail build): still selectable, just no preview.
+      # A state without a thumbnail: selectable, no preview.
       w.set_slot(i, used = true, label = label, tex = 0, tw = 0, th = 0)
 
 proc process_pending_state() =
-  ## Runs between frames only (right after run_until_frame returns, or while
-  ## paused), so the core is always at a frame boundary here. Quick Save/Load
-  ## act on slot 0.
+  ## Runs only between frames (after run_until_frame, or while paused), so
+  ## the core is at a frame boundary. Quick Save/Load act on slot 0.
   if app.pending_save:
     app.pending_save = false
     if not save_state_slot(0):
@@ -1244,10 +1206,8 @@ proc process_pending_state() =
 # ──────────────────────────── Screenshots ────────────────────────────
 
 proc bgr555_to_rgb(px: uint16; correct, gbc: bool): array[3, byte] =
-  ## Expand one BGR555 framebuffer pixel to 8-bit RGB. When `correct` is set
-  ## this mirrors the display shader's LCD color correction — the AGB model
-  ## (linearize with gamma 4.0, mix channels, re-gamma with 2.2) or, with
-  ## `gbc`, the CGB model — so the PNG matches on-screen.
+  ## BGR555 to 8-bit RGB. `correct` mirrors FRAG_SRC's colour correction
+  ## (AGB model, or CGB with `gbc`) so the PNG matches the screen.
   let r5 = float64(px and 0x1F) / 31.0
   let g5 = float64((px shr 5) and 0x1F) / 31.0
   let b5 = float64((px shr 10) and 0x1F) / 31.0
@@ -1295,9 +1255,8 @@ proc save_screenshot() =
   template convert(fb: untyped) =
     for i in 0 ..< w * h: put(i, fb[i], correct)
   if border:
-    # Same composite the shader does: backdrop, Game Boy window at (48, 40),
-    # then opaque border pixels on top. The border is native SNES art, so it
-    # does NOT get the LCD colour-correction curve.
+    # The shader's composite: backdrop, Game Boy window at (48, 40), opaque
+    # border on top. The border is SNES art: no LCD colour correction.
     let s = app.gb_emu
     let bp = cast[ptr UncheckedArray[uint16]](s.sgb_border_ptr())
     let backdrop = s.sgb_backdrop()
@@ -1333,8 +1292,7 @@ proc save_screenshot() =
 # ──────────────────────────── Rendering ────────────────────────────
 
 proc render_logo() =
-  # Bind explicitly: other code (uniform updates, debug texture uploads) may
-  # have switched the active program/texture between frames
+  # Bind explicitly: other code may have switched program/texture
   glUseProgram(app.logo_shader)
   glBindTexture(GL_TEXTURE_2D, app.logo_texture)
   var w, h: cint
@@ -1347,10 +1305,9 @@ proc render_logo() =
   glDrawArrays(GL_TRIANGLE_STRIP, 0, 4)
 
 proc upload_frame(fb: ptr uint16; w, h: int) =
-  ## Upload the frame texture, running it through the panel model first when
-  ## the LCD response is on. The model advances once per uploaded frame — i.e.
-  ## in emulated time, not in display refreshes — so the screen settles the
-  ## same way whatever the window's refresh rate is.
+  ## Upload the frame through the LCD response model. The model advances once
+  ## per uploaded frame (emulated time), so settling is independent of the
+  ## display's refresh rate.
   let src = cast[ptr UncheckedArray[uint16]](fb)
   let gb = app.emu_kind == ekGB and app.gb_emu != nil
   # The GBA color-correction shader linearizes with lcdGamma 4.0, so while it
@@ -1366,10 +1323,9 @@ proc upload_frame(fb: ptr uint16; w, h: int) =
                   GL_RGBA, GL_UNSIGNED_SHORT_1_5_5_5_REV, upload)
 
 when defined(gputime):
-  # Throwaway instrument (-d:gputime): GL_TIME_ELAPSED around the game quad,
-  # so the cost of an upscale filter can be measured at a real window size
-  # instead of extrapolated from the web build's fixed 960x640 backing store.
-  # Prints a line a second: viewport, median/p90 GPU ms for the game draw.
+  # Diagnostic, off by default (-d:gputime): GL_TIME_ELAPSED around the game
+  # quad, to measure upscale filters at a real window size. Prints median/p90
+  # GPU ms every 2 s.
   var gpuq: array[8, GLuint]
   var gpuq_init = false
   var gpuq_slot = 0
@@ -1410,9 +1366,8 @@ when defined(gputime):
            " p90_ms=", formatFloat(v[(v.len * 9) div 10], ffDecimal, 4),
            " emu_fps=", formatFloat(emu_fps, ffDecimal, 1)
       gpu_samples.setLen(0)
-      # DINGBAT_GPUTIME_SWEEP=1 walks the present-path settings itself, one
-      # per report, so a whole matrix comes out of a single launch instead of
-      # a dozen windows.
+      # DINGBAT_GPUTIME_SWEEP=1 steps through the present-path settings, one
+      # per report.
       if getEnv("DINGBAT_GPUTIME_SWEEP") == "1":
         gpu_sweep_step.inc
         case gpu_sweep_step
@@ -1426,9 +1381,9 @@ when defined(gputime):
         of 8: app.cfg.lcd_response = false
         else: echo "GPUTIME sweep done"; app.running = false
 
-# A GBA frame changed since the last upload. Unpaced (fast-forward, turbo)
-# not every frame is presented: a changed frame left unpresented, then a
-# static one presented, would otherwise keep the old texture on screen
+# A GBA frame changed since the last upload. Unpaced (fast-forward, turbo),
+# a changed frame may go unpresented and the next static one would keep the
+# old texture on screen
 var gba_changed_unuploaded = false
 
 proc note_gba_frame() =
@@ -1439,10 +1394,9 @@ proc render_game() =
   if app.emu_kind != ekNone:
     glUseProgram(app.game_shader)
     glBindTexture(GL_TEXTURE_2D, app.game_texture)
-    # Pushed every present: the Settings window's Apply has no callback into
-    # this module, so a cached value could go stale. The grid and subpixel
-    # looks are separate shader stages; filter_mode only carries the
-    # smoothing algorithms.
+    # Pushed every present: Settings' Apply has no callback into this module.
+    # filter_mode carries only the smoothing filters; grid and subpixel are
+    # separate stages.
     let vf = app.cfg.video_filter
     glUniform1i(glGetUniformLocation(app.game_shader, "lcd_grid"),
                 GLint(if vf == vfGrid: 1 else: 0))
@@ -1458,9 +1412,7 @@ proc render_game() =
       pal[i * 3 + 1] = GLfloat((c shr 8) and 0xFF) / 255
       pal[i * 3 + 2] = GLfloat(c and 0xFF) / 255
     glUniform3fv(glGetUniformLocation(app.game_shader, "dmg_pal"), 4, addr pal[0])
-  # The letterboxed rect this present draws into. Computed before the case so
-  # both cores share it, and restored to the full window afterwards so ImGui
-  # is not clipped by it.
+  # Restored to the full window afterwards so ImGui is not clipped.
   var win_w, win_h: cint
   discard getWindowSizeInPixels(app.window, win_w, win_h)
   let (vx, vy, vw, vh) = game_viewport()
@@ -1475,8 +1427,7 @@ proc render_game() =
                 GLfloat(GBA_H))
     glUniform1f(glGetUniformLocation(app.game_shader, "scan_width"),
                 GLfloat(GBA_W))
-    # The panel model must be fed static frames too, or a cell still on its
-    # way to its target would freeze part-settled instead of finishing
+    # The LCD model needs static frames too, or a settling cell freezes
     if app.cfg.lcd_response or gba_changed_unuploaded or not app.gba_emu.ppu.frame_static:
       upload_frame(addr app.gba_emu.ppu.framebuffer[0], GBA_W, GBA_H)
       gba_changed_unuploaded = false
@@ -1489,8 +1440,8 @@ proc render_game() =
     let border = sgb_border_active()
     glUniform1i(glGetUniformLocation(app.game_shader, "sgb_border"),
                 GLint(if border: 1 else: 0))
-    # The scanline pitch follows the OUTPUT, not the Game Boy texture: with a
-    # border the picture is 224 native rows and both layers live in it.
+    # The scanline pitch follows the OUTPUT (224 rows with a border), not the
+    # Game Boy texture.
     glUniform1f(glGetUniformLocation(app.game_shader, "scan_height"),
                 if border: GLfloat(SGB_BORDER_H) else: GLfloat(GB_H))
     glUniform1f(glGetUniformLocation(app.game_shader, "scan_width"),
@@ -1516,9 +1467,8 @@ proc render_game() =
         glActiveTexture(GL_TEXTURE1)
         glBindTexture(GL_TEXTURE_2D, app.border_texture)
         glActiveTexture(GL_TEXTURE0)
-    # A border appearing (or a state load taking one away) changes the
-    # picture's size and aspect, so the window follows it -- once, on the
-    # edge, the same way a console changes video mode.
+    # A border appearing or going changes the picture's size: resize once,
+    # on the edge.
     if border != app.border_shown:
       app.border_shown = border
       resize_to_output()
@@ -1527,10 +1477,8 @@ proc render_game() =
       glViewport(nx, ny, GLsizei(nw), GLsizei(nh))
     upload_frame(addr app.gb_emu.ppu.framebuffer[0], GB_W, GB_H)
     if rumble_on:
-      # ±1 window-unit viewport jitter (2 px on a Retina display, so it
-      # shakes as far as at 1x; scaled with the UI on Windows and X11),
-      # alternating per present; restored right after the draw so ImGui
-      # renders unshaken.
+      # ±1 window-unit viewport jitter (pixel density and UI scale applied),
+      # alternating per present; ImGui renders unshaken.
       rumble_flip = not rumble_flip
       let px = GLint(max(1.0, round(getWindowPixelDensity(app.window) * ui_scale)))
       let off: GLint = if rumble_flip: px else: -px
@@ -1547,10 +1495,8 @@ proc render_game() =
                 GLfloat(NDS_H))
     glUniform1f(glGetUniformLocation(app.game_shader, "scan_width"),
                 GLfloat(NDS_W))
-    # HD 3D follows the setting live, between frames. The texture is the
-    # shown screens' size (256k x 384k at k); the filters read its texels,
-    # while the window, the viewport and the LCD looks' pitch (scan_*) stay
-    # the 1x picture's: HD only sharpens it.
+    # HD 3D follows the setting live. The texture is 256k x 384k at scale k;
+    # window, viewport and scan_* stay at 1x: HD only sharpens.
     app.nds.set_hd(app.cfg.nds_hd)
     let (tw, th) = app.nds.screen_size()
     if app.nds.hd_scale != app.nds_tex_scale:
@@ -1559,8 +1505,7 @@ proc render_game() =
                    GL_RGBA, GL_UNSIGNED_SHORT_1_5_5_5_REV, nil)
       glUniform1f(glGetUniformLocation(app.game_shader, "tex_width"), GLfloat(tw))
       glUniform1f(glGetUniformLocation(app.game_shader, "tex_height"), GLfloat(th))
-    # The two screens straight into the texture's halves, top above bottom.
-    # No LCD response model: it models the GB/GBA panels, not the DS's.
+    # Top screen above bottom. No LCD response model: it models GB/GBA panels.
     glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, GLsizei(tw), GLsizei(th div 2),
                     GL_RGBA, GL_UNSIGNED_SHORT_1_5_5_5_REV, app.nds.top_screen())
     glTexSubImage2D(GL_TEXTURE_2D, 0, 0, GLint(th div 2), GLsizei(tw),
@@ -1583,9 +1528,7 @@ proc show_menu_bar(): bool =
 proc render_link_window()  # defined below, near the network-link procs
 
 proc poll_battery_notice() =
-  ## Once per loop iteration: the running core's battery-write failures into
-  ## `app.battery` (the first of a run opens the notice; a write that lands
-  ## takes it down).
+  ## Once per loop: feed the core's battery-write failures to `app.battery`.
   var none = false
   case app.emu_kind
   of ekGBA:
@@ -1602,9 +1545,7 @@ proc poll_battery_notice() =
   of ekNone: app.battery.poll("", "", none)
 
 proc render_state_notice() =
-  ## What the app says when a save state is refused (a silent refusal reads
-  ## as "nothing happened"). Modal on purpose: it is always the direct result
-  ## of something the user just did, so it never appears unbidden.
+  ## A save state failed. Modal: it always follows a user action.
   render_notice("State##notice", app.state_notice, app.state_notice_hint)
 
 proc render_load_notice() =
@@ -1614,16 +1555,15 @@ proc render_load_notice() =
   render_notice("Open ROM##notice", app.load_notice, app.load_notice_hint)
 
 proc render_config_notice() =
-  ## The settings file was moved aside or could not be written (config.nim
-  ## reports each cause once). Shown after the state notice, never over it.
+  ## The settings file was moved aside or could not be written (config.nim).
+  ## Never over the state notice.
   if app.state_notice.len > 0: return
   var no_hint = ""
   render_notice("Settings##notice", app.cfg.notice, no_hint)
 
 proc render_battery_notice() =
-  ## The running game's battery save can't be written (persist.nim
-  ## BatteryNotice: once per run of failures, down when a write lands).
-  ## Unbidden, so it waits for the other notices.
+  ## The battery save can't be written (persist.nim BatteryNotice). Unbidden,
+  ## so it waits for the other notices.
   if app.state_notice.len > 0 or app.cfg.notice.len > 0 or
      app.load_notice.len > 0: return
   render_notice("Save file##battery", app.battery.text, app.battery.hint)
@@ -1631,11 +1571,8 @@ proc render_battery_notice() =
 var imgui_skipped = false  # the last render_imgui returned before igNewFrame
 
 proc render_imgui() =
-  # Skip the whole ImGui pass when no UI is visible (menu bar hidden, no
-  # dialogs/overlay/debug windows): at uncapped emulation speeds the empty
-  # NewFrame/Render pair costs real throughput. The home screen (no ROM
-  # loaded) always renders ImGui — it shows the drag-and-drop hint and has
-  # no emulation to slow down.
+  # Skip the ImGui pass when no UI is visible: uncapped, the empty
+  # NewFrame/Render pair costs real throughput. The home screen always renders.
   let menu_visible = show_menu_bar()
   if app.emu_kind != ekNone and not app.paused and not app.rewinding and
      not menu_visible and not app.enable_overlay and
@@ -1645,14 +1582,12 @@ proc render_imgui() =
      (app.gb_dbg == nil or not app.gb_dbg.any_window_open) and
      not app.link_window and not app.cheats.window and
      not app.save_states.window and not app.drag_hover and
-     # The menu bar hides after three idle seconds, exactly the state a Quick
-     # Load keypress lands in; the notice must still be drawn then.
+     # A notice must still draw with the menu bar idle-hidden (Quick Load key)
      app.state_notice.len == 0 and app.cfg.notice.len == 0 and
      app.load_notice.len == 0 and app.battery.text.len == 0:
-    # Only igNewFrame drains ImGui's input queue, a few events a frame, so
-    # every key event of a long keyboard-only session would wait there and
-    # the menu would take that long to see a click. Drop the backlog, and
-    # start the UI from nothing held (a release may be among what is dropped).
+    # Only igNewFrame drains ImGui's input queue, a few events a frame, so a
+    # long keyboard-only session would leave a backlog the menu waits behind.
+    # Drop it, and clear held keys (a release may be among what is dropped).
     if app.io != nil:
       if not imgui_skipped:
         ImGuiIO_ClearInputKeys(app.io)
@@ -1709,8 +1644,7 @@ proc render_imgui() =
                                    nil, addr should_reset, true)
         discard igMenuItem_BoolPtr(cstring("Pause  " & MOD_KEY_STR & "+P"),
                                    nil, addr app.paused, true)
-        # Frame advance, 2x and fast forward can't run ahead of a linked
-        # peer (it paces both), so they are off while linked, like Tab.
+        # Off while linked: the link paces both sides.
         let unlinked = app.netlink == nil
         if igMenuItem_Bool(cstring("Frame Advance  " & MOD_KEY_STR & "+N"),
                            nil, false, app.paused and app.emu_kind != ekNone and
@@ -1721,10 +1655,8 @@ proc render_imgui() =
           if not app.cfg.rewind:
             app.rewind.clear()  # free the history when disabled
           save_config(app.cfg)
-        # 2x Speed stays audio-paced (at double rate); Fast Forward is
-        # inverted audio sync — unsynced emulation runs uncapped, so
-        # checked == not sync. Radio-style: fast forward would silently
-        # dominate 2x, so enabling either clears the other.
+        # 2x Speed stays audio-paced; Fast Forward == not sync (uncapped).
+        # Enabling either clears the other (fast forward would dominate 2x).
         if app.emu_kind == ekGBA and app.gba_emu != nil:
           if igMenuItem_BoolPtr("2x Speed", "Shift+Tab",
                                 addr app.gba_emu.apu.turbo, unlinked):
@@ -1758,8 +1690,6 @@ proc render_imgui() =
             app.nds.set_lid(not app.nds.lid_closed)
         if should_reset: reset_game()
         igSeparator()
-        # Cheats live here, not under Debug: a first-class feature, next to
-        # the other things that change a running game.
         discard igMenuItem_BoolPtr("Cheats", nil, addr app.cheats.window,
                                    app.emu_kind in {ekGBA, ekGB})
         if igMenuItem_Bool("Link Cable...", nil, app.link_window,
@@ -1795,8 +1725,8 @@ proc render_imgui() =
                               addr app.cfg.audio_lowpass, app.emu_kind == ekGBA):
           apply_audio_lowpass()
           save_config(app.cfg)
-        # Sound-engine HLE: changes the mix character and supersedes
-        # interpolation for the music stream when engaged (per-game detection).
+        # When engaged (per-game detection), supersedes interpolation for the
+        # music stream.
         if igMenuItem_BoolPtr("Enhanced music synthesis (HLE)", nil,
                               addr app.cfg.mp2k_hle, true):
           apply_mp2k_hle()
@@ -1898,7 +1828,7 @@ proc render_imgui() =
   if app.gb_dbg != nil:
     app.gb_dbg.render_windows()
   app.cheats.render()
-  # load_state_slot refuses while linked; the window says so up front.
+  # load_state_slot fails while linked; the window says so up front.
   app.save_states.load_blocked =
     if app.netlink != nil: "Loading is paused while linked." else: ""
   app.save_states.render()
@@ -1965,8 +1895,7 @@ proc render_imgui() =
         igTextDisabled(cstring("Drop a ROM here to play (" & rom_types & ")"))
       igEnd()
 
-  # Paused/rewinding badge: without it a paused game with the menu bar
-  # hidden looks like a frozen emulator
+  # Without it a paused game with the menu bar hidden looks frozen
   if (app.paused or app.rewinding) and app.emu_kind != ekNone:
     let vp = igGetMainViewport()
     if vp != nil:
@@ -1988,13 +1917,11 @@ proc render_imgui() =
 
 # ──────────────────────────── Controllers ────────────────────────────
 
-# Open gamepads, keyed by joystick instance id. SDL emits EVENT_GAMEPAD_ADDED
-# for gamepads already attached at init, so hotplug handling below covers
-# startup too. Every opened gamepad feeds player 1.
+# Open gamepads by joystick instance id. SDL emits EVENT_GAMEPAD_ADDED for
+# pads attached at init, so hotplug covers startup. Every pad is player 1.
 var controllers: Table[JoystickID, Gamepad]
 
-# Left-stick-as-dpad and right-trigger fast-forward thresholds (hardcoded,
-# not part of the rebindable button table)
+# Left-stick-as-dpad and right-trigger fast-forward thresholds (not rebindable)
 const STICK_DEADZONE     = 8000'i16
 const TRIGGER_THRESHOLD  = 8000'i16
 
@@ -2049,9 +1976,8 @@ proc new_core_takes_held_input() =
   apply_trigger()
 
 proc update_rumble() =
-  ## 80 ms effects re-triggered every 50 ms chain into a continuous buzz
-  ## while the motor stays on; stopping explicitly on the off edge keeps
-  ## short pulses crisp.
+  ## 80 ms effects re-triggered every 50 ms make a continuous buzz; an
+  ## explicit stop on the off edge keeps short pulses crisp.
   let was_on = rumble_on
   let motor_on =
     case app.emu_kind
@@ -2079,9 +2005,8 @@ proc open_dropped(path: string) =
     load_rom(path)
 
 proc nds_view_top_left(): (int, int, int, int) =
-  ## The picture's rect in window coordinates (top-left origin), for the
-  ## stylus: game_viewport's is GL's, from the bottom, and in pixels where
-  ## the mouse is in window units (points on a Retina display).
+  ## The picture's rect in window units, top-left origin, for the stylus
+  ## (game_viewport's is GL's: bottom-up, in pixels).
   var ww, wh: cint
   discard getWindowSize(app.window, ww, wh)
   let (vx, vy, vw, vh) = letterbox(ww, wh)
@@ -2089,8 +2014,8 @@ proc nds_view_top_left(): (int, int, int, int) =
 
 proc handle_input() =
   when defined(gui_driver):
-    # A pushed drop event cannot carry its path through SDL's own event
-    # memory, so the driver hands it over here, where SDL's would arrive.
+    # A pushed drop event can't carry its path through SDL's event memory,
+    # so the driver hands it over here.
     if gui_driver.dropped.len > 0:
       let path = gui_driver.dropped
       gui_driver.dropped = ""
@@ -2103,9 +2028,8 @@ proc handle_input() =
     of EVENT_KEY_DOWN, EVENT_KEY_UP:
       let pressed = evt.key.down
       let kev     = evt.key
-      # The key without its modifiers, as SDL 2 reported it: SDL 3's event
-      # keycode is shifted (Shift or Caps Lock turn 'z' into 'Z'), which no
-      # binding in a settings file names
+      # The unmodified key: SDL 3's event keycode is shifted (Shift or Caps
+      # Lock turn 'z' into 'Z'), which no binding names
       let sym     = if kev.scancode == SCANCODE_UNKNOWN: cint(kev.key)
                     else: cint(getKeyFromScancode(kev.scancode, 0, true))
       let mods    = uint32(kev.mod)
@@ -2131,7 +2055,7 @@ proc handle_input() =
         of cint(SDLK_P):
           app.paused = not app.paused
         of cint(SDLK_N):
-          # Frame advance would desync a live link; suppress it there.
+          # Frame advance would desync a live link
           if app.paused and app.emu_kind != ekNone and app.netlink == nil:
             app.pending_step = true
         of cint(SDLK_S):
@@ -2146,18 +2070,16 @@ proc handle_input() =
           app.running = false
         else: discard
       of krMark:
-        # playtest recording: mark this screen as a checkpoint
+        # input log: mark this screen as a checkpoint
         input_log_mark()
       of krScreenshot:
-        # Screenshot to config_dir/screenshots
         save_screenshot()
       of krRewind:
-        # Hold-to-rewind, core-agnostic (disabled while linked — it desyncs)
+        # Hold-to-rewind (off while linked: it desyncs)
         app.rewinding = pressed and app.cfg.rewind and
                         app.emu_kind != ekNone and app.netlink == nil
       of krFastForward:
-        # Shift+Tab = 2x, Tab = unbounded; mutually exclusive, since fast
-        # forward would silently dominate 2x
+        # Shift+Tab = 2x, Tab = unbounded; mutually exclusive
         template toggle(apu: untyped) =
           if (mods and KMOD_SHIFT) != 0:
             apu.turbo = not apu.turbo
@@ -2165,7 +2087,7 @@ proc handle_input() =
           else:
             apu.sync = not apu.sync
             if not apu.sync: apu.turbo = false
-        # Suppressed while linked (would run ahead of the peer)
+        # Off while linked (would run ahead of the peer)
         if app.emu_kind == ekGBA and app.gba_emu != nil and app.netlink == nil:
           toggle(app.gba_emu.apu)
         elif app.emu_kind == ekGB and app.gb_emu != nil:
@@ -2232,42 +2154,36 @@ proc handle_input() =
       apply_trigger()
 
     of EVENT_WINDOW_RESIZED, EVENT_WINDOW_PIXEL_SIZE_CHANGED:
-      # GL draws in back-buffer pixels. A move between a 1x and a Retina
-      # display changes those alone (the window keeps its size in points);
-      # ImGui follows by itself, re-rasterising its font at the new density.
+      # GL draws in back-buffer pixels: a move between 1x and Retina changes
+      # only those. ImGui follows by itself.
       var w, h: cint
       discard getWindowSizeInPixels(app.window, w, h)
       glViewport(0, 0, w, h)
       if evt.type == EVENT_WINDOW_RESIZED: track_fullscreen()
 
     of EVENT_WINDOW_DISPLAY_SCALE_CHANGED:
-      # Moved to a display with another scale, or the setting changed. SDL
-      # keeps a Windows or X11 window's size in pixels, so the menus are
-      # rescaled and the window resized to the picture's multiple at the new
-      # scale, the size it would have opened at there. A Mac's moves between
-      # 1x and Retina leave the UI scale at 1 and change nothing here.
+      # SDL keeps a Windows or X11 window's size in pixels, so rescale the
+      # menus and resize the window for the new scale. On macOS the UI scale
+      # stays 1 and nothing changes.
       let s = display_ui_scale(app.window)
       if s != ui_scale:
         apply_ui_scale(s)
         resize_to_output()
 
     of EVENT_WINDOW_ENTER_FULLSCREEN, EVENT_WINDOW_LEAVE_FULLSCREEN:
-      # Sent once the transition is over (macOS animates into and out of a
-      # Space), whoever started it
+      # Sent once the transition is over (macOS animates Spaces)
       track_fullscreen()
 
     of EVENT_MOUSE_MOTION:
       app.last_mouse_tick = getTicks()
-      # A DS game's stylus follows the mouse while it is down, clamped to
-      # the bottom screen
+      # The stylus follows the mouse while down, clamped to the bottom screen
       if app.emu_kind == ekNDS and app.nds != nil and app.nds.stylus:
         let t = touch_point(int(evt.motion.x), int(evt.motion.y),
                             nds_view_top_left())
         app.nds.set_touch(t.x, t.y, true)
 
     of EVENT_MOUSE_BUTTON_DOWN:
-      # A DS game's stylus: a left click that lands on the bottom screen
-      # (not on the menu bar or a window over it)
+      # Stylus: a left click on the bottom screen, not on ImGui
       if app.emu_kind == ekNDS and app.nds != nil and
          evt.button.button == BUTTON_LEFT and
          not (app.io != nil and app.io[].WantCaptureMouse):
@@ -2302,8 +2218,7 @@ var fps_last_time = getTime()
 var fps_second    = getTime().toUnix() mod 60
 
 proc update_fps_title(emulated: bool) =
-  # Count emulated frames only: the main loop iterates at the display's
-  # refresh rate even when emulation is paced slower by audio sync
+  # Count emulated frames only: the loop runs at the display's refresh rate
   if emulated: inc fps_frames
   let now = getTime()
   fps_us += (now - fps_last_time).inMicroseconds()
@@ -2329,21 +2244,18 @@ proc gl_loader(name: cstring): pointer = cast[pointer](glGetProcAddress(name))
 # ──────────────────────────── Network link ────────────────────────────
 
 const LINK_FRAME_BUDGET_MS = 8
-  ## How long one iteration's linked frame may wait on the peer before the
-  ## loop takes input and draws again (half a 60 Hz frame).
+  ## How long a linked frame may wait on the peer per loop iteration (half a
+  ## 60 Hz frame).
 
 proc link_ready(): bool =
   app.emu_kind == ekGBA and app.gba_emu != nil
 
 proc teardown_netlink(why = "") =
-  ## Drop the network link and return the local GBA to single-player: send the
-  ## peer a BYE, drain/close the socket, and swap the RemoteSioDriver back for
-  ## the default no-cable driver so the game sees the cable unplug cleanly.
-  ## `why` (empty for the user's own Disconnect) is shown as "Link ended: ...".
-  ## A core the link left inside a frame (parked on the peer, or step_frame
-  ## raised part way) finishes that frame single-player: link_mid_frame no
-  ## longer holds a Quick Save/Load back once the link is gone, and the state
-  ## format assumes a frame boundary.
+  ## Drop the link: BYE to the peer, close the socket, swap back the no-cable
+  ## SIO driver so the game sees a clean unplug. `why` (empty for the user's
+  ## Disconnect) is shown as "Link ended: ...". A core left mid-frame finishes
+  ## that frame single-player: states assume a frame boundary and
+  ## link_mid_frame no longer holds them back.
   let torn = app.netlink != nil and app.netlink.mid_frame
   app.link.teardown(app.netlink, why)
   if torn and app.gba_emu != nil:
@@ -2359,11 +2271,10 @@ proc linked_now(nl: NetLink): bool =
   true
 
 proc establish_netlink(listen_port: int; connect_to: string; delay_ms: int) =
-  ## `--listen PORT` hosts (unit 0) and `--connect HOST:PORT` joins (unit 1)
-  ## the way the Link Cable window's Advanced Host and Join do, with the
-  ## window open on the status: the loop services the wait
-  ## (service_link_setup), so the game runs single-player and the window
-  ## answers until a peer pairs, and Cancel or closing the window ends it.
+  ## `--listen PORT` hosts (unit 0), `--connect HOST:PORT` joins (unit 1), as
+  ## the Link Cable window's Advanced does, with the window open. The loop
+  ## services the wait (service_link_setup); the game runs single-player
+  ## until a peer pairs.
   app.link.delay_ms = delay_ms
   if app.link.start_cli(listen_port, connect_to, link_ready()):
     app.link_window = true
@@ -2381,9 +2292,9 @@ proc service_link_setup() =
                                             link_now_ms()))
 
 proc service_netlink() =
-  ## Phase 1 while linked and not emulating a frame (paused): keep the socket
-  ## read so the peer's BYE or loss is seen, and our pause reaches it (CLOCK's
-  ## paused bit: its stall clock stops, the link stays up).
+  ## Linked and paused: keep reading the socket so the peer's BYE or loss is
+  ## seen, and send our pause (CLOCK's paused bit: its stall clock stops, the
+  ## link stays up).
   if app.netlink == nil: return
   try:
     app.netlink.set_paused(app.paused)
@@ -2421,14 +2332,12 @@ proc render_link_advanced() =
       link_auto_stop(); link_cancel_setup(); app.link.start_join(link_ready())
 
 proc render_link_window() =
-  ## The "Link Cable" window. Zero-config by default: opening it auto-pairs on
-  ## localhost and shows only a status line. Manual Host/Join live under
-  ## "Advanced" for cross-machine / custom-port play.
+  ## Opening it auto-pairs on localhost; manual Host/Join are under
+  ## "Advanced".
   if not app.link_window: return
   igSetNextWindowSize(ImVec2(x: ui_px(340), y: 0), cint(ImGui_Cond_FirstUseEver))
-  # Never shorter than last frame's content, so the wrapped two-windows hint
-  # and an opened Advanced do not scroll, whatever height imgui.ini kept;
-  # the user can still make it wider or taller.
+  # Never shorter than last frame's content, whatever imgui.ini kept, so
+  # nothing scrolls.
   if app.link_window_min_h > 0:
     igSetNextWindowSizeConstraints(ImVec2(x: 0, y: app.link_window_min_h),
                                    ImVec2(x: 1e9, y: 1e9), nil, nil)
@@ -2451,7 +2360,7 @@ proc render_link_window() =
         # An animated ellipsis so it's visibly working; auto stops on close.
         let dots = 1 + (int(getTicks() div 400) mod 3)
         igText("Waiting to pair%s", cstring(repeat('.', dots)))
-        # load_rom refuses a ROM file another window has open (game_lock.nim)
+        # load_rom fails on a ROM file another window has open (game_lock.nim)
         igTextWrapped("%s", cstring(LINK_SAME_MACHINE_HINT))
       elif app.link.setup == lsListening:
         igText("Hosting on port %d", cint(app.link.port))
@@ -2473,8 +2382,8 @@ proc render_link_window() =
     if app.link.status.len > 0 and app.netlink == nil:
       igSeparator()
       igText("%s", cstring(app.link.status))
-    # The content's bottom (the cursor sits one item spacing below the last
-    # item, in window coordinates, title bar included) plus the padding.
+    # Content bottom (cursor sits one item spacing below the last item, title
+    # bar included) plus padding.
     let style = igGetStyle()
     app.link_window_min_h = igGetCursorPosY() - style.ItemSpacing.y +
                             style.WindowPadding.y
@@ -2510,8 +2419,7 @@ proc main() =
       of "run-bios":       boot_ov.run_bios = some(true)
       of "skip-bios":      boot_ov.run_bios = some(false)
       of "listen":
-        # Values may be attached (--listen:PORT) or space-separated (--listen
-        # PORT); pull the next token in the latter case, like the harness.
+        # Accepts --listen:PORT or --listen PORT
         var v = p.val
         if v.len == 0: p.next(); v = p.key
         listen_port = parseInt(v)
@@ -2539,13 +2447,12 @@ proc main() =
   of 2: boot_ov.bios_path = pos_args[0]; rom_path = pos_args[1]
   else: echo "Too many arguments."; system.quit(1)
 
-  # The command-line BIOS choices stay in app.boot_overrides (load_rom's
-  # boot_settings applies them); written into cfg, the next save_config
-  # would have made them permanent.
+  # Command-line BIOS choices stay in app.boot_overrides, out of cfg, so
+  # save_config never makes them permanent.
   let cfg = load_config()
-  # Fullscreen at start only as the platform restores windows. When it does
-  # not, the saved flag is cleared, as macOS discards a window's state at
-  # quit, so turning the system setting on later brings back nothing stale.
+  # Start fullscreen only if the platform restores windows; otherwise clear
+  # the saved flag (as macOS discards window state at quit), so nothing stale
+  # comes back when the system setting is turned on later.
   let start_fs = start_fullscreen(cfg.fullscreen, system_restores_windows())
   if cfg.fullscreen != start_fs:
     cfg.fullscreen = start_fs
@@ -2564,19 +2471,13 @@ proc main() =
   discard glSetAttribute(GL_DEPTH_SIZE, 24)
   discard glSetAttribute(GL_STENCIL_SIZE, 8)
 
-  # Created hidden and centred, then shown: SDL_CreateWindow takes no position.
-  # HIGH_PIXEL_DENSITY: on a Retina display the back buffer is the display's
-  # own pixels (2x the window's size in points), so the picture, menus and
-  # text are drawn at full resolution instead of at 1x and pixel-doubled by
-  # the compositor. That shows in the smoothing filters and LCD looks, the
-  # DS's HD 3D, a picture scaled by a fraction (fullscreen, a dragged window
-  # edge) and ImGui's lines and shapes. Window sizes, positions and the mouse
-  # stay in points; GL and captures use getWindowSizeInPixels. Wayland the
-  # same, its density being the desktop scale (1.25, 1.5...). Windows and X11
-  # windows are sized in pixels already (SDL 3 makes the process per-monitor
-  # DPI aware), so there the flag changes nothing; the display's scale is
-  # the UI scale instead (display_ui_scale), which the window is made that
-  # much bigger by, before it is centred and shown, and the menus too.
+  # Created hidden, then centred and shown: SDL_CreateWindow takes no position.
+  # HIGH_PIXEL_DENSITY: on Retina (and Wayland, density = desktop scale) the
+  # back buffer is device pixels, not 1x pixel-doubled by the compositor.
+  # Window sizes, positions and the mouse stay in points; GL and captures use
+  # getWindowSizeInPixels. Windows and X11 windows are already in pixels (SDL 3
+  # is per-monitor DPI aware), so the flag does nothing there; the display
+  # scale becomes the UI scale (display_ui_scale), applied before showing.
   var hidden = false
   when defined(gui_driver):
     driver_init()
@@ -2621,21 +2522,15 @@ proc main() =
   ui_base_style = igGetStyle()[]
   apply_ui_scale(ui_scale)
   let io_ptr = igGetIO_Nil()
-  # Nothing to do here for a Retina display: the SDL 3 backend reads the
-  # window's density into io.DisplayFramebufferScale every frame, and ImGui
-  # (1.92) rasterises the font at it, so text is drawn in device pixels.
-  # The default font is a pixel font, drawn on a 13 px grid: at 2x its glyphs
-  # come out the same shapes, each pixel 2x2, so only a vector font would
-  # gain detail from the density. A Windows or X11 display's own scale is
-  # the UI scale (apply_ui_scale), the font then drawn bigger in pixels.
+  # Retina needs nothing here: the SDL 3 backend sets
+  # io.DisplayFramebufferScale each frame and ImGui 1.92 rasterises the font
+  # at it. Windows/X11 scale goes through apply_ui_scale.
   discard ImGui_ImplSDL3_InitForOpenGL(window, gl_ctx)
   discard ImGui_Impl_opengl3_Init("#version 330")
 
   let fe = new_file_explorer(cfg)
   let ce = new_config_editor(cfg, fe)
-  # "Reset to Defaults" changes settings no widget owns (color correction,
-  # volume, the audio niceties, frame size) — push them into the live GL
-  # uniform, core and window here.
+  # "Reset to Defaults" changes settings no widget owns: push them live.
   ce.live_sync = proc() =
     apply_color_correction()
     apply_master_volume()
@@ -2676,19 +2571,17 @@ proc main() =
     boot_overrides:  boot_ov,
   )
   ce.bios.overrides = describe(boot_ov)
-  # Started fullscreen, the window was left at its 100% size: scaled once
-  # it is a window again.
+  # Started fullscreen, the window is at its 100% size: rescale on leaving.
   if start_fs and ui_scale != 1: app.fs_track.refit = true
-  # Save States widget: the app owns the files, textures and core, so the
-  # widget just calls back. Save/Load run synchronously here — render_imgui is
-  # always reached at a frame boundary (right after process_pending_state).
+  # Save/Load run synchronously: render_imgui is always at a frame boundary
+  # (after process_pending_state).
   app.save_states.on_open = proc() = refresh_state_slots()
   app.save_states.on_save = proc(slot: int) =
     if not save_state_slot(slot):
       app.save_states.notice = SLOT_SAVE_FAILED
   app.save_states.on_load = proc(slot: int) =
     if not load_state_slot(slot):
-      # Same sentence-per-cause table as Quick Load; raw wording goes to the log.
+      # Raw wording goes to the log only.
       app.save_states.notice = state_reject_sentence()
       if last_state_error.len > 0:
         echo "Slot load refused: ", last_state_error
@@ -2706,12 +2599,10 @@ proc main() =
     if not fileExists(rom_path):
       echo "ROM file not found: ", rom_path; system.quit(1)
     load_rom(rom_path)
-    # Bring up the 2-player network link once the core exists (GBA only).
     if listen_port > 0 or connect_to.len > 0:
       establish_netlink(listen_port, connect_to, netlink_delay)
     elif link_auto:
-      # Opening the window is what update_link_auto's open-edge detection
-      # keys on.
+      # update_link_auto starts pairing on the window's open edge.
       if link_ready():
         app.link_window = true
       else:
@@ -2721,38 +2612,32 @@ proc main() =
   elif link_auto:
     echo "NETLINK: --link-auto needs a ROM path; ignoring"
 
-  # The UI (ImGui + present) runs at the display's refresh rate, decoupled
-  # from emulation speed in both directions:
-  #  - Emulation faster than the display (audio sync off / fast forward):
-  #    presents are skipped down to the display rate instead of wasting
-  #    ~1 ms per emulated frame on texture upload + swap.
-  #  - Emulation paced below the display rate (audio sync at ~60 fps on a
-  #    120 Hz display): audio pacing happens here — skip emulation while the
-  #    audio queue is ahead — so the loop keeps servicing the UI instead of
-  #    blocking inside the APU's queue-drain wait.
+  # The UI runs at the display's refresh rate, decoupled from emulation:
+  #  - Emulation faster (fast forward): presents are skipped down to the
+  #    display rate (upload + swap is ~1 ms per frame).
+  #  - Emulation slower (60 fps on 120 Hz): pacing happens here, skipping
+  #    emulation while audio is ahead, so the loop never blocks in the APU.
   var present_interval = 8'u64
   let display_mode = getDesktopDisplayMode(getPrimaryDisplay())
   if display_mode != nil and display_mode.refresh_rate > 0:
     present_interval = uint64(1000'f32 / display_mode.refresh_rate)
   var last_present = getTicks()
   # Normal play: fixed 16.743 ms wall-clock slot (280896 cycles / 16.777216
-  # MHz; the GB frame is the same period); the audio queue is a bounds check
-  # only. Turbo and fast-forward keep pure audio pacing.
+  # MHz, GB too); the audio queue is only a bounds check. Turbo and
+  # fast-forward pace by audio.
   let sched_freq = getPerformanceFrequency()
   gbx_frame_ticks = sched_freq * 280896'u64 div 16777216'u64
   # A DS frame is a little shorter: 1120380 cycles at 67.027964 MHz
   nds_frame_ticks = sched_freq * uint64(NDS_FRAME_CYCLES) div uint64(NDS_MASTER_HZ)
   frame_ticks = if app.emu_kind == ekNDS: nds_frame_ticks else: gbx_frame_ticks
   var next_frame_due = getPerformanceCounter()
-  # Within this of a paced frame's slot the idle wait sleeps to the slot
-  # precisely instead of in 1 ms steps, which overshoot by up to a few ms
+  # Within this of a slot the idle wait sleeps precisely, not in 1 ms steps
+  # (which overshoot by a few ms)
   let precise_wait = sched_freq * 4 div 1000
-  # A paced frame's swap is held to a steady offset from its release, so a
-  # frame that emulates quickly and one that takes longer reach the display
-  # at the same point in the refresh: without it, emulation time (which
-  # varies frame to frame) moves frames across refreshes. The offset is the
-  # 90th percentile of the last two seconds' release-to-ready times, so it
-  # follows the game and core; a slower frame goes out as soon as it's ready.
+  # A paced frame's swap is held to a steady offset from its release, so
+  # varying emulation time does not move frames across refreshes. The offset
+  # is the 90th percentile of the last two seconds' release-to-ready times; a
+  # slower frame goes out as soon as it's ready.
   var frame_start: uint64
   var ready_ring: array[120, uint64]
   var ready_next = 0
@@ -2770,13 +2655,11 @@ proc main() =
   proc scheduler_frame_due(queued, low, target, high: uint32): bool =
     let now = getPerformanceCounter()
     if next_frame_due + frame_ticks < now:
-      # Stalled (pause, hitch, held slots): resync instead of bursting a
-      # backlog of missed slots
+      # Stalled: resync instead of bursting missed slots
       next_frame_due = now
     if queued > high: return false  # queue ran away: hold until it drains
-    # Hysteresis: below `low`, burst until `target`. Stopping at `low` would
-    # park the steady state on the threshold and the cadence would follow the
-    # audio drain granularity instead of the wall clock.
+    # Hysteresis: below `low`, burst until `target`. Stopping at `low` makes
+    # the cadence follow audio drain granularity, not the wall clock.
     if queued < low: sched_refilling = true
     if sched_refilling:
       if queued < target: return true
@@ -2784,9 +2667,8 @@ proc main() =
     now >= next_frame_due
 
   proc scheduler_frame_ran() =
-    # Clamp to one period from now: refill-burst frames must not bank future
-    # slots (that would starve the queue right back below the refill line and
-    # turn the cadence into a burst/hold sawtooth)
+    # Clamp to one period from now: refill bursts must not bank future slots
+    # (a burst/hold sawtooth)
     next_frame_due = min(next_frame_due + frame_ticks,
                          getPerformanceCounter() + frame_ticks)
 
@@ -2827,18 +2709,16 @@ proc main() =
   var pace_max_q  = 0'u32
   var pace_start  = 0'u64
   var pace_last   = 0'u64
-  # DINGBAT_FRAME_TRACE=<path>: one CSV row per present, written at quit, for
-  # measuring frame jitter: the paced slot the frame was due in, when its
-  # emulation began and ended, and when the swap was issued and returned
-  # (performance-counter ticks; due is 0 for a present with no new frame)
+  # DINGBAT_FRAME_TRACE=<path>: one CSV row per present, written at quit:
+  # slot due, emulation start/end, swap issued/returned (performance-counter
+  # ticks; due is 0 for a present with no new frame)
   let trace_path = getEnv("DINGBAT_FRAME_TRACE")
   var trace: seq[array[6, uint64]]
   var trace_due, trace_end, trace_ready, trace_swap: uint64
-  # DINGBAT_LATENCY_TEST=<trials>: inject a synthetic UP press where polled
-  # SDL keys are applied and measure wall-clock time until (a) the framebuffer
-  # first differs and (b) that frame reaches glSwapWindow. Needs a GBA ROM
-  # that is static until a keypress and responds next frame (tonc m7_demo.gba:
-  # UP moves the camera).
+  # DINGBAT_LATENCY_TEST=<trials>: inject an UP press where SDL keys are
+  # applied; time until (a) the framebuffer differs and (b) that frame is
+  # swapped. Needs a GBA ROM static until UP, responding next frame (tonc
+  # m7_demo.gba).
   var lat_trials = 0
   try: lat_trials = parseInt(getEnv("DINGBAT_LATENCY_TEST", "0"))
   except ValueError: discard
@@ -2868,8 +2748,7 @@ proc main() =
       s += x
     (mn, s / float(xs.len), mx)
   proc lat_poll_input() =
-    # The synthetic press lands where SDL's input is read, and counts from
-    # the moment it was due, as a real key's wait for the next read would
+    # Timed from when the press was due, as a real key's wait would be
     if lat_trials > 0 and lat_state == 0 and lat_inject_at != 0 and
        app.gba_emu != nil and getPerformanceCounter() >= lat_inject_at:
       lat_t0 = lat_inject_at
@@ -2885,14 +2764,12 @@ proc main() =
   while app.running:
     when defined(gui_driver): driver_poll(window)
     var emulated = false
-    # Frame advance bypasses the audio pacing gate: it must run exactly one
-    # frame regardless of queue depth
+    # Frame advance bypasses audio pacing: exactly one frame
     let stepping = app.paused and app.pending_step
     app.pending_step = false
     if app.rewinding and app.emu_kind != ekNone and app.netlink == nil:
-      # Step history backward at a fixed cadence (~30 pops/s of 10-frame
-      # snapshots ≈ 5x realtime). Applying a snapshot restores the serialized
-      # framebuffer, so presenting it shows the rewound frame directly.
+      # ~30 pops/s of 10-frame snapshots ≈ 5x realtime. A snapshot restores
+      # the framebuffer, so presenting shows the rewound frame.
       let now_r = getTicks()
       if now_r - app.last_rewind_pop >= 33:
         app.last_rewind_pop = now_r
@@ -2917,11 +2794,8 @@ proc main() =
       of ekGBA:
         if app.gba_emu != nil and (stepping or gba_frame_due()):
           if app.netlink != nil:
-            # Linked: advance through the netlink so the socket is pumped and
-            # the two sides stay in lockstep. Parked on the peer, it hands
-            # back after LINK_FRAME_BUDGET_MS so input and drawing go on (the
-            # frame resumes next iteration). On the peer leaving or a link
-            # error, tear the link down and keep running single-player.
+            # Parked on the peer, it returns after LINK_FRAME_BUDGET_MS so
+            # input and drawing go on; the frame resumes next iteration.
             try:
               emulated = app.netlink.step_frame_for(LINK_FRAME_BUDGET_MS)
             except NetLinkError as e:
@@ -2964,9 +2838,8 @@ proc main() =
         if emulated:
           inc lat_settle
         if lat_settle >= 40:  # let the screen go static between trials
-          # Inject at a per-trial pseudo-random phase within the frame period
-          # so the trials sample the whole arrival-time distribution, not just
-          # the just-missed-a-frame worst case
+          # Random phase within the frame period, to sample the whole
+          # arrival-time distribution
           if lat_inject_at == 0:
             lat_rng = lat_rng * 6364136223846793005'u64 + 1442695040888963407'u64
             lat_inject_at = getPerformanceCounter() +
@@ -2985,8 +2858,8 @@ proc main() =
       else: discard
     # Linked: the socket is read even while paused, and BYE ends the link.
     service_netlink()
-    # Pending save/load states run here, at a guaranteed frame boundary (a
-    # linked core parked on the peer mid-frame keeps them pending)
+    # States run at a frame boundary (a core parked mid-frame on the peer
+    # keeps them pending)
     if (app.pending_save or app.pending_load) and app.emu_kind != ekNone and
        not link_mid_frame():
       process_pending_state()
@@ -3020,19 +2893,16 @@ proc main() =
     service_link_setup()
     let now = getTicks()
     var presented = false
-    # A paced frame is presented immediately: holding it for the next interval
-    # slot would add up to a display period of input latency. The interval
-    # throttle bounds present rate under turbo and keeps the UI refreshing
-    # when nothing was emulated. While paced frames are arriving they refresh
-    # the UI too: an extra present between two of them only competes with the
-    # next frame's swap.
+    # A paced frame presents immediately (waiting for the next slot adds up to
+    # a display period of latency). The interval bounds the present rate under
+    # turbo and refreshes the UI when nothing ran; while paced frames arrive
+    # they refresh the UI, as an extra present would compete with their swap.
     let ui_interval = if is_paced() and not app.paused:
                         max(present_interval, 2 * frame_ticks * 1000 div sched_freq)
                       else: present_interval
     if (emulated and is_paced()) or now - last_present >= ui_interval:
       last_present = now
-      # Black behind a game so the letterbox bars read as bezel; the brand
-      # purple is the empty-app backdrop and stays that way.
+      # Black letterbox behind a game; brand purple on the home screen.
       if app.emu_kind == ekNone:
         glClearColor(60.0'f32/255, 61.0'f32/255, 107.0'f32/255, 1.0'f32)
       else:
@@ -3089,11 +2959,9 @@ proc main() =
           app.running = false
     update_fps_title(emulated)
     if not emulated and not presented:
-      # Idle until audio drains or the next present slot; don't busy-spin.
-      # Close to a paced frame's slot, wake on it exactly: a late release
-      # moves the frame across a display refresh (a repeated frame, then a
-      # dropped one). Input is read again on waking, so the frame about to
-      # run sees it as of its slot.
+      # Idle without spinning. Close to a paced slot, wake on it exactly: a
+      # late release moves the frame across a refresh (a repeat, then a
+      # drop). Input is re-read on waking.
       let wait = next_frame_due - min(next_frame_due, getPerformanceCounter())
       if is_paced() and not app.paused and wait > 0 and wait <= precise_wait:
         delayPrecise(wait * 1_000_000_000'u64 div sched_freq)
@@ -3106,7 +2974,7 @@ proc main() =
               &"frame_ticks={frame_ticks}\ndue,start,emulated,ready,swap,swapped\n"
     for r in trace: csv.add r.join(",") & "\n"
     writeFile(trace_path, csv)
-  # The peer hears BYE (a pulled cable) instead of waiting out its timeout
+  # The peer hears BYE instead of waiting out its timeout
   link_auto_stop()
   link_cancel_setup()
   teardown_netlink()

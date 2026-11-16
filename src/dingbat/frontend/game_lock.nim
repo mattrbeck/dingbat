@@ -1,23 +1,21 @@
 ## Which dingbat window owns a game's files. Two windows on one ROM would
-## each rewrite the whole `.sav` from their own battery RAM, one over the
-## other's progress, and would share the save-state slots and the cheat list,
-## so a second window on a game is refused.
+## each rewrite the whole `.sav` over the other's progress and share the
+## state slots and cheats, so a second window on a game is refused.
 ##
 ## A window holds two OS advisory locks (flock / LockFileEx) on files under
 ## `config_dir/locks`, not next to the ROM (its folder may be read-only):
 ##
-## * the battery and cheat files: the ROM's folder (symlinks resolved) plus
-##   its name minus the extension, which is what `<rom>.sav` and `<rom>.cht`
-##   are named from. A zip's ROM lives in the zip's own cache folder, keyed by
-##   the zip's real path, so this covers a zip opened twice as well;
-## * the save-state slots: `<rom file name>-<identity>` (persist.nim, the
-##   identity hashing the whole ROM file), which are shared by every folder's
-##   copy of a game under the same file name.
+## * battery and cheat files: keyed like `<rom>.sav` / `<rom>.cht` (ROM
+##   folder, symlinks resolved, plus name minus extension). A zip's ROM sits
+##   in a cache folder keyed by the zip's real path, so a zip opened twice
+##   is covered too;
+## * save-state slots: `<rom file name>-<identity>` (persist.nim), shared by
+##   every folder's copy of a game under the same file name.
 ##
-## The OS drops a lock when its process ends, however it ends, so a crash or
-## a kill never leaves a game unopenable. No SDL here:
-## tests/desktop_persist_test.nim runs two "windows" in one process, since two
-## open file descriptions conflict under both flock and LockFileEx.
+## The OS drops a lock when its process ends, so a crash never leaves a game
+## unopenable. No SDL: tests/desktop_persist_test.nim runs two "windows" in
+## one process, since two open file descriptions conflict under both flock
+## and LockFileEx.
 
 import std/[os, strformat, strutils]
 import persist
@@ -83,10 +81,9 @@ proc canonical_dir(path: string): string =
   except OSError: dir
 
 proc files_key*(rom_path: string): string =
-  ## What `<rom>.sav` and `<rom>.cht` are named from: the folder, symlinks
-  ## resolved, and the file name minus its extension. Two spellings of one
-  ## path share it; so do `Tetris.gb` and `Tetris.gbc` beside each other,
-  ## which share `Tetris.sav`.
+  ## What `<rom>.sav` and `<rom>.cht` are named from: the folder (symlinks
+  ## resolved) and the file name minus extension. `Tetris.gb` and
+  ## `Tetris.gbc` side by side share it, as they share `Tetris.sav`.
   fold(canonical_dir(rom_path) / rom_path.extractFilename().changeFileExt(""))
 
 proc states_key*(rom_path: string; identity: uint32): string =
@@ -98,9 +95,9 @@ proc lock_path*(lock_dir, kind, key: string): string =
   lock_dir / &"{kind}-{fnv1a64(key).toHex(16).toLowerAscii()}.lock"
 
 proc release*(l: var FileLock) =
-  ## Closing the handle drops the lock. The file stays: removing it could let
-  ## a process that opened it just before lock a file no longer in the folder
-  ## while a third locks a new one under the same name.
+  ## Closing the handle drops the lock. The file stays: removing it would let
+  ## a process that had it open lock an unlinked file while a third locks a
+  ## new one under the same name.
   if l.held:
     when defined(windows):
       discard closeHandle(l.h)

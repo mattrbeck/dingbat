@@ -1,17 +1,15 @@
-## What the desktop app decides about a game's files that needs no SDL, ImGui
-## or GL, so tests/desktop_persist_test.nim can run it headless: when to tell
-## the player their battery save is not being written, what to say when a
-## save state could not be written, and what the save-state slot files are
-## called. dingbat.nim draws and does the file work.
+## The desktop's windowless decisions about a game's files (headless in
+## tests/desktop_persist_test.nim): the battery-write failure notice, the
+## state-save failure text, and slot file names. dingbat.nim draws and does
+## the file work.
 
 import std/[os, strutils]
 
 type
   BatteryNotice* = object
-    ## The "save file can't be written" modal. A core records every failed
-    ## battery write (`save_error`) and flags the first of a run
-    ## (`save_error_new`); this turns that into one message per run, gone
-    ## when the player dismisses it or when a write lands.
+    ## The "save file can't be written" modal: one per run of failures
+    ## (`save_error_new` flags the first), gone on dismiss or when a write
+    ## lands.
     text*: string   ## what the modal says; "" = nothing to show
     hint*: string   ## the OS's wording, shown smaller
 
@@ -47,14 +45,12 @@ const
 
 # ──────────────────────────── Save-state slot files ────────────────────────────
 #
-# A slot file is named by the ROM's file name and its ROM identity (a hash
-# of the whole ROM file: `state_rom_identity`), so two different games that
-# share a file name (a hack beside the original, two zips whose inner ROMs
-# share a name) keep separate slots. Older builds named slots by the file
-# name alone and then, for GBA, by the file name and a hash of the ROM's
-# first 1 MB (`state_prior_rom_identity`); such a file is still read when
-# the slot has no file of its own and the state names this cart, and is
-# never written.
+# A slot file is named by the ROM's file name and identity (a hash of the
+# whole ROM: `state_rom_identity`), so two games sharing a file name keep
+# separate slots. Older names (file name alone; for GBA, file name plus
+# `state_prior_rom_identity`, a hash of the first 1 MB) are still read when
+# the slot has no file of its own and the state names this cart; never
+# written.
 
 proc state_file_name*(rom_path: string; identity: uint32; slot: int): string =
   ## `<rom file name>-<identity, 8 hex digits>[.slotN].state`; slot 0 is the
