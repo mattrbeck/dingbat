@@ -30,6 +30,10 @@ import dingbat/frontend/window_restore
 import dingbat/frontend/nds_game
 import dingbat/frontend/imgui_sdl3
 import dingbat/frontend/util
+import dingbat/frontend/menu_model
+import dingbat/frontend/imgui_menu
+when defined(macosx):
+  import dingbat/frontend/mac_menu
 when defined(gui_driver):
   import dingbat/frontend/gui_driver
 import dingbat/common/cheats
@@ -50,6 +54,12 @@ else:
   const MOD_KEY_STR  = "Ctrl"
 
 const LOGO_PNG_DATA = staticRead("../.github/readme/dingbat.png")
+
+const HELP_URL = "https://github.com/mattrbeck/dingbat/blob/main/docs/usage.md"
+
+# macOS: dingbat's menus in the system menu bar (mac_menu.nim), not the
+# window; DINGBAT_IMGUI_MENU=1 keeps the in-window ImGui bar instead.
+var native_menu = false
 
 # The sdl3 package types SDL_WINDOWPOS_CENTERED as uint; positions are cint
 const WINDOW_CENTERED = cint(WINDOWPOS_CENTERED)
@@ -479,6 +489,7 @@ type AppState = ref object
   enable_overlay:  bool
   last_mouse_tick: uint64
   drag_hover:      bool  # a file is being dragged over the window
+  open_rom_request: bool # Open ROM chosen: the ImGui explorer opens next frame
 
 var app: AppState
 
@@ -955,6 +966,10 @@ proc load_rom(path: string; keep_ds = false) =
   while recs.len > 8: recs.setLen(8)
   app.cfg.recents = recs
   save_config(app.cfg)
+  when defined(macosx):
+    if native_menu:
+      mac_note_recent(path)
+      mac_set_document(app.window, path)
   discard setWindowPosition(app.window, WINDOW_CENTERED, WINDOW_CENTERED)
   app.paused = false
   app.pending_save = false
@@ -1517,13 +1532,17 @@ proc render_game() =
   glViewport(0, 0, GLsizei(win_w), GLsizei(win_h))
 
 proc show_menu_bar(): bool =
-  if app.emu_kind == ekNone: return true
+  ## The in-window bar: on the home screen, and over a game while the mouse
+  ## is in the window and has moved in the last 3 s (the cursor hides with
+  ## it). Never beside the macOS menu bar, though the cursor still hides.
+  if app.emu_kind == ekNone: return not native_menu
   var focused    = getMouseFocus() == app.window
   when defined(gui_driver):
     focused = focused or gui_driver.mouse_in
   let mouse_idle = getTicks() - app.last_mouse_tick > 3000'u64
   result = focused and not mouse_idle
   discard (if result: showCursor() else: hideCursor())
+  if native_menu: result = false
 
 proc render_link_window()  # defined below, near the network-link procs
 
@@ -1568,6 +1587,269 @@ proc render_battery_notice() =
      app.load_notice.len > 0: return
   render_notice("Save file##battery", app.battery.text, app.battery.hint)
 
+# ──────────────────────────── Menus ────────────────────────────
+
+proc menu_state(cmd: MenuCmd; arg: int): MenuState =
+  ## Whether an item can be chosen now, and whether it is ticked: for both
+  ## menu bars, the shortcut keys, and AppKit's check before a shortcut fires.
+  let game = app.emu_kind != ekNone
+  let unlinked = app.netlink == nil
+  let gba = app.emu_kind == ekGBA and app.gba_emu != nil
+  let gb = app.emu_kind == ekGB and app.gb_emu != nil
+  let nds = app.emu_kind == ekNDS and app.nds != nil
+  case cmd
+  of mcNone, mcOpenRom, mcOpenRecent, mcClearRecents, mcSettings, mcQuit,
+     mcHelp, mcReset, mcVolume, mcVolumeDone: (true, false)
+  of mcRecentMenu: (app.cfg.recents.len > 0, false)
+  of mcChannelsMenu: (gba or gb, false)
+  of mcQuickSave, mcSaveStates, mcScreenshot: (game, false)
+  # Loading a save state mid-link would desync the pair
+  of mcQuickLoad: (game and unlinked, false)
+  of mcPause: (true, app.paused)
+  # Frame advance too
+  of mcFrameAdvance: (app.paused and game and unlinked, false)
+  of mcRewind: (true, app.cfg.rewind)
+  # Off while a GBA is linked (it would run ahead of the peer)
+  of mcTurbo:
+    if gba: (unlinked, app.gba_emu.apu.turbo)
+    elif gb: (true, app.gb_emu.apu.turbo)
+    elif nds: (true, app.nds.turbo)
+    else: (false, false)
+  of mcFastForward:
+    if gba: (unlinked, not app.gba_emu.apu.sync)
+    elif gb: (true, not app.gb_emu.apu.sync)
+    elif nds: (true, not app.nds.sync)
+    else: (false, false)
+  of mcCloseLid: (nds, nds and app.nds.lid_closed)
+  of mcCheats: (app.emu_kind in {ekGBA, ekGB}, app.cheats.window)
+  of mcLinkCable: (app.emu_kind == ekGBA, app.link_window)
+  of mcMute: (true, app.cfg.mute)
+  of mcPitchCorrect: (true, app.cfg.pitch_correct_ff)
+  of mcAudioInterp: (app.emu_kind == ekGBA, app.cfg.fifo_interp)
+  of mcAnalogFilter: (app.emu_kind == ekGBA, app.cfg.audio_lowpass)
+  of mcMp2kHle: (true, app.cfg.mp2k_hle)
+  # Models of the GBA and GBC panels: not a DS's
+  of mcColorCorrection: (app.emu_kind != ekNDS, app.cfg.color_correction)
+  of mcChannel:
+    if gba and arg in 0 .. 5: (true, app.gba_emu.apu.channel_mask[arg])
+    elif gb and arg in 0 .. 3: (true, app.gb_emu.apu.channel_mask[arg])
+    else: (false, false)
+  of mcFrameSize: (true, arg == app.scale)
+  of mcFullscreen: (true, app.fullscreen)
+  of mcOverlay: (true, app.enable_overlay)
+  of mcGbaDebug: (app.dbg != nil, app.dbg != nil and app.dbg.window_flag(arg)[])
+  of mcGbDebug: (app.gb_dbg != nil, app.gb_dbg != nil and app.gb_dbg.window_flag(arg)[])
+
+proc open_rom_dialog() =
+  when defined(macosx):
+    if native_menu:
+      mac_open_panel(app.window,
+                     if app.cfg.ds_beta: ROM_DIALOG_EXTS_DS else: ROM_DIALOG_EXTS,
+                     app.cfg.explorer_dir)
+      return
+  app.open_rom_request = true
+
+proc run_menu(cmd: MenuCmd; arg: int) =
+  ## A chosen item (or its shortcut key), run by the main loop.
+  if not menu_state(cmd, arg).enabled: return
+  # 2x Speed stays audio-paced; Fast Forward == not sync (uncapped). Enabling
+  # either clears the other (fast forward would dominate 2x).
+  template turbo(x: untyped) =
+    x.turbo = not x.turbo
+    if x.turbo: x.sync = true
+  template fast_forward(x: untyped) =
+    x.sync = not x.sync
+    if not x.sync: x.turbo = false
+  template toggle_saved(field: untyped; apply: untyped) =
+    app.cfg.field = not app.cfg.field
+    apply
+    save_config(app.cfg)
+  case cmd
+  of mcNone, mcRecentMenu, mcChannelsMenu: discard
+  of mcOpenRom: open_rom_dialog()
+  of mcOpenRecent:
+    if arg in 0 ..< app.cfg.recents.len: load_rom(app.cfg.recents[arg])
+  of mcClearRecents:
+    app.cfg.recents.setLen(0)
+    save_config(app.cfg)
+    when defined(macosx):
+      if native_menu: mac_clear_recents()
+  of mcQuickSave: app.pending_save = true
+  of mcQuickLoad: app.pending_load = true
+  of mcSaveStates: app.save_states.window = true
+  of mcScreenshot: save_screenshot()
+  of mcSettings: app.ce.open = true
+  of mcQuit: app.running = false
+  of mcHelp: discard openURL(HELP_URL)
+  of mcReset: reset_game()
+  of mcPause: app.paused = not app.paused
+  of mcFrameAdvance: app.pending_step = true
+  of mcRewind:
+    app.cfg.rewind = not app.cfg.rewind
+    if not app.cfg.rewind: app.rewind.clear()  # free the history
+    save_config(app.cfg)
+  of mcTurbo:
+    case app.emu_kind
+    of ekGBA: turbo(app.gba_emu.apu)
+    of ekGB: turbo(app.gb_emu.apu)
+    of ekNDS: turbo(app.nds)
+    of ekNone: discard
+  of mcFastForward:
+    case app.emu_kind
+    of ekGBA: fast_forward(app.gba_emu.apu)
+    of ekGB: fast_forward(app.gb_emu.apu)
+    of ekNDS: fast_forward(app.nds)
+    of ekNone: discard
+  # The hinge: closed, a game typically sleeps until it opens
+  of mcCloseLid: app.nds.set_lid(not app.nds.lid_closed)
+  of mcCheats: app.cheats.window = not app.cheats.window
+  of mcLinkCable: app.link_window = not app.link_window
+  of mcVolume, mcVolumeDone:
+    app.cfg.volume = clamp(arg, 0, 100)
+    apply_master_volume()
+    # Persist once the slider is let go, not every step of the drag
+    if cmd == mcVolumeDone: save_config(app.cfg)
+  of mcMute: toggle_saved(mute, apply_master_volume())
+  # WSOLA time-stretch keeps 2x audio at normal pitch
+  of mcPitchCorrect: toggle_saved(pitch_correct_ff, apply_pitch_correct_ff())
+  # ON: reconstructs the waveform between FIFO samples. OFF: bit-true GBA
+  # DAC output, grit included.
+  of mcAudioInterp: toggle_saved(fifo_interp, apply_fifo_interp())
+  # Pair with interpolation off for the closest real-hardware sound
+  of mcAnalogFilter: toggle_saved(audio_lowpass, apply_audio_lowpass())
+  # When engaged (per-game detection), supersedes interpolation for the
+  # music stream
+  of mcMp2kHle: toggle_saved(mp2k_hle, apply_mp2k_hle())
+  of mcColorCorrection: toggle_saved(color_correction, apply_color_correction())
+  of mcChannel:
+    if app.emu_kind == ekGBA:
+      app.gba_emu.apu.channel_mask[arg] = not app.gba_emu.apu.channel_mask[arg]
+    else:
+      app.gb_emu.apu.channel_mask[arg] = not app.gb_emu.apu.channel_mask[arg]
+  of mcFrameSize:
+    app.scale = arg
+    app.cfg.frame_size = arg
+    if app.emu_kind != ekNone: resize_to_output()
+    save_config(app.cfg)
+  of mcFullscreen: set_fullscreen(not app.fullscreen)
+  of mcOverlay: app.enable_overlay = not app.enable_overlay
+  of mcGbaDebug:
+    let f = app.dbg.window_flag(arg)
+    f[] = not f[]
+  of mcGbDebug:
+    let f = app.gb_dbg.window_flag(arg)
+    f[] = not f[]
+
+proc menu_bar(native: bool): seq[MenuItem] =
+  ## Both bars' menus. The macOS bar (`native`) adds the app, Window and Help
+  ## menus, moves Settings and Quit into the app menu, and shows file names
+  ## in Open Recent, as Mac apps do. Titles stay ASCII (ImGui's font has no
+  ## ellipsis); mac_menu.m draws "..." as one.
+  var recent: seq[MenuItem]
+  for i, r in app.cfg.recents:
+    recent.add action(if native: extractFilename(r) else: r, mcOpenRecent, i)
+  recent.add separator()
+  recent.add action(if native: "Clear Menu" else: "Clear", mcClearRecents)
+  var file = @[
+    action("Open ROM" & (if native: "..." else: ""), mcOpenRom,
+           key = if native: "o" else: ""),
+    submenu(if native: "Open Recent" else: "Recent", recent, mcRecentMenu),
+    separator(),
+    action("Quick Save", mcQuickSave, key = "s"),
+    action("Quick Load", mcQuickLoad, key = "l"),
+    action("Save States...", mcSaveStates),
+    (if native: action("Screenshot", mcScreenshot, shown = skF12)
+     else: action("Screenshot  F12", mcScreenshot)),
+    separator()]
+  if native:
+    file.add system("Close Window", "performClose:", key = "w")
+  else:
+    file.add action("Settings", mcSettings)
+    file.add separator()
+    file.add action("Exit", mcQuit, key = "q")
+
+  var emu = @[
+    action("Reset", mcReset, key = "r"),
+    action("Pause", mcPause, key = "p"),
+    action("Frame Advance", mcFrameAdvance, key = "n"),
+    action("Rewind (hold `)", mcRewind)]
+  if (app.emu_kind == ekGBA and app.gba_emu != nil) or
+     (app.emu_kind == ekGB and app.gb_emu != nil) or
+     (app.emu_kind == ekNDS and app.nds != nil):
+    emu.add action("2x Speed", mcTurbo, hint = "Shift+Tab", shown = skShiftTab)
+    emu.add action("Fast Forward", mcFastForward, hint = "Tab", shown = skTab)
+  if app.emu_kind == ekNDS and app.nds != nil:
+    emu.add separator()
+    emu.add action("Close Lid", mcCloseLid)
+  emu.add separator()
+  emu.add action("Cheats", mcCheats)
+  emu.add action("Link Cable...", mcLinkCable)
+
+  var channels: seq[MenuItem]
+  if app.emu_kind == ekGBA and app.gba_emu != nil:
+    for i, n in ["PSG1", "PSG2", "PSG3", "PSG4", "DMA-A", "DMA-B"]:
+      channels.add action(n, mcChannel, i, hint = $(i + 1))
+  elif app.emu_kind == ekGB and app.gb_emu != nil:
+    for i, n in ["Pulse 1", "Pulse 2", "Wave", "Noise"]:
+      channels.add action(n, mcChannel, i, hint = $(i + 1))
+  var sizes: seq[MenuItem]
+  for s in 1 .. 8: sizes.add action($s & "x", mcFrameSize, s)
+  sizes.add separator()
+  sizes.add action("Fullscreen", mcFullscreen, key = "f")
+  let av = @[
+    slider("Volume", mcVolume, mcVolumeDone, app.cfg.volume, 0, 100),
+    action("Mute", mcMute),
+    action("Pitch-correct fast-forward", mcPitchCorrect),
+    action("Audio interpolation", mcAudioInterp),
+    action("Analog filter", mcAnalogFilter),
+    action("Enhanced music synthesis (HLE)", mcMp2kHle),
+    separator(),
+    action("LCD Color Correction", mcColorCorrection),
+    submenu("Channels", channels, mcChannelsMenu),
+    separator(),
+    submenu("Frame size", sizes)]
+
+  var debug = @[action("Overlay", mcOverlay), separator()]
+  if app.dbg != nil:
+    for i, t in GBA_DEBUG_WINDOWS: debug.add action(t, mcGbaDebug, i)
+  if app.gb_dbg != nil:
+    for i, t in GB_DEBUG_WINDOWS: debug.add action(t, mcGbDebug, i)
+
+  if native:
+    result.add submenu("dingbat", @[
+      system("About dingbat", "about"),
+      separator(),
+      action("Settings...", mcSettings, key = ","),
+      separator(),
+      system("Services", "services"),
+      separator(),
+      system("Hide dingbat", "hide:", key = "h"),
+      system("Hide Others", "hideOtherApplications:", key = "h", alt = true),
+      system("Show All", "unhideAllApplications:"),
+      separator(),
+      action("Quit dingbat", mcQuit, key = "q")])
+  result.add submenu("File", file)
+  result.add submenu("Emulation", emu)
+  result.add submenu("Audio/Video", av)
+  result.add submenu("Debug", debug)
+  if native:
+    result.add submenu("Window", @[
+      system("Minimize", "performMiniaturize:", key = "m"),
+      system("Zoom", "performZoom:"),
+      separator(),
+      system("Bring All to Front", "arrangeInFront:")])
+    result.add submenu("Help", @[action("dingbat Help", mcHelp)])
+  result.apply_state(menu_state)
+
+proc run_menu_cmds() =
+  ## Items chosen since the last iteration, and the Open panel's choice.
+  for (cmd, arg) in take_cmds(): run_menu(cmd, arg)
+  when defined(macosx):
+    let path = mac_take_opened()
+    if path.len > 0:
+      app.cfg.explorer_dir = parentDir(path)  # the panel opens there next time
+      load_rom(path)
+
 var imgui_skipped = false  # the last render_imgui returned before igNewFrame
 
 proc render_imgui() =
@@ -1577,11 +1859,11 @@ proc render_imgui() =
   if app.emu_kind != ekNone and not app.paused and not app.rewinding and
      not menu_visible and not app.enable_overlay and
      not app.fe.open and not app.ce.open and
-     (app.dbg == nil or
-      not (app.dbg.video_window or app.dbg.sched_window or app.dbg.exp_window)) and
+     (app.dbg == nil or not app.dbg.any_window_open) and
      (app.gb_dbg == nil or not app.gb_dbg.any_window_open) and
      not app.link_window and not app.cheats.window and
      not app.save_states.window and not app.drag_hover and
+     not app.open_rom_request and
      # A notice must still draw with the menu bar idle-hidden (Quick Load key)
      app.state_notice.len == 0 and app.cfg.notice.len == 0 and
      app.load_notice.len == 0 and app.battery.text.len == 0:
@@ -1602,192 +1884,14 @@ proc render_imgui() =
   igNewFrame()
 
   var overlay_h: cfloat = ui_px(10)
-  var open_rom = false
 
   if menu_visible:
-    if igBeginMainMenuBar():
-      if igBeginMenu("File", true):
-        if igMenuItem_Bool("Open ROM", nil, false, true):
-          open_rom = true
-        if igBeginMenu("Recent", app.cfg.recents.len > 0):
-          for recent in app.cfg.recents:
-            if igMenuItem_Bool(cstring(recent), nil, false, true):
-              load_rom(recent)
-          igSeparator()
-          if igMenuItem_Bool("Clear", nil, false, true):
-            app.cfg.recents.setLen(0)
-            save_config(app.cfg)
-          igEndMenu()
-        igSeparator()
-        let game_loaded = app.emu_kind != ekNone
-        if igMenuItem_Bool(cstring("Quick Save  " & MOD_KEY_STR & "+S"),
-                           nil, false, game_loaded):
-          app.pending_save = true
-        if igMenuItem_Bool(cstring("Quick Load  " & MOD_KEY_STR & "+L"),
-                           nil, false, game_loaded and app.netlink == nil):
-          app.pending_load = true
-        if igMenuItem_Bool("Save States...", nil, false, game_loaded):
-          app.save_states.window = true
-        if igMenuItem_Bool("Screenshot  F12", nil, false, game_loaded):
-          save_screenshot()
-        igSeparator()
-        if igMenuItem_Bool("Settings", nil, false, true):
-          app.ce.open = true
-        igSeparator()
-        if igMenuItem_Bool(cstring("Exit  " & MOD_KEY_STR & "+Q"), nil, false, true):
-          app.running = false
-        igEndMenu()
+    overlay_h += render_menu_bar(menu_bar(native = false), MOD_KEY_STR)
 
-      if igBeginMenu("Emulation", true):
-        var should_reset = false
-        discard igMenuItem_BoolPtr(cstring("Reset  " & MOD_KEY_STR & "+R"),
-                                   nil, addr should_reset, true)
-        discard igMenuItem_BoolPtr(cstring("Pause  " & MOD_KEY_STR & "+P"),
-                                   nil, addr app.paused, true)
-        # Off while linked: the link paces both sides.
-        let unlinked = app.netlink == nil
-        if igMenuItem_Bool(cstring("Frame Advance  " & MOD_KEY_STR & "+N"),
-                           nil, false, app.paused and app.emu_kind != ekNone and
-                           unlinked):
-          app.pending_step = true
-        if igMenuItem_BoolPtr("Rewind (hold `)", nil, addr app.cfg.rewind,
-                              true):
-          if not app.cfg.rewind:
-            app.rewind.clear()  # free the history when disabled
-          save_config(app.cfg)
-        # 2x Speed stays audio-paced; Fast Forward == not sync (uncapped).
-        # Enabling either clears the other (fast forward would dominate 2x).
-        if app.emu_kind == ekGBA and app.gba_emu != nil:
-          if igMenuItem_BoolPtr("2x Speed", "Shift+Tab",
-                                addr app.gba_emu.apu.turbo, unlinked):
-            if app.gba_emu.apu.turbo: app.gba_emu.apu.sync = true
-          var fast_forward = not app.gba_emu.apu.sync
-          if igMenuItem_BoolPtr("Fast Forward", "Tab",
-                                addr fast_forward, unlinked):
-            app.gba_emu.apu.sync = not fast_forward
-            if fast_forward: app.gba_emu.apu.turbo = false
-        elif app.emu_kind == ekGB and app.gb_emu != nil:
-          if igMenuItem_BoolPtr("2x Speed", "Shift+Tab",
-                                addr app.gb_emu.apu.turbo, true):
-            if app.gb_emu.apu.turbo: app.gb_emu.apu.sync = true
-          var fast_forward = not app.gb_emu.apu.sync
-          if igMenuItem_BoolPtr("Fast Forward", "Tab",
-                                addr fast_forward, true):
-            app.gb_emu.apu.sync = not fast_forward
-            if fast_forward: app.gb_emu.apu.turbo = false
-        elif app.emu_kind == ekNDS and app.nds != nil:
-          if igMenuItem_BoolPtr("2x Speed", "Shift+Tab",
-                                addr app.nds.turbo, true):
-            if app.nds.turbo: app.nds.sync = true
-          var fast_forward = not app.nds.sync
-          if igMenuItem_BoolPtr("Fast Forward", "Tab",
-                                addr fast_forward, true):
-            app.nds.sync = not fast_forward
-            if fast_forward: app.nds.turbo = false
-          igSeparator()
-          # The hinge: closed, a game typically sleeps until it opens
-          if igMenuItem_Bool("Close Lid", nil, app.nds.lid_closed, true):
-            app.nds.set_lid(not app.nds.lid_closed)
-        if should_reset: reset_game()
-        igSeparator()
-        discard igMenuItem_BoolPtr("Cheats", nil, addr app.cheats.window,
-                                   app.emu_kind in {ekGBA, ekGB})
-        if igMenuItem_Bool("Link Cable...", nil, app.link_window,
-                           app.emu_kind == ekGBA):
-          app.link_window = not app.link_window
-        igEndMenu()
-
-      if igBeginMenu("Audio/Video", true):
-        var vol = cint(app.cfg.volume)
-        igSetNextItemWidth(ui_px(120))
-        if igSliderInt("Volume", addr vol, 0, 100, "%d%%", 0):
-          app.cfg.volume = int(vol)
-          apply_master_volume()
-        # Persist only when the slider edit completes, not every frame
-        if igIsItemDeactivatedAfterEdit():
-          save_config(app.cfg)
-        if igMenuItem_BoolPtr("Mute", nil, addr app.cfg.mute, true):
-          apply_master_volume()
-          save_config(app.cfg)
-        # WSOLA time-stretch keeps 2x audio at normal pitch.
-        if igMenuItem_BoolPtr("Pitch-correct fast-forward", nil,
-                              addr app.cfg.pitch_correct_ff, true):
-          apply_pitch_correct_ff()
-          save_config(app.cfg)
-        # ON: reconstructs the waveform between FIFO samples. OFF: bit-true
-        # GBA DAC output, grit included.
-        if igMenuItem_BoolPtr("Audio interpolation", nil,
-                              addr app.cfg.fifo_interp, app.emu_kind == ekGBA):
-          apply_fifo_interp()
-          save_config(app.cfg)
-        # Pair with interpolation off for the closest real-hardware sound.
-        if igMenuItem_BoolPtr("Analog filter", nil,
-                              addr app.cfg.audio_lowpass, app.emu_kind == ekGBA):
-          apply_audio_lowpass()
-          save_config(app.cfg)
-        # When engaged (per-game detection), supersedes interpolation for the
-        # music stream.
-        if igMenuItem_BoolPtr("Enhanced music synthesis (HLE)", nil,
-                              addr app.cfg.mp2k_hle, true):
-          apply_mp2k_hle()
-          save_config(app.cfg)
-        igSeparator()
-        if igMenuItem_BoolPtr("LCD Color Correction", nil,
-                              addr app.cfg.color_correction,
-                              app.emu_kind != ekNDS):
-          apply_color_correction()
-          save_config(app.cfg)
-        let have_gba_ch = app.emu_kind == ekGBA and app.gba_emu != nil
-        let have_gb_ch  = app.emu_kind == ekGB and app.gb_emu != nil
-        if igBeginMenu("Channels", have_gba_ch or have_gb_ch):
-          if have_gba_ch:
-            const ch_names = ["PSG1", "PSG2", "PSG3", "PSG4", "DMA-A", "DMA-B"]
-            for ch in 0 .. 5:
-              discard igMenuItem_BoolPtr(cstring(ch_names[ch]), cstring($(ch + 1)),
-                                         addr app.gba_emu.apu.channel_mask[ch], true)
-          elif have_gb_ch:
-            const ch_names = ["Pulse 1", "Pulse 2", "Wave", "Noise"]
-            for ch in 0 .. 3:
-              discard igMenuItem_BoolPtr(cstring(ch_names[ch]), cstring($(ch + 1)),
-                                         addr app.gb_emu.apu.channel_mask[ch], true)
-          igEndMenu()
-        igSeparator()
-        if igBeginMenu("Frame size", true):
-          for s in 1 .. 8:
-            if igMenuItem_Bool(cstring($s & "x"), nil, s == app.scale, true):
-              app.scale = s
-              app.cfg.frame_size = s
-              if app.emu_kind != ekNone: resize_to_output()
-              save_config(app.cfg)
-          igSeparator()
-          if igMenuItem_Bool(cstring("Fullscreen  " & MOD_KEY_STR & "+F"),
-                             nil, app.fullscreen, true):
-            set_fullscreen(not app.fullscreen)
-          igEndMenu()
-        igEndMenu()
-
-      if igBeginMenu("Debug", true):
-        discard igMenuItem_BoolPtr("Overlay", nil, addr app.enable_overlay, true)
-        igSeparator()
-        if app.dbg != nil:
-          app.dbg.render_menu_items()
-        if app.gb_dbg != nil:
-          app.gb_dbg.render_menu_items()
-        igEndMenu()
-
-      var win_size = ImVec2(x: 0, y: 0)
-      # imguin <= 1.92.4 uses a pOut out-param; later versions return by value
-      when compiles(igGetWindowSize(addr win_size)):
-        igGetWindowSize(addr win_size)
-      else:
-        let ws = igGetWindowSize()
-        win_size = ImVec2(x: ws.x, y: ws.y)
-      overlay_h += win_size.y
-      igEndMainMenuBar()
-
-  app.fe.render("ROM", open_rom,
+  app.fe.render("ROM", app.open_rom_request,
                 if app.cfg.ds_beta: ROM_DIALOG_EXTS_DS else: ROM_DIALOG_EXTS,
                 proc(path: string) = load_rom(path))
+  app.open_rom_request = false
 
   render_state_notice()
   render_config_notice()
@@ -2049,26 +2153,18 @@ proc handle_input() =
       of krCapture:
         app.ce.keybindings.key_released(sym)
       of krShortcut:
-        case sym
-        of cint(SDLK_R):
-          reset_game()
-        of cint(SDLK_P):
-          app.paused = not app.paused
-        of cint(SDLK_N):
-          # Frame advance would desync a live link
-          if app.paused and app.emu_kind != ekNone and app.netlink == nil:
-            app.pending_step = true
-        of cint(SDLK_S):
-          if app.emu_kind != ekNone: app.pending_save = true
-        of cint(SDLK_L):
-          # Loading a save state mid-link would desync the pair.
-          if app.emu_kind != ekNone and app.netlink == nil:
-            app.pending_load = true
-        of cint(SDLK_F):
-          set_fullscreen(not app.fullscreen)
-        of cint(SDLK_Q):
-          app.running = false
-        else: discard
+        # The menus' own commands, guarded as their items are. On macOS the
+        # menu bar takes Cmd shortcuts itself (mac_menu.nim).
+        let cmd = case sym
+                  of cint(SDLK_R): mcReset
+                  of cint(SDLK_P): mcPause
+                  of cint(SDLK_N): mcFrameAdvance
+                  of cint(SDLK_S): mcQuickSave
+                  of cint(SDLK_L): mcQuickLoad
+                  of cint(SDLK_F): mcFullscreen
+                  of cint(SDLK_Q): mcQuit
+                  else: mcNone
+        if cmd != mcNone and not native_menu: run_menu(cmd, 0)
       of krMark:
         # input log: mark this screen as a checkpoint
         input_log_mark()
@@ -2458,6 +2554,12 @@ proc main() =
     cfg.fullscreen = start_fs
     save_config(cfg)
 
+  when defined(macosx):
+    native_menu = getEnv("DINGBAT_IMGUI_MENU") != "1"
+    # Fullscreen from Cmd+F (setWindowFullscreen) would otherwise hide the
+    # menu bar for good; this keeps it at the top edge, as the green button does
+    if native_menu:
+      discard setHint("SDL_VIDEO_MAC_FULLSCREEN_MENU_VISIBILITY", "1")
   if not sdl3.init(INIT_VIDEO or INIT_AUDIO or INIT_GAMEPAD):
     echo "SDL init failed: ", $getError(); system.quit(1)
   defer: sdl3.quit()
@@ -2586,6 +2688,10 @@ proc main() =
       if last_state_error.len > 0:
         echo "Slot load refused: ", last_state_error
   app.save_states.on_delete = proc(slot: int) = delete_state_slot(slot)
+  when defined(macosx):
+    if native_menu:
+      mac_menu_install(proc(): seq[MenuItem] = menu_bar(native = true),
+                       menu_state, VERSION)
 
   # GLSL uniforms default to 0/false, so push the configured value now
   # (tex_height too: 0 would make the scanline fract() darken everything)
@@ -2888,6 +2994,7 @@ proc main() =
           pace_max_q = 0
     handle_input()
     lat_poll_input()
+    run_menu_cmds()
     update_rumble()
     update_link_auto()
     service_link_setup()

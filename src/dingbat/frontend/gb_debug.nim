@@ -21,10 +21,14 @@ proc new_gb_debug*(gb: GB): GbDebug =
 proc any_window_open*(d: GbDebug): bool =
   d.palette_window or d.tiles_window or d.bgmap_window
 
-proc render_menu_items*(d: GbDebug) =
-  discard igMenuItem_BoolPtr("Palettes", nil, addr d.palette_window, true)
-  discard igMenuItem_BoolPtr("Tiles", nil, addr d.tiles_window, true)
-  discard igMenuItem_BoolPtr("BG Maps", nil, addr d.bgmap_window, true)
+# The Debug menu's items, in order: window_flag's indices
+const GB_DEBUG_WINDOWS* = ["Palettes", "Tiles", "BG Maps"]
+
+proc window_flag*(d: GbDebug; i: int): ptr bool =
+  case i
+  of 0: addr d.palette_window
+  of 1: addr d.tiles_window
+  else: addr d.bgmap_window
 
 const SWATCH_FLAGS = cint(ImGui_ColorEditFlags_NoAlpha) or
                      cint(ImGui_ColorEditFlags_NoPicker) or

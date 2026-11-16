@@ -10,6 +10,11 @@ tap).
 Native: run `dingbat`, pass a ROM path (`./dingbat /path/to/rom`), or drag a file onto
 the window.
 
+On macOS the menus live in the system menu bar (Settings and Quit in the dingbat menu),
+File > Open ROM… (⌘O) is the system's Open panel, and the app opens ROMs from Finder:
+Open With, or a drop on the Dock icon. Games you open show in the Dock icon's and the
+Apple menu's recent items. `DINGBAT_IMGUI_MENU=1` brings back the in-window menu bar.
+
 Zipped ROMs work in both: the first `.gba` / `.gb` / `.gbc` in the archive is loaded.
 
 Nintendo DS games (`.nds`) load in the native app only with Settings > General >

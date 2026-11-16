@@ -36,6 +36,14 @@
 ##                                     requests it took, and whether the last
 ##                                     one was a buzz (not a stop)
 ##   pad detach                        unplug it
+##   menu dump <path.txt>              macOS menu bar: every menu as it would
+##                                     show now, one item a line ([x] ticked,
+##                                     [off] greyed, [Cmd+S] its shortcut)
+##   menu pick <Menu>Item[>Sub]>       choose an item as a click would; acked
+##                                     `error greyed` or `error no item`
+##
+## With the macOS menu bar, a `key ... down cmd` also goes through it, as a
+## real Cmd shortcut does (the key handler leaves those to the menus).
 ##
 ## The window is created hidden, so the user's real mouse and keyboard never
 ## reach it and it never takes focus from what they are doing; the menu bar,
@@ -46,6 +54,8 @@ import std/[os, strutils]
 import sdl3
 import imguin/glad/gl
 import stb_image/write as stbiw
+when defined(macosx):
+  import mac_menu
 
 type
   Step = object
@@ -190,6 +200,9 @@ proc push_key(window: Window; w: seq[string]) =
   e.key.scancode = getScancodeFromKey(sym, no_mods)
   e.key.mod = mods
   push(e)
+  when defined(macosx):
+    if mac_menu.installed and down and "cmd" in w[3 .. ^1]:
+      discard mac_menu_key(w[1].toLowerAscii, "shift" in w[3 .. ^1])
 
 proc push_text(window: Window; s: string) =
   texts.add s
@@ -300,6 +313,18 @@ proc run(window: Window; s: Step): bool =
   of "pad":
     ack(s.id, pad_cmd(w))
     return true
+  of "menu":
+    when defined(macosx):
+      if not mac_menu.installed: raise newException(ValueError, "no macOS menu bar")
+      case w[1]
+      of "dump": writeFile(w[2], mac_menu_dump())
+      of "pick":
+        case mac_menu_pick(s.rest[len("pick") .. ^1].strip())
+        of 1: discard
+        of -1: raise newException(ValueError, "greyed")
+        else: raise newException(ValueError, "no item")
+      else: raise newException(ValueError, "menu dump|pick")
+    else: raise newException(ValueError, "menu: macOS only")
   else: raise newException(ValueError, "unknown command " & w[0])
   true
 

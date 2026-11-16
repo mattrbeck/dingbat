@@ -15,11 +15,19 @@ type
 proc new_gba_debug*(gba: GBA): GbaDebug =
   GbaDebug(gba: gba)
 
-proc render_menu_items*(d: GbaDebug) =
-  discard igMenuItem_BoolPtr("Video", nil, addr d.video_window, true)
-  discard igMenuItem_BoolPtr("IO Registers", nil, addr d.io_window, true)
-  discard igMenuItem_BoolPtr("Scheduler", nil, addr d.sched_window, true)
-  discard igMenuItem_BoolPtr("Experimental Settings", nil, addr d.exp_window, true)
+# The Debug menu's items, in order: window_flag's indices
+const GBA_DEBUG_WINDOWS* = ["Video", "IO Registers", "Scheduler",
+                            "Experimental Settings"]
+
+proc window_flag*(d: GbaDebug; i: int): ptr bool =
+  case i
+  of 0: addr d.video_window
+  of 1: addr d.io_window
+  of 2: addr d.sched_window
+  else: addr d.exp_window
+
+proc any_window_open*(d: GbaDebug): bool =
+  d.video_window or d.io_window or d.sched_window or d.exp_window
 
 proc render_palettes(d: GbaDebug) =
   if igBeginTabItem("Palettes", nil, 0):

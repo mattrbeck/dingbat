@@ -50,8 +50,10 @@ run() {
   mkdir -p "$work/home/.config/dingbat" "$work/drive"
   printf -- '---\nmute: true\n%s' "$2" > "$work/home/.config/dingbat/dingbat.yml"
   printf '%s\n' "$3" > "$work/drive/cmd"
+  # The in-window ImGui bar on macOS too (tests/desktop_mac_menu_test.sh
+  # covers the macOS menu bar)
   HOME="$work/home" DINGBAT_DRIVE="$work/drive" DINGBAT_INPUT_LOG="$work/input.log" \
-    "$bin" "$1" > "$work/out.log" 2>&1
+    DINGBAT_IMGUI_MENU=1 "$bin" "$1" > "$work/out.log" 2>&1
 }
 ack() { grep "^$1 " "$work/drive/ack" | cut -d' ' -f2-; }
 masks() {  # the GBA keypad masks the input log recorded, in order
