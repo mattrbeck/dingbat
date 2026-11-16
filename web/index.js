@@ -8635,6 +8635,7 @@ document.addEventListener("keydown", (e) => {
     }
     closeSavesModal();
     closeUpdateModal();
+    closeRequired();
     closeStatesModal();
     closeMomentsModal();
     closeCheatsModal();
@@ -9203,22 +9204,34 @@ const retryStateLoad = async (rec) => {
 };
 
 // --- Announcements and required updates ---
-// status.json (docs/dev/announcements.md) is fetched past every cache at boot and
-// on a return to the tab at most hourly. Any failure leaves the app as it is:
-// offline, a missing file and bad JSON all mean "nothing to say".
+// status.json (docs/dev/announcements.md) is fetched past every cache at boot
+// and on a return to the tab at most hourly. Any failure leaves the app as it
+// is: offline, a missing file and bad JSON all mean "nothing to say".
 //
-// A required update compares build times (the commit time of the build's
-// version, stamped by deploy-pages.yml; "" in a development build, which is
-// never required to update). It is enforced only when the live build meets
-// the requirement and is fetchable (build-id.txt and sw.js agree with
+// Each announcement shows as a toast (once per browser), a home-screen banner
+// (until dismissed), or both. A required update compares build times (the
+// commit time of the build's version, stamped by deploy-pages.yml; "" in a
+// development build, which is never required to update). Scope "link" offers
+// Not now and holds the link cable until the update; any other scope, or one
+// this build doesn't know, blocks the app. Either is enforced only when the
+// live build meets it and is fetchable (build-id.txt and sw.js agree with
 // version.txt), so a minBuild ahead of every deploy can't strand anyone.
 var BUILD_TIME = document.querySelector?.('meta[name="dingbat-build-time"]')?.getAttribute("content") || "";
 const STATUS_SEEN_KEY = "dingbat_seen_announcements";
+const STATUS_DISMISSED_KEY = "dingbat_dismissed_banners";
 const STATUS_CHECK_INTERVAL = 60 * 60 * 1000;
-const STATUS_SEEN_MAX = 64;
+const STATUS_IDS_MAX = 64;
 const statusTime = (s) => (typeof s === "string" ? Date.parse(s) : NaN);
 let statusCheckedAt = 0;
-let requiredShown = false;
+/** @type {any[]} */
+let statusBanners = [];
+// What the card is showing: "app" (no way out) or "link" (Not now); null when shut.
+/** @type {"app" | "link" | null} */
+let requiredShown = null;
+// The link-scope requirement this build is under, holding the link cable.
+/** @type {any} */
+let linkRequired = null;
+let linkNoticeShown = false;
 
 const fetchStatus = async () => {
   try {
@@ -9243,56 +9256,153 @@ const fetchLiveBuild = async () => {
   }
 };
 
+const forWeb = (e) => !Array.isArray(e.platforms) || e.platforms.includes("web");
+
 const announcementApplies = (a, now) =>
-  !!a && typeof a.id === "string" && typeof a.text === "string" &&
-  (!Array.isArray(a.platforms) || a.platforms.includes("web")) &&
+  !!a && typeof a.id === "string" && typeof a.text === "string" && forWeb(a) &&
   !(statusTime(a.from) > now) && !(statusTime(a.until) <= now) &&
   (a.builtBefore == null || statusTime(BUILD_TIME) < statusTime(a.builtBefore));
 
-const readSeen = () => {
+// Where an announcement goes; no place this build knows means a toast.
+const announcementShows = (a) => {
+  const known = (Array.isArray(a.show) ? a.show : []).filter((s) => s === "toast" || s === "banner");
+  return known.length ? known : ["toast"];
+};
+
+const announcementLink = (a) => (typeof a.url === "string" && /^https:\/\//.test(a.url) ? a.url : "");
+
+const readIds = (key) => {
   try {
-    const v = JSON.parse(localStorage.getItem(STATUS_SEEN_KEY) || "[]");
+    const v = JSON.parse(localStorage.getItem(key) || "[]");
     return Array.isArray(v) ? v : [];
   } catch {
     return [];
   }
 };
+const writeIds = (key, ids) => {
+  try { localStorage.setItem(key, JSON.stringify(ids.slice(-STATUS_IDS_MAX))); } catch {}
+};
 
-// Each announcement shows once per browser, marked seen as it shows.
-const showAnnouncements = (list) => {
-  if (!Array.isArray(list)) return;
-  const now = Date.now();
-  const seen = readSeen();
-  for (const a of list.filter((a) => announcementApplies(a, now) && !seen.includes(a.id)).slice(0, 2)) {
+// Toasts: as many as the stack holds (TOAST_MAX) per check, each marked seen
+// as it shows; the rest wait for the next check.
+const showAnnouncementToasts = (list) => {
+  const seen = readIds(STATUS_SEEN_KEY);
+  const due = list.filter((a) => announcementShows(a).includes("toast") && !seen.includes(a.id));
+  for (const a of due.slice(0, TOAST_MAX)) {
     seen.push(a.id);
-    const link = typeof a.url === "string" && /^https:\/\//.test(a.url) ? a.url : "";
+    const link = announcementLink(a);
     showActionToast(a.text, a.label || (link ? "Read more" : "OK"),
       () => { if (link) window.open(link, "_blank", "noopener"); }, 30000);
   }
-  try { localStorage.setItem(STATUS_SEEN_KEY, JSON.stringify(seen.slice(-STATUS_SEEN_MAX))); } catch {}
+  writeIds(STATUS_SEEN_KEY, seen);
+};
+
+const homeNotes = document.getElementById("home-notes");
+
+const renderBanners = () => {
+  if (!homeNotes) return;
+  const now = Date.now();
+  const dismissed = readIds(STATUS_DISMISSED_KEY);
+  const shown = statusBanners.filter((a) => !(statusTime(a.until) <= now) && !dismissed.includes(a.id));
+  homeNotes.replaceChildren();
+  homeNotes.hidden = !shown.length;
+  for (const a of shown) {
+    const note = document.createElement("div");
+    note.className = "home-note";
+    note.setAttribute("role", "status");
+    const text = document.createElement("p");
+    text.className = "home-note-text";
+    text.textContent = a.text;
+    note.append(text);
+    const link = announcementLink(a);
+    if (link) {
+      const go = document.createElement("a");
+      go.className = "button home-note-link";
+      go.href = link;
+      go.target = "_blank";
+      go.rel = "noopener";
+      go.textContent = a.label || "Read more";
+      note.append(go);
+    }
+    const close = document.createElement("button");
+    close.type = "button";
+    close.className = "home-note-close";
+    close.setAttribute("aria-label", "Dismiss");
+    close.textContent = "×";
+    close.addEventListener("click", () => {
+      writeIds(STATUS_DISMISSED_KEY, [...readIds(STATUS_DISMISSED_KEY).filter((id) => id !== a.id), a.id]);
+      renderBanners();
+    });
+    note.append(close);
+    homeNotes.append(note);
+  }
+};
+
+const showAnnouncements = (list) => {
+  const now = Date.now();
+  const live = (Array.isArray(list) ? list : []).filter((a) => announcementApplies(a, now));
+  showAnnouncementToasts(live);
+  statusBanners = live.filter((a) => announcementShows(a).includes("banner"));
+  renderBanners();
 };
 
 const requiredModal = document.getElementById("required-modal");
+const REQUIRED_COPY = {
+  app: ["Update dingbat to keep playing", "This version of dingbat has a problem that the update fixes."],
+  link: ["Update dingbat to use the link cable",
+    "This version's link cable can't link with the current one. Everything else works as it is."],
+};
 
-const enforceRequired = async (req) => {
-  if (!req || requiredShown || appUpdating) return;
-  const min = statusTime(req.minBuild);
-  if (!(statusTime(BUILD_TIME) < min)) return;
+const showRequired = (/** @type {"app" | "link"} */ kind, req) => {
+  if (!requiredModal) return;
+  if (kind === "app" && currentRomName) paused = true;
+  requiredShown = kind;
+  showUpdateButton();
+  const title = document.getElementById("required-title");
+  const text = document.getElementById("required-text");
+  const later = document.getElementById("required-later");
+  if (title) title.textContent = REQUIRED_COPY[kind][0];
+  if (text) text.textContent = typeof req.message === "string" && req.message ? req.message : REQUIRED_COPY[kind][1];
+  if (later) later.hidden = kind !== "link";
+  requiredModal.classList.add("open");
+  trapFocus(requiredModal);
+};
+
+const closeRequired = () => {
+  if (requiredShown !== "link") return; // an app-wide requirement has no way out
+  requiredShown = null;
+  requiredModal?.classList.remove("open");
+  if (requiredModal) releaseFocus(requiredModal);
+};
+
+const enforceRequired = async (list) => {
+  if (!Array.isArray(list) || appUpdating) return;
+  const own = statusTime(BUILD_TIME);
+  const due = list.filter((r) => r && forWeb(r) && own < statusTime(r.minBuild));
+  if (!due.length) { linkRequired = null; return; }
   const [builds, live] = await Promise.all([probeBuilds(), fetchLiveBuild()]);
   if (!builds || !live) return;
   const { current, latest, deployed } = builds;
   if (!latest || latest === current || deployed !== latest || live.version !== latest) return;
-  if (!(statusTime(live.built) >= min)) return;
-  // A link session is a friend's game too: it waits for the next check.
-  if (linkMode || rollbackMode || netActive()) return;
-  requiredShown = true;
-  if (currentRomName) paused = true;
-  showUpdateButton();
-  const text = document.getElementById("required-text");
-  if (text) text.textContent = typeof req.message === "string" && req.message
-    ? req.message : "This version of dingbat has a problem that the update fixes.";
-  requiredModal?.classList.add("open");
-  if (requiredModal) trapFocus(requiredModal);
+  const met = due.filter((r) => statusTime(live.built) >= statusTime(r.minBuild));
+  const app = met.find((r) => r.scope !== "link");
+  const link = met.find((r) => r.scope === "link");
+  linkRequired = link || null;
+  // A link session is a friend's game too: neither card cuts into one.
+  if (linkMode || rollbackMode || netActive() || requiredShown === "app") return;
+  if (app) showRequired("app", app);
+  else if (link && !linkNoticeShown && !requiredShown) {
+    linkNoticeShown = true;
+    showRequired("link", link);
+  }
+};
+
+// The link cable's ways in (netplay.js openNetConnect, launchLinkRom): true
+// when a link-scope requirement holds it, the card up again in its place.
+const linkNeedsUpdate = () => {
+  if (!linkRequired) return false;
+  showRequired("link", linkRequired);
+  return true;
 };
 
 document.getElementById("required-update")?.addEventListener("click", async () => {
@@ -9303,16 +9413,18 @@ document.getElementById("required-update")?.addEventListener("click", async () =
       await persistAutoState();
     } catch {}
   }
+  requiredShown = null;
   requiredModal?.classList.remove("open");
   applyUpdate();
 });
+document.getElementById("required-later")?.addEventListener("click", closeRequired);
 
 const checkStatus = async () => {
   statusCheckedAt = Date.now();
   const status = await fetchStatus();
   if (!status) return;
   showAnnouncements(status.announcements);
-  await enforceRequired(status.required?.web);
+  await enforceRequired(status.required);
 };
 
 // The signaling server turned this build away (netplay.js sigWantsUpdate):
@@ -15374,6 +15486,7 @@ const exitLinkMode = async () => {
 };
 
 const launchLinkRom = async (rom) => {
+  if (linkNeedsUpdate()) return;
   // Same runtime gate as launchRom.
   await ensureRuntimeReady();
   if (linkMode) {

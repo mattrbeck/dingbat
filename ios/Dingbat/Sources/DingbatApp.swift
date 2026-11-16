@@ -320,16 +320,6 @@ struct RootView: View {
                                                          set: { if !$0 { model.notice = nil } })) {
             Button("OK", role: .cancel) {}
         }
-        .alert(status.announcement?.text ?? "",
-               isPresented: Binding(get: { status.announcement != nil && status.required == nil },
-                                    set: { if !$0 && status.announcement != nil { status.announcementDone(open: false) } })) {
-            if status.announcement?.url != nil {
-                Button("Not Now", role: .cancel) { status.announcementDone(open: false) }
-                Button(status.announcement?.label ?? "Read More") { status.announcementDone(open: true) }
-            } else {
-                Button(status.announcement?.label ?? "OK", role: .cancel) { status.announcementDone(open: false) }
-            }
-        }
         .onChange(of: status.required) { if $0 != nil { model.sheet = nil } }
         .onAppear { status.check() }
         .sheet(item: $model.sheet, onDismiss: sheetDismissed) { sheet in
