@@ -1,6 +1,6 @@
 // A reset queues its Drive deletes before its first await, so a pull that is
 // downloading the save does not write it back
-// (formal/WebState/SavePersistence.lean, bug_file_reset_undone_by_pull).
+// (tools/formal/WebState/SavePersistence.lean, bug_file_reset_undone_by_pull).
 //
 // One or two devices (loadApp instances) share one fake Drive and one clock,
 // and a Drive request is held mid-flight so the person can act inside the

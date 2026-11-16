@@ -666,7 +666,7 @@ interrupt raised just before a preemptible DMA burst is taken: every overflow of
 `tests/roms/irqburst.s`'s timer walking across an H-blank burst), `test_desktop` (the desktop frontend's logic that
 builds without SDL: held input and key routing, the config file, the
 Link Cable over loopback sockets, battery/state/cheat writes, game loading,
-each replaying a `formal/DesktopState` trace, and the modal notices in a real
+each replaying a `tools/formal/DesktopState` trace, and the modal notices in a real
 Dear ImGui context with no window, which needs imguin). The link-acceptance battery (`linktest`, `speclink`,
 `netlink`, `rollback` modes over `tests/roms/*.gba`) is invoked directly in
 `.github/workflows/test.yml`.

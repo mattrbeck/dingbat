@@ -1,6 +1,6 @@
 // Who may unpause the core. Every pausing surface (the home screen, Report a
 // Bug, the clip picker, the peer in a rollback session) writes the one global
-// `paused`, so each of these replays a trace from formal/WebState/RunPause.lean
+// `paused`, so each of these replays a trace from tools/formal/WebState/RunPause.lean
 // in which some other writer undoes it: the game runs behind the surface
 // meant to freeze it, or the pause button's icon stops saying what the core
 // does.

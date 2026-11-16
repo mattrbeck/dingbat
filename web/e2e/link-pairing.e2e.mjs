@@ -4,7 +4,7 @@
 // starts on both. The second case swallows the descriptions A's first socket
 // sends, so that pairing never opens: both sides reach the 20 s deadline, go
 // back to waiting on the code (sigRewait) and link on the next pairing with
-// no further press (formal/WebState/LinkPairing.lean).
+// no further press (tools/formal/WebState/LinkPairing.lean).
 //
 //   node --test e2e/link-pairing.e2e.mjs      # from web/, after the wasm build
 //

@@ -1,12 +1,12 @@
 name: Lean models
 # The web and desktop frontends' state machines, modelled and proved in
-# formal/. The proofs read no JS or Nim, so only a change under formal/ can
+# tools/formal/. The proofs read no JS or Nim, so only a change under formal/ can
 # break them.
 on:
   push:
-    paths: ["formal/**", ".github/workflows/lean.yml"]
+    paths: ["tools/formal/**", ".github/workflows/lean.yml"]
   pull_request:
-    paths: ["formal/**", ".github/workflows/lean.yml"]
+    paths: ["tools/formal/**", ".github/workflows/lean.yml"]
   workflow_dispatch:
 jobs:
   lean:
@@ -14,10 +14,10 @@ jobs:
     timeout-minutes: 30
     defaults:
       run:
-        working-directory: formal
+        working-directory: tools/formal
     steps:
       - uses: actions/checkout@v4
-      - name: Install elan (toolchain comes from formal/lean-toolchain)
+      - name: Install elan (toolchain comes from tools/formal/lean-toolchain)
         run: |
           curl -sSfL https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh \
             | sh -s -- -y --default-toolchain none

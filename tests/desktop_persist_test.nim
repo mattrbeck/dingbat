@@ -1,5 +1,5 @@
 ## What the desktop app writes for a game, checked headless against the real
-## cores (formal/DesktopState/SavePersistence.lean has the traces):
+## cores (tools/formal/DesktopState/SavePersistence.lean has the traces):
 ## a battery write that fails keeps the game running and tells the player
 ## once per run of failures (finding 4); a battery or save-state write cut
 ## short leaves the previous file whole (finding 18); two games with the same

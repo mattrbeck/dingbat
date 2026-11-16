@@ -852,7 +852,7 @@ final class NetLink: ObservableObject {
             return
         case Self.bye:
             // Why the friend ended: its own Disconnect, or a failure there
-            // (web rbMessage; formal/WebState/LinkResume.lean bye_reason_heard).
+            // (web rbMessage; tools/formal/WebState/LinkResume.lean bye_reason_heard).
             rb.byeIn = true
             let gaveUp = data.count >= 2 && data[data.startIndex + 1] == 1
             if s.started { peerGone(gaveUp ? "Couldn't reconnect" : "Your friend disconnected") }
@@ -1045,7 +1045,7 @@ final class NetLink: ObservableObject {
     /// numbered one past the highest this side has seen; both sides keep
     /// the highest press, the host's on a tie, so once neither press is in
     /// flight they hold the same one, whatever order they arrived in (web
-    /// rbPress; formal/WebState/LinkResume.lean `presses_agree`).
+    /// rbPress; tools/formal/WebState/LinkResume.lean `presses_agree`).
     struct Press {
         var on: Bool
         var n: UInt32 = 0
@@ -1545,7 +1545,7 @@ final class NetLink: ObservableObject {
     /// RESUMEs' flags (1 away, 2 paused, 4 2x): running wins, except that a
     /// side paused and away (in the background, a hidden tab) keeps both
     /// paused; slow wins. Symmetric, so both get the same answer (web
-    /// rbResumeState; formal/WebState/LinkResume.lean finalPause).
+    /// rbResumeState; tools/formal/WebState/LinkResume.lean finalPause).
     static func resumeState(_ mine: UInt8, _ theirs: UInt8) -> (paused: Bool, double: Bool) {
         let pausedAway = { (f: UInt8) in f & 3 == 3 }
         return (mine & theirs & 2 != 0 || pausedAway(mine) || pausedAway(theirs), mine & theirs & 4 != 0)
@@ -1567,7 +1567,7 @@ final class NetLink: ObservableObject {
     /// rendezvous away with it for 10 minutes, so it ends with "Your
     /// friend disconnected" ("Couldn't reconnect" for "gave-up") instead of
     /// "Reconnecting…" until its own give-up (web rbLeaveNote; server.js
-    /// leaveNote; formal/WebState/LinkRedial.lean). false: nothing posted.
+    /// leaveNote; tools/formal/WebState/LinkRedial.lean). false: nothing posted.
     @discardableResult
     private func leaveNote(_ rb: RB, _ why: String, done: DispatchSemaphore? = nil) -> Bool {
         guard !rb.resumeCode.isEmpty, !rb.byeIn, !rb.noteLeft else { return false }
@@ -1607,7 +1607,7 @@ final class NetLink: ObservableObject {
     // redial, and clears it when the session ends here. A launch that finds
     // one under 10 minutes old (the server keeps a goodbye that long) leaves
     // the goodbye the killed app couldn't (web rbByeOnRelaunch;
-    // formal/WebState/LinkResume.lean Event.relaunch,
+    // tools/formal/WebState/LinkResume.lean Event.relaunch,
     // regress_kill_heard_on_relaunch).
     private static let liveKey = "linkLiveSession"
     private static let liveMaxAge: TimeInterval = 600

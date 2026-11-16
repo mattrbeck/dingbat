@@ -46,7 +46,7 @@
 // phone suspended the tab, a Wi-Fi hop) sends the same `id`, and its stale
 // seat is dropped rather than paired with or counted as a third peer; a friend
 // paired with the stale socket is told peer-closed and rendezvouses again
-// (formal/WebState/LinkPairing.lean, `regress_paired_with_own_ghost`).
+// (tools/formal/WebState/LinkPairing.lean, `regress_paired_with_own_ghost`).
 //
 // A goodbye note: a page ending a session while its link is down can't tell
 // the friend, who is redialing the session's retry code. So it posts
@@ -57,7 +57,7 @@
 // held by the note's own page id are dropped silently, and its own late
 // rendezvous is not turned away. Only retry codes (16 random characters)
 // take notes, never a short code a person typed: a note on one would turn
-// away the next pair using it (formal/WebState/LinkRedial.lean).
+// away the next pair using it (tools/formal/WebState/LinkRedial.lean).
 //
 // Abuse hardening (all mirrored in server.nim — keep the twins in sync):
 //   - Per-IP limits (rendezvous rate, concurrent sockets, waiting rooms) are

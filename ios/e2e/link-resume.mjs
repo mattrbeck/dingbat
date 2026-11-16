@@ -251,7 +251,7 @@ const cases = {
     await s.sameGames();
     await s.end();
   },
-  // formal/WebState/LinkResume.lean bug_resume_pause_swap_ios (each side
+  // tools/formal/WebState/LinkResume.lean bug_resume_pause_swap_ios (each side
   // answering a resume with its own pause state, the answers crossing).
   // Here the app's background pause never reaches the browser (as when the
   // connection dies under it) and the link drops while the app is still in
@@ -375,7 +375,7 @@ const cases = {
     assert.ok(!s.netlink().some((l) => l.startsWith("redial: waiting")), "the app didn't wait on a friend long gone");
     await s.end();
   },
-  // formal/WebState/LinkResume.lean no_press_in_drop: while redialing the
+  // tools/formal/WebState/LinkResume.lean no_press_in_drop: while redialing the
   // game is held, and the player's Pause and 2x do nothing.
   async "the game held while reconnecting, on the app: Pause and 2x do nothing"() {
     const s = await link("hold", { appArgs: ["-link-cmd"] });
@@ -406,7 +406,7 @@ const cases = {
     await s.sameGames();
     await s.end();
   },
-  // formal/WebState/LinkResume.lean regress_pause_presses_cross: the app
+  // tools/formal/WebState/LinkResume.lean regress_pause_presses_cross: the app
   // presses Pause (its #1); the browser, before it hears that, presses Pause
   // and Resume (#1, #2). Pause and 2x messages take 1.5 s each way at the
   // browser, so the presses cross on the wire. Each side keeps the highest
@@ -442,7 +442,7 @@ const cases = {
     await s.sameGames();
     await s.end();
   },
-  // formal/WebState/LinkResume.lean bye_reason_heard: the browser never
+  // tools/formal/WebState/LinkResume.lean bye_reason_heard: the browser never
   // says RESUME on the new channel, so the app stays redialing on it until
   // its (shortened) give-up, while the browser, which took the app's RESUME,
   // plays on. The app's BYE says it gave up.
@@ -523,7 +523,7 @@ const cases = {
     await s.sameGames();
     await s.end();
   },
-  // formal/WebState/LinkResume.lean regress_long_quiet_keepalive: paused
+  // tools/formal/WebState/LinkResume.lean regress_long_quiet_keepalive: paused
   // together, nothing else crosses the link; without the keepalive a drop
   // past the give-up read as a friend that had given up, and both ended.
   async "paused together past the give-up, then a drop: the keepalive keeps both redialing"() {

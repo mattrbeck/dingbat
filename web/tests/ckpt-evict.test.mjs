@@ -1,6 +1,6 @@
 // dbPutRoomy's retry after other games' checkpoints made room: it must ask
 // whether the save was superseded, as it does after a ROM gave way
-// (formal/WebState/SavePersistence.lean, bug_ckpt_evict_retry_*).
+// (tools/formal/WebState/SavePersistence.lean, bug_ckpt_evict_retry_*).
 //
 // Against game-switch.test.mjs's stand-in core: every solo game's battery
 // file is the one "rom.sav". `hold` parks a flow at one of its awaits, so

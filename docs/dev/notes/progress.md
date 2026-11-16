@@ -14,7 +14,7 @@ Dated work logs live in git history. This is where each subsystem stands.
 | Timers | Scheduler-driven, cascade, overflow IRQ |
 | Serial | Multi, Normal 8/16/32; in-process link, TCP, WebRTC; input-rollback netplay |
 | Storage | SRAM, Flash, EEPROM; RTC with per-minute IRQ; GPIO rumble, tilt, gyro |
-| HLE BIOS | Full SWI table except MultiBoot and the sound-driver SWIs (`notes/todo.md`) |
+| HLE BIOS | Full SWI table except MultiBoot and the sound-driver SWIs (`docs/dev/notes/todo.md`) |
 | Sound-driver HLE | MP2K/M4A shadow mixer (opt-in); Golden Sun "Bon" mixer behind `-d:gsbon` |
 | Waitloop detection | Idle-loop fast-forward bounded by `apu_next_step()` (`DINGBAT_NO_WAITLOOP=1` disables) |
 

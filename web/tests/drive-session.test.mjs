@@ -1,6 +1,6 @@
 // Sign out and sign in while Drive work is in flight: a renewal popup that
 // answers after Sign out, and a flush that is still running when the tab
-// signs in to a different account. Replays formal/WebState/DriveSession.lean's
+// signs in to a different account. Replays tools/formal/WebState/DriveSession.lean's
 // Session traces against the real web/index.js, with a fake GIS whose grant
 // the test delivers when it chooses, and one fake Drive per account (the
 // token a request carries decides which Drive it reaches).

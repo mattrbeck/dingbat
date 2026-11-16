@@ -11,7 +11,7 @@
 // Saves, with a Restore that swaps it with the current save (so the Restore
 // undoes itself), for 30 days from the delete, here and on Drive.
 //
-// formal/WebState/DriveLibrary.lean: bug_reimport_gets_deleted_save,
+// tools/formal/WebState/DriveLibrary.lean: bug_reimport_gets_deleted_save,
 // regress_reimport_keeps_deleted_save_aside.
 
 import test from "node:test";
@@ -103,7 +103,7 @@ const twoDevices = async () => {
   return { clock, drive, d0, d1 };
 };
 
-// formal/FINDINGS.md: device 0 deletes the game and loads it again; device 1,
+// tools/formal/FINDINGS.md: device 0 deletes the game and loads it again; device 1,
 // which has not pulled the delete, syncs its save. Device 0 must not get
 // that save back in the new game.
 test("a device that missed the delete does not hand its old save to the game loaded again", async () => {

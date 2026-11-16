@@ -16,9 +16,9 @@ Usage: flap.py [--preview DIR]
                                     on the moon disc at night, the bat alone in Clear and Tinted
   ios/.../Logo, LaunchLogo          the in-app logo and launch logo
   ios/.../Flap                      the opening's flap: the same 31-frame strip as web/flap.png
-  docker/windows-cross/dingbat.ico  the Windows build's icon
-  ci/dingbat.icns                   the macOS app's icon: the moon tile on Apple's icon grid
-  README/dingbat.png, dingbat_large.png, dingbat_flap.gif
+  tools/docker/windows-cross/dingbat.ico  the Windows build's icon
+  .github/scripts/dingbat.icns            the macOS app's icon: the moon tile on Apple's icon grid
+  .github/readme/dingbat.png, dingbat_large.png, dingbat_flap.gif
 
 Everything is pixel art at whole-number scales on flat colours. check.py
 verifies the flap's frames; holidays.py draws the seasonal bats (not used yet).
@@ -175,19 +175,19 @@ def main():
 
     # ---- Windows: 16 / 32 / 48 pixel art and a 256 moon tile with rounded corners
     t256 = rounded(moon_tile(256, 5), 40)
-    imgio.ico(path('docker', 'windows-cross', 'dingbat.ico'),
+    imgio.ico(path('tools', 'docker', 'windows-cross', 'dingbat.ico'),
               [imgio.png_bytes(fav16, P), imgio.png_bytes(fav32, P), imgio.png_bytes(bat.pad(still, 48, 48), P),
                imgio.png_bytes(t256, MP)])
 
-    # ---- macOS (ci/make-macos-app.sh puts it in the .app)
-    imgio.icns(path('ci', 'dingbat.icns'),
+    # ---- macOS (.github/scripts/make-macos-app.sh puts it in the .app)
+    imgio.icns(path('.github', 'scripts', 'dingbat.icns'),
                [(t, imgio.argb_bytes(mac_icon(n), P) if t in ('ic04', 'ic05')
                  else imgio.png_bytes(mac_icon(n), MP if n > 32 else P)) for t, n in MAC_ICNS])
 
     # ---- README
-    imgio.png(path('README', 'dingbat.png'), still, P)
-    imgio.png(path('README', 'dingbat_large.png'), bat.scale(still, 4), P)
-    imgio.gif(path('README', 'dingbat_flap.gif'), [bat.scale(f, 4) for f in frames31[:16]], P, delay_cs=4)
+    imgio.png(path('.github', 'readme', 'dingbat.png'), still, P)
+    imgio.png(path('.github', 'readme', 'dingbat_large.png'), bat.scale(still, 4), P)
+    imgio.gif(path('.github', 'readme', 'dingbat_flap.gif'), [bat.scale(f, 4) for f in frames31[:16]], P, delay_cs=4)
 
     if '--preview' in sys.argv:
         out = sys.argv[sys.argv.index('--preview') + 1]

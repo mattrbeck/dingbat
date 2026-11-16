@@ -1,5 +1,5 @@
 // A pull downloading a game's file while the game is renamed here does not
-// write it under the old name (formal/WebState/Thumbnails.lean,
+// write it under the old name (tools/formal/WebState/Thumbnails.lean,
 // bug_pull_after_rename_orphans_frame / regress_pull_after_rename_orphans_frame).
 //
 // The rename moves the game's records to the new name; a picture (or save)
@@ -60,7 +60,7 @@ for (const kind of ["frame", "save"]) {
 
 // A name renamed away from is released once a game holds it again here, and
 // the pull writes that game's files under it once more
-// (formal/WebState/DriveLibrary.lean: regress_remote_rename_into_away_name_skips_saves,
+// (tools/formal/WebState/DriveLibrary.lean: regress_remote_rename_into_away_name_skips_saves,
 // regress_download_into_away_name_skips_saves). Otherwise every pull of the
 // session skips the game's save, and this device's next save goes up over
 // the other device's progress.

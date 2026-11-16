@@ -1,7 +1,7 @@
 // Pause and 2x across a resumed link. Both sides decide from the same two
 // RESUMEs (rbResumeState) and send nothing more: answering with each one's
 // own state would let the two answers cross and swap the sides
-// (formal/WebState/LinkResume.lean bug_resume_pause_swap_web/_ios; the fix
+// (tools/formal/WebState/LinkResume.lean bug_resume_pause_swap_web/_ios; the fix
 // is proved by resume_agrees there). sdputil.js + netplay.js are evaluated
 // in the helpers.mjs vm context, in index.html's script order.
 

@@ -5,7 +5,7 @@
 ## the keyboard, two pads and their sticks sharing one input; a fresh core
 ## after a load; the trigger's fast forward; a held Tab; and bindings the
 ## game could never receive. The traces are the Lean model's
-## (formal/DesktopState/RunInput.lean, bug_* / regress_*).
+## (tools/formal/DesktopState/RunInput.lean, bug_* / regress_*).
 
 import std/tables
 import dingbat/common/input

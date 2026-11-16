@@ -2,7 +2,7 @@
 // - the connection's BYE says why ([14][why]: 0 left, 1 gave up), so a
 //   give-up just after the new channel opened reads "Couldn't reconnect"
 //   on the friend's side too, not "Your friend disconnected"
-//   (formal/WebState/LinkResume.lean bye_reason_heard);
+//   (tools/formal/WebState/LinkResume.lean bye_reason_heard);
 // - a link that dropped while the friend was away (hidden tab, app in the
 //   background) shows "Friend switched away" and "Waiting for", not
 //   "Reconnecting…": it waits on the friend, not the network;

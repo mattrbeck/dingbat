@@ -368,7 +368,7 @@ test("Share stays hidden without the Web Share API", async () => {
   assert.equal(el("net-manual-share").hidden, true);
 });
 
-// The traces of formal/WebState/LinkPairing.lean, replayed against the real
+// The traces of tools/formal/WebState/LinkPairing.lean, replayed against the real
 // netplay.js.
 
 // A guest paired and holding the host's offer (it has answered).

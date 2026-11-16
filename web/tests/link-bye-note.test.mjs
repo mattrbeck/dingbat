@@ -1,7 +1,7 @@
 // The goodbye note: a session ending while the friend may be redialing
 // leaves a goodbye on the retry code (POST /bye, a beacon), and a redial
 // that finds one ends with the friend's goodbye instead of "Reconnecting…"
-// until the give-up (server.js leaveNote; formal/WebState/LinkRedial.lean
+// until the give-up (server.js leaveNote; tools/formal/WebState/LinkRedial.lean
 // regress_quit_heard, LinkResume.lean regress_quit_while_redialing).
 // sdputil.js + netplay.js are evaluated in the helpers.mjs vm context, in
 // index.html's script order.

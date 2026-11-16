@@ -2,7 +2,7 @@
 // rename made while a sync is in flight leaves behind, and what renaming a
 // game back (or into a name another game left) does over many syncs.
 //
-// Each test replays a trace from formal/WebState/DriveLibrary.lean (named in
+// Each test replays a trace from tools/formal/WebState/DriveLibrary.lean (named in
 // the test) against the real web/index.js: one or two devices (loadApp
 // instances) share one fake Drive and one clock, and a Drive request is held
 // mid-flight so the person can act inside the sync's await, the way a tap

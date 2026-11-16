@@ -3,11 +3,11 @@
 #
 # Build the image (from the repo root: it copies .github/scripts/build-sdl3.sh):
 #   docker build --platform linux/amd64 -t dingbat-win-cross \
-#     -f docker/windows-cross/Dockerfile .github/scripts
+#     -f tools/docker/windows-cross/Dockerfile .github/scripts
 # Build dingbat.exe (from the repo root):
 #   docker run --rm --platform linux/amd64 \
 #     -v "$PWD":/src -v dingbat-nimble:/root/.nimble -w /src \
-#     dingbat-win-cross ./docker/windows-cross/build.sh
+#     dingbat-win-cross ./tools/docker/windows-cross/build.sh
 FROM nimlang/nim:2.2.6-ubuntu-regular
 
 # Acquire::Retries rides out transient mirror 5xx.

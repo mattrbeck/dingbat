@@ -45,10 +45,10 @@ sound and reads the keys).
 
 ```sh
 docker build --platform linux/amd64 -t dingbat-win-cross \
-  -f docker/windows-cross/Dockerfile .github/scripts
+  -f tools/docker/windows-cross/Dockerfile .github/scripts
 docker run --rm --platform linux/amd64 \
   -v "$PWD":/src -v dingbat-nimble:/root/.nimble -w /src \
-  dingbat-win-cross ./docker/windows-cross/build.sh
+  dingbat-win-cross ./tools/docker/windows-cross/build.sh
 ```
 
 Produces a self-contained `dist/windows/dingbat.exe` (SDL 3 and the mingw C++ runtime

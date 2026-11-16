@@ -1,4 +1,4 @@
--- What this models, for formal/anchors.mjs (which lists stale models):
+-- What this models, for tools/formal/anchors.mjs (which lists stale models):
 -- @models web/index.js: anyModalOpen askRomWarn buildSyncModal closeRomWarnModal closeSettingsModal closeUpdateModal confirmSuspectRom confirmTombstones endClipExport handleRomFile openExportModal openRenameModal openSettingsModal releaseFocus renameGame renameInventory runFullSync settleRomWarn startClipExport trapFocus on:popstate on:drop
 
 /-

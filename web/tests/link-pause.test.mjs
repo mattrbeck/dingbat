@@ -1,7 +1,7 @@
 // The Link Cable's hold on the run state: the modal freezes a running game
 // for the whole of code entry and pairing, a session's end hands the game
 // back, and the modal's screen wake lock lives exactly as long as the modal.
-// Each replays a trace from formal/WebState/RunPause.lean. sdputil.js +
+// Each replays a trace from tools/formal/WebState/RunPause.lean. sdputil.js +
 // netplay.js are evaluated in the helpers.mjs vm context, in index.html's
 // script order, with inert network stubs (nothing here dials).
 

@@ -1,5 +1,5 @@
 // storeCheckpoint re-checks that its moment is still current after storing
-// the battery it carries (formal/WebState/SavePersistence.lean,
+// the battery it carries (tools/formal/WebState/SavePersistence.lean,
 // bug_ckpt_store_*).
 //
 // Checkpoints: the session taken every minute of play, so a browser that

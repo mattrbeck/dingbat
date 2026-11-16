@@ -1,4 +1,4 @@
--- What this models, for formal/anchors.mjs (which lists stale models):
+-- What this models, for tools/formal/anchors.mjs (which lists stale models):
 -- @models web/index.js: abortRetroClip clipEncode closeClipScrubber closeReportModal closeRewindScrubber emulationActive endClipExport finishRetroClip holdForFlight launchRom loadRom openClipScrubber openReportModal openRewindScrubber playerPaused releaseFlight resumeFromHero resumeGame shortcutKeyHandler showMainMenu startClipExport syncWakeLock takePendingFlight takePlayerPause togglePause unloadGame on:visibilitychange on:pointerup
 -- @models web/netplay.js: acquireWakeLock closeNetModal netDismissModal netFail netShutdown openNetConnect rbConnect rbStartIfReady rbTeardown releaseWakeLock
 

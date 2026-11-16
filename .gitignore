@@ -210,7 +210,7 @@ tests/roms/mbprobe/build/*.sav
 tests/roms/mbprobe/build/payload_mirror_cart.gba
 
 # Lean build outputs (formal/)
-formal/.lake/
+tools/formal/.lake/
 web/nds/nds.js
 web/nds/nds.wasm
 web/nds/demos/

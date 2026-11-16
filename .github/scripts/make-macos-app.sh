@@ -3,7 +3,7 @@
 # Requires macOS tools: plutil, hdiutil (both built in). The binary must
 # already be a -d:macdist build (static SDL3, no Homebrew dependency).
 #
-# Usage: ci/make-macos-app.sh <binary> <version> <out_dir>
+# Usage: .github/scripts/make-macos-app.sh <binary> <version> <out_dir>
 set -euo pipefail
 
 BIN="${1:?binary path}"
@@ -19,7 +19,7 @@ chmod +x "$APP/Contents/MacOS/dingbat"
 cp LICENSE THIRD_PARTY_NOTICES.md "$APP/Contents/Resources/"
 
 # The icon, drawn at every size by tools/logo_flap/flap.py (pixel art doesn't resample).
-cp ci/dingbat.icns "$APP/Contents/Resources/dingbat.icns"
+cp .github/scripts/dingbat.icns "$APP/Contents/Resources/dingbat.icns"
 
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>

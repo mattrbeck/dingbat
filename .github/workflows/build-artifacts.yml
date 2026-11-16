@@ -159,7 +159,7 @@ jobs:
           else
             VERSION="0.0.0"
           fi
-          ci/make-macos-app.sh dingbat_dist "$VERSION" dist/macos
+          .github/scripts/make-macos-app.sh dingbat_dist "$VERSION" dist/macos
       - uses: actions/upload-artifact@v4
         with:
           name: dingbat-macos
@@ -169,7 +169,7 @@ jobs:
   windows:
     # Cross-compiled from Linux with mingw-w64 (static SDL3, single .exe), so
     # this needs no Windows runner. Natively on the runner rather than via
-    # docker/windows-cross: that image's base comes from Docker Hub, whose
+    # tools/docker/windows-cross: that image's base comes from Docker Hub, whose
     # anonymous pulls from runner IPs fail with 429/504 for hours at a time.
     # Same toolchain and steps as the image, which stays for local builds.
     runs-on: ubuntu-24.04
@@ -217,7 +217,7 @@ jobs:
         # build.sh's own nimble step is the image's; the deps are in already.
         env:
           DINGBAT_DEPS_INSTALLED: "1"
-        run: ./docker/windows-cross/build.sh
+        run: ./tools/docker/windows-cross/build.sh
       - name: Verify dingbat.exe ships alone
         # Only Windows' own DLLs: an SDL3 or mingw runtime DLL import would
         # work here and fail on a player's machine.

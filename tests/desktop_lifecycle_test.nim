@@ -1,5 +1,5 @@
 ## The desktop's game lifecycle (src/dingbat/frontend/game_load.nim, called by
-## load_rom in src/dingbat.nim; formal/DesktopState/GameLifecycle.lean):
+## load_rom in src/dingbat.nim; tools/formal/DesktopState/GameLifecycle.lean):
 ## a file that is not a ROM is refused before anything of the running game is
 ## touched, and a .gb shorter than a cartridge plays, padded with $FF, in the
 ## core the web shares; a GBA game's battery is written when its core is

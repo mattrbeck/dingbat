@@ -24,7 +24,7 @@
 ## phone suspended the tab) sends the same id; its stale seat is dropped
 ## rather than paired with or counted as a third peer, and a friend paired with
 ## the stale socket is told peer-closed and rendezvouses again
-## (formal/WebState/LinkPairing.lean, `regress_paired_with_own_ghost`).
+## (tools/formal/WebState/LinkPairing.lean, `regress_paired_with_own_ghost`).
 ##
 ## A goodbye note (see server.js for the why):
 ##   POST /bye  {"code":"RS...","id":"<page id>","why":"left"|"gave-up"}
@@ -32,7 +32,7 @@
 ## a later rendezvous on it gets {"t":"bye"} instead of a room. Seats held by
 ## the note's own page id are dropped silently and its own late rendezvous is
 ## not turned away. Retry codes only (16 characters), never a typed code
-## (formal/WebState/LinkRedial.lean).
+## (tools/formal/WebState/LinkRedial.lean).
 ##
 ## No TLS: a reverse proxy terminates wss:// and forwards plain ws://. The
 ## request path is ignored, except /oauth (below) and /bye.

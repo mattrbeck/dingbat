@@ -1,4 +1,4 @@
--- What this models, for formal/anchors.mjs (which lists stale models):
+-- What this models, for tools/formal/anchors.mjs (which lists stale models):
 -- @models web/index.js: addCheckpoint applyImportedSave applyStateBytes autoStateMatchesSave dbPutRoomy deleteGameAction deleteGameEverywhere deleteKeys deleteSaveData detachLoadedGame evictCheckpoints evictOldestRom flushSoloSave installSave isRomLoaded launchRom liveSaveSig loadFromSlot loadRom markDelete markUpload maybeCheckpoint offerAutoResume persistAutoState persistSave queueSaveDataDeletes resetCurrentSaveFile resetGameAction resetGameSaves resumeGame resumeMoment resumeSessionFor retireSavePuts saveToSlot showMainMenu sigOfSave storeCheckpoint storeLastFrame takeCheckpoint unloadGame writeSyncBytes on:visibilitychange
 
 /-

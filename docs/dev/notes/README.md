@@ -6,4 +6,4 @@ Working notes for dingbat, a Crystal→Nim rewrite of [crab](https://github.com/
 - [`progress.md`](progress.md) — current state of each subsystem
 - [`todo.md`](todo.md) — open items and deliberate gaps
 
-Reference documentation is indexed in [`docs/README.md`](../docs/README.md).
+Reference documentation is indexed in [`docs/README.md`](../../README.md).

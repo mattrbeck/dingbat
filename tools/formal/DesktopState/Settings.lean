@@ -1,4 +1,4 @@
--- What this models, for formal/anchors.mjs (which lists stale models):
+-- What this models, for tools/formal/anchors.mjs (which lists stale models):
 -- @models src/dingbat.nim: load_rom apply_color_correction apply_master_volume apply_fifo_interp set_fullscreen render_imgui handle_input main
 -- @models src/dingbat/frontend/config_editor.nim: new_config_editor do_reset do_apply has_unapplied_edits end_captures do_factory_reset render
 -- @models src/dingbat/frontend/keybindings_widget.nim: wants_input key_released load_preset render reset apply_to apply

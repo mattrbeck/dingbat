@@ -131,7 +131,7 @@ different CRCs and link fine; incompatible games fail their own handshake.
   code is in use. The client goes back to waiting on the code whenever a
   pairing ends before linking, and gives the NAT verdict only after two
   pairings that exchanged descriptions and never opened; the machine is
-  modelled in `formal/WebState/LinkPairing.lean`. Room/connection caps,
+  modelled in `tools/formal/WebState/LinkPairing.lean`. Room/connection caps,
   handshake timeout, keepalive + idle reaper. Build: `nim c -d:release -d:test_harness
   --opt:size -o:signalsrv web/signaling/server.nim` (`-d:test_harness` skips
   the repo's SDL/GL link flags; static Linux builds need musl). TLS terminates

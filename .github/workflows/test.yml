@@ -8,9 +8,9 @@ name: Test Suite
 on:
   push:
     branches: [main]
-    paths-ignore: ["docs/**", "tools/**", "notes/**", "README.md", "README/**", ".claude/**"]
+    paths-ignore: ["docs/**", "tools/**", "README.md", ".github/readme/**", ".claude/**"]
   pull_request:
-    paths-ignore: ["docs/**", "tools/**", "notes/**", "README.md", "README/**", ".claude/**"]
+    paths-ignore: ["docs/**", "tools/**", "README.md", ".github/readme/**", ".claude/**"]
   workflow_dispatch:
 # Every commit on main keeps its own run; anywhere else a newer run of the
 # same ref cancels the older one.

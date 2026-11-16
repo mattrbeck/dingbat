@@ -1177,7 +1177,7 @@ final class GameSession: NSObject, ObservableObject {
 
     /// The player's Pause (the bar, Space). Not while a dropped link
     /// redials: the game waits on it, and the reconnect decides pause for
-    /// both (formal/WebState/LinkResume.lean regress_no_press_in_drop).
+    /// both (tools/formal/WebState/LinkResume.lean regress_no_press_in_drop).
     func togglePause() {
         guard NetLink.shared.reconnectingSince == nil else { return }
         setPaused(!paused)

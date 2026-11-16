@@ -21,9 +21,9 @@
 // it) and compares with anchors.json, keyed by the model's path under formal/
 // (`WebState/RunPause`, `DesktopState/NetLink`).
 //
-//   node formal/anchors.mjs                  list the stale models (exit 1 if any)
-//   node formal/anchors.mjs --update         stamp every model, once they match the code again
-//   node formal/anchors.mjs --update M ...   stamp only these (`DesktopState/NetLink`, or a
+//   node tools/formal/anchors.mjs                  list the stale models (exit 1 if any)
+//   node tools/formal/anchors.mjs --update         stamp every model, once they match the code again
+//   node tools/formal/anchors.mjs --update M ...   stamp only these (`DesktopState/NetLink`, or a
 //                                            whole directory: `DesktopState`)
 //
 // Needs web/node_modules (typescript, already a devDependency for tsc).
@@ -35,7 +35,7 @@ import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const root = path.resolve(here, "..");
+const root = path.resolve(here, "../..");
 const ts = createRequire(path.join(root, "web/package.json"))("typescript");
 const anchorsFile = path.join(here, "anchors.json");
 
@@ -214,9 +214,9 @@ for (const model of new Set([...Object.keys(res), ...Object.keys(stamped)])) {
 }
 if (stale.size) {
   console.error("Lean models out of date with the code they model:");
-  for (const [model, why] of stale) console.error(`  formal/${model}.lean\n    - ${why.join("\n    - ")}`);
-  console.error("Model those machines again from the current code (formal/README.md), then\n" +
-                "run: node formal/anchors.mjs --update <model>");
+  for (const [model, why] of stale) console.error(`  tools/formal/${model}.lean\n    - ${why.join("\n    - ")}`);
+  console.error("Model those machines again from the current code (tools/formal/README.md), then\n" +
+                "run: node tools/formal/anchors.mjs --update <model>");
   process.exit(1);
 }
 console.log(`anchors: ${Object.keys(res).length} models match the code they model`);

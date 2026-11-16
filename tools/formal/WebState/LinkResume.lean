@@ -1,4 +1,4 @@
--- What this models, for formal/anchors.mjs (which lists stale models):
+-- What this models, for tools/formal/anchors.mjs (which lists stale models):
 -- @models web/netplay.js: rbOfferResume rbResumeInfoIn rbCanResume rbLogSent rbDropped rbBeginResume rsDetach rsRestart rsStop rsAdopt rsResumeIn rbResumeState rbStartIfReady rbSendInput rbSendInputWire rbSend rbSendPause rbNewReg rbBeats rbPress rbPressIn rbMessage netShutdown netPeerGone rbLeaveNote rbPostBye rbMarkLive rbClearLive rbByeOnRelaunch rsDial rbRenderCard rbReconnecting
 -- @models web/index.js: togglePause setSpeed2x
 

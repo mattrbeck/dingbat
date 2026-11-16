@@ -1,4 +1,4 @@
--- What this models, for formal/anchors.mjs (which lists stale models):
+-- What this models, for tools/formal/anchors.mjs (which lists stale models):
 -- @models web/index.js: autoStateMatchesSave flushSyncInner handoffNews heldGameIsSent launchRom liveSaveSig loadRom markUpload persistAutoState persistSave pullSyncInner refreshHero renderClosedHero resumeGame resumeSessionFor runFullSync sessionBundle sessionFromBundle showMainMenu storeLastFrame switchToHandoff takeHandoff unloadGame maybeCheckpoint takeCheckpoint storeCheckpoint noteCrashedRuns on:visibilitychange
 
 /-

@@ -5,7 +5,7 @@
 // game's battery file is the one "rom.sav"; what these tests guard is that a
 // game only ever boots on, and only ever persists, its own save.
 //
-// Each trace is a counterexample found by the Lean models in formal/WebState/
+// Each trace is a counterexample found by the Lean models in tools/formal/WebState/
 // (named at each section), replayed through the real web/index.js. `hold`
 // parks a flow at one of its awaits, so each interleaving is the one the
 // model found, not whatever the fake IndexedDB's microtask order happens to be.

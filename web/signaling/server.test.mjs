@@ -650,7 +650,7 @@ async function run() {
   // A page that redials sends the same id: its stale seat (a socket that died
   // without the server hearing, e.g. a phone that suspended the tab) is
   // dropped, never paired with or counted as a third peer
-  // (formal/WebState/LinkPairing.lean, bug_paired_with_own_ghost).
+  // (tools/formal/WebState/LinkPairing.lean, bug_paired_with_own_ghost).
   console.log('a redialing page takes back its own stale seat:');
   await withServer(PORT2, { SIGNAL_STATS: '1' }, async (port) => {
     const A = 'pageA0000000001', B = 'pageB0000000001';
@@ -711,7 +711,7 @@ async function run() {
 
   // A goodbye note (POST /bye): a page ending a session while its link is
   // down leaves it on the retry code, and the redialing friend is told
-  // instead of waiting out its give-up (formal/WebState/LinkRedial.lean).
+  // instead of waiting out its give-up (tools/formal/WebState/LinkRedial.lean).
   console.log('goodbye notes on a retry code:');
   await withServer(PORT2, { SIGNAL_STATS: '1' }, async (port) => {
     const A = 'pageA0000000001', B = 'pageB0000000001';

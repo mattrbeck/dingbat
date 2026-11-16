@@ -104,10 +104,10 @@ regression tests are that. Every bug these models found has a test in
 `web/tests/` that replays its trace against the real `web/index.js`, and those
 run on every push. `lean.yml` only builds the proofs when `formal/` changes.
 
-To start the next audit, run `node formal/anchors.mjs`. Each model's
+To start the next audit, run `node tools/formal/anchors.mjs`. Each model's
 `-- @models` lines name the JS functions or Nim procs it describes, and `anchors.json`
 holds a token hash of each one as it was when the model last matched the
 code; comments and whitespace do not count. The script lists the models whose
 functions have changed since. Model those machines again from the current
 code with the method above, turn any new counterexample into a fix and a test,
-then `node formal/anchors.mjs --update <Dir>/<Model>`.
+then `node tools/formal/anchors.mjs --update <Dir>/<Model>`.

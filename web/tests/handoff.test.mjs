@@ -260,7 +260,7 @@ test("the paused hero says whether its moment has reached Drive", async () => {
   assert.equal(app.runIn(`heroStateText("paused")`), "Paused", "signed out: no Drive to speak of");
 });
 
-// --- Races the Lean model found (formal/WebState/Handoff.lean) --------------
+// --- Races the Lean model found (tools/formal/WebState/Handoff.lean) --------------
 
 const sessOnDrive = (app, drive) =>
   app.runIn(`sessionFromBundle(new Uint8Array(${JSON.stringify([...drive.get("stateauto:A.gba").bytes])}))`).rec;

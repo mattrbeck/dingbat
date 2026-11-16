@@ -49,7 +49,7 @@ else:
   const MOD_KEY_MASK = KMOD_CTRL
   const MOD_KEY_STR  = "Ctrl"
 
-const LOGO_PNG_DATA = staticRead("../README/dingbat.png")
+const LOGO_PNG_DATA = staticRead("../.github/readme/dingbat.png")
 
 # The sdl3 package types SDL_WINDOWPOS_CENTERED as uint; positions are cint
 const WINDOW_CENTERED = cint(WINDOWPOS_CENTERED)

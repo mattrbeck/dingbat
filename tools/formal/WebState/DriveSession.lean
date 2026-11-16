@@ -1,4 +1,4 @@
--- What this models, for formal/anchors.mjs (which lists stale models):
+-- What this models, for tools/formal/anchors.mjs (which lists stale models):
 -- @models web/index.js: adoptDriveAccount adoptGrantedToken armDriveRenewListener armDriveRenewOnGesture clearDriveToken driveCodeGrant driveEnrolled driveFetch driveLinked driveListMap driveRefreshSilently driveRegrantPopup driveRetryWait driveSessionGuard driveSessionResumed driveTokenSub driveUploadFile driveWantsUpgrade ensureDriveSignedIn flushSync flushSyncInner gdriveAcquireToken gdriveConnect gdriveFetchEmail gdriveSignOut hasUserActivation loadGisScript localSyncFiles markDelete markGameUpload markUpload parseDriveFileName pendingCount pullSync pullSyncInner readDriveLibrary readSyncBytes refreshSyncStatus rememberDriveEmail renewDriveToken resumeDriveOnBoot runExclusive runFullSync runPool saveSyncState scheduleFlush setSyncStatus startSyncTriggers syncActive syncPollTick writeDriveLibrary on:online on:offline on:visibilitychange
 
 /-
@@ -7,7 +7,7 @@
 Two sub-models of the one machine, each carrying exactly the state its
 properties need. First written on top of 7ca348ebf (the Drive sync fix
 series); against dd7ba741f the same models refuted the properties below with
-the `bug_*` traces in formal/FINDINGS.md (#8, #10, #11), each now a
+the `bug_*` traces in tools/formal/FINDINGS.md (#8, #10, #11), each now a
 `regress_*` theorem. Re-audited against 03f88d6c (2026-10-05), after the
 token broker (92c9e49c: renewals through a refresh token, no popup;
 6961bab6: a popup-flow device moved onto it by a consent screen at its next

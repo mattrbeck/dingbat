@@ -1,4 +1,4 @@
--- What this models, for formal/anchors.mjs (which lists stale models):
+-- What this models, for tools/formal/anchors.mjs (which lists stale models):
 -- @models web/index.js: applyUpdate beginUpdating checkForUpdate endUpdating failUpdating forceUpdate fullResetReload maybeCheckForUpdate probeBuilds refuseState registerServiceWorker reloadAfterUpdate showUpdateButton startForceUpdate updateForNewerState on:visibilitychange
 -- @models web/sw.js: hex sha256 digest fetchManifest fetchFresh verified assetCaches heldCopy tell tracker assetBytes countInto manifestResponse collect commit liveName setLive collectDev install dropCaches dropLater reinstall cached lazyFrom on:activate on:fetch on:install on:message
 

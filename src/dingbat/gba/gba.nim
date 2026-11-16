@@ -1708,7 +1708,7 @@ const UNC_THUMB_HI* = 0x4000'u32
 proc mode_bank*(m: CpuMode): int
 
 # Textual includes: the core is one module so the C compiler inlines across
-# files (notes/architecture.md). Order is free except:
+# files (docs/dev/notes/architecture.md). Order is free except:
 #   * hle_bios before arm/arm and thumb/thumb: both SWI handlers call
 #     hle_swi, which has no forward declaration.
 #   * arm/arm before arm/lut: `const armLut = armLutBuilder()` resolves the

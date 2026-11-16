@@ -30,8 +30,8 @@ mkdir -p dist/windows
 
 # Icon + version info resource, linked into the exe
 res=$(mktemp /tmp/dingbat_res.XXXXXX.o)
-x86_64-w64-mingw32-windres --include-dir=docker/windows-cross \
-    docker/windows-cross/dingbat.rc -O coff -o "$res"
+x86_64-w64-mingw32-windres --include-dir=tools/docker/windows-cross \
+    tools/docker/windows-cross/dingbat.rc -O coff -o "$res"
 
 nim c -d:mingw -d:release --cpu:amd64 --passL:"$res" \
     -o:dist/windows/dingbat.exe src/dingbat.nim

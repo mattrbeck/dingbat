@@ -3282,7 +3282,7 @@ proc gb_lcdc_mixer_latency*(gb: GB): int32 {.inline.} =
 # ==================== INCLUDES ====================
 # Textual includes, not imports: the whole GB core is one module (one C
 # translation unit), so the files share a namespace and inline across each
-# other without LTO (notes/architecture.md). Forward declarations below free
+# other without LTO (docs/dev/notes/architecture.md). Forward declarations below free
 # most of the ordering; the one hard constraint is at the CPU group.
 
 # Cartridge mappers: base methods + factory + the flat-ROM window fast path

@@ -1,6 +1,6 @@
 // The upload queue while a flush is on the wire: a key saved again while its
 // own upload (or an earlier one in the same flush) is in flight. Replays
-// formal/WebState/DriveSession.lean's Queue traces against the real
+// tools/formal/WebState/DriveSession.lean's Queue traces against the real
 // web/index.js, holding the Drive request mid-flight. Deletes racing an
 // upload are in library-races.test.mjs.
 

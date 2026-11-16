@@ -1,5 +1,5 @@
 // A checkpoint packing when the player taps Switch is of the copy being let
-// go: it must not land over the copy chosen (formal/WebState/Handoff.lean,
+// go: it must not land over the copy chosen (tools/formal/WebState/Handoff.lean,
 // bug_checkpoint_after_switch / regress_checkpoint_after_switch).
 //
 // The device and its stand-in core are handoff.test.mjs's (a state is

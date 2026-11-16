@@ -1,7 +1,7 @@
 ## The desktop Link Cable over real loopback sockets
 ## (src/dingbat/frontend/link_cable.nim, src/dingbat/gba/netlink.nim), with a
 ## scripted peer: a raw socket speaking linkproto, so each case controls
-## exactly what the other side sends. Guards formal/DESKTOP-FINDINGS.md 7, 8,
+## exactly what the other side sends. Guards tools/formal/DESKTOP-FINDINGS.md 7, 8,
 ## 11, 20, 21, the Low link items, and that nothing in pairing waits on the
 ## network (--listen, the HELLO handshake, a connect). No GUI; linktest.gba
 ## is the core.

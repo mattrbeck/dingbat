@@ -94,4 +94,4 @@ design notes, hardware evidence and test triage for people working on dingbat.
 
 ## Working notes
 
-- [../notes/README.md](../notes/README.md) — architecture map, subsystem state, open items.
+- [../notes/README.md](dev/notes/README.md) — architecture map, subsystem state, open items.

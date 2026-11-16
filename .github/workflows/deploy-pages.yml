@@ -6,7 +6,7 @@ on:
     # Nothing under these ships (the site is web/ plus the wasm build). Other
     # pushes deploy, but only a change to what the app runs moves the version
     # (see "Pick the version"): a new one makes every open copy offer an update.
-    paths-ignore: ["docs/**", "tools/**", "notes/**", "README.md", "README/**", ".claude/**"]
+    paths-ignore: ["docs/**", "tools/**", "README.md", ".github/readme/**", ".claude/**"]
   workflow_dispatch:
 
 permissions:

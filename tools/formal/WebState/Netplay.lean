@@ -1,4 +1,4 @@
--- What this models, for formal/anchors.mjs (which lists stale models):
+-- What this models, for tools/formal/anchors.mjs (which lists stale models):
 -- @models web/index.js: dbPutRoomy loadRom netActive persistSave
 -- @models web/netplay.js: armManualFallback launchNetRom makeSession manualConfirmGo manualEnter manualPrepare netDismissModal netFail netHoldsCore netShutdown onSigMessage openNetConnect rbConnect rbStartIfReady rbTeardown rbTryInit sigConnect sigRedial startLocalLink startRtc wireChannel sigRewait sigDialAgain sigRendezvous rtcGaveUp
 
@@ -40,7 +40,7 @@ and caught up to 5ea4d552 (see below); every line number is at 5ea4d552
 false in a rollback session.
 
 The signaling half follows the fixed pairing code of
-formal/WebState/LinkPairing.lean (web/netplay.js sigRewait/rtcGaveUp; line
+tools/formal/WebState/LinkPairing.lean (web/netplay.js sigRewait/rtcGaveUp; line
 numbers below at that commit): the pairing deadline (`rtcDeadline` 493, and
 ICE 'failed' before the channel opens) runs `rtcGaveUp` (391), which either
 gives the NAT verdict (`netFail`) or goes back to waiting (`sigRewait` 360:

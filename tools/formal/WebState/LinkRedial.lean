@@ -1,4 +1,4 @@
--- What this models, for formal/anchors.mjs (which lists stale models):
+-- What this models, for tools/formal/anchors.mjs (which lists stale models):
 -- @models web/netplay.js: rbDropped rbWatchDisconnected rbBeginResume rsDetach rsRestart rsStop rsDial rsStartRtc rsAdopt rsResumeIn rbLeaveNote
 -- @models web/signaling/server.nim: onText teardown notifyClosed normalizeId handleClient leaveNote
 -- @models web/signaling/server.js: attach leave closeRoom relayFrom normalizeId leaveNote

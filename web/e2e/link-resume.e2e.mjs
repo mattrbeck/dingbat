@@ -318,7 +318,7 @@ test("a friend's give-up is heard: \"Couldn't reconnect\" at once, not 3 minutes
 
 // A give-up just after the new channel opened says BYE on it; the BYE says
 // why, so the friend that just resumed reads "Couldn't reconnect" too, not
-// "Your friend disconnected" (formal/WebState/LinkResume.lean
+// "Your friend disconnected" (tools/formal/WebState/LinkResume.lean
 // give_up_reads_as_disconnect, bye_reason_heard). A never takes B's RESUME
 // here, so it stays redialing with the channel open until its give-up.
 test("a give-up after the new channel opened reads as one on the friend's side",

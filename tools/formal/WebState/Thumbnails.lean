@@ -1,4 +1,4 @@
--- What this models, for formal/anchors.mjs (which lists stale models):
+-- What this models, for tools/formal/anchors.mjs (which lists stale models):
 -- @models web/index.js: addRecentRom applyLibFilter buildTileMenuHead closeThumbsModal closeTileMenu deleteGameEverywhere deleteGameLocalData deleteKeys frameBlobFromFb getRomArt getRomFrame launchRom loadRom openThumbsOffer openTileMenu persistAutoState refreshHomeRecent removeGameFromDevice renameGame runThumbnailBatch setRomsSort showMainMenu storeLastFrame thumbsPictureOne togglePause unloadGame drawPausedHero copyFramebuffer pullSyncInner writeSyncBytes on:visibilitychange on:contextmenu
 
 /-

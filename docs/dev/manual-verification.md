@@ -318,7 +318,7 @@ Android Chrome crash, Safari's own Cmd-Q, a phone's frame pacing.
       last save*: it resumes there, and the menu offers Restore Old Save
       (*The save you replaced*), which brings the newer save back.
 
-## State-machine fix round (formal/FINDINGS.md)
+## State-machine fix round (tools/formal/FINDINGS.md)
 
 Driven through the real UI in headless Chromium: the local scenarios, and
 Drive on two browser profiles against a fake Google that follows the Drive v3

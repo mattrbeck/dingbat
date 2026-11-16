@@ -1,4 +1,4 @@
--- What this models, for formal/anchors.mjs (which lists stale models):
+-- What this models, for tools/formal/anchors.mjs (which lists stale models):
 -- @models web/index.js: addRecentRom allPerGameKeys applyRemoteRename bumpRecentIndex confirmTombstones convertStaleGame dbMoveKeys deleteGameAction deleteGameEverywhere deletedIn downloadGame downloadGameAction driveListAll driveListMap driveUploadFile fileGen flushSyncInner genBound genOf getRecentMeta hasAnyLocalRecord keepOldSave libGen libraryUnchanged localLibrary markUpload mergeLibrary pendingCount pullSyncInner readDriveLibrary renameGame restoreKeptSave runExclusive runFullSync runPool touchRecent updateRecent withGen writeDriveLibrary
 
 /-
@@ -7,7 +7,7 @@
 Model of the Drive "library" file and the code that reads, merges and writes
 it. First written on top of 7ca348ebf (the Drive sync fix series); against
 dd7ba741f the same model refuted the properties below with the `bug_*` traces
-listed in formal/FINDINGS.md (#6, #7), and each is now a `regress_*` theorem.
+listed in tools/formal/FINDINGS.md (#6, #7), and each is now a `regress_*` theorem.
 Re-audited against 03f88d6c (2026-10-05), and caught up to be44ad4c: every
 line number below is web/index.js at be44ad4c. Since 03f88d6c, bfe5d5c5 keeps
 `renamedAway`, the names this session renamed a game away from
