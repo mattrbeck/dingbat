@@ -52,9 +52,28 @@ per side; `?signal=ws://host:port` points at another signaling server (the defau
 `wss://<page-host>/signal`). Connections are STUN-only: a strict-NAT/CGNAT pair gets a
 "Couldn't connect directly to your friend" error.
 
+## Native: online, with the web and iOS
+
+The desktop's Link Cable window opens on **Online**: type a code, Connect, and a friend
+who types the same code (on dingbat.gg, the iPhone app or another desktop) is linked, a
+Game Boy or a GBA game, as the web does it: the same signaling server, WebRTC data
+channel and input rollback, so every pairing of the three works
+(`src/dingbat/frontend/online_link.nim`, a port of the iOS app's `NetLink.swift`; the
+manual code exchange is iOS and web only). A dropped connection resumes, pause and 2x
+are shared, and rewind, fast forward, cheats and state loading are off while linked.
+`--online CODE` connects on start; `--signal ws://host:port` points at another server.
+
+It links libdatachannel and mbedTLS statically: `nimble webrtc` builds them into
+`deps/webrtc` (cmake, a C++ compiler and python3; `-d:webrtc_prefix=DIR` points
+elsewhere). Tests: `tests/desktop_online_link_test.nim` (two links in one process),
+`tests/desktop_online_e2e.sh` (the app itself) and `web/e2e/link-native.e2e.mjs` (a
+browser and a native player, byte-identical states); all need node for the local
+signaling server.
+
 ## Native: two processes over TCP
 
-The native GUI's Link Cable window hosts or joins a TCP session. The test harness does
+The native GUI's Link Cable window also hosts or joins a TCP session (under Advanced).
+That link is cycle-level and GBA only, and pairs only with another desktop. The test harness does
 the same headlessly:
 
 ```

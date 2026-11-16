@@ -77,7 +77,8 @@ origins allowlist — https required off localhost, raw IPs rejected).
 - LCD color correction per panel; scanlines; LCD response (DMG / CGB / AGB-001 / AGS-101
   ghosting models); hq4x / xBR upscaling
 - MBC5 rumble (controller rumble + screen shake)
-- Link Cable window for network play
+- Link Cable window: online with anyone (a browser, an iPhone or another desktop: both type
+  the same code), or two windows on one machine, or Host/Join over TCP
 - Debug windows: PPU, IO registers, scheduler
 
 ## iOS app

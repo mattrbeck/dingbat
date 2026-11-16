@@ -23,6 +23,7 @@ import dingbat/frontend/gb_debug
 import dingbat/frontend/cheats_widget
 import dingbat/frontend/save_states_widget
 import dingbat/frontend/link_cable
+import dingbat/frontend/online_link
 import dingbat/frontend/persist
 import dingbat/frontend/game_load
 import dingbat/frontend/game_lock
@@ -294,6 +295,8 @@ proc print_help() =
   echo "  --listen PORT       Host the link on PORT (this side is unit 0)"
   echo "  --connect HOST:PORT Join a host's link (this side is unit 1)"
   echo "  --netlink-delay-ms N  Add N ms of send latency (network simulation)"
+  echo "  --online CODE         Link online on start: as typing CODE in Link Cable"
+  echo "  --signal URL          Online link signaling server (default " & SIGNAL_URL & ")"
   echo "  --link-auto         Zero-config auto-pair on localhost (same as opening"
   echo "                      the Link Cable window)"
   echo "  Two windows on one computer can't open the same ROM file (they would"
@@ -474,6 +477,18 @@ type AppState = ref object
   link_window:     bool
   link_window_min_h: float32  # its content's height last frame
   link:            LinkCable  # pairing state (frontend/link_cable.nim)
+  # Online link play (frontend/online_link.nim): input rollback over WebRTC
+  # with the web and iOS apps. While it runs, app.gba_emu/gb_emu is this
+  # player's core of the session's two, ticked by online.tick.
+  online:          OnlineLink
+  online_code:     array[CODE_MAX + 1, char]  # the Link Cable window's code box
+  online_paused:   bool    # app.paused as last told to (or by) the friend
+  online_turbo:    bool    # 2x Speed, the same
+  online_moved_at: uint64  # last frame the session advanced (getTicks)
+  online_froze:    bool    # the snapshot paused the game; setup still running
+  online_was_paused: bool  # and whether it was paused before that
+  toast:           string  # a line under the game for a few seconds
+  toast_until:     uint64
   fullscreen:      bool
   fs_track:        FullscreenTrack  # the window's real state (window_restore.nim)
   enable_overlay:  bool
@@ -481,6 +496,37 @@ type AppState = ref object
   drag_hover:      bool  # a file is being dragged over the window
 
 var app: AppState
+
+const TOAST_MS = 4000
+
+proc show_toast(text: string) =
+  ## A line under the game for a few seconds (render_online_badge).
+  app.toast = text
+  app.toast_until = getTicks() + TOAST_MS
+
+proc online_on(): bool =
+  ## The online session runs: its rollback applies this player's buttons.
+  app.online != nil and app.online.started
+
+const ONLINE_STALL_CARD_MS = 1000'u64
+  ## Stalled on the friend this long: "Waiting for your friend..." under the
+  ## game (a round trip's stall is normal and says nothing).
+
+proc online_badge_text(): string =
+  ## Under the game: the latest toast, else what the link waits on.
+  if app.online == nil: return ""
+  let now = getTicks()
+  if app.toast.len > 0 and now < app.toast_until: return app.toast
+  if not online_on(): return ""
+  if app.online.reconnecting:
+    return if app.online.reconnect_away: "Your friend switched away - waiting for them"
+           else: "Reconnecting..."
+  if app.online.peer_away_shown:
+    return "Your friend switched away - their game is paused"
+  if not app.paused and now - app.online_moved_at > ONLINE_STALL_CARD_MS:
+    return "Waiting for your friend..."
+  ""
+
 
 # Emulated-frames FPS (not the UI framerate), updated once a second
 var emu_fps = 0.0
@@ -865,6 +911,9 @@ proc load_rom(path: string; keep_ds = false) =
   link_auto_stop()
   link_cancel_setup()
   teardown_netlink("another game was loaded")
+  if app.online != nil and app.online.active:
+    app.online.disconnect()
+    show_toast("Link ended: another game was loaded")
   # A Quick Save pending in this batch of input is the outgoing game's: save
   # it now. With the link gone the core is at a frame boundary (teardown
   # finishes a torn frame).
@@ -1081,7 +1130,7 @@ proc save_state_slot(slot: int): bool =
 proc load_state_slot(slot: int): bool =
   # Loading into a linked core would desync the two games. Checked here so
   # every caller (menu, hotkey, Save States window) gets it.
-  if app.netlink != nil:
+  if app.netlink != nil or online_on():
     last_state_error = ""
     return false
   let path = state_slot_read_path(slot)
@@ -1526,6 +1575,8 @@ proc show_menu_bar(): bool =
   discard (if result: showCursor() else: hideCursor())
 
 proc render_link_window()  # defined below, near the network-link procs
+proc render_online_badge()
+proc render_online_section()
 
 proc poll_battery_notice() =
   ## Once per loop: feed the core's battery-write failures to `app.battery`.
@@ -1584,7 +1635,8 @@ proc render_imgui() =
      not app.save_states.window and not app.drag_hover and
      # A notice must still draw with the menu bar idle-hidden (Quick Load key)
      app.state_notice.len == 0 and app.cfg.notice.len == 0 and
-     app.load_notice.len == 0 and app.battery.text.len == 0:
+     app.load_notice.len == 0 and app.battery.text.len == 0 and
+     online_badge_text().len == 0:
     # Only igNewFrame drains ImGui's input queue, a few events a frame, so a
     # long keyboard-only session would leave a backlog the menu waits behind.
     # Drop it, and clear held keys (a release may be among what is dropped).
@@ -1624,7 +1676,8 @@ proc render_imgui() =
                            nil, false, game_loaded):
           app.pending_save = true
         if igMenuItem_Bool(cstring("Quick Load  " & MOD_KEY_STR & "+L"),
-                           nil, false, game_loaded and app.netlink == nil):
+                           nil, false, game_loaded and app.netlink == nil and
+                           not online_on()):
           app.pending_load = true
         if igMenuItem_Bool("Save States...", nil, false, game_loaded):
           app.save_states.window = true
@@ -1645,7 +1698,7 @@ proc render_imgui() =
         discard igMenuItem_BoolPtr(cstring("Pause  " & MOD_KEY_STR & "+P"),
                                    nil, addr app.paused, true)
         # Off while linked: the link paces both sides.
-        let unlinked = app.netlink == nil
+        let unlinked = app.netlink == nil and not online_on()
         if igMenuItem_Bool(cstring("Frame Advance  " & MOD_KEY_STR & "+N"),
                            nil, false, app.paused and app.emu_kind != ekNone and
                            unlinked):
@@ -1659,7 +1712,7 @@ proc render_imgui() =
         # Enabling either clears the other (fast forward would dominate 2x).
         if app.emu_kind == ekGBA and app.gba_emu != nil:
           if igMenuItem_BoolPtr("2x Speed", "Shift+Tab",
-                                addr app.gba_emu.apu.turbo, unlinked):
+                                addr app.gba_emu.apu.turbo, app.netlink == nil):
             if app.gba_emu.apu.turbo: app.gba_emu.apu.sync = true
           var fast_forward = not app.gba_emu.apu.sync
           if igMenuItem_BoolPtr("Fast Forward", "Tab",
@@ -1672,7 +1725,7 @@ proc render_imgui() =
             if app.gb_emu.apu.turbo: app.gb_emu.apu.sync = true
           var fast_forward = not app.gb_emu.apu.sync
           if igMenuItem_BoolPtr("Fast Forward", "Tab",
-                                addr fast_forward, true):
+                                addr fast_forward, unlinked):
             app.gb_emu.apu.sync = not fast_forward
             if fast_forward: app.gb_emu.apu.turbo = false
         elif app.emu_kind == ekNDS and app.nds != nil:
@@ -1690,10 +1743,12 @@ proc render_imgui() =
             app.nds.set_lid(not app.nds.lid_closed)
         if should_reset: reset_game()
         igSeparator()
+        # Cheats on one side would desync an online link
         discard igMenuItem_BoolPtr("Cheats", nil, addr app.cheats.window,
-                                   app.emu_kind in {ekGBA, ekGB})
+                                   app.emu_kind in {ekGBA, ekGB} and
+                                   not online_on())
         if igMenuItem_Bool("Link Cable...", nil, app.link_window,
-                           app.emu_kind == ekGBA):
+                           app.emu_kind in {ekGBA, ekGB}):
           app.link_window = not app.link_window
         igEndMenu()
 
@@ -1830,10 +1885,11 @@ proc render_imgui() =
   app.cheats.render()
   # load_state_slot fails while linked; the window says so up front.
   app.save_states.load_blocked =
-    if app.netlink != nil: "Loading is paused while linked." else: ""
+    if app.netlink != nil or online_on(): "Loading is paused while linked." else: ""
   app.save_states.render()
 
   render_link_window()
+  render_online_badge()
 
   let rom_types = if app.cfg.ds_beta: ".gba, .gb, .gbc, .nds, .zip"
                   else: ".gba, .gb, .gbc, .zip"
@@ -1933,6 +1989,7 @@ var held: HeldInput
 var no_ds_keys: Table[cint, DsInput]
 
 proc emu_pad_input(inp: Input; pressed: bool) =
+  if online_on(): return
   case app.emu_kind
   of ekGBA:
     if app.gba_emu != nil: app.gba_emu.handle_input(inp, pressed)
@@ -1956,7 +2013,7 @@ proc apply_trigger() =
   ## The right trigger's fast forward, onto the running core's speed toggles
   template onto(apu: untyped) =
     var speed = Speed(sync: apu.sync, turbo: apu.turbo)
-    held.apply_trigger(speed, linked = app.netlink != nil)
+    held.apply_trigger(speed, linked = app.netlink != nil or online_on())
     apu.sync = speed.sync
     apu.turbo = speed.turbo
   case app.emu_kind
@@ -2056,13 +2113,14 @@ proc handle_input() =
           app.paused = not app.paused
         of cint(SDLK_N):
           # Frame advance would desync a live link
-          if app.paused and app.emu_kind != ekNone and app.netlink == nil:
+          if app.paused and app.emu_kind != ekNone and app.netlink == nil and
+             not online_on():
             app.pending_step = true
         of cint(SDLK_S):
           if app.emu_kind != ekNone: app.pending_save = true
         of cint(SDLK_L):
           # Loading a save state mid-link would desync the pair.
-          if app.emu_kind != ekNone and app.netlink == nil:
+          if app.emu_kind != ekNone and app.netlink == nil and not online_on():
             app.pending_load = true
         of cint(SDLK_F):
           set_fullscreen(not app.fullscreen)
@@ -2087,8 +2145,11 @@ proc handle_input() =
           else:
             apu.sync = not apu.sync
             if not apu.sync: apu.turbo = false
-        # Off while linked (would run ahead of the peer)
-        if app.emu_kind == ekGBA and app.gba_emu != nil and app.netlink == nil:
+        # Off while linked (would run ahead of the peer); online, 2x is the
+        # pair's (service_online tells the friend), unbounded is not
+        if online_on() and (mods and KMOD_SHIFT) == 0:
+          discard
+        elif app.emu_kind == ekGBA and app.gba_emu != nil and app.netlink == nil:
           toggle(app.gba_emu.apu)
         elif app.emu_kind == ekGB and app.gb_emu != nil:
           toggle(app.gb_emu.apu)
@@ -2343,7 +2404,12 @@ proc render_link_window() =
                                    ImVec2(x: 1e9, y: 1e9), nil, nil)
   if igBegin("Link Cable", addr app.link_window,
              cint(ImGui_WindowFlags_NoCollapse)):
-    if app.netlink != nil:
+    if app.netlink == nil:
+      render_online_section()
+      igSeparator()
+    if app.online != nil and app.online.active:
+      igTextDisabled("Same machine: off while linked online.")
+    elif app.netlink != nil:
       igText("Paired successfully")
       igText("%s", cstring(app.link.status))
       if app.netlink.peer_paused:
@@ -2354,7 +2420,7 @@ proc render_link_window() =
       if igButton("Disconnect", ImVec2(x: 0, y: 0)):
         teardown_netlink()
     elif not link_ready():
-      igText("Load a GBA ROM, then reopen this window to link.")
+      igText("Same machine: load a GBA ROM to link two windows.")
     else:
       if app.link.auto:
         # An animated ellipsis so it's visibly working; auto stops on close.
@@ -2392,7 +2458,229 @@ proc render_link_window() =
 proc update_link_auto() =
   ## Opening the Link Cable window starts auto-pairing; closing it stops any
   ## pairing, auto or manual.
-  app.link.update_auto(app.link_window, link_ready(), app.netlink != nil)
+  app.link.update_auto(app.link_window, link_ready(),
+                       app.netlink != nil or (app.online != nil and app.online.active))
+
+# ──────────────────────────── Online link ────────────────────────────
+
+proc online_ready(): bool =
+  app.emu_kind in {ekGBA, ekGB} and (app.gba_emu != nil or app.gb_emu != nil)
+
+proc online_bits(): uint16 =
+  ## What the player holds, as the rollback's input word (bit i = Input(i),
+  ## the web's and iOS's layout).
+  for inp in held.held(): result = result or (1'u16 shl ord(inp))
+
+proc online_turbo_now(): bool =
+  if app.gba_emu != nil: app.gba_emu.apu.turbo
+  elif app.gb_emu != nil: app.gb_emu.apu.turbo
+  else: false
+
+proc set_online_turbo(on: bool) =
+  template apply(apu: untyped) =
+    apu.turbo = on
+    if on: apu.sync = true
+  if app.gba_emu != nil: apply(app.gba_emu.apu)
+  elif app.gb_emu != nil: apply(app.gb_emu.apu)
+
+proc online_session_cores_live() =
+  ## The session's local core is the one the picture, audio and menus serve.
+  let g = app.online.local_gba
+  let b = app.online.local_gb
+  if g != nil:
+    app.gba_emu = g
+    app.gb_emu = nil
+    app.emu_kind = ekGBA
+    app.dbg = new_gba_debug(g)
+    app.gb_dbg = nil
+  elif b != nil:
+    app.gb_emu = b
+    app.gba_emu = nil
+    app.emu_kind = ekGB
+    app.gb_dbg = new_gb_debug(b)
+    app.dbg = nil
+  apply_master_volume()
+  apply_pitch_correct_ff()
+  apply_audio_lowpass()
+  lcd_resp.reset()
+
+proc init_online(signal_url: string) =
+  discard net_init()
+  var h: OnlineHooks
+  h.now_ms = proc(): int64 = int64(getTicks())
+  h.log = proc(m: string) = echo m
+  h.capture = proc(): tuple[rom_path, state: string] =
+    # Frozen at the snapshot so the game cannot run past it; a setup that
+    # then fails gives it back (service_online).
+    if not app.online_froze:
+      app.online_froze = true
+      app.online_was_paused = app.paused
+    app.paused = true
+    try:
+      case app.emu_kind
+      of ekGBA: (app.gba_emu.rom_path, app.gba_emu.state_bytes())
+      of ekGB: (app.gb_emu.rom_path, app.gb_emu.state_bytes())
+      of ekNDS, ekNone: ("", "")
+    except CatchableError: ("", "")
+  proc options(): CoreOptions =
+    let boot = boot_settings(app.cfg, app.boot_overrides)
+    # No Super Game Boy: the web's and iOS's link cores have none.
+    CoreOptions(gb_bootrom: app.cfg.gb_bootrom_path, headless: app.cfg.headless,
+                gb_run_bios: boot.gb_run_bios, sgb: false,
+                bios_path: boot.bios_path, run_bios: boot.run_bios,
+                use_hle: boot.use_hle, hle_after_bios: boot.hle_after_bios)
+  h.make_gba = proc(rom: string): GBA =
+    let built = build_core(rom, options())
+    if built.gba == nil: return nil
+    built.gba.mp2k_hle = app.cfg.mp2k_hle
+    built.gba.apu.set_fifo_interp(app.cfg.fifo_interp)
+    built.gba
+  h.make_gb = proc(rom: string): GB = build_core(rom, options()).gb
+  h.started = proc() =
+    app.online_froze = false
+    online_session_cores_live()
+    app.rewind.clear()
+    app.rewinding = false
+    # Cheats on one side would desync: the widget lets go of the solo engine
+    app.cheats.window = false
+    app.cheats.attach(nil, if app.emu_kind == ekGBA: cpGBA else: cpGB)
+    held.core_replaced()
+    discard held.take_changes()
+    app.paused = false
+    app.online_paused = false
+    set_online_turbo(false)
+    app.online_turbo = false
+    app.online_moved_at = getTicks()
+    link_auto_stop()
+    link_cancel_setup()
+  h.ended = proc() =
+    let (g, b) = app.online.take_solo()
+    if g != nil:
+      app.gba_emu = g
+      app.dbg = new_gba_debug(g)
+    elif b != nil:
+      app.gb_emu = b
+      app.gb_dbg = new_gb_debug(b)
+    app.rewind.clear()
+    set_online_turbo(false)
+    # The solo core is the session's (no cheats): its codes come back
+    app.cheats.attach(current_cheat_engine(),
+                      if app.emu_kind == ekGBA: cpGBA else: cpGB)
+    load_cheats()
+    new_core_takes_held_input()
+  h.remote_pause = proc(on: bool) =
+    app.paused = on
+    app.online_paused = on
+  h.remote_speed = proc(on: bool) =
+    set_online_turbo(on)
+    app.online_turbo = on
+  h.paused = proc(): bool = app.paused
+  h.double = proc(): bool = online_turbo_now()
+  h.away = proc(): bool = false
+  app.online = new_online_link(h, config_dir() / "link-cache",
+                               config_dir() / "link-live.json", signal_url)
+  app.online.bye_on_relaunch()
+
+when defined(gui_driver):
+  # Tests: DINGBAT_LINK_STOP_AT=N holds the session at frame N and, once the
+  # friend's inputs up to it are in, logs both cores' checksum (the other
+  # side's tests/online_peer.nim logs its own to compare).
+  let link_stop_at = parseInt(getEnv("DINGBAT_LINK_STOP_AT", "0"))
+  var link_stop_said = false
+
+proc online_step(): bool =
+  ## One session frame; false while stalled on the friend.
+  when defined(gui_driver):
+    if link_stop_at > 0 and app.online.head >= link_stop_at:
+      if not link_stop_said and app.online.confirmed >= link_stop_at - 1:
+        link_stop_said = true
+        echo "ONLINE CHECKSUM ", link_stop_at, " ", toHex(app.online.checksum())
+      return false
+  if app.online.tick(online_bits()) < 0: return false
+  app.online_moved_at = getTicks()
+  if app.gba_emu != nil: note_gba_frame()
+  true
+
+proc service_online() =
+  ## Per iteration: the network, then this side's pause and 2x to the
+  ## friend (both run both games, so a one-sided change would just stall).
+  if app.online == nil: return
+  app.online.service()
+  for t in app.online.toasts: show_toast(t)
+  app.online.toasts.setLen(0)
+  if app.online_froze:
+    if not app.online.active:
+      app.online_froze = false
+      app.paused = app.online_was_paused
+    else:
+      app.paused = true  # play now would be thrown away at the start
+  if online_on():
+    if app.paused != app.online_paused:
+      app.online_paused = app.paused
+      app.online.send_pause(app.paused)
+    let turbo = online_turbo_now()
+    if turbo != app.online_turbo:
+      app.online_turbo = turbo
+      app.online.send_speed(turbo)
+
+proc render_online_section() =
+  ## The Link Cable window's first part: link with anyone, anywhere.
+  let ol = app.online
+  if ol == nil: return
+  igText("Online")
+  if ol.started:
+    igText("Linked with your friend.")
+    if ol.reconnecting: igText("Reconnecting...")
+    elif ol.peer_away_shown: igText("Your friend switched away.")
+    igTextWrapped("Rewind, fast forward, cheats and state loading are off while linked.")
+    if igButton("Disconnect##online", ImVec2(x: 0, y: 0)): ol.disconnect()
+    return
+  if not online_ready():
+    igTextWrapped("Load a Game Boy or GBA game to link online.")
+    return
+  igTextWrapped("Link with a friend anywhere: on dingbat.gg, the iPhone app " &
+                "or another dingbat. You both type the same code.")
+  igSetNextItemWidth(ui_px(180))
+  let typed = igInputTextWithHint("##online_code", "Code (e.g. PIKACHU)",
+    cast[cstring](addr app.online_code[0]), csize_t(app.online_code.len),
+    cint(ImGui_InputTextFlags_EnterReturnsTrue) or
+    cint(ImGui_InputTextFlags_CharsUppercase), nil, nil)
+  igSameLine(0, -1)
+  var code = ""
+  for c in app.online_code:
+    if c == '\0': break
+    code.add c
+  if ol.active:
+    if igButton("Cancel##online", ImVec2(x: 0, y: 0)): ol.disconnect()
+  elif igButton("Connect##online", ImVec2(x: 0, y: 0)) or typed:
+    # One cable at a time: the same-machine pairing stops.
+    link_auto_stop()
+    link_cancel_setup()
+    ol.connect(code)
+  if ol.status.len > 0:
+    if ol.status_error:
+      igTextColored(ImVec4(x: 1.0, y: 0.45, z: 0.4, w: 1.0), "%s", cstring(ol.status))
+    else:
+      igTextWrapped("%s", cstring(ol.status))
+
+proc render_online_badge() =
+  let text = online_badge_text()
+  if text.len == 0: return
+  let vp = igGetMainViewport()
+  if vp == nil: return
+  let (vpos, vsize) = (vp[].Pos, vp[].Size)
+  igSetNextWindowPos(ImVec2(x: vpos.x + vsize.x * 0.5'f32,
+                            y: vpos.y + vsize.y - ui_px(12)),
+                     cint(ImGui_Cond_Always), ImVec2(x: 0.5, y: 1.0))
+  igSetNextWindowBgAlpha(0.7'f32)
+  let flags = cint(ImGui_WindowFlags_NoDecoration) or
+              cint(ImGui_WindowFlags_NoMove) or
+              cint(ImGui_WindowFlags_NoInputs) or
+              cint(ImGui_WindowFlags_NoSavedSettings) or
+              cint(ImGui_WindowFlags_AlwaysAutoResize)
+  if igBegin("##online_badge", nil, flags):
+    igTextUnformatted(cstring(text), nil)
+  igEnd()
 
 # ──────────────────────────── Main ────────────────────────────
 
@@ -2403,6 +2691,8 @@ proc main() =
   var connect_to     = ""
   var netlink_delay  = 0
   var link_auto      = false
+  var signal_url     = SIGNAL_URL
+  var online_code    = ""
   var pos_args: seq[string]
 
   var p = initOptParser(commandLineParams())
@@ -2437,6 +2727,14 @@ proc main() =
         capture_path  = if parts.len > 1: parts[1] else: "capture.png"
       of "link-auto":
         link_auto = true
+      of "signal":
+        var v = p.val
+        if v.len == 0: p.next(); v = p.key
+        signal_url = v
+      of "online":
+        var v = p.val
+        if v.len == 0: p.next(); v = p.key
+        online_code = v
       else: echo "Unknown option: --" & p.key; system.quit(1)
     of cmdArgument:
       pos_args.add(p.key)
@@ -2595,6 +2893,8 @@ proc main() =
   if listen_port > 0 and connect_to.len > 0:
     echo "Use either --listen or --connect, not both."; system.quit(1)
 
+  init_online(signal_url)
+
   if rom_path != "":
     if not fileExists(rom_path):
       echo "ROM file not found: ", rom_path; system.quit(1)
@@ -2611,6 +2911,14 @@ proc main() =
     echo "NETLINK: --listen/--connect need a ROM path; ignoring"
   elif link_auto:
     echo "NETLINK: --link-auto needs a ROM path; ignoring"
+  if online_code.len > 0:
+    if online_ready():
+      app.link_window = true
+      for i in 0 ..< min(online_code.len, app.online_code.len - 1):
+        app.online_code[i] = online_code[i]
+      app.online.connect(online_code)
+    else:
+      echo "netlink: --online needs a Game Boy or GBA ROM; ignoring"
 
   # The UI runs at the display's refresh rate, decoupled from emulation:
   #  - Emulation faster (fast forward): presents are skipped down to the
@@ -2767,7 +3075,8 @@ proc main() =
     # Frame advance bypasses audio pacing: exactly one frame
     let stepping = app.paused and app.pending_step
     app.pending_step = false
-    if app.rewinding and app.emu_kind != ekNone and app.netlink == nil:
+    if app.rewinding and app.emu_kind != ekNone and app.netlink == nil and
+       not online_on():
       # ~30 pops/s of 10-frame snapshots ≈ 5x realtime. A snapshot restores
       # the framebuffer, so presenting shows the rewound frame.
       let now_r = getTicks()
@@ -2801,14 +3110,19 @@ proc main() =
             except NetLinkError as e:
               echo "NETLINK: link lost: ", e.msg, " — continuing single-player"
               teardown_netlink(e.msg)
+          elif online_on():
+            emulated = online_step()
           else:
             input_log_frame_start()
             app.gba_emu.run_until_frame()
             emulated = true
       of ekGB:
         if app.gb_emu != nil and (stepping or gb_frame_due()):
-          app.gb_emu.run_until_frame()
-          emulated = true
+          if online_on():
+            emulated = online_step()
+          else:
+            app.gb_emu.run_until_frame()
+            emulated = true
       of ekNDS:
         if app.nds != nil and (stepping or nds_frame_due()):
           app.nds.run_frame(app.cfg.volume, app.cfg.mute, app.cfg.pitch_correct_ff)
@@ -2820,7 +3134,7 @@ proc main() =
         scheduler_frame_ran()
       if emulated and app.emu_kind == ekGBA and app.gba_emu != nil:
         note_gba_frame()
-      if emulated and app.cfg.rewind and app.netlink == nil:
+      if emulated and app.cfg.rewind and app.netlink == nil and not online_on():
         case app.emu_kind
         of ekGBA:
           discard app.rewind.maybe_push(proc(): string = app.gba_emu.state_payload())
@@ -2858,6 +3172,7 @@ proc main() =
       else: discard
     # Linked: the socket is read even while paused, and BYE ends the link.
     service_netlink()
+    service_online()
     # States run at a frame boundary (a core parked mid-frame on the peer
     # keeps them pending)
     if (app.pending_save or app.pending_load) and app.emu_kind != ekNone and
@@ -2978,6 +3293,7 @@ proc main() =
   link_auto_stop()
   link_cancel_setup()
   teardown_netlink()
+  if app.online != nil: app.online.quitting()
   flush_saves()
   input_log_close()
 

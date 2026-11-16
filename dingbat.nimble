@@ -99,6 +99,13 @@ task ndsref_build, "Build the DS reference tools (tools/ndsref: a headless libre
   exec "sh tools/ndsref/build.sh"
   exec "nim c -d:test_harness -d:release --hints:off --path:src -o:tools/ndsref/ndsrun tools/ndsrun.nim"
 
+task webrtc, "Build the desktop online link's libdatachannel + mbedTLS into deps/webrtc":
+  exec ".github/scripts/build-webrtc.sh deps/webrtc"
+
+task test_desktop_online, "Run the desktop online link tests (two links over a local signaling server; needs node)":
+  exec "nim c -r -d:test_harness -d:release --path:src " &
+       "-o:dingbat_desktop_online_link_test tests/desktop_online_link_test.nim"
+
 task test_desktop, "Run the desktop frontend tests (input, settings, link, saves, game loading, modals, DS Beta)":
   # modal drives Dear ImGui headless, so it needs imguin (CI's test job
   # installs it: .github/scripts/install-test-deps.sh).

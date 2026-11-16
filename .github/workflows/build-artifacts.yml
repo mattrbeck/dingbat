@@ -60,6 +60,17 @@ jobs:
           for p in "https://github.com/nim-lang/sdl3@#bb137829ff619b0a27a473628cb28fc1c86f3fe5" imguin yaml stb_image zippy; do
             "$GITHUB_WORKSPACE/.github/scripts/retry.sh" 3 nimble install -y "$p"
           done
+      - name: Cache the online-link library
+        # libdatachannel + mbedTLS, static (.github/scripts/build-webrtc.sh): keyed
+        # on the script, which pins both versions.
+        id: webrtc-cache
+        uses: actions/cache@v4
+        with:
+          path: deps/webrtc
+          key: webrtc-${{ runner.os }}-22.04-${{ hashFiles('.github/scripts/build-webrtc.sh') }}
+      - name: Build the online-link library
+        if: steps.webrtc-cache.outputs.cache-hit != 'true'
+        run: .github/scripts/build-webrtc.sh deps/webrtc
       - name: Build
         run: nim c -d:release -o:dingbat src/dingbat.nim
       - name: Smoke test (Xvfb, Mesa's software OpenGL)
@@ -131,6 +142,17 @@ jobs:
           for p in "https://github.com/nim-lang/sdl3@#bb137829ff619b0a27a473628cb28fc1c86f3fe5" imguin yaml stb_image zippy; do
             "$GITHUB_WORKSPACE/.github/scripts/retry.sh" 3 nimble install -y "$p"
           done
+      - name: Cache the online-link library
+        # libdatachannel + mbedTLS, static (.github/scripts/build-webrtc.sh): keyed
+        # on the script, which pins both versions.
+        id: webrtc-cache
+        uses: actions/cache@v4
+        with:
+          path: deps/webrtc
+          key: webrtc-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.github/scripts/build-webrtc.sh') }}
+      - name: Build the online-link library
+        if: steps.webrtc-cache.outputs.cache-hit != 'true'
+        run: .github/scripts/build-webrtc.sh deps/webrtc
       - name: Build (self-contained)
         run: nim c -d:release -d:macdist -o:dingbat_dist src/dingbat.nim
       - name: Verify no Homebrew dependency
@@ -213,6 +235,17 @@ jobs:
           for p in "https://github.com/nim-lang/sdl3@#bb137829ff619b0a27a473628cb28fc1c86f3fe5" imguin yaml stb_image zippy; do
             "$GITHUB_WORKSPACE/.github/scripts/retry.sh" 3 nimble install -y "$p"
           done
+      - name: Cache the online-link library
+        # libdatachannel + mbedTLS, static (.github/scripts/build-webrtc.sh): keyed
+        # on the script, which pins both versions.
+        id: webrtc-cache
+        uses: actions/cache@v4
+        with:
+          path: deps/webrtc
+          key: webrtc-mingw64-${{ hashFiles('.github/scripts/build-webrtc.sh') }}
+      - name: Build the online-link library
+        if: steps.webrtc-cache.outputs.cache-hit != 'true'
+        run: .github/scripts/build-webrtc.sh deps/webrtc --mingw
       - name: Build dingbat.exe
         # build.sh's own nimble step is the image's; the deps are in already.
         env:

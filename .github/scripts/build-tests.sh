@@ -53,12 +53,18 @@ build lcdresponse     dingbat_lcdresponse_test      tests/lcdresponse_test.nim
 build savefooter      dingbat_savefooter_test       tests/savefooter_test.nim
 build mbc3            dingbat_mbc3_test             tests/mbc3_test.nim
 build desktopnetlink  dingbat_desktop_netlink_test  tests/desktop_netlink_test.nim
+build gbrollbackkeys  dingbat_gb_rollback_keys_test tests/gb_rollback_keys_test.nim
 build gbartc          dingbat_gbartc_test           tests/gba_rtc_test.nim
 build desktopinput    dingbat_desktop_input_test    tests/desktop_input_test.nim
 build desktopsettings dingbat_desktop_settings_test tests/desktop_settings_test.nim
 build desktoppersist  dingbat_desktop_persist_test  tests/desktop_persist_test.nim
 build desktoplifecycle dingbat_desktop_lifecycle_test tests/desktop_lifecycle_test.nim
 build desktopnds      dingbat_desktop_nds_test      tests/desktop_nds_test.nim
+# The online link links libdatachannel (build-webrtc.sh): only where it was
+# built (test.yml builds it on Linux).
+if [ -f deps/webrtc/lib/libwebrtcdc.a ]; then
+  build desktoponline dingbat_desktop_online_link_test tests/desktop_online_link_test.nim
+fi
 build clipreplay      dingbat_clipreplay_test       tests/clip_replay_test.nim
 build mp2kpass        dingbat_mp2kpass_test         tests/mp2k_pass_test.nim
 build cyclelaws       dingbat_cyclelaws_test        tests/cyclelaws_test.nim

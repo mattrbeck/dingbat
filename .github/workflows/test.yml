@@ -78,6 +78,18 @@ jobs:
           path: .nimcache-tests
           key: nimcache-tests-${{ runner.os }}-nim${{ env.NIM_VERSION }}-${{ hashFiles('src/**/*.nim', 'src/**/*.c', 'src/**/*.h', 'tests/**/*.nim', 'nim.cfg', '.github/scripts/build-tests.sh') }}
           restore-keys: nimcache-tests-${{ runner.os }}-nim${{ env.NIM_VERSION }}-
+      - name: Cache the online-link library
+        # libdatachannel + mbedTLS, static (.github/scripts/build-webrtc.sh): keyed
+        # on the script, which pins both versions.
+        id: webrtc-cache
+        if: runner.os == 'Linux'
+        uses: actions/cache@v4
+        with:
+          path: deps/webrtc
+          key: webrtc-${{ runner.os }}-latest-${{ hashFiles('.github/scripts/build-webrtc.sh') }}
+      - name: Build the online-link library
+        if: runner.os == 'Linux' && steps.webrtc-cache.outputs.cache-hit != 'true'
+        run: .github/scripts/build-webrtc.sh deps/webrtc
       - name: Build test binaries (in parallel)
         # Independent `nim c` runs in parallel; the steps below only run
         # what this built. Flag rationale lives in the script.
@@ -229,6 +241,20 @@ jobs:
         # session. Localhost ports 47930-47941.
         shell: bash
         run: ./dingbat_desktop_netlink_test
+      - name: GB rollback with buttons changing every frame
+        # gb/rollback.nim: two peers at uneven latencies agree with each other
+        # and a straight run (checkpoints keep each joypad's held keys).
+        shell: bash
+        run: ./dingbat_gb_rollback_keys_test
+      - name: Desktop online link (two links, local signaling server)
+        # frontend/online_link.nim over real WebRTC data channels: pairing,
+        # both sides' rollback cores bit-identical, attachtest.gba's rounds
+        # through them, a cross-game ROM transfer, a dropped connection
+        # resuming, Disconnect, a GB pair. Linux only: the Windows runner
+        # has no libdatachannel build (the Windows app links it cross-built).
+        if: runner.os == 'Linux'
+        shell: bash
+        run: ./dingbat_desktop_online_link_test
       - name: GBA cartridge RTC and battery-save RTC trailer
         # S-3511A protocol writes/reads/strobes, datasheet data validation, the
         # FlashGBX/mGBA 16-byte trailer (real reference bytes), EEPROM sizing,
@@ -521,6 +547,17 @@ jobs:
           for p in "https://github.com/nim-lang/sdl3@#bb137829ff619b0a27a473628cb28fc1c86f3fe5" imguin yaml stb_image zippy; do
             "$GITHUB_WORKSPACE/.github/scripts/retry.sh" 3 nimble install -y "$p"
           done
+      - name: Cache the online-link library
+        # libdatachannel + mbedTLS, static (.github/scripts/build-webrtc.sh): keyed
+        # on the script, which pins both versions.
+        id: webrtc-cache
+        uses: actions/cache@v4
+        with:
+          path: deps/webrtc
+          key: webrtc-${{ runner.os }}-22.04-${{ hashFiles('.github/scripts/build-webrtc.sh') }}
+      - name: Build the online-link library
+        if: steps.webrtc-cache.outputs.cache-hit != 'true'
+        run: .github/scripts/build-webrtc.sh deps/webrtc
       - name: Restore the GUI build's nimcache
         # main's latest, as the test job's.
         id: nimcache
@@ -544,6 +581,73 @@ jobs:
           # A runner has no sound device; the dummy driver still paces.
           SDL_AUDIO_DRIVER: dummy
         run: xvfb-run -a -s "-screen 0 1280x1024x24" tests/desktop_gui_test.sh
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Desktop app linked online (Xvfb)
+        # tests/desktop_online_e2e.sh: the app started with --online pairs
+        # with tests/online_peer.nim through a local signaling server; both
+        # sides' cores must agree at frame 900.
+        timeout-minutes: 5
+        env:
+          DINGBAT_GUI_BIN: ${{ github.workspace }}/dingbat_gui_test
+          SDL_AUDIO_DRIVER: dummy
+        run: xvfb-run -a -s "-screen 0 1280x1024x24" tests/desktop_online_e2e.sh
+
+  desktop-web-link:
+    # web/e2e/link-native.e2e.mjs: a browser (the wasm build) and the
+    # desktop's online link (tests/online_peer.nim, native) linked through a
+    # local signaling server, each side running both players' cores: both
+    # must hold byte-identical states, GBA either side hosting, GB, and a
+    # cross-game pair.
+    needs: wasm
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: jiro4989/setup-nim-action@v2
+        with:
+          nim-version: ${{ env.NIM_VERSION }}
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: wasm
+          path: web
+      - name: Cache the online-link library
+        # libdatachannel + mbedTLS, static (.github/scripts/build-webrtc.sh): keyed
+        # on the script, which pins both versions.
+        id: webrtc-cache
+        uses: actions/cache@v4
+        with:
+          path: deps/webrtc
+          key: webrtc-${{ runner.os }}-24.04-${{ hashFiles('.github/scripts/build-webrtc.sh') }}
+      - name: Build the online-link library
+        if: steps.webrtc-cache.outputs.cache-hit != 'true'
+        run: .github/scripts/build-webrtc.sh deps/webrtc
+      - name: Install dependencies
+        shell: bash
+        run: .github/scripts/install-test-deps.sh
+      - name: Build the native player
+        run: nim c -d:release -d:test_harness --hints:off --path:src -o:online_peer tests/online_peer.nim
+      - name: Cache Playwright's browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-native-${{ runner.os }}-${{ hashFiles('web/package-lock.json') }}
+      - name: Chromium
+        working-directory: web
+        run: |
+          set -e
+          ../.github/scripts/retry.sh 3 npm ci
+          ../.github/scripts/retry.sh 3 npx playwright install --with-deps chromium
+      - name: Browser and desktop linked online
+        working-directory: web
+        env:
+          ONLINE_PEER_BIN: ${{ github.workspace }}/online_peer
+        run: node --test --test-concurrency=1 e2e/link-native.e2e.mjs
 
   wasm:
     # The web build, made once for the end-to-end jobs (the test job never

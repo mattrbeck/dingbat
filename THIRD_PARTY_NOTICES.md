@@ -25,11 +25,14 @@ licence asks to be kept.
 | NimYAML | MIT | Felix Krause |
 | stb_image, stb_image_write | public domain / MIT | Sean Barrett |
 
-## Compiled into the iOS build only
+## Compiled into the iOS and desktop builds
 
 The online link's WebRTC data channel, built unmodified from the pinned
-tags by `ios/build-webrtc.sh` (libdatachannel v0.24.6, mbedTLS v3.6.7).
-The MPL-2.0 components' source is the upstream source at those tags.
+tags by `ios/build-webrtc.sh` and `.github/scripts/build-webrtc.sh`
+(libdatachannel v0.24.6, mbedTLS v3.6.7). The desktop's signaling socket
+uses the same mbedTLS, checked against Let's Encrypt's root certificates
+(`src/dingbat/frontend/link_roots.pem`, ISRG). The MPL-2.0 components'
+source is the upstream source at those tags.
 
 | Component | Licence | Copyright |
 |---|---|---|

@@ -67,6 +67,9 @@ web/rom.gbc
 /singlestep_test.exe
 /dingbat_bench
 /dingbat_desktop_netlink_test
+/dingbat_desktop_online_link_test
+/dingbat_gb_rollback_keys_test
+/online_peer
 /dingbat_desktop_persist_test
 /dingbat_bench_native
 /dingbat_ts_test
@@ -224,3 +227,6 @@ tests/nds/src/**/*.elf
 /tools/ndsref/ndsref
 /tools/ndsref/ndsrun
 /dingbat_ndsperiph_test
+
+# Built by .github/scripts/build-webrtc.sh (nimble webrtc)
+deps/
