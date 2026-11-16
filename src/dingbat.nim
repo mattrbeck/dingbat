@@ -15,6 +15,7 @@ import dingbat/gb/gb
 import dingbat/frontend/file_explorer
 import dingbat/frontend/notice
 import dingbat/frontend/config_editor
+import dingbat/frontend/imgui_settings
 import dingbat/frontend/keybindings_widget
 import dingbat/frontend/controller_widget
 import dingbat/frontend/held_input
