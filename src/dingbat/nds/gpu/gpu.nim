@@ -157,8 +157,7 @@ proc capture_line(g: Gpu; y: int) =
       if a_3d:
         # "Dest_Intensity = SrcA_Intensity; Dest_Alpha = SrcA_Alpha"
         # (GBATEK): a transparent 3D dot keeps its colour, without bit 15
-        # (disp_capture SRC3: the rear plane's colour, as all three
-        # reference cores have it)
+        # (disp_capture SRC3: the rear plane's colour)
         if l3 != nil:
           ca = to_bgr555(l3[x]) or (if alpha5(l3[x]) != 0: 0x8000'u16 else: 0)
       else:
@@ -462,7 +461,7 @@ proc hd_line(g: Gpu; y: int; a_top, lcd_on, cap: bool) =
   # on lines that need it), an opaque one `hd_dot` (the line painted once
   # with the 3D layer opaque, then the effect and master brightness rules
   # on that dot alone). Equal to compositing every sub-dot column whole
-  # (`render_hd_sub`, which 08b4eb78 did): docs/nds/hd3d.md.
+  # (`render_hd_sub`): docs/nds/hd3d.md.
   if has3d and (dm == 1 or cap_gfx):
     let l1x = addr g3.line
     let hofs = int(a.bghofs[0])

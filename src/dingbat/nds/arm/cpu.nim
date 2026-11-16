@@ -503,8 +503,7 @@ template single_access[B](cpu: ArmCpu[B]; load: bool) =
   ## in parallel)"), so the access overlaps the opcode's own cycle (the
   ## bus's `data_overlap`) and the load interlock (GBATEK's "1L", charged
   ## only when the next opcode uses the result) is not modelled: Assumed
-  ## hidden. disp_cpu9time measures the same on the reference core
-  ## (docs/nds/accuracy.md).
+  ## hidden (disp_cpu9time, docs/nds/accuracy.md).
   mixin data_overlap, armv5
   when armv5(B): data_overlap(cpu.bus)
   else:
@@ -1238,9 +1237,8 @@ proc step*[B](cpu: ArmCpu[B]) {.inline.} =
 # exactly until something outside changes. Inside one `run` nothing outside
 # runs, so the whole repeats that fit before `until` are counted instead of
 # executed: the clock and the opcode count advance by whole repeats, exactly
-# as executing them would. The GBA core's waitloop skipping follows the same
-# rule: output with skipping on must equal output with it off, byte for
-# byte (docs/nds/perf.md).
+# as executing them would. Output with skipping on must equal output with
+# it off, byte for byte (docs/nds/perf.md).
 #
 # Events and frontend calls change devices -- registers, VRAM (display
 # capture), the 3D engine -- and memory only through stores, which bump the

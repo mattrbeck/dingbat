@@ -50,7 +50,7 @@ proc update_tcm(c: var Cp15) =
 
 proc reset*(c: var Cp15) =
   c = Cp15()
-  c.control = 0x00012078'u32   ## reset value: DTCM on, everything else off
+  c.control = 0x00012078'u32   ## reset value: DTCM on, high vectors, ITCM off
   c.update_tcm()
 
 proc vector_base*(c: Cp15): uint32 =
@@ -106,7 +106,7 @@ proc write*(c: var Cp15; op1, cn, cm, op2, v: uint32) =
   of 6: c.prot_regions[cm and 7] = v
   of 7:
     if (cm == 0 and op2 == 4) or (cm == 8 and op2 == 2): c.halt_request = true
-    # cache maintenance: nothing to do without a cache model
+    # cache maintenance: bus9.nim cp15_write (caches in timing.nim)
   of 9:
     if cm == 1:
       if op2 == 1: c.itcm_reg = v and 0x3E'u32   # ITCM base is fixed at 0

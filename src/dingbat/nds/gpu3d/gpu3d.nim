@@ -189,13 +189,12 @@ proc cmd_cycles(g: Gpu3d; cmd: uint8; mode: int; attr: uint32): int64 =
   case cmd
   of 0x18, 0x19, 0x1A, 0x1C:
     # "In MTX_MODE=2 (Simultaneous Set), MTX_MULT/TRANS take additional 30
-    # cycles" (GBATEK; MTX_SCALE has no asterisk and the reference runs
-    # agree it pays none: 3d_timing_cmds SCAL)
+    # cycles" (GBATEK; MTX_SCALE has no asterisk and pays none:
+    # 3d_timing_cmds SCAL)
     if mode == 2: n += 30
   of 0x21:
     # NORMAL: 9..12 for 0..4 lights per GBATEK, which leaves open which
-    # counts share a value; the reference runs give 9, 9, 10, 11, 12
-    # (3d_timing_cmds NRM; docs/oracles.md)
+    # counts share a value: 9, 9, 10, 11, 12 (3d_timing_cmds NRM)
     var lights = 0
     for i in 0..3:
       if (attr and (1'u32 shl i)) != 0: inc lights
@@ -214,7 +213,7 @@ proc write_time(g: Gpu3d): int64 {.inline.} =
 proc fifo_level(g: Gpu3d): int {.inline.} =
   ## FIFO entries as GXSTAT counts them: the first PIPE entries queued
   ## behind a stalled command sit in the PIPE, not the FIFO (3d_status:
-  ## 40 queued behind SWAP_BUFFERS read as 36 on the reference core)
+  ## 40 queued behind SWAP_BUFFERS read as 36)
   min(FIFO_SIZE, max(0, g.fifo.len - PIPE))
 
 proc fifo_wants_dma*(g: Gpu3d): bool {.inline.} = g.fifo_level < 128
@@ -330,9 +329,8 @@ proc gxstat(g: Gpu3d): uint32 =
   g.catch_up(t)
   let running = t < g.cur_end
   let busy = running or g.fifo.len > 0 or g.swap_pending or g.pk_left > 0
-  # bit 0 while a test runs, bit 14 while a push/pop does (GBATEK; the
-  # reference runs flag MTX_STORE/RESTORE as not stack-busy too:
-  # 3d_timing_cmds MID)
+  # bit 0 while a test runs, bit 14 while a push/pop does (GBATEK);
+  # MTX_STORE/RESTORE are not stack-busy (3d_timing_cmds MID)
   let testing = running and g.cur_cmd in 0x70'u8..0x72'u8
   let stacking = running and g.cur_cmd in 0x11'u8..0x12'u8
   result = (if testing: 1'u32 else: 0) or (if geo.box_result: 2'u32 else: 0) or

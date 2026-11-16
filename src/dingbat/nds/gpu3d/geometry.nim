@@ -80,9 +80,8 @@ const
   HD_SUB* = 192   ## hd_screen's sub-dot steps: exact at 2x, 3x, 4x, 6x, 8x
   # Texcoord transform modes 2 and 3: (N or V, 1.0) * texture matrix, the
   # sum shifted right by these. GBATEK's parts table (N 1.9, V 4.12, matrix
-  # 20.12, S/T 12.4) would give 17 and 20; the 3d_texcoord ROM on the
-  # reference cores (all three agree) pins 21 and 24 exactly, i.e. the
-  # products keep no fraction bits at all (docs/oracles.md, NDS core).
+  # 20.12, S/T 12.4) would give 17 and 20; 3d_texcoord pins 21 and 24
+  # exactly, i.e. the products keep no fraction bits at all.
   TEXGEN_NORMAL_SHIFT {.intdefine.} = 21
   TEXGEN_VERTEX_SHIFT {.intdefine.} = 24
   MAX_POLYS* = 2048
@@ -256,9 +255,9 @@ proc set_light_vector(g: Geometry; p: uint32) =
   let l = g.vec_mul3(sext10(p) shl 3, sext10(p shr 10) shl 3, sext10(p shr 20) shl 3)
   g.light_vec[i] = l
   # half vector: light + line of sight (0, 0, -1.0) (GBATEK), here scaled
-  # to unit length: the specular falloff of the reference cores
-  # (3d_probe_light_spec/_tab) is cos(2 * angle to the unit half vector),
-  # far sharper than GBATEK's square of the unnormalised dot product
+  # to unit length: the specular falloff (3d_probe_light_spec/_tab) is
+  # cos(2 * angle to the unit half vector), far sharper than GBATEK's
+  # square of the unnormalised dot product
   let hx = float(l[0])
   let hy = float(l[1])
   let hz = float(l[2] - ONE)
@@ -285,8 +284,8 @@ proc apply_normal(g: Geometry; p: uint32) =
     if (g.attr and (1'u32 shl i)) == 0: continue
     let l = g.light_vec[i]
     let h = g.half_vec[i]
-    # the diffuse level keeps 8 fraction bits (3d_probe_light; docs/oracles.md:
-    # reference cores; a 12-bit level is one step brighter on 22 of 192)
+    # the diffuse level keeps 8 fraction bits (3d_probe_light; a 12-bit
+    # level is one step brighter on 22 of 192)
     let dif = (clamp(-((int64(l[0]) * n[0] + int64(l[1]) * n[1] + int64(l[2]) * n[2]) shr 12),
                      0'i64, int64(ONE)) shr 4) shl 4
     var shi = clamp(-((int64(h[0]) * n[0] + int64(h[1]) * n[1] + int64(h[2]) * n[2]) shr 12),
@@ -325,8 +324,7 @@ proc intersect(a, b: Vertex; da, db: int64; plane: int): Vertex =
   ## computed from the inside vertex `a` so shared edges clip identically.
   let den = da - db
   # coordinates and texcoords round down, colours (5-bit) round up
-  # (3d_probe_clip / _clip_persp / _clipq, 3d_vcolor, 3d_clip on the
-  # reference core)
+  # (3d_probe_clip / _clip_persp / _clipq, 3d_vcolor, 3d_clip)
   template lerp(f: untyped): int32 =
     lo32(int64(a.f) + floorDiv((int64(b.f) - a.f) * da, den))
   template clerp(f: untyped): int32 =
@@ -358,7 +356,7 @@ proc clip_polygon*(src: openArray[Vertex]; dst: var array[MAX_CLIP, Vertex]): in
   var n = src.len
   for i in 0 ..< n: a[i] = src[i]
   # near/far first, then y, then x: vertices cut by two planes (a corner)
-  # come out as the reference core has them (3d_vcolor, 3d_clip)
+  # come out as 3d_vcolor and 3d_clip expect
   const ORDER = [4, 5, 2, 3, 0, 1]
   for plane in ORDER:
     var m = 0

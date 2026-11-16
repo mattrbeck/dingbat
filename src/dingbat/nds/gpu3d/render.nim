@@ -3,31 +3,27 @@
 ## (GBATEK "DS 3D Display Control", "Texture Formats/Coordinates/Blending",
 ## "Toon, Edge, Fog, Alpha-Blending, Anti-Aliasing", "Rear-Plane").
 ##
-## Pixel format (also the format of Gpu3d.line): bits 0-5 red, 8-13 green,
-## 16-21 blue (6-bit, the 3D engine's 18-bit colour), bits 24-28 alpha
-## (0..31). Alpha 0 is transparent.
+## Pixel format (also Gpu3d.line's): bits 0-5 red, 8-13 green, 16-21 blue
+## (6-bit), bits 24-28 alpha (0..31, 0 transparent).
 ##
 ## Per polygon: rows from the top vertex row down to (not including) the
-## bottom one; on each row the edges two chains of vertices have reached
-## cover runs of dots and the span runs between them (edge rules below, at
-## Edge; chains and swapped rows at draw_polygon). Attributes are
-## interpolated along the edges, then across the span: linearly where the
-## two ends' w are equal, else perspective-correctly with 9-bit (edge) and
-## 8-bit (span) factors. Colours carry 9 bits through interpolation.
-## Z-buffer depth interpolates linearly in screen space: exactly along
-## edges, by an 18-bit reciprocal of the span's length across it
-## (3d_probe_zinterp*); W-buffer depth as the other attributes (Assumed).
+## bottom one; two vertex chains give each row's edge runs and the span
+## between (edge rules at Edge; chains and swapped rows at draw_polygon;
+## docs/nds/3d-edges.md). Attributes interpolate along the edges, then across
+## the span: linearly where both ends' w are equal, else perspective-correctly
+## with 9-bit (edge) and 8-bit (span) factors. Colours carry 9 bits.
+## Z-buffer depth is linear in screen space: exact along edges, by an 18-bit
+## reciprocal of the span's length across it (3d_probe_zinterp*); W-buffer
+## depth as the other attributes (Assumed).
 ##
-## Line budget (GBATEK "DS 3D Overview", RDLINES_COUNT): the hardware
-## renders line by line into a 48-line cache from line 214 on, and the
-## display takes a line from it at each line start; a line not ready by
-## then is an underflow (DISP3DCNT.12). Each frame's line costs are
-## estimated while drawing (`line_cost`: RENDER_POLY_CYCLES per polygon on
-## the line plus its span at RENDER_DOTS_PER_CYCLE; both Assumed, GBATEK
-## gives no figures and the reference runs do not model it:
-## 3d_timing_rdlines) and `budget` replays them against the display to
-## give the frame's RDLINES_COUNT (the fewest lines ever buffered, minus 2)
-## and whether it underflowed. The picture itself is unaffected.
+## Line budget (GBATEK "DS 3D Overview", RDLINES_COUNT): the hardware renders
+## into a 48-line cache from line 214 on; the display takes a line at each
+## line start, and one not ready is an underflow (DISP3DCNT.12). `line_cost`
+## estimates each line (RENDER_POLY_CYCLES per polygon on it plus its span at
+## RENDER_DOTS_PER_CYCLE; both Assumed, GBATEK gives no figures:
+## docs/nds/3d-timing.md) and `budget` replays them against the display for
+## RDLINES_COUNT (the fewest lines ever buffered, minus 2) and underflow. The
+## picture itself is unaffected.
 ##
 ## TODO(3d): rendering per line against mid-frame writes.
 
@@ -248,18 +244,17 @@ proc texel_uv[S: static int](r: RendererOf[S]; tex, pltt: uint32; u, v: int): ui
     let b = r.tex8(base + i)
     rgb6(r.pal16(pbase + int(b and 7) * 2)) or ((b shr 3) shl 24)
   of 7:   # direct colour, bit 15 = alpha (a transparent texel keeps its
-          # colour: wire-frames show it, 3d_lines on the reference cores)
+          # colour: wire-frames show it, 3d_lines)
     let c = r.tex16(base + i * 2)
     rgb6(c) or (if (c and 0x8000) == 0: 0'u32 else: 31'u32 shl 24)
   else: 0'u32
 
-# Decoded texels. A texel is a function of the texture parameters that
-# address it (TEXIMAGE_PARAM's address, size, format and colour-0 bit and,
-# for the paletted formats, PLTT_BASE), its (u, v) and the texture and
-# palette slots' contents, which change only with vram.tex_gen (a bank in a
-# slot has no CPU address: gpu3d.nim render_frame, docs/nds/perf.md "3D
-# frame reuse"). So each texture keeps a buffer of its texels, decoded by
-# texel_uv the first time a dot reads one, for as long as tex_gen stands.
+# Decoded texels. A texel depends only on TEXIMAGE_PARAM (address, size,
+# format, colour-0 bit), PLTT_BASE for the paletted formats, its (u, v) and
+# the texture and palette slots, which change only with vram.tex_gen (a slot
+# bank has no CPU address: gpu3d.nim render_frame, docs/nds/perf.md "3D frame
+# reuse"). So each texture caches its texels, decoded by texel_uv on first
+# read, while tex_gen stands.
 
 const
   NOT_DECODED = 0xFFFF_FFFF'u32
@@ -351,12 +346,11 @@ when defined(r3dprof):
 # to its bottom one and covers rows y0 ..< y1; its x on row y is
 #   X(y) = x0 << 18 + slope * (y - y0)  (minus 1 when x decreases),
 # slope = dx * floor(2^18 / dy), or exactly +-1.0 when |dx| == dy.
-# On each row an edge covers a run of dots: x-major edges (|dx| > dy) the
-# dots whose centres lie between X(y) and X(y) + the slope with its low 9
-# bits cleared (rounded, half up: the hardware line captures), other edges
-# the one dot holding X(y); a vertical right edge covers the dot left of
-# it. These are the rules the 3d_probe_tri* ROMs pin (run against the
-# reference cores, docs/oracles.md).
+# Per row, an x-major edge (|dx| > dy) covers the dots whose centres lie
+# between X(y) and X(y) + the slope with its low 9 bits cleared (rounded half
+# up: hardware line captures); other edges the one dot holding X(y); a
+# vertical right edge the dot left of it. Pinned by 3d_probe_tri*;
+# docs/nds/3d-edges.md "Edge rules".
 
 const
   XSHIFT = 18
@@ -464,10 +458,9 @@ proc edge_run(e: Edge; y: int; right: bool): Run {.inline.} =
 proc lin(a, b, n, d: int64): int64 {.inline.} =
   a + floorDiv((b - a) * n, d)
 
-# The divisor is 0 only where both points weigh nothing (w = 0: the eye
-# point in clip space). The factor is then 0, what an arm64 division by
-# zero answers, so every host draws it alike and the wasm build doesn't
-# trap. What the hardware does there is not known (Assumed).
+# The divisor is 0 only where both points have w = 0 (the eye point in clip
+# space). The factor is then 0, as an arm64 division by zero gives, so every
+# host agrees and wasm doesn't trap. Hardware behaviour unknown (Assumed).
 template pfac(n, d, w0, w1: int64; P: int): int64 =
   block:
     let num = n * w0
@@ -520,7 +513,7 @@ proc blend_texel[S: static int](r: RendererOf[S]; c: PolyCtx; textured: bool; mo
     if not textured or ta == 0: return pack(vr, vg, vb, av)
     if ta == 31: return pack(tr, tg, tb, av)
     # 5-bit texel alpha over 32 (GBATEK writes (Rt*At + Rv*(63-At))/64;
-    # 3d_blendmodes on the reference core pins this form exactly)
+    # 3d_blendmodes pins this form)
     pack((tr * ta + vr * (31 - ta)) shr 5, (tg * ta + vg * (31 - ta)) shr 5,
          (tb * ta + vb * (31 - ta)) shr 5, av)
   of 2:
@@ -531,9 +524,9 @@ proc blend_texel[S: static int](r: RendererOf[S]; c: PolyCtx; textured: bool; mo
     let sb = ch(sc, 2)
     var rr, gg, bb: int32
     if c.highlight:
-      # highlight: the texel modulated by the vertex red as a grey, plus
-      # the table colour (GBATEK modulates by the table colour; the
-      # reference core's 3d_highlight frame pins this form exactly)
+      # highlight: the texel modulated by the vertex red as a grey, plus the
+      # table colour (GBATEK modulates by the table colour; 3d_highlight pins
+      # this form)
       rr = min(63, (((tr + 1) * (vr + 1) - 1) shr 6) + sr)
       gg = min(63, (((tg + 1) * (vr + 1) - 1) shr 6) + sg)
       bb = min(63, (((tb + 1) * (vr + 1) - 1) shr 6) + sb)
@@ -580,11 +573,9 @@ proc step_to(sp: var SpanStep; n: int64) {.inline, codegenDecl: "static inline _
     sp.acc = nn - sp.f * sp.d
   sp.n = n
 
-# Dot kinds. `plot_k` is instantiated once with nothing known (K = 0:
-# every flag read from the context, as each edge dot is drawn) and, for the
-# runs between the edges (`fill`), once per combination of these facts,
-# which `fill` checks before choosing one; a known flag is a constant the C
-# compiler folds, so each instance is the same code with fewer tests.
+# Dot kinds. `plot_k` has one generic instance (K = 0: every flag read from
+# the context; edge dots) and, for `fill`'s runs, one per combination of
+# these facts, which `fill` checks first; a known flag folds to a constant.
 const
   K_SIMPLE = 1      ## not wire-frame, no edge-marking rule, modulation, depth test "less"
   K_TEX = 2         ## textured
@@ -630,11 +621,9 @@ proc plot_k[S, K: static int](r: RendererOf[S]; c: PolyCtx; x, y: int; L, R: End
       fl = sp.f
       fc = fl + (if sp.acc != 0: 1'i64 else: 0'i64)
     let dz = R.z - L.z
-    # depth steps across the span by an 18-bit reciprocal of its length,
-    # so it lands just short of the exact value at whole steps: a polygon
-    # drawn later wins the tie where its depth rises along the span
-    # (3d_probe_zinterp_x on the reference cores; any 16..30 bits fit,
-    # 18 Assumed like the edge slope's)
+    # depth steps by an 18-bit reciprocal of the span length, landing just
+    # short of the exact value: a later polygon wins the tie where its depth
+    # rises along the span (3d_probe_zinterp_x; 16..30 bits fit, 18 Assumed)
     z = L.z + ashr(dz * n * sp.zk, 18)
     if eqw:
       w = L.w
@@ -655,15 +644,11 @@ proc plot_k[S, K: static int](r: RendererOf[S]; c: PolyCtx; x, y: int; L, R: End
   let old = r.px[i].depth
   var pass = if not simple and (c.attr and 0x4000) != 0: abs(int64(dval) - int64(old)) <= 0x200
              else: dval < old
-  # With edge marking on and anti-aliasing off, where edges of two opaque
-  # polygons with the same ID overlap, a left edge wins over a right one
-  # (y-major, diagonal or vertical) and a top x-major run or top row over
-  # a bottom one, whichever is nearer and whichever comes first
-  # (polyrastertest's "curse of edge marking": the author's notes, "right
-  # ymajor/vert (overriden by left ymajor/vert), bottom xmajor/flat
-  # (overriden by top xmajor/flat)", and the recorded colours of 38, 39, 43:
-  # a further polygon's top run shows over the nearer one's bottom run or
-  # bottom row; 42: a right diagonal over a bottom run does nothing).
+  # Edge marking without AA: where edges of two opaque same-ID polygons
+  # overlap, a left edge beats a right one (y-major, diagonal or vertical) and
+  # a top x-major run or top row beats a bottom one, whatever the depth or
+  # drawing order (polyrastertest 38-43; docs/nds/3d-edges.md "Overlapping
+  # edges with edge marking").
   if not simple and c.curse and role != 0 and r.px[i].opaque_id == c.id and r.px[i].trans_id == NO_ID:
     let was = r.px[i].flags
     if (role == ROLE_LEFT and (was and ROLE_RIGHT) != 0) or
@@ -674,11 +659,10 @@ proc plot_k[S, K: static int](r: RendererOf[S]; c: PolyCtx; x, y: int; L, R: End
     inc prof_dots
     if pass: inc prof_pass
   if mode == 3:
-    # Shadow volumes (GBATEK "DS 3D Shadow Polygons"), as the reference
-    # cores agree on 3d_shadow: the mask (ID 0) flags the dots where its
-    # back side is hidden, i.e. where the scene lies inside the volume; the
-    # shadow (ID > 0) draws only on flagged dots, clearing the flag, and
-    # not on its own polygon ID. A shadow with no mask draws nothing.
+    # Shadow volumes (GBATEK "DS 3D Shadow Polygons"; 3d_shadow): the mask
+    # (ID 0) flags the dots where its back side is hidden, i.e. inside the
+    # volume; the shadow (ID > 0) draws only on flagged dots, clearing the
+    # flag, and not on its own polygon ID. A shadow with no mask draws nothing.
     if c.id == 0:
       if not pass: r.px[i].flags = r.px[i].flags or FLAG_STENCIL
       return
@@ -687,12 +671,10 @@ proc plot_k[S, K: static int](r: RendererOf[S]; c: PolyCtx; x, y: int; L, R: End
     if not pass or r.px[i].opaque_id == c.id: return
   elif not pass:
     # With anti-aliasing each dot keeps two layers: the top one and the
-    # nearest one behind it, which a partly covered top dot mixes over at
-    # the end. A dot hidden by the top layer still lands in the one behind
-    # when it is nearer than that: opaque ones replace it, translucent ones
-    # blend into it, whatever the drawing order (3d_aa, 3d_probe_aa2,
-    # 3d_probe_aa3 on the reference cores). Only dots whose top is partly
-    # covered or an edge ever read it.
+    # nearest one behind it, which a partly covered top dot mixes over at the
+    # end. A dot hidden by the top layer still lands behind when nearer than
+    # that layer: opaque replaces, translucent blends, in any drawing order
+    # (3d_aa, 3d_probe_aa2/_aa3). Only partly covered or edge tops read it.
     if not aa or (r.px[i].aacov >= 31 and (r.px[i].flags and FLAG_EDGE) == 0) or
        dval >= r.px[i].below_depth: return
   template c6(a, b: int64): int32 =
@@ -705,8 +687,8 @@ proc plot_k[S, K: static int](r: RendererOf[S]; c: PolyCtx; x, y: int; L, R: End
   if textured:
     tx = r.tex_at(c, at(L.s, R.s), at(L.t, R.t))
   var px = r.blend_texel(c, textured, mode, vr, vg, vb, tx)
-  # wire-frame lines are drawn at alpha 31 (GBATEK), whatever the texel's
-  # alpha: transparent texels too (3d_lines on the reference cores)
+  # wire-frame lines draw at alpha 31 (GBATEK), even transparent texels
+  # (3d_lines)
   if not simple and c.wire: px = px or (31'u32 shl 24)
   let a = int32(px shr 24)
   if a <= c.aref: return
@@ -794,7 +776,7 @@ proc fill[S: static int](r: RendererOf[S]; c: PolyCtx; y, x0, x1: int; L, R: End
 
 proc aa_cov(e: Edge; y, x: int; right: bool; lend = 0'i32): int32 =
   ## Anti-aliasing coverage (0..31) of dot x on row y by edge e
-  ## (3d_probe_aa, 3d_probe_aa4 on the reference cores). y-major edges
+  ## (3d_probe_aa, 3d_probe_aa4). y-major edges
   ## measure where the edge crosses the row's middle within the dot: right
   ## edges keep floor(32 * covered), left ones 31 - floor(32 * uncovered).
   ## x-major edges measure a 10-bit edge height h at the dot's centre from
@@ -855,9 +837,8 @@ proc draw_polygon[S: static int; P: static bool](r: RendererOf[S]; vram: Vram; p
                   # alpha test: drawn only if alpha > ALPHA_TEST_REF (> 0 when off)
                   aref: (if (disp3dcnt and 4) != 0: int32(r.reg8(0x340) and 31) else: 0'i32),
                   aa: (disp3dcnt and 0x10) != 0, wire: wire,
-                  # the overlapping-edge rule: "Edgemarking (only)", not
-                  # translucent polygons, wire-frames too (polyrastertest's
-                  # notes)
+                  # the overlapping-edge rule: edge marking only, not
+                  # translucent, wire-frames too
                   curse: (disp3dcnt and 0x30) == 0x20 and not poly.translucent and
                          ((poly.attr shr 4) and 3) != 3)
   if c.textured:
@@ -881,15 +862,14 @@ proc draw_polygon[S: static int; P: static bool](r: RendererOf[S]; vram: Vram; p
   # anti-aliasing leave out their bottom/right edges
   let full = wire or line or (disp3dcnt and 0x30) != 0 or poly.translucent and c.blend
   # anti-aliasing (DISP3DCNT.4): edges of opaque polygons, lines and
-  # wire-frames included ("accidentally", GBATEK: dirty lines with missing
-  # dots, as the reference runs of 3d_aa draw them), not translucent ones
+  # wire-frames too ("accidentally", GBATEK: dirty lines with missing dots,
+  # 3d_aa), not translucent ones
   let aa = (disp3dcnt and 0x10) != 0 and not poly.translucent
   if ymin == ymax:
     # all on one row: the dots from the leftmost to the rightmost of the
-    # first vertex and its two neighbours, the right end left out (the
-    # chains step once each way from the top vertex: polyrastertest's
-    # horizontal line polygons "always render 1-4, 1-2 or 2-4, 3 is never
-    # rendered", also once clipped)
+    # first vertex and its two neighbours, right end excluded (each chain
+    # steps once from the top vertex; polyrastertest's horizontal lines, also
+    # when clipped)
     if ymin < 0 or ymin >= HS: return
     var li, ri = 0
     for i in [1 mod n, n - 1]:
@@ -902,14 +882,13 @@ proc draw_polygon[S: static int; P: static bool](r: RendererOf[S]; vram: Vram; p
     when not P: return
     r.fill(c, int(ymin), max(0, int(sx[li])), min(WS, max(int(sx[ri]), int(sx[li]) + 1)), L, R, sp, true)
     return
-  # The rasteriser walks two chains of edges down from the top vertex (the
-  # first one on the top row): one forward in vertex order, one backward,
-  # each moving on to the next vertex once the current edge ends, whichever
-  # way that edge runs (polyrastertest: cursed line polygons, "pointer
-  # never goes backwards"). Which chain is the left one comes from the
-  # polygon's facing, taken from its first three vertices: the forward
-  # chain when they turn anticlockwise or lie on one line (polyrastertest:
-  # second vertex tests, a concave second vertex "swaps" the polygon).
+  # Two chains of edges walk down from the top vertex (the first one on the
+  # top row): one forward in vertex order, one backward, each moving to the
+  # next vertex when its edge ends, whichever way that edge runs (never
+  # backwards). The facing of the first three vertices picks the left chain:
+  # the forward one when they turn anticlockwise or are collinear (a concave
+  # second vertex "swaps" the polygon). docs/nds/3d-edges.md "Chains, facing
+  # and swapped rows".
   let fwd_left = facing(verts, int(poly.first), n) >= 0
   var top = 0
   for i in 1 ..< n:
@@ -931,28 +910,25 @@ proc draw_polygon[S: static int; P: static bool](r: RendererOf[S]; vram: Vram; p
     if not ok: continue
     let le0 = chains[if fwd_left: 0 else: 1].e
     let re0 = chains[if fwd_left: 1 else: 0].e
-    # both chains on one segment: drawn whole (polyrastertest: line
-    # polygons, only the line part of the cursed ones)
+    # both chains on one segment: drawn whole (line polygons)
     let rfull = full or (le0.x0 == re0.x0 and le0.y0 == re0.y0 and le0.x1 == re0.x1 and le0.y1 == re0.y1)
     let rim = y == int(ymin) or y == int(ymax) - 1
     let last_flat = flat_bottom and y == int(ymax) - 1
-    # A row where the designated left edge lies right of the designated
-    # right one at the row's top (or level with it, moving right faster) is
-    # "swapped": the span runs from the right edge to the left one; filled
-    # x-major runs give only their inner dot, the left side follows the
-    # left fill rule, and the right side the right rule except that a
-    # non-x-major right edge is filled when the edge on the left is
-    # vertical (the hardware checks the wrong side: polyrastertest's
-    # "swapped vertical left glitch"); a vertical edge is moved left a dot
-    # by being the designated right edge, not by lying on the right.
-    # A swapped row whose ends cross over is drawn as an ordinary one.
+    # A row where the designated left edge lies right of the designated right
+    # one at the row's top (or level, moving right faster) is "swapped": the
+    # span runs from the right edge to the left one; filled x-major runs give
+    # only their inner dot; the left side follows the left fill rule, the
+    # right side the right rule, except that a non-x-major right edge is
+    # filled when the left edge is vertical (the hardware checks the wrong
+    # side); a vertical edge moves left a dot by being the designated right
+    # edge, not by lying on the right. A swapped row whose ends cross over is
+    # drawn as an ordinary one.
     let xl = le0.edge_x(y)
     let xr = re0.edge_x(y)
     if xl > xr or xl == xr and le0.slope > re0.slope:
       let pl = re0
       let pr = le0
-      # a shifted vertical stops at the screen's left edge (polyrastertest:
-      # with anti-aliasing its dot 0 shows the edge)
+      # a shifted vertical stops at dot 0 (with AA, dot 0 shows the edge)
       var lr = pl.edge_run(y, true)
       if pl.vert and lr.s < 0: lr = Run(s: 0, e: 1, vert: true)
       let rr = pr.edge_run(y, false)
@@ -967,14 +943,10 @@ proc draw_polygon[S: static int; P: static bool](r: RendererOf[S]; vram: Vram; p
         let ER = pr.edge_end(va, y, xe + 1)
         var sp = span_step(EL, ER)
         # anti-aliasing: a vertical edge gets no coverage in a swapped row
-        # (polyrastertest's AA swapped vertical edge glitch: the hardware
-        # inverts swapped edges' coverage, which leaves sloped edges as
-        # they would be on their side and verticals at none). The x-major
-        # edge on the left keeps the coverage of its run's first dot, as if
-        # the run were never stepped to its inner dot: none on the top row
-        # of polyrastertest 56 (the run starts 0.07 dots before a dot
-        # centre), some on the rows below (3d_probe_swap_aa on the
-        # reference cores gives these exact values).
+        # (the hardware inverts swapped edges' coverage: sloped edges come out
+        # as unswapped, verticals at none). The left x-major edge keeps its
+        # run's first dot's coverage, as if never stepped to its inner dot
+        # (polyrastertest 56, 3d_probe_swap_aa).
         template edge_dot(x: int32; e: Edge; right: bool; cx: int32) =
           if x >= 0 and x < WS:
             r.plot(c, int(x), y, EL, ER, sp, true,
@@ -1087,10 +1059,9 @@ proc edge_mark[S: static int](r: RendererOf[S]; aa: bool) =
 
 proc anti_alias[S: static int](r: RendererOf[S]) =
   ## Opaque edge dots with partial coverage mix over the nearest opaque
-  ## colour behind them (`below`), whatever their neighbours' IDs: a mesh
-  ## shows no seams because its neighbouring polygon is that colour
-  ## (3d_probe_aa / _aa_edge pin the coverage, 3d_probe_aa2 / _aa3 the
-  ## layer, translucent polygons included).
+  ## colour behind them (`below`), whatever their neighbours' IDs, so a mesh
+  ## shows no seams (3d_probe_aa / _aa_edge pin the coverage, 3d_probe_aa2 /
+  ## _aa3 the layer, translucent polygons included).
   for i in 0 ..< NPIX * S * S:
     let cov = int32(r.px[i].aacov)
     if cov >= 31: continue

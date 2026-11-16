@@ -128,9 +128,9 @@ proc io9_read(n: NDS; a: uint32): uint32 =
 proc io9_write(n: NDS; a: uint32; v, mask: uint32) =
   let o = a and 0x00FF_FFFC'u32
   # A unit switched off in POWCNT1 leaves its ports read-only (GBATEK "DS
-  # Power Control"; disp_powcnt in the reference runs, docs/oracles.md):
-  # 2D A 008h-05Fh (bit 1), 3D rendering 320h-3FFh (bit 2), geometry
-  # 400h-6FFh (bit 3, commands included), 2D B 1008h-105Fh (bit 9).
+  # Power Control"; disp_powcnt): 2D A 008h-05Fh (bit 1), 3D rendering
+  # 320h-3FFh (bit 2), geometry 400h-6FFh (bit 3, commands included), 2D B
+  # 1008h-105Fh (bit 9).
   let pw = n.gpu.powcnt1
   case o
   of 0x008 .. 0x05C:
@@ -167,8 +167,8 @@ proc io9_write(n: NDS; a: uint32; v, mask: uint32) =
   of 0x204:
     if (mask and 0xFFFF) != 0:
       # bits 8-10 and 12 read zero, bit 13 reads set (GBATEK); writes to
-      # bit 14 are ignored (GBATEK "appear to be ignored?"; slot2_probe in
-      # the reference runs, docs/oracles.md) and it stays set from boot
+      # bit 14 are ignored (GBATEK "appear to be ignored?"; slot2_probe) and
+      # it stays set from boot
       let m = uint16(mask) and 0x88FF'u16
       n.exmemcnt = (n.exmemcnt and not m) or (uint16(v) and m) or 0x2000
       n.cart.owner_arm7 = (n.exmemcnt and 0x800) != 0
@@ -201,10 +201,9 @@ proc io9_write(n: NDS; a: uint32; v, mask: uint32) =
 
 proc pal_oam_on(n: NDS; a: uint32): bool {.inline.} =
   ## An engine's palette (05000000h A, 05000400h B) and OAM (07000000h,
-  ## 07000400h) while POWCNT1 has it off read zero and ignore writes,
-  ## keeping their contents: GBATEK "DS Power Control" ("(palette-) memory
-  ## becomes read-only-zero-filled"), OAM and the kept contents from
-  ## disp_powcnt in the reference runs (docs/oracles.md).
+  ## 07000400h) read zero and ignore writes while POWCNT1 has it off, keeping
+  ## their contents (GBATEK "DS Power Control": "(palette-) memory becomes
+  ## read-only-zero-filled"; OAM and the kept contents: disp_powcnt).
   (n.gpu.powcnt1 and (if (a and 0x400) == 0: 2'u16 else: 0x200'u16)) != 0
 
 proc in_itcm(n: NDS; a: uint32; write: bool): bool {.inline, codegenDecl: "static inline __attribute__((always_inline)) $# $#$#".} =
@@ -441,11 +440,10 @@ template pu_check9(n: NDS; a: uint32; kind: static int): bool =
   ## 2 write): flag the abort (the CPU takes it after the opcode,
   ## arm/cpu.nim). DMA is not checked. The last 4 KB page allowed per kind
   ## and privilege is remembered (cleared by CP15 writes). For speed, data
-  ## accesses to main RAM and DTCM are not checked (read9/write9): what
-  ## the sweep needed is ITCM (null pointers land there under libnds,
-  ## which leaves 0-0x01FFFFFF outside every region) and the unmapped and
-  ## I/O space; a guard region inside main RAM (the SDK's 0x023E0000 one)
-  ## does not abort.
+  ## accesses to main RAM and DTCM are not checked (read9/write9): games
+  ## need ITCM (null pointers land there under libnds, which leaves
+  ## 0-0x01FFFFFF outside every region) and the unmapped and I/O space; a
+  ## guard region inside main RAM (the SDK's 0x023E0000 one) does not abort.
   let user = (n.arm9.cpsr and 0x1F) == 0x10 and not n.arm9.bank_xfer
   let key = (a shr 12) or (if user: 0x8000_0000'u32 else: 0'u32)
   if likely(key == n.pu_ok[kind]): false
@@ -454,26 +452,23 @@ template pu_check9(n: NDS; a: uint32; kind: static int): bool =
 # --- ARM9 data TLB ----------------------------------------------------------
 #
 # Most ARM9 data accesses go to DTCM or to main RAM through the data cache
-# (SoulSilver's overworld: 33 M of 47 M in 600 frames). What the general
-# path decides for them depends on the page alone -- the TCM windows, the
-# load modes, the data cache's enable and the page's cachability, all CP15
-# state -- and, for main RAM, on the line: a tag hit costs nothing and
-# reads or writes the CPU's copy in `main_ram` (`dc_hit`: a hit is the line
-# under this very address, so `dc_apart` does not matter), a store into a
-# hit dirty line just stores. So a page is entered in the TLB (`rtlb9` for
-# loads, `wtlb9` for stores: load mode splits them) when the general path
-# finds it DTCM or main RAM, and `read32` .. `write32` take the short path
-# for it: DTCM always; cached main RAM on a tag hit (a dirty one for a
-# store); a store to a line no cache holds, and a load from an uncached
-# page with nothing apart, at the uncached charge; everything else, misses
-# included, goes the general way, which does the lookup, fill and charges
-# itself. The CPU's accesses only: DMA
-# goes through `Dma9Bus` (TCMs invisible, nothing charged). The entries
-# follow CP15 state only, so they are dropped by a CP15 write that changes
-# the TCMs, the protection unit's regions, the cache enables or
-# cachability (`cp15_write`), WRAMCNT and a state load (`fetch_paths_off`);
-# line state (fills, evictions, C7 clean / invalidate, DMA and the ARM7
-# writing behind the cache) is checked at every access.
+# (SoulSilver's overworld: 33 M of 47 M). What the general path decides for
+# them depends on the page alone (TCM windows, load modes, the data cache's
+# enable and the page's cachability: all CP15 state) and, for main RAM, on
+# the line: a tag hit costs nothing and uses the CPU's copy in `main_ram`
+# (`dc_hit`: a hit is the line under this very address, so `dc_apart` does
+# not matter), a store into a hit dirty line just stores. So a page the
+# general path finds DTCM or main RAM is entered in the TLB (`rtlb9` loads,
+# `wtlb9` stores: load mode splits them), and `read32` .. `write32` take the
+# short path for it: DTCM always; cached main RAM on a tag hit (a dirty one
+# for a store); a store to a line no cache holds, and a load from an
+# uncached page with nothing apart, at the uncached charge; everything else,
+# misses included, goes the general way. CPU accesses only: DMA uses
+# `Dma9Bus` (TCMs invisible, nothing charged). The entries follow CP15 state
+# only, so a CP15 write changing the TCMs, protection regions, cache enables
+# or cachability (`cp15_write`), WRAMCNT and a state load
+# (`fetch_paths_off`) drop them; line state (fills, evictions, C7, DMA and
+# the ARM7 writing behind the cache) is checked at every access.
 
 proc dtlb_fill9(n: NDS; a: uint32; write: bool; kind: uint32) =
   ## Enter `a`'s page, found DTCM or cached main RAM by the general path.

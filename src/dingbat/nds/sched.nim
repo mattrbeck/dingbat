@@ -6,8 +6,8 @@
 ## ordinals are GB/GBA save-state format, and its CycleCount is 32-bit on
 ## wasm (docs/nds/spec.md, "Reuse"). The DS state (savestate.nim) stores
 ## the pending events in queue order with their absolute times; NdsEvent's
-## members are part of its layout hash, so adding one refuses older states
-## rather than misreading them.
+## members are part of its layout hash, so adding one makes older states
+## fail to load rather than be misread.
 
 import quirky
 
