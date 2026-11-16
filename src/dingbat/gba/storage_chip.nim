@@ -101,8 +101,7 @@ proc rom_has_rtc*(content: string): bool =
   ## string is "SIIRTC_V" (like "SRAM_V"/"FLASH1M_V" for backup chips). In
   ## the 7,906-ROM compatibility library it occurs in exactly the Pokemon
   ## Ruby/Sapphire/Emerald, Boktai 1-3, Rockman EXE 4.5, Sennen Kazoku and
-  ## both Legendz families (and their hacks/translations), the same ten
-  ## game-code families mGBA's override table fits with an RTC, and no others.
+  ## both Legendz families (and their hacks/translations), and no others.
   content.contains("SIIRTC_V")
 
 # ---------------------------------------------------------------------------

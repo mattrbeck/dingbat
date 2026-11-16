@@ -2434,8 +2434,8 @@ proc vdma_dot_busy(ppu: GbFifoPpu; gb: GB; dot: int32): bool {.noinline.} =
            (if gb.cgb_enabled: int32(CGB_OBJ_SIZE_LATENCY) else: 0'i32)
   if dot >= hi - OBJ_PLANE_GAP - 1 and dot <= hi: return true
   # No fetch: the head delay, and the head's discarded fetch, whose reads the
-  # port does not see (DocBoy's and SameBoy's maps land the bytes on all four
-  # of its dots, every row).
+  # port does not see (DocBoy's conflict tests and a reference run land the
+  # bytes on all four of its dots, every row; docs/dev/oracles.md).
   if ppu.m3_delay != 0 or not ppu.dropped_first_fetch: return false
   when SCX_STORE_STALL_DOTS != 0:
     if ppu.scx_stall > 0: return false

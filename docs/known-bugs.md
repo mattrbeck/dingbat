@@ -48,8 +48,22 @@ In STOP the PPU is frozen but `mem_tick_stopped` still raises `ppu.frame` from
 the panel clock, and `step_frame`'s settle loop is skipped while the CPU is
 stopped. A STOP executed during mode 3 therefore ends a frame with the PPU in
 mode 3, and `load_ppu_state` refuses a mode-3 state, so a rewind, a rollback
-or a slot taken there fails to load. Fix: either let the boundary wait for the
-STOP's end, or carry what a mode-3 state needs; the first is smaller.
+or a slot taken there fails to load. Every boundary until the key press is
+such a state: daid `stop_instr_gbc_mode3` (CGB), DocBoy
+`cgb/ppu/visual/stop_during_pixel_transfer{,_alt}`, `*stop_read_tima*` and
+`mbc3_rtc_gb_stopped_recover` reproduce it; no licensed game uses STOP outside
+the speed switch (Pan Docs), which never sets `stopped`.
+
+An in-process load (`apply_state_payload`: rewind, scrub commit, run-ahead)
+has no rollback, and the PPU section comes after the CPU, memory and scheduler
+ones. A refused rewind therefore leaves the live core half-applied: CPU back
+in the snapshot's STOP, PPU and APU still at the present frame. The slot and
+file paths (`gb_apply_checked`) restore the machine.
+
+Fix: carry what a mode-3 state needs (the per-line renderer scratch, which
+also closes the HBlank repaint entry below); the boundary cannot wait for the
+STOP's end, which only a key press brings. Separately, make the in-process
+load all-or-nothing.
 
 ### A boundary just past mode 3 loses an HBlank palette repaint
 

@@ -500,6 +500,17 @@ Dots are dingbat's line dots; W is the first dot of the writing M-cycle
   eight fetcher positions (`tools/gbppu/reactsweep.sh`). Which fetcher step
   swallows the edge is a property of this renderer's phase, hence a knob.
 
+### A refused window start on a tile boundary inserts one colour-0 pixel (DMG)
+- Default: `WIN_EN_HOLD_ZERO = 2` (`gb.nim`).
+- Claim: Pan Docs, "Window": with LCDC.5 clear but the other conditions met,
+  a start that would land exactly on a BG tile boundary inserts a single
+  colour-0 pixel and offsets the rest of the line (the Star Trek 25th
+  Anniversary glitch).
+- Evidence: nitro2k01's SGB logic-analyser trace
+  (https://github.com/LIJI32/SameBoy/issues/278) shows the rest of the line
+  delayed. DocBoy `dmg/ppu/visual/window_retrigger_pixel_glitch_*` pin the
+  insert (1, a replaced pixel, fails them).
+
 ## 3. Objects
 
 ### An object costs 6 dots plus a per-tile wait, per Pan Docs

@@ -69,8 +69,7 @@ proc new_ppu*(gba: GBA): PPU =
 proc skip_boot_phase*(ppu: PPU) =
   ## Video phase at ROM entry when the BIOS boot is skipped: the BIOS hands
   ## over on line 126, 841 cycles in (a full LLE boot: 270 frames, 126 lines,
-  ## 841 cycles; mGBA's skip-boot uses line 126 as
-  ## well). Starting at line 0 shifts RNG seeds taken from timer phase
+  ## 841 cycles). Starting at line 0 shifts RNG seeds taken from timer phase
   ## (Yu-Gi-Oh! WCT 2004's starter deck).
   const ENTRY_LINE = 126
   # The BIOS enters with the first two ROM words already fetched (charged to

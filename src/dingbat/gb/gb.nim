@@ -783,7 +783,7 @@ const VDMA_M3_PORT* {.intdefine.} = 1
   ## whose slot starts on dot c meets the bus as it stands on pipeline dot
   ## c - 1 (vdma_port_busy, fifo_ppu.nim), bracketed on both sides. Pinned by
   ## DocBoy `cgb/hdma/gdma_ppu_on_pixel_transfer_conflict_relaxed_*` (82 of 83;
-  ## a black-box SameBoy run sides with dingbat on `_sprite_y16_x07`). Hardware
+  ## a reference run sides with dingbat on `_sprite_y16_x07`, docs/dev/oracles.md). Hardware
   ## question 21 (gbedge p21 VDMABUS) photographs the SCX 0 map. 0 = every byte
   ## lands.
 const HDMA_LCD_OFF_EDGE* {.intdefine.} = 1
@@ -965,7 +965,7 @@ const WIN_EN_HOLD_ZERO*       {.intdefine.} = 2
   ## tile boundary, then where it would have started rendering, a single pixel
   ## with ID 0 ... is inserted; this offsets the remainder of the scanline."
   ## (the Star Trek 25th Anniversary glitch; nitro2k01's SGB logic-analyser
-  ## trace, SameBoy issue #278, has the rest of the line delayed). Pinned by
+  ## trace has the rest of the line delayed; docs/dev/gb-derivations.md). Pinned by
   ## DocBoy `dmg/ppu/visual/window_retrigger_pixel_glitch_*` (1 fails them).
   ## Gated on `window_trigger` (a WY match seen with LCDC.5 set this frame):
   ## Pokemon Blue rests at WX = 7 / WY = 0 with the window off and draws no
@@ -1044,8 +1044,8 @@ const WIN_FINE_PAD*           {.intdefine.} = 1
   ## switched to before the initial fine scroll adjustment". Mode 3 length is
   ## unchanged (`172 + 6 + SCX & 7`, gambatte `window/m2int_wx03_scx*`). 0
   ## shifts the window left by SCX & 7 at WX = 1..5 too. No test ROM pins the
-  ## picture: a black-box SameBoy run draws it unshifted
-  ## (docs/dev/gb-failure-triage.md I6). WX = 0: WIN_WX0_PHASE; WX >= 6 reaches
+  ## picture: a reference run draws it unshifted (docs/dev/oracles.md,
+  ## docs/dev/gb-failure-triage.md I6). WX = 0: WIN_WX0_PHASE; WX >= 6 reaches
   ## the window through the shifter's equality, after the discard.
 const WIN_LINE_START_LATCH*   {.intdefine.} = 1
   ## Which dot WX is read on to decide whether a line starts as a window line:
