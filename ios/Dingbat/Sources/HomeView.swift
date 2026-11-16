@@ -158,7 +158,7 @@ struct HomeView: View {
         let _ = padGrid(gridRows, cols: layout.fit)
 
         VStack(spacing: 26) {
-            AnnouncementBanners()
+            AnnouncementBanners(maxWidth: entries.isEmpty ? 480 : layout.width)
             if entries.isEmpty {
                 brandBlock
                 EmptyStart { importing = true }

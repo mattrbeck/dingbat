@@ -144,7 +144,7 @@ final class AppStatus: ObservableObject {
         }
         func make(_ r: [String: Any], link: Bool) -> Required {
             let message = (r["message"] as? String).flatMap { $0.isEmpty ? nil : $0 }
-                ?? (link ? "This version's link cable can't link with the current one. Everything else works as it is."
+                ?? (link ? "This version can't link with the current one. Update to link with friends again."
                          : "This version of dingbat has a problem that the update fixes.")
             return Required(link: link, message: message, url: (r["url"] as? String).flatMap(URL.init(string:)))
         }
@@ -181,100 +181,166 @@ final class AppStatus: ObservableObject {
     }
 }
 
-/// A required update: the whole screen. An app-wide one has nothing behind
-/// it to reach; a link one has Not now.
+/// A required update. App-wide: the whole screen, nothing behind it to reach,
+/// the button at the bottom within the thumb's reach. Link scope: a card over
+/// the dimmed app, with Not now under the update (web #required-modal).
 struct RequiredUpdateView: View {
     let required: AppStatus.Required
     @Environment(\.palette) private var palette
 
+    private var updateLabel: String {
+        (required.url?.host ?? "").hasSuffix("apple.com") ? "Update on the App Store" : "Update"
+    }
+
     var body: some View {
-        ZStack {
-            palette.bg.opacity(required.link ? 0.94 : 1).ignoresSafeArea()
+        if required.link { linkCard } else { fullScreen }
+    }
+
+    private var fullScreen: some View {
+        VStack(spacing: 0) {
+            Spacer()
             VStack(spacing: 14) {
-                Text(required.link ? "Update dingbat to use the link cable" : "Update dingbat to keep playing")
-                    .font(.system(size: 22, weight: .bold))
+                Image("Logo")
+                    .resizable()
+                    .interpolation(.none)
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: 84)
+                    .padding(.bottom, 10)
+                    .accessibilityHidden(true)
+                Text("Update Required")
+                    .font(.system(size: 26, weight: .bold))
                     .foregroundColor(palette.text)
-                    .multilineTextAlignment(.center)
                 Text(required.message)
-                    .font(.system(size: 15))
-                    .foregroundColor(palette.textDim)
-                    .multilineTextAlignment(.center)
+                    .font(.system(size: 17))
+                    .foregroundColor(palette.text)
                     .fixedSize(horizontal: false, vertical: true)
-                Text("Your games and saves stay on this device.")
+                Text(GameSession.shared.game != nil
+                     ? "Your game is saved. Your games and saves stay on this device."
+                     : "Your games and saves stay on this device.")
                     .font(.system(size: 15))
                     .foregroundColor(palette.textDim)
-                    .multilineTextAlignment(.center)
-                HStack(spacing: 12) {
-                    if required.link {
-                        Button("Not Now") { AppStatus.shared.later() }
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .multilineTextAlignment(.center)
+            .frame(maxWidth: 340)
+            Spacer()
+            if let url = required.url {
+                updateButton(url)
+                    .frame(maxWidth: 480)
+            }
+        }
+        .padding(.horizontal, 28)
+        .padding(.bottom, 12)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(palette.bg.ignoresSafeArea())
+        .accessibilityAddTraits(.isModal)
+    }
+
+    private var linkCard: some View {
+        ZStack {
+            palette.stage.opacity(0.6).ignoresSafeArea()
+            VStack(spacing: 10) {
+                Image(systemName: "link")
+                    .font(.system(size: 26, weight: .semibold))
+                    .foregroundColor(palette.accent)
+                    .accessibilityHidden(true)
+                Text("Link Cable Needs an Update")
+                    .font(.system(size: 20, weight: .bold))
+                    .foregroundColor(palette.text)
+                Text(required.message)
+                    .font(.system(size: 16))
+                    .foregroundColor(palette.text)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text("Everything else keeps working.")
+                    .font(.system(size: 14))
+                    .foregroundColor(palette.textDim)
+                VStack(spacing: 8) {
+                    if let url = required.url { updateButton(url) }
+                    Button { AppStatus.shared.later() } label: {
+                        Text("Not Now")
                             .font(.system(size: 17, weight: .semibold))
                             .foregroundColor(palette.text)
-                            .padding(.horizontal, 22)
-                            .padding(.vertical, 12)
-                            .background(Capsule().fill(palette.surface2))
-                    }
-                    if let url = required.url {
-                        Button {
-                            UIApplication.shared.open(url)
-                        } label: {
-                            Text("Update")
-                                .font(.system(size: 17, weight: .semibold))
-                                .foregroundColor(palette.accentInk)
-                                .padding(.horizontal, 28)
-                                .padding(.vertical, 12)
-                                .background(Capsule().fill(palette.accent))
-                        }
+                            .frame(maxWidth: .infinity, minHeight: 50)
+                            .background(RoundedRectangle(cornerRadius: 14).fill(palette.surface3))
                     }
                 }
-                .padding(.top, 8)
+                .padding(.top, 10)
             }
-            .padding(.horizontal, 32)
-            .frame(maxWidth: 480)
+            .multilineTextAlignment(.center)
+            .padding(EdgeInsets(top: 24, leading: 20, bottom: 20, trailing: 20))
+            .background(RoundedRectangle(cornerRadius: 20).fill(palette.surface1))
+            .overlay(RoundedRectangle(cornerRadius: 20).stroke(palette.border2, lineWidth: 1))
+            .frame(maxWidth: 400)
+            .padding(24)
         }
         .accessibilityAddTraits(.isModal)
     }
+
+    private func updateButton(_ url: URL) -> some View {
+        Button { UIApplication.shared.open(url) } label: {
+            Text(updateLabel)
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundColor(palette.accentInk)
+                .frame(maxWidth: .infinity, minHeight: 52)
+                .background(RoundedRectangle(cornerRadius: 14).fill(palette.accent))
+        }
+    }
 }
 
-/// status.json's banners, heading the home screen (web #home-notes).
+/// status.json's banners, heading the home screen (web #home-notes): as wide
+/// as what is under them. On a compact width a link goes under the text; on a
+/// regular width (iPad) beside it.
 struct AnnouncementBanners: View {
+    let maxWidth: CGFloat
     @ObservedObject private var status = AppStatus.shared
     @Environment(\.palette) private var palette
+    @Environment(\.horizontalSizeClass) private var sizeClass
 
     var body: some View {
         if !status.banners.isEmpty {
             VStack(spacing: 8) {
-                ForEach(status.banners) { a in
-                    HStack(spacing: 10) {
-                        Text(a.text)
-                            .font(.system(size: 14))
-                            .foregroundColor(palette.text)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .fixedSize(horizontal: false, vertical: true)
-                        if let url = a.url {
-                            Button(a.label ?? "Read More") { UIApplication.shared.open(url) }
-                                .font(.system(size: 14, weight: .semibold))
-                                .foregroundColor(palette.accent)
-                        }
-                        Button {
-                            status.dismissBanner(a)
-                        } label: {
-                            Image(systemName: "xmark")
-                                .font(.system(size: 13, weight: .semibold))
-                                .foregroundColor(palette.textDim)
-                                .frame(width: 32, height: 32)
-                                .contentShape(Rectangle())
-                        }
-                        .accessibilityLabel("Dismiss")
-                    }
-                    .padding(.leading, 16)
-                    .padding(.trailing, 6)
-                    .padding(.vertical, 8)
-                    .background(RoundedRectangle(cornerRadius: 12).fill(palette.surface2))
-                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(palette.border2, lineWidth: 1))
-                }
+                ForEach(status.banners) { banner($0) }
             }
-            .frame(maxWidth: 480)
+            .frame(maxWidth: maxWidth)
             .frame(maxWidth: .infinity)
         }
+    }
+
+    private func banner(_ a: AppStatus.Announcement) -> some View {
+        let wide = sizeClass == .regular
+        return HStack(alignment: wide ? .center : .top, spacing: 12) {
+            Image(systemName: "info.circle")
+                .font(.system(size: 18))
+                .foregroundColor(palette.accent)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 6) {
+                Text(a.text)
+                    .font(.system(size: 15))
+                    .foregroundColor(palette.text)
+                    .fixedSize(horizontal: false, vertical: true)
+                if !wide, let url = a.url { link(a, url) }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            if wide, let url = a.url { link(a, url) }
+            Button { status.dismissBanner(a) } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(palette.textDim)
+                    .frame(width: 32, height: 32)
+                    .contentShape(Rectangle())
+            }
+            .accessibilityLabel("Dismiss")
+        }
+        .padding(.leading, 14)
+        .padding(.trailing, 6)
+        .padding(.vertical, wide ? 8 : 12)
+        .background(RoundedRectangle(cornerRadius: 12).fill(palette.surface2))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(palette.border2, lineWidth: 1))
+    }
+
+    private func link(_ a: AppStatus.Announcement, _ url: URL) -> some View {
+        Button(a.label ?? "Read More") { UIApplication.shared.open(url) }
+            .font(.system(size: 15, weight: .semibold))
+            .foregroundColor(palette.accent)
     }
 }

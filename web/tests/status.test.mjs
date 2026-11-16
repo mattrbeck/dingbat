@@ -87,8 +87,8 @@ test("several at once: banners all show, toasts as many as the stack holds, the 
   const max = app.runIn("TOAST_MAX");
   assert.equal(app.toasts.filter((t) => /Toast \d|Both ways/.test(t)).length, max);
   assert.deepEqual(notes(app).map(noteText), ["Banner one", "Banner two", "Both ways"]);
-  assert.equal(notes(app)[1].children[1].href, "https://dingbat.gg/news");
-  assert.equal(notes(app)[1].children[1].textContent, "News");
+  assert.equal(notes(app)[1].children[2].children[0].href, "https://dingbat.gg/news");
+  assert.equal(notes(app)[1].children[2].children[0].textContent, "News");
   await app.runIn("checkStatus()");
   const shown = new Set(app.toasts.filter((t) => /Toast \d|Both ways/.test(t)));
   assert.equal(shown.size, 5, "the toasts left over show on the next check");
@@ -164,6 +164,8 @@ test("an app-wide required update blocks with its message, and Update now saves 
   assert.equal(modalOpen(app), true);
   assert.equal(app.elements.get("required-text").textContent, "Saves can be lost on this build.");
   assert.equal(app.elements.get("required-later").hidden, true, "no Not now");
+  assert.match(app.elements.get("required-foot").textContent, /paused and saved first/);
+  assert.equal(app.elements.get("required-title").textContent, "Update Required");
   assert.equal(app.runIn("paused"), true, "the game waits behind the card");
   app.runIn("closeRequired()"); // Escape's closer
   assert.equal(modalOpen(app), true, "Escape doesn't close it");
@@ -178,7 +180,8 @@ test("a link-scope update offers Not now, then holds the link cable with the car
   serve(app, { status: { required: [{ minBuild: FIX, scope: "link", message: "Link needs 2026-11." }] } });
   await app.runIn("checkStatus()");
   assert.equal(modalOpen(app), true);
-  assert.match(app.elements.get("required-title").textContent, /link cable/);
+  assert.equal(app.elements.get("required-title").textContent, "Link Cable Needs an Update");
+  assert.equal(app.elements.get("required-modal").classList.contains("link"), true);
   assert.equal(app.elements.get("required-later").hidden, false);
   app.elements.get("required-later").click();
   assert.equal(modalOpen(app), false, "Not now closes it");

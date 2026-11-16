@@ -9314,16 +9314,6 @@ const renderBanners = () => {
     text.className = "home-note-text";
     text.textContent = a.text;
     note.append(text);
-    const link = announcementLink(a);
-    if (link) {
-      const go = document.createElement("a");
-      go.className = "button home-note-link";
-      go.href = link;
-      go.target = "_blank";
-      go.rel = "noopener";
-      go.textContent = a.label || "Read more";
-      note.append(go);
-    }
     const close = document.createElement("button");
     close.type = "button";
     close.className = "home-note-close";
@@ -9334,6 +9324,20 @@ const renderBanners = () => {
       renderBanners();
     });
     note.append(close);
+    const link = announcementLink(a);
+    if (link) {
+      // Under the text on a narrow banner, beside it on a wide one (styles.css).
+      const actions = document.createElement("div");
+      actions.className = "home-note-actions";
+      const go = document.createElement("a");
+      go.className = "home-note-link";
+      go.href = link;
+      go.target = "_blank";
+      go.rel = "noopener";
+      go.textContent = a.label || "Read more";
+      actions.append(go);
+      note.append(actions);
+    }
     homeNotes.append(note);
   }
 };
@@ -9347,11 +9351,14 @@ const showAnnouncements = (list) => {
 };
 
 const requiredModal = document.getElementById("required-modal");
+// [title, message when status.json gives none, the line under it].
 const REQUIRED_COPY = {
-  app: ["Update dingbat to keep playing", "This version of dingbat has a problem that the update fixes."],
-  link: ["Update dingbat to use the link cable",
-    "This version's link cable can't link with the current one. Everything else works as it is."],
+  app: ["Update Required", "This version of dingbat has a problem that the update fixes.",
+    "Your games and saves stay on this device. dingbat reloads when the update is ready."],
+  link: ["Link Cable Needs an Update", "This version can't link with the current one. Update to link with friends again.",
+    "Everything else keeps working. Your games and saves stay on this device."],
 };
+const REQUIRED_IN_GAME_FOOT = "Your game is paused and saved first. Your games and saves stay on this device.";
 
 const showRequired = (/** @type {"app" | "link"} */ kind, req) => {
   if (!requiredModal) return;
@@ -9360,10 +9367,13 @@ const showRequired = (/** @type {"app" | "link"} */ kind, req) => {
   showUpdateButton();
   const title = document.getElementById("required-title");
   const text = document.getElementById("required-text");
+  const foot = document.getElementById("required-foot");
   const later = document.getElementById("required-later");
   if (title) title.textContent = REQUIRED_COPY[kind][0];
   if (text) text.textContent = typeof req.message === "string" && req.message ? req.message : REQUIRED_COPY[kind][1];
+  if (foot) foot.textContent = kind === "app" && currentRomName ? REQUIRED_IN_GAME_FOOT : REQUIRED_COPY[kind][2];
   if (later) later.hidden = kind !== "link";
+  requiredModal.classList.toggle("link", kind === "link");
   requiredModal.classList.add("open");
   trapFocus(requiredModal);
 };

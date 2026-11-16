@@ -90,9 +90,9 @@ Set `minBuild` to the time of the first commit that has the fix.
 Each entry has `minBuild`, and optionally `platforms`, `message`, `url` (iOS)
 and `scope`:
 
-- `"scope": "app"` (the default): a card with no way out but **Update now**.
+- `"scope": "app"` (the default): a card ("Update Required") with no way out but **Update**.
   A game in progress is paused, then saved before the update.
-- `"scope": "link"`: the card says the link cable needs the update and offers
+- `"scope": "link"`: the card ("Link Cable Needs an Update") offers
   **Not now**, once per launch. After that the app runs as usual, but every
   way into the link cable brings the card back instead:
   - web: Connect Link Cable (online and same-browser) and local 2P;
