@@ -3,22 +3,16 @@
 const APU_POWERON_TAP_LEAD* {.intdefine.} = 4
   ## Divider counts ahead of an NR52 power-on write at which the DIV-APU tap
   ## bit is sampled for the skipped first edge (GbApu.div_skip): a power-on
-  ## in the M-cycle whose end raises the bit finds it raised. gambatte
-  ## sound/ch2_init_reset_env_counter_timing_{1..8}: powered on 8 counts
-  ## before the bit rises, a period-1 envelope first steps on the eighth
-  ## DIV-APU edge (`_1`/`_2` [dmg], `_3`/`_4` [cgb]); 4 counts before, one
-  ## edge later (`_5`/`_6` [dmg], `_7`/`_8` [cgb]). ch2_late_reset_nr52_2b
-  ## [dmg, cgb] and `_ds_2b` [cgb] (the length counter's side of the same
-  ## skip) agree, the last at double speed. 4..7 pass; 0..3 lose `_5` [dmg],
-  ## `_7` [cgb] and the three `2b` tests; 8 loses `_2` [dmg], `_4` [cgb] and
-  ## the `2b` tests' `1a` siblings.
+  ## in the M-cycle whose end raises the bit finds it raised. 4..7 pass;
+  ## pinned by gambatte sound/ch2_init_reset_env_counter_timing_* and
+  ## ch2_late_reset_nr52_*.
 
 const APU_SPSW_TAP_LAG_T* {.intdefine.} = 4
   ## Divider counts added to every etAPUFrameSeq re-aim while
   ## GbApu.spsw_fs_lag is set: after an odd number of KEY1 switches into double
   ## speed the DIV-APU tap edge arrives one M-cycle late. Toggles per switch;
-  ## only an APU power-off clears it (not a re-trigger, not a DIV write). AGE
-  ## speed-switch/spsw-ch2-lc-delay-cgbBCE. 0 compiles the mechanism out.
+  ## any APU power transition clears it (apu_drop_spsw_lag), not a re-trigger
+  ## or a DIV write. Pinned by AGE spsw-ch2-lc-delay. 0 compiles it out.
 
 when defined(emscripten):
   proc appendAudioSample(left, right: float32) {.importc, cdecl.}
@@ -82,16 +76,15 @@ when not defined(test_harness) and not defined(emscripten):
     if apu.owns_audio: audio_queued() else: 0
 
 # Lazy waveform catch-up: no channel schedules a per-period event. Each carries
-# an absolute `next_step` deadline and is advanced in closed form (duty
-# position mod 8, wave pointer mod 32; CH4 iterates) at every point that can
-# observe it: get_sample, wave RAM access while CH3 is on, PCM12/PCM34
-# (gb/memory.nim), any NR10-NR26 write, frame-sequencer ticks, the NR52 read
-# (CH1's pending sweep check), the CGB speed switch, the per-frame scheduler
-# rebase, and save states (savestate.nim converts next_step to and from an
-# etAPUChannel* event). The frequency timer is clocked only while the channel
-# is on: switching it off freezes the phase and only an APU power-off resets it
-# (SameSuite channel_1_stop_restart), so the squares and the wave channel park
-# next_step at GB_NO_STEP (ch3_catchup_at).
+# an absolute `next_step` deadline and is advanced in closed form (CH4
+# iterates) at every point that can observe it: get_sample, wave RAM access
+# while CH3 is on, PCM12/PCM34 (gb/memory.nim), any NR10-NR26 write,
+# frame-sequencer ticks, the NR52 read (CH1's pending sweep check), the CGB
+# speed switch, the per-frame rebase, and save states (savestate.nim converts
+# next_step to and from an etAPUChannel* event). A new observer must catch up
+# first. The frequency timer runs only while the channel is on: switching it
+# off freezes the phase and only an APU power-off resets it (SameSuite
+# channel_1_stop_restart), so a stopped channel parks next_step at GB_NO_STEP.
 
 proc apu_catchup_reg(h: GB; nr: int) {.inline.} =
   ## Catch up the channel register `nr` belongs to before it is written.
@@ -106,13 +99,9 @@ proc apu_catchup_reg(h: GB; nr: int) {.inline.} =
 const ENV_CLOCK_DS_LATE_T* {.intdefine.} = 2
   ## T-cycles from the divider's double-speed tap edge to the envelope clock
   ## of the step it makes, on CGB E (GbQuirks.env_clock_ds_late): one APU
-  ## 2 MHz cycle. DocBoy's `double_speed_apu_ch2_volume_sweep*` pairs read
-  ## the old volume on the step's M-cycle and the new one an M-cycle (2 T)
-  ## later, so 1 and 2 pass, 0 loses `_round1` and 3 loses `_round2`. Not on
-  ## top of the KEY1 tap lag, which already moves the whole step the same
-  ## 2 T: DocBoy's `speed_switch_to_double_apu_ch2_volume_sweep_*` pairs (one
-  ## switch into double speed, the lag on) step between their two reads
-  ## with the lag alone.
+  ## 2 MHz cycle. 1 and 2 pass DocBoy `double_speed_apu_ch2_volume_sweep*`.
+  ## Not on top of the KEY1 tap lag, which already moves the whole step the
+  ## same 2 T (DocBoy `speed_switch_to_double_apu_ch2_volume_sweep_*`).
 static:
   doAssert APU_SPSW_TAP_LAG_T == 0 or APU_SPSW_TAP_LAG_T == ENV_CLOCK_DS_LATE_T shl 1,
     "psg_env_late takes the KEY1 tap lag for the envelope's own 2 T"
@@ -124,9 +113,8 @@ proc apu_env_late_run*(apu: GbApu) =
 
 proc apu_env_late_due*(apu: GbApu; gb: GB) {.inline.} =
   ## Run a deferred step 7 once ENV_CLOCK_DS_LATE_T has passed since the
-  ## divider's tap edge that made it (a deferred step only exists with no
-  ## KEY1 tap lag, so the step is that edge); every reader of a channel's
-  ## volume (and every APU register write) calls this first.
+  ## divider's tap edge that made it. Every reader of a channel's volume (and
+  ## every APU register write) must call this first.
   if apu.env_late_pending:
     let since = int(gb.timer.tdiv) and (apu_div_period(gb) - 1)
     if since >= (ENV_CLOCK_DS_LATE_T shl int(gb.scheduler.speed)):
@@ -172,45 +160,33 @@ const APU_SPSW_EXTRA_DOTS* {.intdefine.} = 8
 const APU_SPSW_EXTRA_DOTS_SINGLE* {.intdefine.} = 3
   ## T-cycles the APU's 4 MHz domain runs across the KEY1 stall beyond what
   ## the CPU clock counts, for a switch ending in double / single speed: the
-  ## same oscillator restart the PPU sees (SPEED_SWITCH_PPU_EXTRA_DOTS = 8 /
-  ## _SINGLE = 3). With the one-time re-phase below, the gambatte duty ladder
-  ## speedchange{,2,3,4,5}*_ch1_duty0_pos6_to_pos7_timing_* [cgb] (36 rows,
-  ## one to five switches, both directions first) is additive in these:
-  ## 7 / 9 and 2 / 4 each lose rows. Refused: 10 / 7 (without the re-phase;
-  ## the two- to five-switch rows want sums no constant pair gives).
+  ## same oscillator restart the PPU sees (SPEED_SWITCH_PPU_EXTRA_DOTS).
+  ## Pinned, with the one-time re-phase below, by gambatte
+  ## `speedchange*_ch1_duty0_pos6_to_pos7_timing_*` (one to five switches).
+  ## Without the re-phase no constant pair fits the multi-switch tests.
 
 const APU_SPSW_REPHASE_LEAD_T* {.intdefine.} = 3
 const APU_SPSW_REPHASE_GRID_T* {.intdefine.} = 1
   ## The first KEY1 switch after an APU power-on re-phases the APU clock: its
-  ## tick grid (the 1 MHz square grid) comes out GRID_T T-cycles later than real time plus the stall's
-  ## APU_SPSW_EXTRA_DOTS, and a running square's next step LEAD_T earlier --
-  ## onto the re-phased grid's previous edge. Later switches move the APU by
-  ## the extras alone. The grid half is pinned by speedchange_ch1_nr4init_
-  ## duty0_pos6_to_pos7_timing_{1,2} [cgb] (power-on, switch, then the first
-  ## trigger): 0 and 3 lose, 2 also passes. The lead by every ladder row
-  ## whose channel runs across a switch, one switch or five, triggered before
-  ## the first switch or after a power-on that followed one (the `_ds_`
-  ## members): 2 and 4 lose; tying it to the boot rather than the power-on
-  ## loses the five `_ds_2` tests. A trigger after a power-on with no switch
-  ## since sees no re-phase: SameSuite channel_1_freq_change_timing-cgb0BC
-  ## and the no-switch sound/ rows. Measured on channel 1; channel 2 is the
-  ## same hardware (assumed); channel 3 below; channel 4 is untested and left
-  ## alone. docs/gb-failure-triage.md H2. 0 / 0 disables.
+  ## 1 MHz tick grid comes out GRID_T T-cycles later than real time plus
+  ## APU_SPSW_EXTRA_DOTS, and a running square's next step LEAD_T earlier
+  ## (onto the re-phased grid's previous edge). Later switches move the APU
+  ## by the extras alone. Tied to the power-on, not the boot (boot fails the
+  ## `_ds_2` tests). Pinned by gambatte `speedchange*_ch1_*` (grid: the
+  ## nr4init tests; lead: the duty ladder). Measured on channel 1; channel 2
+  ## assumed the same; channel 3 below; channel 4 untested, left alone.
+  ## docs/gb-failure-triage.md H2. 0 / 0 disables.
 const APU_SPSW_REPHASE_LEAD3_T* {.intdefine.} = 1
   ## The same one-off for the wave channel, whose sample timer steps on the
   ## 2 MHz grid: onto that grid's previous edge once it is GRID_T later, i.e.
   ## 2 - APU_SPSW_REPHASE_GRID_T T-cycles earlier (the squares' LEAD_T is the
-  ## 1 MHz grid's 4 - GRID_T). DocBoy cgb/double_speed/apu/ch3 speed_switch_
-  ## to_single_apu_ch3_period_1 (period 1, a power-on, then the first switch:
-  ## the sample after the stall is one later than without it): over the 171
-  ## double-speed CH3 rows 0 loses that row, 3 loses the three `_b` tests (the
-  ## same switch one double-speed M-cycle later), 2 also passes; SameBoy, CGB
-  ## C and E, passes all four.
+  ## 1 MHz grid's 4 - GRID_T). 1 and 2 pass DocBoy
+  ## `speed_switch_to_single_apu_ch3_period_1*`.
 
 proc apu_stall_extra*(apu: GbApu; gb: GB; dots: int) =
-  ## Advance every channel deadline by `dots` T-cycles of real time: the
-  ## deadlines are in cycles of the CPU clock, so pull them in by dots shl
-  ## speed. Called once per stall after the scheduler ticked (mem_tick_stalled).
+  ## Advance every channel deadline by `dots` T-cycles of real time (deadlines
+  ## are in CPU-clock cycles, so dots shl speed). Called once per stall after
+  ## the scheduler ticked (mem_tick_stalled).
   if dots == 0: return
   apu_catchup_all(apu, gb)
   let d = CycleCount(dots) shl gb.scheduler.speed
@@ -277,9 +253,8 @@ proc apu_rescale_speed*(apu: GbApu; gb: GB; old_speed, new_speed: uint8) =
   ch4_advance_divisor(apu.channel4, gb)
   if apu.channel4.div_next != GB_NO_STEP:
     apu.channel4.div_next = conv(apu.channel4.div_next)
-  # The tick grids are re-anchored, not rescaled: the divider phase after a
-  # speed switch is unpinned (SameSuite's APU tests switch speed before the APU
-  # power-on that sets it).
+  # The tick grids are re-anchored, not rescaled: no test pins their phase
+  # across a switch (SameSuite switches speed before the APU power-on).
   apu.tick_phase  = gb.scheduler.cycles mod (CycleCount(4) shl new_speed)
   apu.noise_phase = gb.scheduler.cycles mod (CycleCount(8) shl new_speed)
 
@@ -287,12 +262,9 @@ proc gb_rebase*(gb: GB): CycleCount {.discardable.} =
   ## Frame-boundary scheduler rebase. Catching the channels up first keeps every
   ## deadline within one frame of staleness (CH4's shift loop; wasm uint32).
   gb.apu.apu_catchup_all(gb)
-  # Channel 4's divisor deadline can be in the past (the catch-up stops at the
-  # last LFSR shift). Settle it here, while scheduler.cycles is still the clock
-  # it is measured against: once rebase has moved that clock back it looks like
-  # the future, is left alone, and the subtraction wraps it. A wrapped stage
-  # turns the next NR43 write's LFSR deadline into a far-future one (the noise
-  # stops shifting) that apu_arm_state_events cannot convert.
+  # Channel 4's divisor deadline can be in the past. Settle it before rebase
+  # moves the clock back, or the subtraction wraps it and the noise stops
+  # shifting (a far-future deadline apu_arm_state_events cannot convert).
   ch4_advance_divisor(gb.apu.channel4, gb)
   result = gb.scheduler.rebase()
   gb.apu.apu_rebase(gb, result)
@@ -368,12 +340,11 @@ when not defined(test_harness) and not defined(emscripten):
 proc get_sample*(apu: GbApu; gb: GB) =
   apu_env_late_due(apu, gb)
   if apu.silent and apu.probe_period == 0:
-    # Nobody hears it: skip the catch-up and the mix (unobservable; see the
-    # GBA get_sample). The mixer probe always mixes. Channel 1's catch-up
-    # applies a due sweep stop before it steps the duty (ch1_sweep_due), so
-    # the phase a stop freezes depends on when the channel was last observed:
-    # while the sweep has anything in flight, observe it as a mixing sample
-    # would.
+    # Nobody hears it: skip the catch-up and the mix. The mixer probe always
+    # mixes. Channel 1's catch-up applies a due sweep stop before it steps the
+    # duty (ch1_sweep_due), so the phase a stop freezes depends on when it was
+    # last observed: while the sweep has anything in flight, observe it as a
+    # mixing sample would.
     let c1 = apu.channel1
     if c1.enabled and (c1.sweep_stop_at != PSG_NO_STEP or
                        c1.sweep_check_at != PSG_NO_STEP or
@@ -385,8 +356,8 @@ proc get_sample*(apu: GbApu; gb: GB) =
     gb.scheduler.schedule_gb(GB_SAMPLE_PERIOD, etAPUSample)
     return
   # Gated on `enabled` (a disabled channel's amplitude does not depend on its
-  # phase; the steps replay exactly later), NOT on channel_mask (a debug mute;
-  # skipping the catch-up would let CH4's shift loop fall a frame behind).
+  # phase), NOT on channel_mask (a debug mute; skipping the catch-up would let
+  # CH4's shift loop fall a frame behind).
   let OBS = if apu.probe_period != 0: apu.probe_period
             else: uint32(GB_SAMPLE_PERIOD)
   if apu.channel1.enabled: ch1_catchup_at(apu.channel1, gb, OBS)
@@ -414,8 +385,8 @@ proc get_sample*(apu: GbApu; gb: GB) =
      (if (apu.nr51 and 0x02) != 0: c2 else: 0.0'f32) +
      (if (apu.nr51 and 0x01) != 0: c1 else: 0.0'f32))
   if apu.probe_period != 0:
-    # Mixer probe (GbApu.probe_*): the raw mix, before the coupling capacitor,
-    # is what a test compares; the cap only shapes the presented stream.
+    # Mixer probe (GbApu.probe_*): tests compare the raw mix, before the
+    # coupling capacitor.
     if apu.probe_skip > 0:
       dec apu.probe_skip
     elif apu.probe_limit != 0 and apu.probe_samples >= apu.probe_limit:
@@ -433,8 +404,8 @@ proc get_sample*(apu: GbApu; gb: GB) =
   let sample_right = mix_right - apu.dc_cap_right
   apu.dc_cap_left  = mix_left  - sample_left  * GB_DC_CHARGE
   apu.dc_cap_right = mix_right - sample_right * GB_DC_CHARGE
-  # Flush to zero once the charge decays into float32 denormal range: denormal
-  # arithmetic is slow on x86 at 32768/s. The cutoff is far below one LSB.
+  # Flush denormals to zero: denormal arithmetic is slow on x86. The cutoff
+  # is far below one LSB.
   if abs(apu.dc_cap_left)  < 1e-30'f32: apu.dc_cap_left  = 0.0'f32
   if abs(apu.dc_cap_right) < 1e-30'f32: apu.dc_cap_right = 0.0'f32
   when not defined(emscripten):
@@ -492,7 +463,7 @@ proc new_gb_apu*(gb: GB; headless: bool): GbApu =
       result.owns_audio = false
   let apu = result
   # The frame-sequencer event is primed in post_init: it taps the divider,
-  # whose phase skip_boot seeds per model only after every component exists.
+  # which skip_boot seeds only after every component exists.
   get_sample(apu, gb)
 
 proc apu_read*(apu: GbApu; idx: int; gb: GB): uint8 =
@@ -518,9 +489,7 @@ proc apu_read*(apu: GbApu; idx: int; gb: GB): uint8 =
 
 proc apu_drop_spsw_lag(apu: GbApu; gb: GB) =
   ## An APU power transition (either edge of NR52 bit 7) takes the speed-switch
-  ## tap lag away, pending edge included: the edge already aimed with the lag
-  ## is re-aimed from the divider's own phase. AGE spsw-ch2-lc-delay rows
-  ## TEST_DS_OFF_ON (off edge) and TEST_DS_ON (on edge).
+  ## tap lag away, pending edge included (AGE spsw-ch2-lc-delay).
   when APU_SPSW_TAP_LAG_T != 0:
     if apu.spsw_fs_lag:
       apu.spsw_fs_lag = false
@@ -531,9 +500,8 @@ proc apu_write*(apu: GbApu; idx: int; val: uint8; gb: GB) =
   apu_env_late_due(apu, gb)
   if not apu.sound_enabled and idx != 0xFF26 and not (idx in 0xFF30..0xFF3F):
     # Pan Docs, Power Control: writes are ignored while the APU is off, except
-    # that on DMG the length counters can still be written. Only the length
-    # field lands, not NR11/NR21's duty bits (blargg dmg_sound
-    # 11-regs_after_power).
+    # DMG length counters. Only the length field lands, not NR11/NR21's duty
+    # bits (blargg dmg_sound 11-regs_after_power).
     if not gb.cgb_enabled:
       case idx
       of 0xFF11:
@@ -582,8 +550,7 @@ proc apu_write*(apu: GbApu; idx: int; val: uint8; gb: GB) =
         apu.channel1.length_counter = len1; apu.channel2.length_counter = len2
         apu.channel3.length_counter = len3; apu.channel4.length_counter = len4
       apu.sound_enabled = false
-      # Power-off resets the channels' internal phase; wave RAM survives
-      # (SameSuite channel_1 / channel_2 bracket every subtest with an off/on).
+      # Power-off resets the channels' internal phase; wave RAM survives.
       apu.channel1.wave_duty_position = 0
       apu.channel2.wave_duty_position = 0
       apu.channel3.wave_ram_position = 0
@@ -618,15 +585,14 @@ proc apu_write*(apu: GbApu; idx: int; val: uint8; gb: GB) =
       apu.tick_phase = gb.scheduler.cycles mod gb_apu_tick(gb)
       apu.noise_phase = gb.scheduler.cycles mod (2 * gb_apu_tick(gb))
       # Pan Docs, Power Control: power-on resets the wave sample buffer. CH3
-      # emits it through its trigger's startup delay, so it is visible in PCM34
-      # (SameSuite channel_3_delay, _first_sample, _restart_stop_delay, ...).
+      # emits it through its trigger's startup delay, visible in PCM34
+      # (SameSuite channel_3_*).
       apu.channel3.wave_ram_sample_buffer = 0
       # SameSuite div_write_trigger_10: starting the APU while the DIV-APU tap
       # bit is set (internal divider bit 12, 13 in double speed; timer.nim
       # apu_div_bit) skips the first DIV-APU event.
       let tap = 12 + int(gb.scheduler.speed)
-      # The bit is sampled APU_POWERON_TAP_LEAD divider counts ahead of the
-      # write (gambatte sound/ch2_init_reset_env_counter_timing_{5,7}).
+      # The bit is sampled APU_POWERON_TAP_LEAD divider counts ahead.
       apu.div_skip = (((gb.timer.tdiv + uint16(APU_POWERON_TAP_LEAD)) shr tap) and 1) != 0
       apu.first_half_of_length_period = apu.div_skip
   of 0xFF30..0xFF3F: ch3_wave_write(apu.channel3, gb, idx - 0xFF30, val)

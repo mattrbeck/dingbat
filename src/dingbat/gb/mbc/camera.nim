@@ -8,21 +8,14 @@
 # follows that page's sample code, which Pan Docs publishes under CC0 (the
 # same author's GiiBiiAdvance is where Pan Docs says the sample came from).
 #
-# Banking is MBC3-shaped: a 6-bit ROM bank at 0x2000-0x3FFF and a RAM bank at
-# 0x4000-0x5FFF. What makes it a camera is bit 4 of the RAM bank register: set
-# it and 0xA000-0xBFFF stops being RAM and becomes 54 registers, mirrored every
-# 0x80 bytes. Register A000 is the shutter — writing bit 0 starts a capture and
-# reading bit 0 says whether one is still running — and A001-A005 are five of
-# the M64282FP's own registers passed straight through. The remaining 48 form a
-# 4x4x3 threshold matrix that belongs to the MAC-GBD rather than the sensor, and
-# is what turns the sensor's analogue level into two bits per pixel.
+# MBC3-shaped banking. RAM bank bit 4 maps 54 registers (mirrored every 0x80)
+# over 0xA000-0xBFFF: A000 is the shutter (bit 0 starts / reports a capture),
+# A001-A005 pass through to M64282FP registers, and the other 48 are the
+# MAC-GBD's 4x4x3 threshold matrix (analogue level -> 2 bpp).
 #
-# Two things about the memory window are unlike any other mapper:
-#   * "Reading from RAM or registers is always enabled. Writing to registers is
-#     always enabled." Only RAM *writes* obey the 0x0A enable.
-#   * While a capture is running the whole RAM window reads back 0x00 and
-#     ignores writes, because the MAC-GBD has the RAM bus to itself. Register
-#     A000 keeps answering, which is how the game knows when to look again.
+# Unlike other mappers: reads, and register writes, ignore the 0x0A enable
+# (only RAM writes obey it). During a capture the RAM window reads 0x00 and
+# ignores writes; A000 keeps answering.
 
 const
   CAM_SENSOR_W       = 128
@@ -33,16 +26,13 @@ const
   CAM_IMAGE_LEN      = 14 * 16 * 16
 
 # ---------------------------------------------------------------------------
-# Sensor image source: a deterministic synthetic scene unless a frontend
-# installs one with set_camera_source (sensor coordinates 0..127, 0..119 ->
-# 8-bit grey). Nothing downstream knows where the pixels came from.
+# Sensor image source: a synthetic scene unless a frontend installs one with
+# set_camera_source (sensor coordinates 0..127, 0..119 -> 8-bit grey).
 # ---------------------------------------------------------------------------
 
 proc camera_test_pattern(x, y: int): uint8 =
-  ## Stand-in scene. Chosen to exercise the pipeline rather than to look like
-  ## anything: a diagonal ramp for the ROM's auto-exposure loop to converge on,
-  ## hard-edged blocks for edge enhancement to bite on, and a disc of smoothly
-  ## varying level for the dither matrix to work over.
+  ## Stand-in scene that exercises the pipeline: a ramp for auto-exposure,
+  ## hard-edged blocks for edge enhancement, a disc for the dither matrix.
   var v = (x * 3 + y * 2) and 0xFF
   if (((x shr 4) + (y shr 4)) and 1) == 1: v = (v + 96) and 0xFF
   let dx = x - 64
@@ -57,8 +47,7 @@ proc camera_pixel(cart: PocketCamera; x, y: int): int =
   if src != nil: int(src(cx, cy)) else: int(camera_test_pattern(cx, cy))
 
 proc set_camera_source*(cart: Mbc; src: proc(x, y: int): uint8) =
-  ## Replace the synthetic scene with a real image source. A no-op on every
-  ## other mapper, so callers need not check the cartridge type first.
+  ## Replace the synthetic scene. A no-op on other mappers.
   if cart of PocketCamera: PocketCamera(cart).sensor = src
 
 # ---------------------------------------------------------------------------
@@ -67,8 +56,7 @@ proc set_camera_source*(cart: Mbc; src: proc(x, y: int): uint8) =
 
 proc cam_matrix_process(cart: PocketCamera; value, x, y: int): int =
   ## The MAC-GBD's 4x4 threshold matrix: three ascending thresholds per cell
-  ## turn one grey level into one of four output levels. Being per-(x,y) is what
-  ## makes it a dither pattern as well as a contrast curve.
+  ## map grey to four levels; per-(x,y), so it also dithers.
   let base = 6 + ((y and 3) * 4 + (x and 3)) * 3
   if value < int(cart.regs[base]):     0x00
   elif value < int(cart.regs[base+1]): 0x40
@@ -77,15 +65,13 @@ proc cam_matrix_process(cart: PocketCamera; value, x, y: int): int =
 
 proc camera_capture(cart: PocketCamera) =
   ## Run the sensor and the MAC-GBD over one frame and leave the result in RAM.
-  # The real cartridge writes pixels to RAM as the sensor clocks them out;
-  # collapsed to one instant as the Pan Docs sample code does, since the RAM
-  # window is unreadable for the whole capture.
+  # Collapsed to one instant (as the Pan Docs sample): RAM is unreadable for
+  # the whole capture anyway.
   if cart.ram.len < CAM_IMAGE_OFFSET + CAM_IMAGE_LEN: return
 
   # --- sensor configuration ---
-  # Register A000 bits 1-2 pick the M64282FP's registers 4, 5 and 6, which are
-  # the coefficients of its one-dimensional filter: P is what is added, M what
-  # is subtracted, each over {this pixel, the pixel below}.
+  # A000 bits 1-2 pick M64282FP registers 4-6, the 1-D filter: P added, M
+  # subtracted, each over {this pixel, the pixel below}.
   var p_bits, m_bits: int
   case (int(cart.regs[0]) shr 1) and 3
   of 0: p_bits = 0x00; m_bits = 0x01
@@ -104,9 +90,8 @@ proc camera_capture(cart: PocketCamera) =
   var tmp: array[CAM_SENSOR_W, array[CAM_SENSOR_H, int]]
 
   # --- exposure and level shift ---
-  # Pan Docs: the sensor's gain and level control are deliberately NOT
-  # emulated (a real capture source has its own auto-exposure). Only the
-  # exposure register is applied, as the Pan Docs sample code does.
+  # Gain and level control are NOT emulated (a real source has its own
+  # auto-exposure); only exposure applies, as in the Pan Docs sample.
   for i in 0 ..< CAM_SENSOR_W:
     for j in 0 ..< CAM_SENSOR_H:
       var v = camera_pixel(cart, i, j)
@@ -122,8 +107,7 @@ proc camera_capture(cart: PocketCamera) =
     for j in 0 ..< CAM_SENSOR_H: buf[i][j] = buf[i][j] - 128   # make signed
 
   # --- edge processing ---
-  # Mode = N, the two VH bits and E3. Only the four cases below are
-  # documented; anything else passes the image through, as the sample code does.
+  # Mode = N, VH, E3. Only these four are documented; others pass through.
   case (n_bit shl 3) or (vh_bits shl 1) or e3_bit
   of 0x0:   # plain 1-D filter
     for i in 0 ..< CAM_SENSOR_W:
@@ -144,9 +128,8 @@ proc camera_capture(cart: PocketCamera) =
         let mw = buf[max(0, i - 1)][j]
         let me = buf[min(i + 1, CAM_SENSOR_W - 1)][j]
         let px = buf[i][j]
-        # The Pan Docs sample clamps this intermediate to 0..255 though the
-        # buffer is signed (the 2-D case clamps to -128..127). Reproduced as
-        # published; the Camera ROM uses the 2-D mode, so no title settles it.
+        # 0..255 on a signed buffer, as the Pan Docs sample (the 2-D case uses
+        # -128..127). The Camera ROM uses 2-D, so no title settles it.
         tmp[i][j] = clamp(int(float(px) + float(2 * px - mw - me) * alpha), 0, 255)
     for i in 0 ..< CAM_SENSOR_W:
       for j in 0 ..< CAM_SENSOR_H:
@@ -180,8 +163,7 @@ proc camera_capture(cart: PocketCamera) =
     for j in 0 ..< CAM_SENSOR_H: buf[i][j] = buf[i][j] + 128   # make unsigned
 
   # --- MAC-GBD: threshold to 2 bits and pack into Game Boy tiles ---
-  # The sensor hands over 128 rows but the MAC-GBD keeps only the middle ones,
-  # so the vertical index is offset by half the discarded rows.
+  # The MAC-GBD keeps the middle rows: offset by half the discarded ones.
   for i in 0 ..< CAM_IMAGE_LEN: cart.ram[CAM_IMAGE_OFFSET + i] = 0
   for i in 0 ..< CAM_SENSOR_W:
     for j in 0 ..< CAM_H:
@@ -204,9 +186,8 @@ proc camera_capture_cycles(cart: PocketCamera): int =
 
 proc camera_schedule(cart: PocketCamera) =
   cart.gb_ref.scheduler.clear(etCameraDone)
-  # Raw scheduler cycles, not schedule_gb: the cartridge clocks itself from
-  # PHI, which doubles with the CPU in double speed (Pan Docs: "the values
-  # used for exposure time should be doubled").
+  # Raw scheduler cycles, not schedule_gb: the cart clocks from PHI, which
+  # doubles in double speed (Pan Docs: exposure values "should be doubled").
   cart.gb_ref.scheduler.schedule(cart.capture_cycles_left, etCameraDone)
 
 proc camera_done*(cart: PocketCamera) =
@@ -220,8 +201,7 @@ proc camera_done*(cart: PocketCamera) =
 proc camera_reg_write(cart: PocketCamera; idx: int; val: uint8) =
   let reg = (idx - 0xA000) and 0x7F   # mirrored every 0x80 bytes
   if reg == 0:
-    # "The lower 3 bits of this register can be read and write. The other bits
-    # return '0'."
+    # Only the low 3 bits are stored (Pan Docs).
     let v = val and 0x07
     let was_busy = (cart.regs[0] and 1) != 0
     if (v and 1) != 0 and not was_busy:
@@ -233,8 +213,7 @@ proc camera_reg_write(cart: PocketCamera; idx: int; val: uint8) =
       # else: resuming a stopped capture with the old parameters (Pan Docs).
       cart.camera_schedule()
     elif (v and 1) == 0 and was_busy:
-      # Stopping a capture (Pan Docs documents stop and resume). The partially
-      # written image a real cartridge leaves is not modelled.
+      # Stop (Pan Docs). The partial image hardware leaves is not modelled.
       let s = cart.gb_ref.scheduler
       var remaining = cart.capture_cycles_left
       for ev in s.events:
@@ -249,8 +228,7 @@ proc camera_reg_write(cart: PocketCamera; idx: int; val: uint8) =
   # 0x36-0x7F decode to nothing at all
 
 proc camera_reg_read(cart: PocketCamera; idx: int): uint8 =
-  # "All registers are write-only, except the register A000. The others return
-  # $00 when read."
+  # Write-only except A000; the others read $00 (Pan Docs).
   if ((idx - 0xA000) and 0x7F) == 0: cart.regs[0] and 0x07 else: 0x00'u8
 
 method mbc_rom_map*(cart: PocketCamera): (int, int) =
@@ -267,8 +245,7 @@ method mbc_read*(cart: PocketCamera; idx: int): uint8 =
     elif (cart.regs[0] and 1) != 0:
       0x00'u8   # capture in progress: the MAC-GBD has the RAM to itself
     elif cart.ram.len > 0:
-      # Note the missing ram_enabled test: "Reading from RAM or registers is
-      # always enabled."
+      # No ram_enabled test: reads are always enabled.
       cart.ram[mbc_ram_bank_offset(cart, int(cart.ram_bank_num)) + mbc_ram_offset(cart, idx)]
     else: 0xFF'u8
   else: 0xFF'u8

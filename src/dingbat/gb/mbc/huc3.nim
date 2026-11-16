@@ -1,12 +1,10 @@
 # HuC3 cartridge (included by gb.nim)
 #
-# Sources: Pan Docs "HuC-3", and the gbdev research thread it cites
-# (https://gbdev.gg8.se/forums/viewtopic.php?id=744), where endrift, cuavas and
-# CasualPokePlayer worked the part out on real cartridges.
+# Sources: Pan Docs "HuC-3" and the hardware thread it cites
+# (https://gbdev.gg8.se/forums/viewtopic.php?id=744).
 #
-# Banking is MBC5-shaped (7-bit ROM bank, bank 0 mappable at 0x4000). What is
-# not MBC-shaped is 0xA000-0xBFFF: the low nibble written to 0x0000-0x1FFF picks
-# what the whole window decodes to.
+# MBC5-shaped banking (7-bit, bank 0 mappable at 0x4000). The low nibble
+# written to 0x0000-0x1FFF picks what 0xA000-0xBFFF decodes to:
 #
 #   0x0  cart RAM, read-only
 #   0xA  cart RAM, read/write
@@ -16,18 +14,13 @@
 #   0xE  infrared transceiver
 #   any other value: open bus on read, writes dropped
 #
-# Behind 0xB/0xC/0xD is not an RTC but a 4-bit microcontroller with its own
-# program ROM, of which the cartridge exposes a 256-nibble window into memory.
-# The host never touches that memory directly: it writes a command and a 4-bit
-# argument to the 0xB mailbox, clears the semaphore to ask the MCU to run it,
-# waits for the semaphore to come back, and reads the 4-bit answer out of 0xC.
-# Only bits 6-0 of the window reach the chip at all — D7 is not wired — so the
-# top bit of every read is the floating bus, which sits high.
+# Behind 0xB/0xC/0xD is a 4-bit MCU with a 256-nibble memory: the host writes
+# command + argument to 0xB, clears the semaphore, waits for it, and reads the
+# answer from 0xC. D7 is not wired, so bit 7 of every read floats high.
 #
-# Commands run the moment the semaphore is cleared and ready is reported at
-# once; the MCU's busy window is not modelled (games poll for ready). Not
-# modelled: the tone generator (a piezo on the cartridge; extended command 0xE
-# is accepted and dropped). The register map and the clock in it are in gb.nim.
+# Commands run as soon as the semaphore clears and report ready at once (busy
+# time not modelled; games poll). The piezo tone generator is not modelled
+# (extended command 0xE is dropped). Register map and clock: gb.nim.
 
 proc huc3_exec_extended(cart: Huc3; arg: uint8) =
   ## Command 0x6's argument selects one of the MCU's higher-level operations.
@@ -73,8 +66,7 @@ proc huc3_execute(cart: Huc3) =
                  # with argument 0 and nobody has worked out what it does
 
 proc huc3_window_read(cart: Huc3; idx: int): uint8 =
-  # A12-A0 do not reach the chip, so every address in the window aliases to the
-  # same register; only cart RAM cares which one it was.
+  # A12-A0 do not reach the chip: the window aliases one register.
   case cart.mode
   of 0x0C:
     # Bit 7 floats high, bits 6-4 read back the command still in the mailbox,

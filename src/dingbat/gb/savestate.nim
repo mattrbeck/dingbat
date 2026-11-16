@@ -56,8 +56,8 @@ proc load_cpu_state(cpu: GbCpu; r: var Reader; rev: uint32) =
   # `stopped` masked out, so a state taken in STOP loads as the running CPU
   # after the STOP, which is what those builds did.
   cpu.stopped = if rev >= 6: r.read_bool() else: false
-  # STOP always sets all three; a file that says otherwise would run a
-  # stopped machine as a halted one (or never wake it).
+  # STOP always sets all three; anything else would run a stopped machine
+  # as a halted one (or never wake it).
   if cpu.stopped and not (cpu.halted and cpu.locked):
     raise state_error("save state has the CPU in STOP mode without the halt " &
                       "that goes with it")
@@ -68,9 +68,8 @@ proc load_cpu_state(cpu: GbCpu; r: var Reader; rev: uint32) =
 
 proc save_irq_state(irq: GbInterrupts; w: var Writer) =
   w.write_tag(GB_SEC_IRQ)
-  # The pending flags themselves, not irq_read(0xFF0F): that is what a CPU
-  # read sees, the byte latched at the last $FF0F read (IF_READ_SAMPLE_T), so
-  # a state would drop an interrupt raised since and bring back one taken.
+  # The pending flags, not irq_read(0xFF0F): that is the byte latched at the
+  # last $FF0F read (IF_READ_SAMPLE_T), which can be stale.
   w.write_u8(irq_packed(irq))
   w.write_u8(irq_read(irq, 0xFFFF))
 
@@ -78,8 +77,8 @@ proc load_irq_state(irq: GbInterrupts; r: var Reader) =
   r.expect_tag(GB_SEC_IRQ)
   irq_write(irq, 0xFF0F, r.read_u8())
   irq_write(irq, 0xFFFF, r.read_u8())
-  # Only a $FF0F read's own M-cycle uses the latch, and it re-latches first;
-  # keep it the byte just loaded so nothing stale from before the load shows.
+  # Only a $FF0F read's own M-cycle uses the latch (it re-latches first);
+  # seed it with the loaded byte so nothing stale shows.
   when IF_READ_SAMPLE_T < 4: irq.if_prev = irq_packed(irq)
 
 proc save_timer_state(t: GbTimer; w: var Writer) =
@@ -106,9 +105,8 @@ proc load_timer_state(t: GbTimer; r: var Reader; rev: uint32) =
   t.bit_for_tima = int(r.read_i32())
   t.previous_bit = r.read_bool()
   t.countdown = int(r.read_i32())
-  # Before rev 10 the hold was not carried (a load kept the running
-  # machine's); none is the value a state written outside the 2 M-cycles
-  # after a leaf switch has.
+  # Before rev 10 the hold was not carried; none is right for any state not
+  # written within 2 M-cycles of a leaf switch.
   t.hold_t = if rev >= 10: int(r.read_i32()) else: 0
   check_range(t.hold_t, -1, 64, "timer.hold_t")
 
@@ -150,8 +148,7 @@ proc load_serial_state(s: GbSerial; r: var Reader; rev: uint32) =
   s.shifting = r.read_bool()
 
 proc save_joypad_state(j: GbJoypad; w: var Writer) =
-  # Only the select lines (written by the game); pressed-key state stays
-  # live since it reflects currently held host keys
+  # Only the select lines; pressed keys are live host input.
   w.write_tag(GB_SEC_JOY)
   w.write_bool(j.button_keys)
   w.write_bool(j.direction_keys)
@@ -160,8 +157,8 @@ proc load_joypad_state(j: GbJoypad; r: var Reader) =
   r.expect_tag(GB_SEC_JOY)
   j.button_keys = r.read_bool()
   j.direction_keys = r.read_bool()
-  # Key presses are live input: re-seed the joypad-interrupt edge detector
-  # from what is held now, or a phantom press interrupt can fire.
+  # Re-seed the joypad-interrupt edge detector from what is held now, or a
+  # phantom press interrupt can fire.
   joypad_sync(j)
 
 # ---- The machine object (rev 6) ----
@@ -177,9 +174,9 @@ proc save_machine_state(gb: GB; w: var Writer) =
   w.write_tag(GB_SEC_MACH)
   # The silicon revision the quirks were resolved from (gb_set_revision).
   w.write_u8(uint8(ord(gb.revision)))
-  # An HBlank request a HALT took and has yet to pay
-  # (HDMA_HALT_REQ, gb.nim): the latched byte + 1, 0 = none. A reserved slot
-  # of rev 6, so the format is unchanged.
+  # An HBlank request a HALT took and has yet to pay (HDMA_HALT_REQ, gb.nim):
+  # the latched byte + 1, 0 = none. A reserved slot of rev 6, so the format is
+  # unchanged.
   w.write_i16(if gb.hdma_halt_taken: int16(gb.hdma_latch) + 1 else: 0'i16)
   # The HBlank DMA edge detector's registered mode + 1 (HDMA_HALT_M0_BLIND:
   # frozen while the CPU is halted, so not derivable from the payload) and,
@@ -289,8 +286,8 @@ proc load_mem_state(mem: GbMemory; r: var Reader; rev: uint32) =
   let sits_out = rev >= 10 and r.read_bool()
   mem.ppu_mdot_shift = if sits_out: PPU_SIT_OUT else: int(mem.current_speed)
   mem.cycle_tick_count = 0  # per-instruction scratch, zero between frames
-  # Derived, not payload. dma_bus / dma_drive / dma_latch are re-derived in
-  # gb_apply_state once the cartridge and PPU sections have landed.
+  # Derived. dma_bus / dma_drive / dma_latch are re-derived in gb_apply_state
+  # once the cartridge and PPU sections have landed.
   mem.dma_busy = mem.dma_position > 0 and mem.dma_position <= 0xA0
 
 # ---- PPU (renderer-agnostic base state only, see file comment) ----
@@ -365,24 +362,19 @@ proc load_ppu_state(ppu: GbPpu; gb: GB; r: var Reader; rev: uint32) =
   ppu.scx = r.read_u8()
   ppu.ly = r.read_u8()
   # The renderers write `framebuffer[ly * 160 + x]`; 154+ indexes past it.
-  # (LYC is only ever compared, so any byte is legal.)
   check_range(int(ppu.ly), 0, 153, "ppu.ly")
-  # States are written at frame boundaries, which are V-blank entries (mode
-  # 1 at LY 144), LCD-off frames (mode 0), or the frame an LCD-on ends: that
-  # write restarts the PPU at LY 0 in mode 2 and pushes the frame from inside
-  # the instruction, so the state is a few dots into mode 2. Mode 3 cannot
-  # appear (the renderer's per-line scratch is not serialized, and how long
-  # mode 3 still needs depends on it); mode 2 can, because nothing in it is
-  # renderer scratch -- the OAM scan runs as one burst at its end -- and is
-  # checked against its stop dot once the counter is read, below.
+  # States are written at frame boundaries (see the file comment): an LCD-on
+  # write pushes the frame from inside the instruction, so that state is a
+  # few dots into mode 2. Mode 3 cannot appear (its length depends on the
+  # unserialized renderer scratch); mode 2 can, because the OAM scan runs as
+  # one burst at its end, and is checked against its stop dot below.
   let ppu_mode = int(ppu.lcd_status) and 3
   if ppu_mode == 3:
     raise state_error("save state has PPU mode 3 on line " & $int(ppu.ly) &
                       ": no state is written mid-scanline")
   # A vblank line must be in vblank mode: mode 0 at LY 144 walks LY to 145,
   # the `== GB_HEIGHT` vblank entry never fires again, and the PPU renders
-  # past the 160x144 framebuffer. Real states are LY 144 mode 1 (LCD on) or
-  # LY 0 mode 0 (LCD off), both of which pass.
+  # past the framebuffer.
   if int(ppu.ly) >= GB_HEIGHT and ppu_mode != 1:
     raise state_error("save state has PPU mode " & $ppu_mode & " on line " &
                       $int(ppu.ly) & ", which is a vblank line: only mode 1 " &
@@ -403,9 +395,8 @@ proc load_ppu_state(ppu: GbPpu; gb: GB; r: var Reader; rev: uint32) =
   r.read_bytes(ppu.obp0)
   r.read_bytes(ppu.obp1)
   ppu.wy = r.read_u8()
-  # The comparator's copy and its queued samples are in flight for a few dots
-  # after a write (WIN_CHECK_DEFER), never across the frame boundary a state
-  # is written on.
+  # The comparator's copy and queued samples (WIN_CHECK_DEFER) never cross
+  # a frame boundary.
   win_check_clear(ppu)
   ppu.wx = r.read_u8()
   ppu.vram_bank = r.read_u8()
@@ -430,9 +421,9 @@ proc load_ppu_state(ppu: GbPpu; gb: GB; r: var Reader; rev: uint32) =
   let hdma_pos = r.read_u16()
   ppu.hdma_active = r.read_bool()
   # Rebuild the address counters. An older state holds the transfer's start
-  # address plus a block index, and the four register bytes last written;
-  # both are reproduced so it resumes where it left off. For this build's
-  # states the block index is 0 and the bytes are the counters: a no-op.
+  # address plus a block index, and the four register bytes last written. For
+  # this build's states the block index is 0 and the bytes are the counters:
+  # a no-op.
   if ppu.hdma_active:
     ppu.hdma_src = ppu.hdma_src + hdma_pos * 0x10
     ppu.hdma_dst = ppu.hdma_dst + hdma_pos * 0x10
@@ -441,8 +432,7 @@ proc load_ppu_state(ppu: GbPpu; gb: GB; r: var Reader; rev: uint32) =
     ppu.hdma_dst = (uint16(hdma3) shl 8) or uint16(hdma4 and 0xF0)
   if rev >= 3:
     ppu.dots_since_frame = r.read_i32()
-    # The panel's refresh clock, reset at every frame push: one frame of dots
-    # is its whole range.
+    # Reset at every frame push: one frame of dots is its whole range.
     check_range(int(ppu.dots_since_frame), 0, 70224, "ppu.dots_since_frame")
   else:
     # Reset at every frame push and states are written at frame boundaries,
@@ -458,8 +448,7 @@ proc load_ppu_state(ppu: GbPpu; gb: GB; r: var Reader; rev: uint32) =
   check_range(int(ppu.cycle_counter), 0, 456, "ppu.cycle_counter")
   # Every mode leaves on an EXACT dot (fifo_ppu: mode 2 at m3_start_dot,
   # modes 0/1 at the line end), so a mode-2 counter past that stop would
-  # climb the same way; the pair is what no per-field bound can catch
-  # (b5dddb0c). The LCD-on frame's state is a few dots into mode 2.
+  # climb the same way; no per-field bound catches the pair.
   if ppu_mode == 2 and ppu.cycle_counter > m3_start_dot(gb):
     raise state_error("save state has PPU mode 2 at dot " &
                       $ppu.cycle_counter & " of line " & $int(ppu.ly) &
@@ -491,9 +480,8 @@ proc load_ppu_state(ppu: GbPpu; gb: GB; r: var Reader; rev: uint32) =
     # state replaces must not land on the loaded one.
     ppu.lcd_on_first_frame = false
     ppu.stat_drop_pending = false
-  # Derived, not payload: the interrupt line's copy of mode/LY leads the
-  # readable one by under an M-cycle, and a state is captured at vblank, where
-  # re-deriving is exact.
+  # Derived: the interrupt line's copy of mode/LY leads the readable one by
+  # under an M-cycle, so re-deriving at a frame boundary is exact.
   when STAT_IRQ_SPLIT:
     ppu.irq_mode = ppu.lcd_status and 3'u8
     ppu.irq_ly = ppu.ly
@@ -559,8 +547,8 @@ proc read_deadline(r: var Reader; now: CycleCount; field: string): CycleCount =
   let pending = r.read_bool()
   let d = int(r.read_i32())
   if not pending: return GB_NO_STEP
-  # Every deadline carried is settled at the frame rebase, so it is within a
-  # frame of the payload's clock; anything further is damage.
+  # Every deadline carried is within a frame of the payload's clock;
+  # anything further is damage.
   check_range(d, -(1 shl 20), 1 shl 20, field)
   CycleCount(int64(now) + int64(d))
 
@@ -632,9 +620,8 @@ proc save_apu_state(apu: GbApu; gb: GB; w: var Writer) =
   w.write_u8(apu.channel2.env_extra_tick)
   w.write_bool(apu.channel3.wave_fetched)
   w.write_u8(apu.channel4.env_extra_tick)
-  # Channel 4's divisor stage: a free-running counter NR43's clock shift picks
-  # a bit of, so the LFSR deadline alone cannot rebuild it (a later NR43 write
-  # that moves the shift reads bits the deadline says nothing about).
+  # Channel 4's divisor stage: a free-running counter NR43's clock shift
+  # picks a bit of, so the LFSR deadline alone cannot rebuild it.
   w.write_u16(apu.channel4.div_counter)
   w.write_deadline(apu.channel4.div_next, now)
   # rev 7: the first KEY1 switch after a power-on re-phases the APU clock
@@ -702,9 +689,8 @@ proc load_apu_state(apu: GbApu; gb: GB; r: var Reader; rev: uint32) =
     ch.duty = r.read_u8() and 3
     ch.length_load = r.read_u8()
     ch.frequency = r.read_u16()
-    # last_step_at is not in the payload: the frame rebase clears it, so it
-    # is GB_NO_STEP at every boundary a state is written on. The sweep
-    # deadlines are read at the end of the section (rev 6).
+    # last_step_at is not in the payload: the frame rebase clears it. The
+    # sweep deadlines are read at the end of the section (rev 6).
     ch.last_step_at   = GB_NO_STEP
   block:
     let ch = apu.channel2
@@ -787,9 +773,9 @@ proc load_apu_state(apu: GbApu; gb: GB; r: var Reader; rev: uint32) =
     for ch in [PsgSquare(apu.channel1), apu.channel2]:
       ch.start_at = if rev >= 10: r.read_deadline(now, "start_at") else: GB_NO_STEP
   else:
-    # Before rev 6: the grids' phases and the KEY1 lag stayed whatever the
-    # running machine had, as those builds did; the rest is live for a few
-    # M-cycles at most and those builds dropped it, which is idle.
+    # Before rev 6: the grids' phases and the KEY1 lag stay as the running
+    # machine had them, as those builds did; the rest is live for a few
+    # M-cycles at most and loads idle.
     apu.div_skip = false
     for ch in [GbVolumeEnvChannel(apu.channel1), apu.channel2, apu.channel4]:
       ch.env_extra_tick = 0
@@ -813,7 +799,7 @@ proc mbc_kind_tag(cart: Mbc): uint8 =
   elif cart of Mbc5: 5'u8
   elif cart of Mbc6: 6'u8
   elif cart of Mbc7: 7'u8
-  # The mappers with no MBC number use their cartridge-type bytes instead
+  # Mappers with no MBC number use their cartridge-type bytes
   elif cart of Mmm01: 0x0B'u8
   elif cart of PocketCamera: 0xFC'u8
   elif cart of Tama5: 0xFD'u8
@@ -893,9 +879,8 @@ proc save_mbc_state(cart: Mbc; w: var Writer) =
     w.write_bool(c.flash_select_b)
     w.write_bool(c.flash_enabled)
     w.write_bool(c.flash_write_enabled)
-    # The flash array is battery-backed content (downloaded minigames) and the
-    # command state must go with it, or a state taken mid-unlock resumes
-    # mid-sequence.
+    # The flash array is battery-backed content and the command state goes
+    # with it, or a state taken mid-unlock resumes mid-sequence.
     w.write_seq_u8(c.flash)
     w.write_seq_u8(c.flash_hidden)
     w.write_bool(c.flash_sector0_protected)
@@ -946,8 +931,8 @@ proc load_mbc_state(cart: Mbc; r: var Reader) =
   r.expect_tag(GB_SEC_MBC)
   if r.read_u8() != mbc_kind_tag(cart):
     raise newException(StateError, "save state MBC type mismatch")
-  # Into the live buffer (a failed load rolls back from its backup), not a
-  # fresh seq, and noted only if it changes: run-ahead restores every frame.
+  # Into the live buffer (a failed load rolls back from its backup), and
+  # noted only if it changes: run-ahead restores every frame.
   let n = r.read_seq_u8_len()
   if n != cart.ram.len:
     raise newException(StateError, "save state cart RAM size mismatch")
@@ -1077,8 +1062,8 @@ proc load_mbc_state(cart: Mbc; r: var Reader) =
   # The banking registers were written directly, not through mbc_write, so
   # the flat-ROM cache is stale until now.
   mbc_sync_rom_map(cart)
-  # Persist the restored cart RAM to the .sav on the next flush, if the state
-  # changed it: marking it every time rewrote the save every run-ahead frame.
+  # Persist restored cart RAM on the next flush only if it changed: marking it
+  # every time rewrites the save every run-ahead frame.
   if cart.has_battery and ram_changed:
     cart.ram_dirty = true
 
@@ -1150,8 +1135,7 @@ proc load_sgb_state(s: SgbState; r: var Reader) =
   s.prev_lines = r.read_u8()
   s.receiving  = r.read_bool()
   # `pending` is derived, keeping the rev 5 layout: exactly one select line
-  # low means a pulse is in flight (only cpp/sgb-ext-test's malformed
-  # transfer reaches that state without one).
+  # low means a pulse is in flight.
   s.pending = s.prev_lines == 1 or s.prev_lines == 2
   s.bit_count  = int(r.read_u16())
   r.read_bytes(s.packet)
@@ -1253,8 +1237,8 @@ proc gb_apply_state(gb: GB; payload: string; rev: uint32;
   # Derived: a function of the console, the cart header and whether the boot
   # ROM is still mapped, which load_mem_state has just restored.
   gb_sync_cgb_native(gb)
-  # Derived: `halt_ppu_debt` (CGB_HALT_PPU_LEAD in gb.nim) is constant for
-  # the whole of a halt, so `halted` plus the speed reconstructs it.
+  # Derived: `halt_ppu_debt` (CGB_HALT_PPU_LEAD) is constant for the whole
+  # of a halt.
   when CGB_HALT_PPU_LEAD_ANY:
     gb.cpu.halt_ppu_debt =
       if gb.cpu.halted and not gb.cpu.locked and gb.cgb_enabled:
@@ -1297,10 +1281,9 @@ proc gb_apply_state(gb: GB; payload: string; rev: uint32;
   # until an NR43 write moves the clock shift; see ch4_resync_divisor).
   if rev < 6: ch4_resync_divisor(gb.apu.channel4)
   load_mbc_state(gb.cartridge, r)
-  # The SGB section is present when the WRITING machine had an adapter, and
-  # the reading one may not (it is a frontend setting): decide from the
-  # payload, not `gb.sgb != nil`, or the reader desynchronises. Without an
-  # adapter the section is read into a throwaway and dropped.
+  # The SGB section is present when the WRITING machine had an adapter (a
+  # frontend setting): decide from the payload, not `gb.sgb != nil`, or the
+  # reader desynchronises. Without an adapter it is read and dropped.
   if rev >= 5 and r.peek_tag() == GB_SEC_SGB:
     load_sgb_state(if gb.sgb != nil: gb.sgb else: new_sgb_state(), r)
   r.expect_tag(GB_SEC_END)
@@ -1384,9 +1367,8 @@ proc state_bytes*(gb: GB; thumbnail = false): string =
 
 proc gb_apply_checked(gb: GB; payload: string; rev: uint32): bool =
   ## Apply a validated payload, restoring the live machine if it fails midway.
-  ## Both load paths go through here. See the GBA proc of the same name for why
-  ## the Defect arm exists and why continuing after one is safe in this one
-  ## place — the reasoning is identical and is written out there.
+  ## Both load paths go through here. The GBA proc of the same name explains
+  ## the Defect arm and why continuing after one is safe here.
   let backup = gb.gb_state_payload()
   try:
     gb.gb_apply_state(payload, rev)
@@ -1405,9 +1387,8 @@ proc gb_apply_checked(gb: GB; payload: string; rev: uint32): bool =
 
 proc parse_state_image*(gb: GB; data: string; origin = "state data"):
                        tuple[payload: string; rev: uint32] =
-  ## Header validation for a full state image against THIS cart — the mirror
-  ## of the GBA proc of the same name, so the format test can ask both cores
-  ## the same question instead of assembling a ROM identity itself.
+  ## Header validation for a full state image against THIS cart; mirrors the
+  ## GBA proc so the format test can ask both cores the same question.
   parse_state_payload(data, ckGB, gb.gb_rom_checksum(),
                       gb.gb_rom_size(), origin)
 
@@ -1428,8 +1409,7 @@ proc state_is_for*(gb: GB; data: string): bool =
 
 proc load_state_bytes*(gb: GB; data: string): bool =
   ## Validate and apply a full state image. Mirrors load_state's rollback.
-  ## The reject kind is cleared first: not every failure classifies itself,
-  ## and a stale kind would have the frontend explain the wrong problem.
+  ## The reject kind is cleared first: not every failure classifies itself.
   last_state_reject_kind = srkNone
   var image: tuple[payload: string; rev: uint32]
   try:

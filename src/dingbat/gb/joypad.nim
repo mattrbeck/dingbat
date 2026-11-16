@@ -1,9 +1,8 @@
 # GB Joypad (included by gb.nim)
 
 proc joypad_lines*(j: GbJoypad): uint8 =
-  ## The four input pins as they actually read: a bit is 0 while a key of a
-  ## selected group holds its line low. Both groups can be selected at once,
-  ## in which case either key pulls the shared line down.
+  ## The four input pins: a bit is 0 while a key of a selected group holds
+  ## its line low. With both groups selected either key pulls the line down.
   let pressed =
     (if (j.down  and j.direction_keys) or (j.start   and j.button_keys): 0x08'u8 else: 0'u8) or
     (if (j.up    and j.direction_keys) or (j.jselect and j.button_keys): 0x04'u8 else: 0'u8) or
@@ -12,10 +11,9 @@ proc joypad_lines*(j: GbJoypad): uint8 =
   (not pressed) and 0x0F'u8
 
 proc new_gb_joypad*(): GbJoypad =
-  # Power-on: both select lines low (P1 reads $CF) and nothing held, so every
-  # input line idles high. The DMG boot ROM never writes P1 and hands off $CF
-  # (mooneye boot_hwio-dmgABCmgb); skip_boot (memory.nim) applies what the
-  # boot ROMs that do write it leave behind.
+  # Power-on: both select lines low (P1 reads $CF). The DMG boot ROM never
+  # writes P1 (mooneye boot_hwio-dmgABCmgb); skip_boot (memory.nim) applies
+  # what the boot ROMs that do write it leave behind.
   GbJoypad(button_keys: true, direction_keys: true, prev_lines: 0x0F)
 
 proc joypad_sync*(j: GbJoypad) =
@@ -67,8 +65,7 @@ proc handle_input*(j: GbJoypad; gb: GB; inp: Input; pressed: bool) =
 
 when defined(test_harness):
   # Timed input for the test harness (tests/gb_timed_input.nim, dingbat_test
-  # --input): key changes placed on an exact M-cycle rather than between
-  # frames. Nothing here exists in a shipping build.
+  # --input): key changes on an exact M-cycle. Not in shipping builds.
   var gb_harness_input*: proc(gb: GB; stopped: bool) {.nimcall.}
     ## Run from the scheduler's etHandleInput (gb_dispatch; the GB core never
     ## books that event itself) and, with `stopped`, once per step of STOP

@@ -1,16 +1,13 @@
 # GB Memory bus (included by gb.nim)
 
-# -d:gb_dma_trace (diagnostic, compiled out of shipping builds; REGREAD and
-# MODE are on hot paths): DMASTART (OAM DMA takes the bus), REGREAD (CPU reads
-# of STAT/LY), MODE (PPU mode changes), FF55 (writes, with mode/hdma_active),
-# HDMABLOCK (each block copy), VRAMRD (CPU VRAM reads with the lock state).
+# -d:gb_dma_trace: diagnostic, off by default (REGREAD and MODE sit on hot
+# paths). Logs DMASTART, REGREAD (STAT/LY), MODE, FF55, HDMABLOCK, VRAMRD.
 
 const SVBK_READS_WRITTEN* {.booldefine.} = true
-  ## $FF70 reads back the three bits last stored (so $F8 after a stored 0,
-  ## and $F8 at hand-off) rather than the bank mapped at $D000 ($F9 for
-  ## both). true: DocBoy cgb/boot/boot_regs_cgb passes and matches the AGS
-  ## read of gbedge p00 (SVBK = $F8, docs/flashcart-runbook.md). false: that
-  ## test fails ($F9). docs/gb-derivations.md, "SVBK readback".
+  ## true: $FF70 reads back the three bits last stored ($F8 after a stored 0
+  ## and at hand-off). false: the bank mapped at $D000 ($F9 for both).
+  ## true matches the AGS read of gbedge p00 (docs/flashcart-runbook.md) and
+  ## DocBoy cgb/boot/boot_regs_cgb. docs/gb-derivations.md, "SVBK readback".
 
 proc new_gb_memory*(gb: GB): GbMemory =
   # DMA (FF46) reads back the last written value; post-boot it's 0xFF on
@@ -20,9 +17,8 @@ proc new_gb_memory*(gb: GB): GbMemory =
   for i in 0 ..< 8:
     result.wram[i] = newSeq[uint8](0x1000)
   when GB_POWERUP_WRAM_PATTERN != 0:
-    # Non-zero power-up WRAM (BullyGB InitRAMTest). A fixed xorshift, not a
-    # seeded RNG: the screenshot, save-state and rollback gates need identical
-    # bytes on every run.
+    # Non-zero power-up WRAM (BullyGB InitRAMTest). Fixed xorshift, not a
+    # seeded RNG: screenshot, save-state and rollback gates need identical bytes.
     var s: uint32 = 0x1234_5678'u32
     for b in 0 ..< 8:
       for j in 0 ..< 0x1000:
@@ -37,14 +33,12 @@ proc new_gb_memory*(gb: GB): GbMemory =
     for i in 0 ..< raw.len: result.bootrom[i] = uint8(raw[i])
 
 proc mem_flush_deferred*(mem: GbMemory; gb: GB) =
-  ## Apply the part of a CPU write that belongs on the M-cycle boundary rather
-  ## than at the write's commit point (GbMemory.write_deferred). mem_write
-  ## commits the byte at the top of its M-cycle to sit in phase with the mode-3
-  ## pipeline; the STAT interrupt line and FF55 were already in phase, so their
-  ## effect stays on the boundary (ppu_write_machinery classifies; gambatte
-  ## m2enable/*_late_*, gbmicrotest lyc1_write_timing_*). IF is NOT deferred:
-  ## the CPU's IF store lands ahead of the flags the PPU raises in the same
-  ## M-cycle (gambatte miscmstatirq, lycEnable, m0enable, m1).
+  ## Apply the part of a CPU write that belongs on the M-cycle boundary
+  ## (GbMemory.write_deferred). mem_write commits the byte at the top of its
+  ## M-cycle, in phase with the mode-3 pipeline; the STAT line and FF55 effects
+  ## stay on the boundary (ppu_write_machinery classifies; gambatte
+  ## m2enable/*_late_*). IF is NOT deferred: the CPU's IF store lands ahead of
+  ## flags the PPU raises in the same M-cycle (gambatte miscmstatirq).
   mem.write_deferred = false
   when CGB_WRITE_LATENCY_ANY:
     # A pipeline store no M-cycle ran the dots for (post-boot write, cheat poke).
@@ -58,8 +52,8 @@ proc mem_flush_deferred*(mem: GbMemory; gb: GB) =
     let v   = mem.deferred_val
     mem.deferred_reg = 0
     when CGB_LYC153_SRC_HOLD:
-      # A CGB STAT write's enables, landing, still find the 153 match the
-      # source holds through the snapback (CGB_LYC153_SRC_HOLD, gb.nim).
+      # A CGB STAT write's enables still see the 153 match held through the
+      # snapback (CGB_LYC153_SRC_HOLD, gb.nim).
       if reg == 0xFF41 and gb.cgb_enabled:
         gb.stat_hold = STAT_LYC153_HELD
         ppu_write_machinery(gb.ppu, gb, reg, v)
@@ -71,29 +65,22 @@ proc mem_flush_deferred*(mem: GbMemory; gb: GB) =
 
 const BOOT_FS_STAGE_DMG* {.intdefine.} = 1
 const BOOT_FS_STAGE_CGB* {.intdefine.} = 0
-  ## The frame sequencer's next step (0-7) at the boot hand-off: the boot ROM
-  ## powered the APU on at its start and the sequencer has been stepping since.
-  ## Per boot ROM. gambatte sound/ch2_init_env_counter_timing_{1..4} trigger
-  ## channel 2 at four spacings against the first envelope clock and want the
-  ## DMG's tick on 2, 3 and 4 and the CGB's on 4 only: every other stage loses
-  ## at least one of the 40 envelope rows on that device (DINGBAT_BOOT_FS_STAGE
-  ## sweep, the test build).
+  ## The frame sequencer's next step (0-7) at the boot hand-off, per boot ROM
+  ## (the boot ROM powered the APU on at its start). Pinned by gambatte
+  ## sound/ch2_init_env_counter_timing_*; every other stage fails some.
+  ## DINGBAT_BOOT_FS_STAGE overrides it in the test build.
 
 const BOOT_CH1_PHASE_DMG_T* {.intdefine.} = 728
 const BOOT_CH1_PHASE_CGB_T* {.intdefine.} = 1612
   ## T-cycles into channel 1's 2016-cycle duty cycle (frequency $7C1, duty 2)
   ## at the boot hand-off, per boot ROM: the beep's second note is still
-  ## stepping (NR52 reads $F1). gambatte sound/ch1_init_pos_{1..8} retrigger
-  ## the channel at eight spacings and read which duty sample it froze on;
-  ## the sweep over all 504 values four cycles apart (DINGBAT_BOOT_CH1_PHASE,
-  ## the test build) passes all eight only at 728 [dmg] and 1612 [cgb], with
-  ## both neighbours losing two.
+  ## stepping (NR52 reads $F1). Pinned by gambatte sound/ch1_init_pos_*: only
+  ## these values pass all of them. DINGBAT_BOOT_CH1_PHASE overrides it in the
+  ## test build.
 const BOOT_CH1_PHASE_CGB_COMPAT_T* {.intdefine.} = 1600
-  ## The same for the CGB boot ROM run over a DMG cart (compatibility mode),
-  ## which no gambatte row covers: running the CGB boot ROM puts the hand-off
-  ## 12 T earlier in the duty cycle than over a CGB cart (where the run lands
-  ## exactly on BOOT_CH1_PHASE_CGB_T), on every header path the skip-boot
-  ## models (cgb_boot_header_t).
+  ## The same for the CGB boot ROM over a DMG cart, which no test covers:
+  ## measured by running the boot ROM, 12 T earlier than over a CGB cart on
+  ## every header path skip-boot models (cgb_boot_header_t).
 
 const BOOT_STACK_RESIDUE_CGB = [0x71'u8, 0x02, 0x4D, 0x01, 0xC1, 0xFF, 0x0D,
                                 0x00, 0xD3, 0x05, 0xF9]
@@ -102,16 +89,14 @@ const BOOT_STACK_RESIDUE_CGB_COMPAT = [0x71'u8, 0x02, 0x4D, 0x01, 0x00, 0xFF,
 const BOOT_STACK_RESIDUE_DMG = [0x39'u8, 0x01, 0x2E]
 
 proc skip_boot_hram(mem: GbMemory; gb: GB) =
-  ## What the boot ROM leaves in HRAM, which is otherwise random at power-up
-  ## (Pan Docs, "Power Up Sequence"; dingbat: zero). Measured by running each
-  ## boot ROM; DocBoy's `boot_hram` tests (dmg, cgb, cgb_dmg_mode) read the
-  ## same bytes. They also want one fixed value at $FFFE, which no boot ROM
-  ## writes: that is power-up HRAM, random per Pan Docs, and left at zero.
-  ## * The CGB boot ROM checks the logo from an HRAM buffer (Pan Docs, same
-  ##   page): the cart's header $0104-$0133 at $FF80-$FFAF (the cart's own
-  ##   bytes: a changed byte in the half it does not check lands there too).
-  ## * Its stack leaves $FFF2-$FFFC (CGB cart and DMG cart differ in two
-  ##   bytes), the DMG ABC boot ROM's $FFFA-$FFFC.
+  ## What the boot ROM leaves in HRAM, otherwise random at power-up (Pan
+  ## Docs, "Power Up Sequence"; dingbat: zero). Measured by running each boot
+  ## ROM; DocBoy `boot_hram` reads the same. Its fixed $FFFE byte is not
+  ## written by any boot ROM, so it stays zero.
+  ## * CGB: the logo check buffer, the cart's header $0104-$0133 at
+  ##   $FF80-$FFAF (the cart's own bytes, checked half or not).
+  ## * Stack residue: CGB $FFF2-$FFFC (DMG cart differs in two bytes), DMG ABC
+  ##   $FFFA-$FFFC.
   case gb.boot_model
   of bmCgbABCDE:
     for i in 0 ..< 0x30:
@@ -126,25 +111,20 @@ proc skip_boot_hram(mem: GbMemory; gb: GB) =
 
 proc skip_boot*(mem: GbMemory; gb: GB) =
   mem.bootrom = @[]
-  # Post-boot register state (mooneye boot_hwio-*). NR52 first: sound-register
-  # writes are dropped while the APU is off. The NR14 trigger starts channel 1
-  # like the boot beep (NR52 = 0xF1); the beep has decayed by the handoff.
+  # Post-boot register state (mooneye boot_hwio-*). NR52 first: sound writes
+  # are dropped while the APU is off. NR14 triggers channel 1 like the boot
+  # beep (NR52 = 0xF1), decayed by the hand-off.
   mem.write_byte(gb, 0xFF26, 0xF1)
   mem.write_byte(gb, 0xFF10, 0x80)
   mem.write_byte(gb, 0xFF11, 0xBF)
   mem.write_byte(gb, 0xFF12, 0xF3)
-  # The beep's second note: NR13 = $C1 with NR14 = $87 (both boot ROMs), so
-  # the channel hands off stepping at frequency $7C1, one duty step every 252
-  # T-cycles. NR13 is write-only, so no hwio ROM sees this; gambatte
-  # sound/ch1_init_pos_* do (they retrigger without ever writing NR13).
+  # The beep's second note: NR13 = $C1, NR14 = $87 (both boot ROMs), so
+  # frequency $7C1, one duty step every 252 T. NR13 is write-only; only
+  # gambatte sound/ch1_init_pos_* see it (they retrigger without writing it).
   mem.write_byte(gb, 0xFF13, 0xC1)
   mem.write_byte(gb, 0xFF14, 0xBF)
   block:
-    # Where in its 8-step, 2016 T-cycle duty cycle the beep is at the
-    # hand-off: BOOT_CH1_PHASE_*_T T-cycles into it (position = phase div 252,
-    # next step 252 - phase mod 252 away). Per boot ROM: each runs a different
-    # length after its second note. Pinned by sound/ch1_init_pos_{1..8} on
-    # dmg08 and cgb04c.
+    # Duty position at the hand-off from BOOT_CH1_PHASE_*_T.
     var phase = (if gb.boot_model == bmCgbABCDE and gb.cgb_flag == cgbNone:
                    BOOT_CH1_PHASE_CGB_COMPAT_T
                  elif gb.boot_model in {bmCgb0, bmCgbABCDE, bmAgb}:
@@ -158,21 +138,18 @@ proc skip_boot*(mem: GbMemory; gb: GB) =
     ch.wave_duty_position = phase div step
     ch.sample_bit = PSG_DUTY[ch.duty][ch.wave_duty_position]
     ch.next_step = gb.scheduler.cycles + CycleCount(step - phase mod step)
-    # The sequencer's step at the hand-off (BOOT_FS_STAGE_*); post_init aims
-    # its next edge from the divider phase timer.skip_boot seeds.
+    # post_init aims the sequencer's next edge from the divider phase
+    # timer.skip_boot seeds.
     var stage = (if gb.boot_model in {bmCgb0, bmCgbABCDE, bmAgb}:
                    BOOT_FS_STAGE_CGB else: BOOT_FS_STAGE_DMG)
     when defined(test_harness):
       let env_stage = getEnv("DINGBAT_BOOT_FS_STAGE")
       if env_stage.len > 0: stage = parseInt(env_stage)
     gb.apu.frame_sequencer_stage = stage and 7
-    # ...and the length gate that goes with it: the step that ran last is
-    # stage - 1, so the next one skips the length counter exactly when the
-    # next stage is odd (Pan Docs, "Obscure Behavior": an NRx4 length enable
-    # then clocks it once). The NR52 write above derived the gate from a
-    # divider skip_boot has not seeded yet. DocBoy dmg/apu ch1_length_timer_
-    # delay{0,1024}: the hand-off triggers before the stage-1 step and get
-    # the extra clock; _delay2048+ trigger after it and do not.
+    # The matching length gate: the next step skips the length counter when
+    # the next stage is odd (Pan Docs, "Obscure Behavior": an NRx4 length
+    # enable then clocks it once). Re-derived here: the NR52 write above used
+    # a divider not yet seeded. DocBoy dmg/apu ch1_length_timer_delay*.
     gb.apu.first_half_of_length_period = (gb.apu.frame_sequencer_stage and 1) == 1
   mem.write_byte(gb, 0xFF16, 0x3F)
   mem.write_byte(gb, 0xFF17, 0x00)
@@ -187,8 +164,7 @@ proc skip_boot*(mem: GbMemory; gb: GB) =
   mem.write_byte(gb, 0xFF23, 0xBF)
   mem.write_byte(gb, 0xFF24, 0x77)
   mem.write_byte(gb, 0xFF25, 0xF3)
-  # SGB/SGB2 hand off late enough that channel 1 has shut off entirely
-  # (boot_hwio-S: NR52 = 0xF0).
+  # SGB/SGB2 hand off with channel 1 off (boot_hwio-S: NR52 = 0xF0).
   gb.apu.channel1.current_volume = 0
   gb.apu.channel1.vol_env_is_updating = false
   if gb.boot_model in {bmSgb, bmSgb2}:
@@ -198,10 +174,9 @@ proc skip_boot*(mem: GbMemory; gb: GB) =
   mem.write_byte(gb, 0xFF43, 0x00)
   mem.write_byte(gb, 0xFF45, 0x00)
   mem.write_byte(gb, 0xFF47, 0xFC)
-  # OBP0/OBP1/DMA are the bytes no boot ROM writes, so they show the silicon's
-  # power-on state and split on the machine, not the cart's CGB flag: $FF on
-  # DMG/MGB/SGB, $00 on CGB/AGB (Pan Docs, "Console state after boot ROM
-  # hand-off" for DMA; mooneye-wilbertpol misc/boot_hwio-C for all three).
+  # OBP0/OBP1/DMA: no boot ROM writes them, so they split on the silicon,
+  # not the cart's CGB flag: $FF DMG/MGB/SGB, $00 CGB/AGB (Pan Docs for DMA;
+  # mooneye-wilbertpol misc/boot_hwio-C for all three).
   let cgb_silicon = gb.boot_model in {bmCgb0, bmCgbABCDE, bmAgb}
   let obp_boot = if cgb_silicon: 0x00'u8 else: 0xFF'u8
   mem.write_byte(gb, 0xFF48, obp_boot)
@@ -210,29 +185,22 @@ proc skip_boot*(mem: GbMemory; gb: GB) =
   mem.write_byte(gb, 0xFF4A, 0x00)
   mem.write_byte(gb, 0xFF4B, 0x00)
   if gb.cgb_enabled:
-    # The CGB boot ROM leaves the palette-index ports where its palette writes
-    # stopped, auto-increment on, and that depends on the cart. Over a DMG
-    # cart (the compatibility palette): BCPS = 0xC8, OCPS = 0xD0 (mooneye
-    # misc/boot_hwio-C, a DMG cart). Over a CGB cart: BCPS = 0xC0, OCPS = 0xC1
-    # (DocBoy cgb/boot/boot_regs_cgb; running the boot ROM leaves the same).
+    # Palette-index ports where the boot ROM's palette writes stopped,
+    # auto-increment on. DMG cart: mooneye misc/boot_hwio-C. CGB cart: DocBoy
+    # cgb/boot/boot_regs_cgb and a boot ROM run.
     let native_cart = gb.cgb_flag != cgbNone
     mem.write_byte(gb, 0xFF68, if native_cart: 0xC0 else: 0xC8)
     mem.write_byte(gb, 0xFF6A, if native_cart: 0xC1 else: 0xD0)
-    # SVBK is left as it powers up: the boot ROM stores nothing to it, so the
-    # register hands off holding 0 with bank 1 mapped and reads $F8
-    # (SVBK_READS_WRITTEN; DocBoy cgb/boot/boot_regs_cgb, and gbedge p00 on
-    # an AGS, docs/flashcart-runbook.md).
-  # P1 at handoff. The select lines power up low (new_gb_joypad: $CF), and a
-  # boot ROM that never writes P1 hands that off: the DMG-family ones, and the
-  # CGB/AGB one for a CGB cart (Pan Docs, "Power Up Sequence": P1 = $C7 or
-  # $CF on CGB/AGB; the CGB boot ROM run over a CGB-flagged cart writes P1
-  # nowhere; the AGS read $CF under the CGB-flagged gbedge p00). A cart that leaves P1 alone therefore wakes STOP with a key press (Pan Docs,
-  # "Using the STOP Instruction": STOP ends on a P10-P13 line going low, and
-  # a line only goes low in a selected group; DocBoy's CGB stop/hdma rows).
-  # Two boot ROMs leave both groups deselected ($FF): the SGB's, whose
-  # packets ride on P1, and the CGB/AGB one for a DMG cart, whose
-  # compatibility-palette key poll ends deselected (mooneye misc/boot_hwio-C
-  # and boot_hwio-S, both DMG carts, hardware-verified).
+    # SVBK: the boot ROM never stores to it, so it hands off holding 0 with
+    # bank 1 mapped (reads $F8, SVBK_READS_WRITTEN).
+  # P1 at hand-off. The select lines power up low (new_gb_joypad: $CF); boot
+  # ROMs that never write P1 hand that off: DMG-family, and CGB/AGB over a CGB
+  # cart (Pan Docs: $C7 or $CF; the AGS read $CF under gbedge p00). So a cart
+  # that leaves P1 alone wakes STOP on a key press (Pan Docs: STOP ends on a
+  # P10-P13 line going low, only possible in a selected group).
+  # Both groups deselected ($FF): SGB (packets ride on P1), and CGB/AGB over a
+  # DMG cart (its palette key poll ends deselected; mooneye misc/boot_hwio-C,
+  # boot_hwio-S).
   if gb.boot_model in {bmSgb, bmSgb2} or (cgb_silicon and gb.cgb_flag == cgbNone):
     gb.joypad.button_keys = false
     gb.joypad.direction_keys = false
@@ -241,15 +209,15 @@ proc skip_boot*(mem: GbMemory; gb: GB) =
   # None of the writes above is a CPU M-cycle, so nothing else consumes this.
   mem_flush_deferred(mem, gb)
 
-# mem_read/mem_write and the M-cycle tick halves sit on clang's inline
-# threshold across ~160 opcode call sites (~0.9% retired instructions,
-# docs/gb_oam_dma_cost.md). hot_bus_inline (gb.nim) pins it: always_inline on
-# clang, plain `inline` on gcc, where a failed always_inline is a hard error.
+# mem_read/mem_write and the tick halves sit on clang's inline threshold
+# across ~160 call sites (~0.9% retired instructions, docs/gb_oam_dma_cost.md).
+# hot_bus_inline (gb.nim) pins it: always_inline on clang, `inline` on gcc,
+# where a failed always_inline is a hard error.
 
 when HDMA_STEAL_LEAD_DOTS >= 0:
   proc mem_land_hdma_due(mem: GbMemory; gb: GB) {.noinline.} =
-    ## An owed HBlank block (requested HDMA_STEAL_LEAD_DOTS dots after the
-    ## mode-0 edge) taking the bus on the M-cycle boundary the CPU just reached.
+    ## An owed HBlank block (HDMA_STEAL_LEAD_DOTS after the mode-0 edge)
+    ## taking the bus on this M-cycle boundary.
     let ppu = gb.ppu
     if ppu.hdma_active and (ppu.lcd_status and 3'u8) == 0'u8:
       ppu_step_hdma(ppu, gb, in_cpu_cycle = true)
@@ -259,17 +227,15 @@ when HDMA_STEAL_LEAD_DOTS >= 0:
 proc mem_tick_bus*(mem: GbMemory; gb: GB; cycles: int; from_cpu = true;
                    defer_hdma = false) {.hot_bus_inline.} =
   ## Everything an M-cycle advances except the PPU: scheduler, timer (which
-  ## clocks the serial shifter) and the OAM DMA unit. Split from the PPU half
-  ## because a CPU write is applied between them (mem_write), and `dma_busy`
-  ## must be settled before the write picks its path.
+  ## clocks serial) and OAM DMA. Split from the PPU half because mem_write
+  ## applies a CPU write between them, after `dma_busy` is settled.
   if from_cpu: mem.cycle_tick_count += cycles
   when HDMA_STEAL_LEAD_DOTS >= 0:
-    # An owed block whose deadline has passed goes before this M-cycle.
-    # `defer_hdma`: a CPU write commits its byte at the top of its M-cycle, so
-    # a write on the grant boundary reaches the register before the block
-    # copies (gambatte dma/hdma_late_destl, hdma_late_wrambank); a read samples
-    # at the bottom and loses the race (dma/hdma_start_*_2). mem_write lands
-    # the block itself, after the byte.
+    # An owed block past its deadline goes before this M-cycle.
+    # `defer_hdma`: a write on the grant boundary reaches its register before
+    # the block copies (gambatte dma/hdma_late_*); mem_write lands the block
+    # after the byte. A read samples at the bottom and loses the race
+    # (dma/hdma_start_*_2).
     if unlikely(gb.ppu.hdma_block_due) and from_cpu and not defer_hdma and
        gb.ppu.cycle_counter >= gb.ppu.hdma_due_deadline:
       mem_land_hdma_due(mem, gb)
@@ -280,53 +246,45 @@ proc mem_tick_bus*(mem: GbMemory; gb: GB; cycles: int; from_cpu = true;
     mem_dma_tick(mem, gb, cycles)
 
 template mem_mdots*(mem: GbMemory): int =
-  ## One M-cycle's PPU dots: 4, 2 at double speed, none while the PPU sits
-  ## out a leaf switch's restart (GbMemory.ppu_mdot_shift).
+  ## One M-cycle's PPU dots: 4, 2 at double speed, 0 while the PPU sits out
+  ## a leaf switch's restart (GbMemory.ppu_mdot_shift).
   4 shr mem.ppu_mdot_shift
 
 proc mem_tick_ppu*(mem: GbMemory; gb: GB; cycles: int; ignore_speed = false) {.hot_bus_inline.} =
   ## The PPU half of an M-cycle, in dots (half as many in double speed).
-  # `ppu_mdot_shift` is the speed, or a shift past any M-cycle while the PPU
-  # sits out a leaf switch's restart (SPEED_SWITCH_LEAF_PPU): every M-cycle
-  # then rounds to no dots. Callers that split an M-cycle into dots take
-  # them from mem_mdots, which rounds the same way.
+  # During a leaf switch's restart (SPEED_SWITCH_LEAF_PPU) the shift rounds
+  # every M-cycle to no dots; callers splitting an M-cycle use mem_mdots.
   let ppu_cycles = if ignore_speed: cycles else: cycles shr mem.ppu_mdot_shift
   fifo_tick(gb.fifo_ppu, gb, ppu_cycles)
   when CGB_LYC_EDGE_DEFER and CGB_LYC_EDGE_POLL:
-    # A CGB LYC write's STAT edge, one M-cycle boundary after its byte landed.
-    # Harness control; shipping books a scheduler event (CGB_LYC_EDGE_POLL).
+    # A CGB LYC write's STAT edge, one M-cycle after its byte landed.
+    # Harness control, off by default; shipping books a scheduler event.
     if unlikely(mem.lyc_edge_owed):
       mem.lyc_edge_owed = false
       ppu_handle_stat_interrupt(gb.ppu, gb)
 
 
 proc mem_tick_components*(mem: GbMemory; gb: GB; cycles: int; from_cpu = true; ignore_speed = false) {.inline.} =
-  ## Both halves, in the order every caller but mem_write wants them. The
-  ## halves carry hot_bus_inline because splitting them left mem_tick_bus out
-  ## of line on every bus access (+0.9% retired instructions).
+  ## Both halves, in order (mem_write splits them). The halves carry
+  ## hot_bus_inline: without it mem_tick_bus went out of line (+0.9% retired
+  ## instructions).
   mem_tick_bus(mem, gb, cycles, from_cpu)
   mem_tick_ppu(mem, gb, cycles, ignore_speed)
 
 when CGB_WRITE_LATENCY_ANY:
-  # CGB per-register write latency: a pipeline-register write reaches the CGB
-  # PPU a register-specific number of dots later than the DMG one, so the
-  # M-cycle's dots run in pieces with the store between them. One phase offset
-  # cannot do it: gambatte window/late_disable_{0,1,2} and
-  # window/late_disable_early_scx03_wx12_* flip in opposite directions between
-  # DMG and CGB. Not in Pan Docs. Each value is bracketed on its own by the
-  # rows named at the CGB_*_LATENCY knobs (gb.nim: gambatte window/arg/late_wy_*
-  # for WY, mealybug m3_scy/scx_change _cgb_c for SCY/SCX, gambatte window/*
-  # for LCDC); that they are six independent numbers rather than one delay
-  # per bus is Assumed. CGB_LATENCY_CAP keeps one from filling a 2-dot
-  # double-speed M-cycle.
+  # CGB per-register write latency: a pipeline-register write reaches the
+  # CGB PPU a register-specific number of dots later than on DMG, so the
+  # M-cycle's dots run in pieces with the store between. One phase offset
+  # fails: gambatte window/late_disable_* flip opposite ways on DMG and CGB.
+  # Not in Pan Docs. Tests per value at the CGB_*_LATENCY knobs (gb.nim); six
+  # independent numbers rather than one per bus is assumed.
   proc mem_tick_ppu_latched(mem: GbMemory; gb: GB) {.noinline.} =
     ## This M-cycle's PPU dots with a parked pipeline store landing part way
     ## through them. Cold path.
     let reg = int(mem.pipe_reg)
     let val = mem.pipe_val
     mem.pipe_reg = 0
-    # 4 dots per M-cycle, 2 in double speed. A latency past the M-cycle's end
-    # saturates at `cap` (CGB_LATENCY_CAP).
+    # A latency past the M-cycle's end saturates at `cap` (CGB_LATENCY_CAP).
     let mdots = mem_mdots(mem)
     let cap = mdots - CGB_LATENCY_CAP
     var done = 0
@@ -364,22 +322,18 @@ proc mem_tick_extra*(mem: GbMemory; gb: GB; total_expected: int) =
   mem_reset_cycle_count(mem)
 
 proc unusable_index(gb: GB; idx: int): int {.inline.} =
-  ## Which cell of `mem.unusable` an address in `$FEA0..$FEFF` reaches: the
-  ## C-class mask folds four addresses onto a cell, CGB-D keeps all 96 apart.
-  ## Pan Docs says a mask exists but not its value; cgb-acid-hell's readback
-  ## is the source (GbUnusableRegion in gb.nim).
+  ## The `mem.unusable` cell for `$FEA0..$FEFF`: the C-class mask folds four
+  ## addresses per cell, CGB-D keeps all 96. Pan Docs gives no mask value;
+  ## cgb-acid-hell's readback is the source (GbUnusableRegion, gb.nim).
   let a = if gb.quirks.unusable_region == urRamMasked: idx and not 0x18 else: idx
   a - 0xFEA0
 
 proc read_unusable(mem: GbMemory; gb: GB; idx: int): uint8 {.noinline.} =
-  ## `$FEA0..$FEFF`, one model per GbUnusableRegion member (Pan Docs, "FEA0-FEFF
-  ## range"). Pan Docs: "This area returns $FF when OAM is blocked", the same
-  ## lock an OAM read asks (cpu_oam_open; DocBoy dmg/memory/not_usable_read_
-  ## {oam_scan,pixel_transfer} read $FF, _hblank/_vblank/_ppu_off $00). Only
-  ## the CPU reaches this: an OAM DMA source folds below $E000 or is open bus,
-  ## and an HDMA source here is illegal. The OAM-DMA case: mem_read_busy
-  ## answers $FF for the whole page. Out of line: read_byte is hot, this page
-  ## is not.
+  ## `$FEA0..$FEFF`, one model per GbUnusableRegion member. Pan Docs: "This
+  ## area returns $FF when OAM is blocked", the same lock as an OAM read
+  ## (cpu_oam_open; DocBoy dmg/memory/not_usable_read_*). CPU only: DMA
+  ## sources never land here, and during OAM DMA mem_read_busy answers $FF.
+  ## Out of line: read_byte is hot, this page is not.
   if not cpu_oam_open(gb.ppu, is_write = false,
                       open_late = gb.quirks.oam_read_open_late,
                       ds = mem.current_speed != 0):
@@ -445,39 +399,35 @@ proc read_byte*(mem: GbMemory; gb: GB; idx: int): uint8 =
   of 0xFF51..0xFF55: ppu_read(gb.ppu, gb, idx)
   of 0xFF68..0xFF6B: ppu_read(gb.ppu, gb, idx)
   of 0xFF56:
-    # Infrared port, CGB only. Bits 0/6/7 R/W; bit 1 reads 1 (no IR signal is
+    # Infrared, CGB only. Bits 0/6/7 R/W; bit 1 reads 1 (no IR signal
     # modelled); bits 2-5 read set.
     if gb.cgb_native: (mem.rp and 0xC1'u8) or 0x3E'u8 else: 0xFF'u8
   of 0xFF70:
-    # SVBK is a 3-bit register: it reads back what was stored, bits 3-7 set
-    # (Pan Docs, "FF70 - SVBK": bits 0-2 read/write). A stored 0 maps bank 1
-    # but still reads 0: the 0 -> 1 substitution is in the bank decode, not
-    # in the register (SVBK_READS_WRITTEN).
+    # Pan Docs: bits 0-2 read/write. A stored 0 maps bank 1 but reads 0: the
+    # 0 -> 1 substitution is in the bank decode (SVBK_READS_WRITTEN).
     if gb.cgb_native:
       0xF8'u8 or (when SVBK_READS_WRITTEN: mem.svbk else: mem.wram_bank)
     else: 0xFF'u8
   of 0xFF6C:
-    # OPRI: bit 0 readable in CGB mode; $FF in compatibility mode (DocBoy
-    # cgb_dmg_mode/ppu/opri_write_read, boot_regs_cgb).
+    # OPRI: $FF in compatibility mode (DocBoy cgb_dmg_mode/ppu/opri_write_read).
     if gb.cgb_native: 0xFE'u8 or mem.opri else: 0xFF'u8
-  # FF72-FF77 exist on CGB/AGB silicon even in DMG-compat mode, except FF74
-  # (mooneye misc/bits/unused_hwio-C); on DMG they read 0xFF
-  # (acceptance/bits/unused_hwio-GS).
+  # FF72-FF77 exist on CGB/AGB even in compat mode, except FF74 (mooneye
+  # misc/bits/unused_hwio-C); DMG reads 0xFF (acceptance/bits/unused_hwio-GS).
   of 0xFF72: (if gb.cgb_enabled: mem.ff72 else: 0xFF'u8)
   of 0xFF73: (if gb.cgb_enabled: mem.ff73 else: 0xFF'u8)
   of 0xFF74:
     if gb.cgb_native: mem.ff74 else: 0xFF'u8
   of 0xFF75: (if gb.cgb_enabled: mem.ff75 or 0x8F'u8 else: 0xFF'u8)
-  # PCM12/PCM34: the four channels' current 4-bit outputs (CH1/CH3 low nibble,
-  # CH2/CH4 high; off channels read 0). The channels advance lazily, so the
-  # catch-up is what makes the read see this cycle's phase (SameSuite apu/*).
+  # PCM12/PCM34: the channels' current 4-bit outputs (CH1/CH3 low nibble,
+  # off channels 0). Channels advance lazily; the catch-up makes the read see
+  # this cycle's phase (SameSuite apu/*).
   of 0xFF76:
     if gb.cgb_enabled:
       apu_catchup_all(gb.apu, gb)
       apu_env_late_due(gb.apu, gb)
       var lo = sq_dac_input(gb.apu.channel1)
       var hi = sq_dac_input(gb.apu.channel2)
-      # CGB 0/A/B/C: a read on a rising duty step answers 0 for that channel
+      # CGB 0/A/B/C: a read on a rising duty step answers 0
       # (GbQuirks.pcm_read_edge_zero); channel 2 by PCM12_CH2_EDGE_ZERO.
       if gb.quirks.pcm_read_edge_zero:
         if sq_pcm_edge_zero(gb.apu.channel1, gb): lo = 0
@@ -496,8 +446,8 @@ proc read_byte*(mem: GbMemory; gb: GB; idx: int): uint8 =
   else: 0xFF'u8
 
 proc console_is_cgb*(gb: GB): bool {.inline.} =
-  ## The console, not the mode: bus topology is the machine's, so this reads
-  ## boot_model rather than cgb_enabled (cleared for a DMG cart in compat mode).
+  ## The console, not the mode: bus topology is the machine's (cgb_enabled is
+  ## cleared for a DMG cart in compat mode).
   gb.boot_model in {bmCgb0, bmCgbABCDE, bmAgb}
 
 proc dma_bus_of*(gb: GB; idx: int): uint8 {.inline.} =
@@ -510,8 +460,8 @@ proc dma_bus_of*(gb: GB; idx: int): uint8 {.inline.} =
   else:                              uint8(dbNone)
 
 const
-  # What lands in OAM when a CPU write collides with the DMA on its bus, decided
-  # by what the DMA's source does to the data lines (mem_write_busy).
+  # What lands in OAM when a CPU write collides with the DMA on its bus: what
+  # the DMA's source does to the data lines (mem_write_busy).
   DriveTristate* = 0'u8   # cartridge: sees /WR and lets go; OAM gets the CPU's byte
   DriveSource*   = 1'u8   # DMG WRAM: keeps driving; the two wire-AND
   DriveZero*     = 2'u8   # CGB video bus: the DMA loses the cycle and stores $00
@@ -524,9 +474,8 @@ proc dma_drive_of*(gb: GB; idx: int): uint8 {.inline.} =
   else:              DriveTristate
 
 proc mem_read_open(mem: GbMemory; gb: GB; idx: int): uint8 {.inline.} =
-  ## A CPU read that reaches the bus, with the PPU's VRAM lock applied. Only
-  ## the CPU comes through here: the OAM DMA unit and HDMA go straight to
-  ## read_byte/write_byte and must keep their access. The OAM read lock sits
+  ## A CPU read that reaches the bus, with the VRAM lock applied. CPU only:
+  ## OAM DMA and HDMA use read_byte/write_byte unlocked. The OAM read lock is
   ## inside ppu_read.
   when defined(gb_dma_trace):
     if (idx and 0xE000) == 0x8000:
@@ -537,8 +486,8 @@ proc mem_read_open(mem: GbMemory; gb: GB; idx: int): uint8 {.inline.} =
                                        cgb = gb.cgb_enabled): 1 else: 0),
            " val=", toHex(read_byte(mem, gb, idx), 2)
   if (idx and 0xE000) == 0x8000:
-    # This read samples after its M-cycle's dots, so it is one of the two
-    # points a held HBlank block can become visible at (HDMA_VISIBLE_DOTS).
+    # One of the two points a held HBlank block can become visible at
+    # (HDMA_VISIBLE_DOTS): this read samples after its M-cycle's dots.
     when HDMA_VISIBLE_DOTS != 0:
       if gb.ppu.hdma_bytes_held: ppu_land_hdma_if_due(gb.ppu, gb)
     if not cpu_vram_open(gb.ppu, is_write = false,
@@ -547,12 +496,10 @@ proc mem_read_open(mem: GbMemory; gb: GB; idx: int): uint8 {.inline.} =
   read_byte(mem, gb, idx)
 
 const OAMDMA_WRAM_A12* {.intdefine.} = 1
-  ## On CGB the OAM DMA drives the address bus too: a non-colliding CPU access
-  ## to $C000-$FDFF during an external-bus DMA uses its own A0-A11 but takes
-  ## A12 (the bank-0 / SVBK-banked half select) from the DMA's source address.
-  ## gambatte oamdma/*busy* pins it by construction: the suite emits a
-  ## bit-12-flipped template exactly when A12(source) != A12(CPU address).
-  ## Not on DMG, where WRAM shares the external bus and the access collides.
+  ## On CGB a non-colliding CPU access to $C000-$FDFF during an external-bus
+  ## OAM DMA keeps its A0-A11 but takes A12 (the WRAM half select) from the
+  ## DMA's source. Pinned by gambatte oamdma/*busy*. Not on DMG, where WRAM
+  ## shares the external bus and the access collides.
 
 proc dma_wram_addr(mem: GbMemory; gb: GB; idx: int): int {.inline.} =
   ## `idx` with the WRAM half-select taken from a running CGB external-bus DMA
@@ -561,17 +508,15 @@ proc dma_wram_addr(mem: GbMemory; gb: GB; idx: int): int {.inline.} =
     if idx >= 0xC000 and idx <= 0xFDFF and
        mem.dma_bus == uint8(dbExternal) and console_is_cgb(gb):
       let folded = if idx >= 0xE000: idx - 0x2000 else: idx
-      # The raw source A12: an $E000 source goes out on the external bus
-      # unfolded (mem_dma_tick), so $E000 -> 0 and $F000 -> 1.
+      # Raw source A12: an $E000 source goes out unfolded (mem_dma_tick).
       let a12 = (int(mem.current_dma_source) shr 12) and 1
       return (folded and not 0x1000) or (a12 shl 12)
   idx
 
 proc mem_read_busy(mem: GbMemory; gb: GB; idx: int): uint8 {.noinline.} =
-  ## Cold path: a CPU read while the OAM DMA unit owns a bus. A read on that
-  ## bus never reaches memory; the CPU latches the byte the DMA is moving this
-  ## M-cycle. Other buses and IO/HRAM/IE are untouched (Pan Docs, "OAM DMA
-  ## Transfer"). The whole OAM page reads $FF, not just $FE00-$FE9F.
+  ## Cold path: a CPU read while OAM DMA owns a bus. On that bus the CPU
+  ## latches the byte the DMA moves this M-cycle; other buses and IO/HRAM/IE
+  ## are untouched (Pan Docs, "OAM DMA Transfer"). The whole OAM page reads $FF.
   if idx >= 0xFE00 and idx <= 0xFEFF: return 0xFF'u8
   if dma_bus_of(gb, idx) == mem.dma_bus:
     # CGB video bus: the CPU takes the cycle, the DMA stores $00 in OAM.
@@ -583,13 +528,13 @@ proc mem_read_busy(mem: GbMemory; gb: GB; idx: int): uint8 {.noinline.} =
 
 when IF_READ_SAMPLE_T < 4:
   proc mem_tick_if_read(mem: GbMemory; gb: GB) {.noinline.} =
-    ## One M-cycle for the $FF0F read, whose byte latches IF_READ_SAMPLE_T dots
-    ## in (gb.nim, irq_read). Behind an address test rather than splitting
-    ## every M-cycle in mem_tick_components: that costs +19.5% retired
-    ## instructions, because fifo_tick's idle span swallows whole M-cycles.
+    ## One M-cycle for the $FF0F read, latched IF_READ_SAMPLE_T dots in
+    ## (gb.nim, irq_read). Do not split every M-cycle in mem_tick_components
+    ## instead: +19.5% retired instructions (fifo_tick's idle span swallows
+    ## whole M-cycles).
     when IF_READ_SAMPLE_T < 0:
-      # Harness control: the read samples ahead of the whole M-cycle, timer and
-      # serial shifter included (IF_READ_SAMPLE_T in gb.nim).
+      # Harness control, off by default: sample ahead of the whole M-cycle,
+      # timer and serial included.
       irq_latch_mcycle(gb.interrupts)
       mem_tick_components(mem, gb, 4)
     else:
@@ -597,8 +542,8 @@ when IF_READ_SAMPLE_T < 4:
       let dots = mem_mdots(mem)
       var head = min(dots, IF_READ_SAMPLE_T shr mem.current_speed)
       when IF_READ_M2_144_TIE_DS != 0:
-        # The line-144 OAM pulse's own dot: an IF read whose M-cycle starts on
-        # it sees it (IF_READ_M2_144_TIE_DS).
+        # An IF read whose M-cycle starts on the line-144 OAM pulse's dot
+        # sees it (IF_READ_M2_144_TIE_DS).
         if mem.current_speed != 0 and gb.ppu.ly == 143'u8 and
            gb.ppu.cycle_counter == M2_144_EARLY_DOT_DS:
           head = 1
@@ -607,16 +552,16 @@ when IF_READ_SAMPLE_T < 4:
         mem_tick_ppu(mem, gb, dots, ignore_speed = true)
       else:
         mem_tick_ppu(mem, gb, head, ignore_speed = true)
-        # fifo_tick re-snapshots `read_mode` on entry; keep the head's latch
-        # (this M-cycle's) and take only the tail's LY-advanced bit, or the
-        # split alone moves gambatte oam_access/vram_m3 postread rows.
+        # fifo_tick re-snapshots `read_mode`; keep the head's latch and take
+        # only the tail's LY-advanced bit, or the split alone moves gambatte
+        # oam_access/vram_m3 postread tests.
         let head_rm = gb.ppu.read_mode
         irq_latch_mcycle(gb.interrupts)
         if dots > head:
           mem_tick_ppu(mem, gb, dots - head, ignore_speed = true)
           gb.ppu.read_mode = head_rm or (gb.ppu.read_mode and LY_JUST_CHANGED)
-    # The serial IF bit rises on the M-cycle's last T-cycle, after the read's
-    # sample point (SERIAL_CPU_SAMPLE_T in gb.nim).
+    # The serial IF bit rises after the read's sample point
+    # (SERIAL_CPU_SAMPLE_T, gb.nim).
     when SERIAL_CPU_SAMPLE_T < 4:
       serial_if_latch_fixup(gb)
 
@@ -631,9 +576,8 @@ proc mem_read*(mem: GbMemory; gb: GB; idx: int): uint8 {.hot_bus_inline.} =
     mem_tick_components(mem, gb, 4)
   # A running DMA owns the bus and is decided first.
   when defined(gb_io_trace):
-    # Diagnostic (tools only): every I/O read with the PPU's position, the
-    # instrument the gambatte per-family dot tables are read off (LY reads are
-    # left out: the wait loops spam them).
+    # Diagnostic, off by default: every I/O read with the PPU's position
+    # (LY left out: wait loops spam it).
     if idx >= 0xFF00 and idx != 0xFF44 or idx >= 0xFE00 and idx < 0xFEA0:
       let v = if mem.dma_busy: mem_read_busy(mem, gb, idx)
               else: mem_read_open(mem, gb, idx)
@@ -648,12 +592,10 @@ proc mem_read_oam_bug(mem: GbMemory; gb: GB; idx: int) {.noinline.} =
   if not mem.dma_busy: oam_bug_access(gb, obRead, uint16(idx))
 
 proc mem_read_data*(mem: GbMemory; gb: GB; idx: int): uint8 {.inline.} =
-  ## A CPU data read (every read that is not an instruction fetch). A read of
-  ## the OAM page while the scan runs scrambles OAM (oam_bug_access in
-  ## ppu.nim), sampled before the M-cycle's dots like the IDU hook; not while
-  ## the OAM DMA owns the page (mem_read_busy). Fetches go straight to
-  ## mem_read: PC in OAM is not modelled, and the test on every opcode and
-  ## operand byte measured +0.4..0.9% retired instructions.
+  ## A CPU data read (not a fetch). An OAM-page read during the scan
+  ## scrambles OAM (oam_bug_access, ppu.nim), sampled before the M-cycle's
+  ## dots; not while OAM DMA owns the page. Fetches skip this: PC in OAM is
+  ## not modelled, and the test costs +0.4..0.9% retired instructions.
   when not defined(cpu_testbus):
     if unlikely((idx and 0xFF00) == 0xFE00): mem_read_oam_bug(mem, gb, idx)
   mem_read(mem, gb, idx)
@@ -662,14 +604,12 @@ proc mem_dma_classify(mem: GbMemory; gb: GB) =
   ## Which bus the OAM DMA unit drives for `current_dma_source`.
   let raw_src = int(mem.current_dma_source)
   if raw_src >= 0xE000 and console_is_cgb(gb):
-    # On CGB a source at or above $E000 goes out on the external bus
-    # where nothing answers: every byte is open bus.
+    # CGB: a source at or above $E000 goes to the external bus, open bus.
     mem.dma_bus     = uint8(dbExternal)
     mem.dma_drive   = DriveTristate
     mem.dma_openbus = true
   else:
-    # DMG: sources at or above $E000 fetch through the echo (mooneye
-    # oam_dma/sources-GS).
+    # DMG: at or above $E000 fetches through the echo (mooneye oam_dma/sources-GS).
     var bus_src = raw_src
     if bus_src >= 0xE000: bus_src = bus_src and not 0x2000
     mem.dma_bus     = dma_bus_of(gb, bus_src)
@@ -686,21 +626,19 @@ proc write_byte*(mem: GbMemory; gb: GB; idx: int; val: uint8) =
   # VRAM, OAM and I/O feed the pipeline; a deferred mode 3 runs first.
   if (idx >= 0x8000 and idx < 0xA000) or (idx >= 0xFE00 and idx < 0xFF80):
     fifo_sync(gb)
-  # Any write with bit 0 set unmaps the boot ROM (the CGB boot ROM writes
-  # 0x11, the DMG one 0x01).
+  # FF50: any write with bit 0 set unmaps the boot ROM.
   when defined(gb_io_trace):
-    # Diagnostic (tools only): every I/O write's commit dot.
+    # Diagnostic, off by default: every I/O write's commit dot.
     if idx >= 0xFF00 or idx >= 0xFE00 and idx < 0xFEA0:
       echo "IOW ", toHex(idx, 4), "=", toHex(val, 2), " ly=", gb.ppu.ly,
            " dot=", gb.ppu.cycle_counter, " mode=", (gb.ppu.lcd_status and 3),
            " ds=", mem.current_speed
   if idx == 0xFF50 and (val and 1) != 0:
     mem.bootrom = @[]
-    # Handoff: a DMG cart drops out of CGB mode but the machine stays a CGB
-    # (timing, STAT-write glitch), so cgb_enabled is not cleared here.
+    # A DMG cart drops out of CGB mode but the machine stays a CGB (timing,
+    # STAT-write glitch), so cgb_enabled is not cleared.
     gb_sync_cgb_native(gb)
-    # VBK goes with the CGB register set: bank 1 is frozen at what the boot
-    # ROM left (nothing), so the map attributes read as zero from here on.
+    # VBK goes with the CGB register set: map attributes read zero from here.
     if not gb.cgb_native: gb.ppu.vram_bank = 0
   case idx
   of 0x0000..0x7FFF:
@@ -724,11 +662,10 @@ proc write_byte*(mem: GbMemory; gb: GB; idx: int; val: uint8) =
   of 0xFF10..0xFF3F: apu_write(gb.apu, idx, val, gb)
   of 0xFF46:
     when OAMDMA_RESTART_HANDOVER != 0:
-      # A write under a running transfer hands the unit's bus to the new
-      # source page at once (OAMDMA_RESTART_HANDOVER, gb.nim); the bytes the
-      # old transfer still moves before the restart are left as they were,
-      # no test saying where they come from. The restart follows on its
-      # usual delay.
+      # A write under a running transfer hands the bus to the new source
+      # page at once (OAMDMA_RESTART_HANDOVER, gb.nim); the old transfer's
+      # remaining bytes are untouched (no test says where they come from).
+      # The restart follows on its usual delay.
       if mem.dma_busy:
         let old_src  = mem.current_dma_source
         let old_open = mem.dma_openbus
@@ -739,9 +676,8 @@ proc write_byte*(mem: GbMemory; gb: GB; idx: int; val: uint8) =
     mem_dma_transfer(mem, val)
   of 0xFF40..0xFF45, 0xFF47..0xFF4B:
     when CGB_LYC_CMP_LATCH:
-      # A CGB LYC write in flight borrows two of the PPU's stops between
-      # ticks (LYC_STOP_FOLDED, fifo_ppu.nim): this write meets them as
-      # their owners left them, and the loan is renewed, or begun, after it.
+      # A CGB LYC write in flight borrows two PPU stops (LYC_STOP_FOLDED,
+      # fifo_ppu.nim): release them for this write, re-arm after.
       if gb.lyc_land_left >= 0: lyc_stop_release(gb.fifo_ppu, gb)
       ppu_write(gb.ppu, gb, idx, val)
       if gb.lyc_land_left >= 0: lyc_stop_arm(gb.fifo_ppu, gb)
@@ -772,19 +708,19 @@ proc write_byte*(mem: GbMemory; gb: GB; idx: int; val: uint8) =
 proc mem_write_open(mem: GbMemory; gb: GB; idx: int; val: uint8;
                     sampled_late = false) {.inline.} =
   ## A CPU write that reaches the bus; dropped when the VRAM/OAM window is
-  ## shut. Both locks are here because ppu_write has none of its own (a write
-  ## samples the latched mode, a read the live one; cpu_oam_open), and the OAM
-  ## DMA unit writes through write_byte unlocked.
+  ## shut. Both locks live here: ppu_write has none, and OAM DMA writes
+  ## through write_byte unlocked. A write samples the latched mode, a read
+  ## the live one (cpu_oam_open).
   if (idx and 0xE000) == 0x8000:
-    # The other point a held HBlank block can land at: this write is about to
-    # change VRAM and a held block would otherwise land on top of it.
+    # The other landing point for a held HBlank block: before this write
+    # changes VRAM.
     when HDMA_VISIBLE_DOTS != 0:
       if gb.ppu.hdma_bytes_held: ppu_land_hdma_if_due(gb.ppu, gb)
     if not cpu_vram_open(gb.ppu, is_write = true, cgb = gb.cgb_enabled,
                             ds = mem.current_speed != 0'u8): return
   elif idx >= 0xFE00 and idx <= 0xFE9F:
-    # `mcycle_dots` is the span still ahead of the sample point: the whole
-    # cycle for a start-of-cycle sample, nothing for an end-of-cycle one.
+    # `mcycle_dots`: the span ahead of the sample point (whole cycle for a
+    # start-of-cycle sample, 0 for end-of-cycle).
     if not cpu_oam_open(gb.ppu, is_write = true,
                         mcycle_dots = (if sampled_late: 0'i32
                                        else: int32(4 shr mem.current_speed)),
@@ -793,14 +729,12 @@ proc mem_write_open(mem: GbMemory; gb: GB; idx: int; val: uint8;
   write_byte(mem, gb, idx, val)
 
 proc mem_write_busy(mem: GbMemory; gb: GB; idx: int; val: uint8) {.noinline.} =
-  ## Cold path counterpart of mem_read_busy. A CPU write onto the bus the DMA
-  ## owns never reaches its destination; the CPU co-drives the data lines the
-  ## DMA latches, so what the Drive* table says lands in OAM at this M-cycle's
-  ## position (gambatte oamdma/*busy*).
+  ## Cold-path counterpart of mem_read_busy. A CPU write onto the DMA's bus
+  ## never reaches its destination; the CPU co-drives the DMA's data lines,
+  ## and the Drive* table says what lands in OAM (gambatte oamdma/*busy*).
   if idx >= 0xFE00 and idx <= 0xFEFF: return
   if dma_bus_of(gb, idx) == mem.dma_bus:
-    # dma_busy holds only for dma_position in 1..0xA0, so position-1 is the
-    # slot filled at the top of this M-cycle.
+    # dma_busy implies dma_position in 1..0xA0: position-1 is this M-cycle's slot.
     if mem.dma_drive != DriveIsolated:
       let driven =
         case mem.dma_drive
@@ -814,8 +748,8 @@ proc mem_write_busy(mem: GbMemory; gb: GB; idx: int; val: uint8) {.noinline.} =
   mem_write_open(mem, gb, dma_wram_addr(mem, gb, idx), val)
 
 proc mem_write_tail(mem: GbMemory; gb: GB) {.noinline.} =
-  ## The end of a CPU write that left something for the M-cycle to finish: a
-  ## CGB pipeline store part way through the dots, then the boundary work.
+  ## The end of a CPU write that left work for the M-cycle: a CGB pipeline
+  ## store part way through the dots, then the boundary work.
   when CGB_WRITE_LATENCY_ANY:
     if mem.pipe_reg != 0: mem_tick_ppu_latched(mem, gb)
     else:                 mem_tick_ppu(mem, gb, 4)
@@ -824,40 +758,24 @@ proc mem_write_tail(mem: GbMemory; gb: GB) {.noinline.} =
   mem_flush_deferred(mem, gb)
 
 const IF_WRITE_LAND_DOTS* {.intdefine.} = 1
-  ## Dots into its M-cycle at which a CPU write to IF lands: an interrupt
-  ## request the PPU raises in those dots is overwritten by the write rather
-  ## than surviving it (0 = at the top of the M-cycle). Default 1: a request
-  ## rising on the write's first dot is lost, one rising on its second
-  ## survives. 0 loses gambatte `m2int_m0irq/m2int_m0irq_scx3_ifw_{2,4}`
-  ## (both devices; IF cleared on the dot the mode-0 source rises, read back
-  ## clear) and DocBoy `dmg/interrupts/hblank_stat_interrupt_reset_if_
-  ## scx3_round2`, `_scx7_round3`; 2 loses 21, among them `ly0/
-  ## lycint152_lyc{0,153}irq_ifw_1`, `lyc153int_m2irq_ifw_1`, `m1/
-  ## lycint143_m1irq_ifw_1`, `m2int_m0irq_scx4_ifw_{1,3}` (both devices) and
-  ## DocBoy `hblank_stat_interrupt_reset_if_scx0_round1`, `_scx4_round2`,
-  ## `vblank_interrupt_reset_if_round2`; 3 and 4 lose 23.
+  ## Dots into its M-cycle at which a CPU write to IF lands: a request the
+  ## PPU raises in those dots is overwritten by the write (0 = top of the
+  ## M-cycle). Default 1: a request on the write's first dot is lost, one on
+  ## its second survives. Pinned both sides by gambatte `*_ifw_*` and DocBoy
+  ## `dmg/interrupts/*_reset_if_*`.
 const IF_WRITE_LAND_DOTS_DS* {.intdefine.} = 1
-  ## The same in double speed, in dots. Default 1 (half the M-cycle): 0 loses
-  ## `m2int_m0irq/m2int_m0irq_scx3_ifw_ds_2` [cgb]; 2 (the whole M-cycle)
-  ## loses eight `*_ifw_ds_1` tests (`ly0/lycint152_lyc{0,153}irq_ifw_ds_1`,
-  ## `lyc153int_m2irq_ifw_ds_1`, `m1/lycint143_m1irq_ifw_ds_1`, `m1/
-  ## m2m1irq_ifw_ds_{1,2}`, `m2int_m0irq_scx4_ifw_ds_1`,
-  ## `m2int_m2irq_ifw_ds_1`).
+  ## The same in double speed, in dots. Default 1 (half the M-cycle), pinned
+  ## both sides by gambatte `*_ifw_ds_*`.
   ## Clean-room: derived from test ROM sources/outputs and dingbat's own trace
   ## runs; no emulator source consulted.
 const VRAM_WRITE_M3_END_DOTS* {.intdefine.} = 3
   ## Dots into its M-cycle at which a VRAM write issued in mode 3 asks the
-  ## lock: a mode 3 that ends in those dots lets it through (0 = off, the
-  ## write asks at the top of its M-cycle). Default 3, a strict optimum on
-  ## gambatte vramw_m3end/* (a write one M-cycle later per ROM across the end
-  ## of mode 3, at SCX 0 and 3): 0..2 lose `vramw_m3end_scx3_5` (both devices)
-  ## and 4 loses `vramw_m3end_4` (both devices).
+  ## lock: a mode 3 ending in those dots lets it through (0 = off, ask at the
+  ## top). Default 3, pinned both sides by gambatte vramw_m3end/*.
 const VRAM_WRITE_M3_END_DOTS_DS* {.intdefine.} = 0
-  ## The same at double speed, in dots. Default 0: 1 loses
-  ## `vramw_m3end_scx5_ds_4` [cgb] and 2 `vramw_m3end_ds_4` as well.
+  ## The same at double speed, in dots; 1 fails gambatte vramw_m3end/*_ds_*.
 proc mem_write_vram_m3(mem: GbMemory; gb: GB; idx: int; val: uint8) {.noinline.} =
-  ## A VRAM write issued in mode 3 asks the lock VRAM_WRITE_M3_END_DOTS into
-  ## its M-cycle, so a mode 3 that ends inside the M-cycle lets it through.
+  ## A mode-3 VRAM write asks the lock VRAM_WRITE_M3_END_DOTS into its M-cycle.
   let dots = mem_mdots(mem)
   let pre = min(dots, if mem.current_speed != 0'u8: VRAM_WRITE_M3_END_DOTS_DS
                       else: VRAM_WRITE_M3_END_DOTS)
@@ -867,12 +785,11 @@ proc mem_write_vram_m3(mem: GbMemory; gb: GB; idx: int; val: uint8) {.noinline.}
   if mem.write_deferred: mem_flush_deferred(mem, gb)
 
 proc mem_write*(mem: GbMemory; gb: GB; idx: int; val: uint8) {.hot_bus_inline.} =
-  ## A CPU write commits at the START of its M-cycle, before its PPU dots: the
-  ## VRAM/OAM lock is decided on the mode at the start of the M-cycle
-  ## (cpu_vram_open), and data landing after the dots sat one M-cycle behind
-  ## its own lock (M3_PIPE_MCYCLES in fifo_ppu). Reads are not reordered;
-  ## their sample point is the read_mode latch. The bus half runs first
-  ## because dma_busy selects the write path.
+  ## A CPU write commits at the START of its M-cycle, before its PPU dots:
+  ## the VRAM/OAM lock is decided on the mode at the start (cpu_vram_open),
+  ## and data landing after the dots would sit one M-cycle behind its lock
+  ## (M3_PIPE_MCYCLES, fifo_ppu). Reads sample via the read_mode latch. The
+  ## bus half runs first because dma_busy selects the write path.
   when defined(cpu_testbus):
     mem_tick_components(mem, gb, 4)
     gb_testbus_write(idx, val)
@@ -888,16 +805,15 @@ proc mem_write*(mem: GbMemory; gb: GB; idx: int; val: uint8) {.hot_bus_inline.} 
     # The PPU has not moved yet (mem_tick_bus): the OAM bug's sample point.
     oam_bug_access(gb, obWrite, uint16(idx), val)
     if OAM_WRITE_SAMPLE_END != 0 and idx <= 0xFE9F:
-      # An OAM write asks its lock after the M-cycle's dots, where a read
-      # samples (OAM_WRITE_SAMPLE_END, gb.nim), so the dots run first.
+      # An OAM write asks its lock after the dots, like a read
+      # (OAM_WRITE_SAMPLE_END, gb.nim).
       mem_tick_ppu(mem, gb, 4)
       mem_write_open(mem, gb, idx, val, sampled_late = true)
       if mem.write_deferred: mem_flush_deferred(mem, gb)
       return
     mem_write_open(mem, gb, idx, val)
   elif IF_WRITE_LAND_DOTS != 0 and idx == 0xFF0F:
-    # IF_WRITE_LAND_DOTS: a source rising in the write's first dots is
-    # overwritten by it.
+    # IF_WRITE_LAND_DOTS.
     let dots = mem_mdots(mem)
     let pre = min(dots, if mem.current_speed != 0'u8: IF_WRITE_LAND_DOTS_DS
                         else: min(IF_WRITE_LAND_DOTS, dots - 1))
@@ -918,19 +834,18 @@ proc mem_write*(mem: GbMemory; gb: GB; idx: int; val: uint8) {.hot_bus_inline.} 
        HDMA_WRITE_DEFER_LO <= idx and idx <= HDMA_WRITE_DEFER_HI and
        gb.ppu.cycle_counter >= gb.ppu.hdma_due_deadline:
       mem_land_hdma_due(mem, gb)
-  # One flag covers everything that lands later than the byte (pipeline
-  # store, STAT-line edge), so the common path pays a single test.
+  # One flag for everything landing after the byte (pipeline store, STAT
+  # edge), so the common path pays one test.
   if mem.write_deferred: mem_write_tail(mem, gb)
   else:                  mem_tick_ppu(mem, gb, 4)
 
 proc mem_write_head*(mem: GbMemory; gb: GB; idx: int; val: uint8;
                      head_t: int): int {.noinline.} =
   ## mem_write for the interrupt dispatch's last push, stopped `head_t` CPU
-  ## T-cycles into the M-cycle's PPU half so the caller can clear IF there
-  ## (dispatch_interrupt, IRQ_SAMPLE_T); returns the dots mem_write_rest
-  ## still has to run. Same order as mem_write: the bus half, the byte, the
-  ## dots. A push that parks something for the M-cycle to finish (a PPU
-  ## register under SP) runs whole, and the clear follows the M-cycle.
+  ## T-cycles into the PPU half so the caller can clear IF there
+  ## (dispatch_interrupt, IRQ_SAMPLE_T); returns the dots left for
+  ## mem_write_rest. A push that defers work (a PPU register under SP) runs
+  ## whole, and the clear follows the M-cycle.
   when defined(cpu_testbus):
     mem_tick_components(mem, gb, 4)
     gb_testbus_write(idx, val)
@@ -961,34 +876,29 @@ proc mem_write_rest*(mem: GbMemory; gb: GB; rest: int) {.inline.} =
   if rest > 0: mem_tick_ppu(mem, gb, rest, ignore_speed = true)
 
 proc mem_read_word*(mem: GbMemory; gb: GB; idx: int): uint16 =
-  # A word access at $FFFF wraps to $0000 for its second byte (gambatte
-  # oamdma/oamdma_src*_busypopFFFF, busypush0001).
+  # A word at $FFFF wraps to $0000 (gambatte oamdma/*busypopFFFF).
   uint16(mem_read(mem, gb, idx)) or
     (uint16(mem_read(mem, gb, (idx + 1) and 0xFFFF)) shl 8)
 
 proc mem_write_word*(mem: GbMemory; gb: GB; idx: int; val: uint16) =
-  # LD (nn),SP, its only caller: the low byte to nn on M4, then the high byte
-  # to nn+1 on M5 (Game Boy: Complete Technical Reference, "LD (nn), SP",
-  # mem <- SPL then mem <- SPH). Pushes go high byte first, but do their own.
+  # Only LD (nn),SP: low byte first (Game Boy: Complete Technical Reference).
+  # Pushes go high byte first and do their own.
   mem_write(mem, gb, idx,                  uint8(val and 0xFF))
   mem_write(mem, gb, (idx + 1) and 0xFFFF, uint8(val shr 8))
 
 proc mem_vdma_bus_capture*(mem: GbMemory; gb: GB; src_lo: uint8; val: uint8) =
-  ## The OAM DMA unit's write port driven by a VRAM DMA: an in-flight OAM
-  ## transfer stores whatever the external bus carries, and under a VRAM DMA
-  ## that is a block byte at the block's SOURCE address. Called from the block
-  ## copy, not mem_dma_tick, because it is not clocked by the OAM DMA's own bus
-  ## cycles (gambatte dma/hdma_transition_oamdma_1 HALTs across the block).
-  ## Past $A0 there is no port to drive (oamdma/oamdmasrcC000_hdmasrc0000).
-  ## See VDMA_OAM_BUS_CAPTURE in gb.nim.
+  ## An in-flight OAM DMA stores what the external bus carries; under a VRAM
+  ## DMA that is a block byte at the block's SOURCE address. Called from the
+  ## block copy: it is not clocked by OAM DMA bus cycles (gambatte
+  ## dma/hdma_transition_oamdma_1 HALTs across the block). Past $A0 there is
+  ## no port. VDMA_OAM_BUS_CAPTURE, gb.nim.
   if mem.dma_position <= 0xA0 and src_lo < 0xA0'u8:
     mem.dma_latch = val
     write_byte(mem, gb, 0xFE00 + int(src_lo), val)
 
 proc mem_dma_release_frozen(mem: GbMemory; gb: GB) {.noinline.} =
-  ## A frozen OAM DMA unit that has stored its last byte gives OAM back
-  ## (OAMDMA_FROZEN_RELEASE, gb.nim): the step past $A0 moves no byte and
-  ## needs no bus cycle of the CPU's.
+  ## A frozen OAM DMA that stored its last byte gives OAM back
+  ## (OAMDMA_FROZEN_RELEASE, gb.nim): the step past $A0 needs no bus cycle.
   when OAMDMA_FROZEN_RELEASE != 0:
     when defined(gb_dma_trace):
       echo "DMAFROZEN pos=", mem.dma_position, " ly=", gb.ppu.ly,
@@ -1004,13 +914,12 @@ proc mem_dma_tick*(mem: GbMemory; gb: GB; cycles: int) =
   if not mem.requested_oam_dma and mem.dma_position > 0xA0: return
   when OAMDMA_HALT_PAUSE != 0:
     var cycles = cycles
-    # The unit is clocked by bus cycles and HALT stops them, OAMDMA_HALT_GRACE
-    # M-cycles in; OAMDMA_WAKE_EXTRA is added at the wake because that
-    # M-cycle's bus half runs with `halted` still set (OAMDMA_HALT_PAUSE).
+    # Clocked by bus cycles; HALT stops them OAMDMA_HALT_GRACE M-cycles in.
+    # OAMDMA_WAKE_EXTRA is added at the wake: that M-cycle's bus half runs
+    # with `halted` still set (OAMDMA_HALT_PAUSE).
     if gb.cpu.halted:
-      # A VRAM DMA makes bus cycles of its own, so the unit keeps stepping
-      # (storing nothing; VDMA_OAM_BUS_CAPTURE). `dma_was_halted` stays set
-      # so the wake still pays the hand-back.
+      # A VRAM DMA makes its own bus cycles, so the unit keeps stepping
+      # (storing nothing; VDMA_OAM_BUS_CAPTURE).
       if VDMA_OAM_BUS_CAPTURE == 0 or not mem.vdma_bus_hold:
         when OAMDMA_HALT_GRACE != 0:
           if not mem.dma_was_halted and gb.dma_halt_grace < uint8(OAMDMA_HALT_GRACE):
@@ -1042,8 +951,8 @@ proc mem_dma_tick*(mem: GbMemory; gb: GB; cycles: int) =
                " dot=", gb.fifo_ppu.cycle_counter,
                " src=", toHex(uint16(mem.dma) shl 8, 4)
         when OAM_SCAN_DMA_LOCK != 0:
-          # The transfer takes OAM on this dot; a running mode-2 scan reads
-          # nothing more until it is given back.
+          # The transfer takes OAM; a running mode-2 scan reads nothing until
+          # it is given back.
           fifo_oam_lock_change(gb.fifo_ppu, gb, taking = true)
         mem.requested_oam_dma  = false
         mem.current_dma_source = uint16(mem.dma) shl 8
@@ -1055,12 +964,10 @@ proc mem_dma_tick*(mem: GbMemory; gb: GB; cycles: int) =
     if mem.dma_position <= 0xA0:
       if (mem.internal_dma_timer and 3) == 0:
         if mem.dma_position < 0xA0:
-          # Under a VRAM DMA the slot passes and the position steps, but the
-          # lines are the VRAM DMA's, so nothing lands here
-          # (mem_vdma_bus_capture, VDMA_OAM_BUS_CAPTURE).
+          # Under a VRAM DMA the position steps but nothing lands here
+          # (mem_vdma_bus_capture).
           if VDMA_OAM_BUS_CAPTURE == 0 or not mem.vdma_bus_hold:
-            # The latch is what a colliding CPU read sees. The echo covers
-            # $E000-$FFFF (mooneye oam_dma/sources-GS).
+            # The latch is what a colliding CPU read sees.
             if mem.dma_openbus:
               mem.dma_latch = 0xFF'u8
             else:
@@ -1077,59 +984,46 @@ proc mem_dma_tick*(mem: GbMemory; gb: GB; cycles: int) =
       inc mem.internal_dma_timer
 
 const SPEED_SWITCH_FREEZES_OAM_DMA* {.intdefine.} = 1
-  ## The OAM DMA unit does not step through a speed-switch stall: it is
-  ## clocked by bus cycles and there are none while the CPU clock is off (as
-  ## at HALT, OAMDMA_HALT_PAUSE). The timer is a separate domain and keeps
-  ## counting. Pinned by gambatte oamdma/oamdmasrcC0_speedchange_readC000
-  ## (exact; 0 reads $00 for $11) and bracketed by
-  ## dma/hdma_transition_speedchange_oamdma (1 lands one byte off at $72 for
-  ## $71, 0 runs the transfer out to $A0).
+  ## OAM DMA does not step through a speed-switch stall: no bus cycles while
+  ## the CPU clock is off (as at HALT). The timer is a separate domain and
+  ## keeps counting. Pinned by gambatte oamdma/oamdmasrcC0_speedchange_readC000
+  ## and dma/hdma_transition_speedchange_oamdma.
 const SPEED_SWITCH_OAM_DMA_HANDBACK_T* {.intdefine.} = 4
   ## Bus cycles the unit is still clocked for across the stall: the hand-back
   ## M-cycle.
 
 const SPEED_SWITCH_STALL_CPU* {.intdefine.} = 131072
-  ## The stall in cycles of the CPU clock at the speed switched TO. 2^17: gambatte speedchange_tima00_* count
-  ## +128 TIMA ticks at TAC=$04 across one switch; speedchange2_tima00_* show
-  ## the to-single switch costs the same count of a half-rate clock (twice the
-  ## real time); speedchange2_*_ly_1 wants the two directions' dots added.
-  ## Two-sided to one M-cycle: 2^17-4 loses daid speed_switch_timing_ly, 2^17+4
-  ## loses daid speed_switch_timing_stat, and either side loses AGE
-  ## spsw-{tima,div,mode0,ch2-lc-delay} + lcd-align-ly and ~85 gambatte
-  ## speedchange rows. Pan Docs ("FF4D — KEY1") says 2050 M-cycles; these rows
-  ## measure 2^17.
+  ## The stall in cycles of the CPU clock at the speed switched TO, so a
+  ## to-single switch takes twice the real time. 2^17: gambatte
+  ## speedchange_tima00_* count +128 TIMA ticks at TAC=$04. Pinned to one
+  ## M-cycle both sides by daid speed_switch_timing_* and AGE spsw-*. Pan Docs
+  ## ("FF4D — KEY1") says 2050 M-cycles; the tests measure 2^17.
 
 const SPEED_SWITCH_PPU_EXTRA_DOTS* {.intdefine.} = 12 - 4 * CGB_HALT_PPU_LEAD
-  ## Dots the PPU advances across the stall beyond the CPU clock's own count.
-  ## daid speed_switch_timing_ly/_stat pin 65548 PPU dots across a to-double
-  ## switch (65536 + 12) while _div pins the CPU stall to a multiple of 256.
-  ## Those ROMs each HALT once before the STOP, so the 12 is 8 for the switch
-  ## plus the halt-exit M-cycle CGB_HALT_PPU_LEAD (gb.nim) owns; the gambatte
-  ## speedchange*_ly44_m3* switch-count ladder, which never halts, measures
-  ## 8 alone. Tied to the lead so the two move together. Two-sided to one
-  ## dot: 7 and 9 each lose AGE lcd-align-ly + spsw-mode0 and ~200 gambatte
-  ## rows (speedchange, scy, m2int_m3stat); 7 also loses daid
-  ## speed_switch_timing_ly.
+  ## Dots the PPU advances across the stall beyond the CPU clock's count.
+  ## daid speed_switch_timing_ly/_stat pin 65548 dots across a to-double
+  ## switch (65536 + 12); those ROMs HALT before the STOP, so 12 is 8 for the
+  ## switch plus the halt-exit M-cycle CGB_HALT_PPU_LEAD (gb.nim) owns. The
+  ## gambatte speedchange*_ly44_m3* ladder, which never halts, measures 8.
+  ## Tied to the lead so they move together. Pinned to one dot both sides.
 
 const SS_EXTRA_SINGLE_SAME* = -9999
-  ## Sentinel for SPEED_SWITCH_PPU_EXTRA_DOTS_SINGLE, outside any legal dot
-  ## count so the constant can take a negative value.
+  ## Sentinel for SPEED_SWITCH_PPU_EXTRA_DOTS_SINGLE ("same as double"),
+  ## outside any legal dot count since the value may be negative.
 
 const SPEED_SWITCH_PPU_EXTRA_DOTS_SINGLE* {.intdefine.} =
   when CGB_HALT_PPU_LEAD != 0: 3 else: SS_EXTRA_SINGLE_SAME
-  ## The same quantity for a switch ending in SINGLE speed; the sentinel means
-  ## "use SPEED_SWITCH_PPU_EXTRA_DOTS for both", which ships because the split
-  ## needs CGB_HALT_PPU_LEAD. The ly44_m3 ladder's rungs measure A, A+B, 2A+B,
-  ## 2A+2B, 3A+2B = 8, 11, 19, 22, 30 dots, so A = 8, B = 3. B odd means a
-  ## to-single switch leaves the PPU grid 3 dots from the CPU's; gambatte
-  ## lcd_offset wants A+B = 0 mod 4 and is the open residual.
+  ## The same for a switch ending in SINGLE speed; the sentinel means "use
+  ## SPEED_SWITCH_PPU_EXTRA_DOTS" (the split needs CGB_HALT_PPU_LEAD). The
+  ## ly44_m3 ladder measures 8, 11, 19, 22, 30 dots = A, A+B, 2A+B, 2A+2B,
+  ## 3A+2B, so A = 8, B = 3: a to-single switch leaves the PPU grid 3 dots
+  ## off the CPU's. Open: gambatte lcd_offset wants A+B = 0 mod 4.
 
 const SPEED_SWITCH_STALL_RUNS_CPU_CLOCK* {.intdefine.} = 1
-  ## Whether the timer/serial/OAM-DMA domain runs during the stall. It does:
-  ## gambatte speedchange_tima00_* see +128 TIMA ticks across a switch. Pan
-  ## Docs' "DIV does not tick" is about the STOP leaves; the switch leaf is a
-  ## HALT (Pan Docs' STOP chart) and everything that runs in a halt runs here.
-  ## DIV is still reset at the switch, before the stall.
+  ## Whether the timer/serial/OAM-DMA domain runs during the stall. It does
+  ## (gambatte speedchange_tima00_*). Pan Docs' "DIV does not tick" is about
+  ## the STOP leaves; the switch leaf is a HALT (Pan Docs' STOP chart). DIV
+  ## is still reset at the switch, before the stall.
 
 proc spsw_extra_dots(mem: GbMemory): int {.inline.} =
   ## SPEED_SWITCH_PPU_EXTRA_DOTS for the speed just switched TO.
@@ -1141,18 +1035,17 @@ proc spsw_extra_dots(mem: GbMemory): int {.inline.} =
 
 proc mem_tick_stalled(mem: GbMemory; gb: GB; cycles: int;
                       first_chunk = true; ppu_hold = 0) =
-  ## mem_tick_components for the speed-switch stall: no fetch, the CPU-clock
-  ## domain per SPEED_SWITCH_STALL_RUNS_CPU_CLOCK, and the PPU at its
-  ## real-time rate (gambatte speedchange/*_m3_*). `ppu_hold`: dots of the
-  ## first chunk the PPU does not run here (already run by the stall's entry
-  ## check, or held back for the wake: SPEED_SWITCH_HALT_PPU_LEAD).
+  ## mem_tick_components for the speed-switch stall: no fetch, CPU-clock
+  ## domain per SPEED_SWITCH_STALL_RUNS_CPU_CLOCK, PPU at real-time rate.
+  ## `ppu_hold`: first-chunk dots not run here (already run by the entry
+  ## check, or held for the wake: SPEED_SWITCH_HALT_PPU_LEAD).
   gb.scheduler.tick(cycles)
   when SPEED_SWITCH_STALL_RUNS_CPU_CLOCK != 0:
     timer_tick(gb.timer, gb, cycles)
     when SPEED_SWITCH_FREEZES_OAM_DMA == 0:
       mem_dma_tick(mem, gb, cycles)
     elif SPEED_SWITCH_OAM_DMA_HANDBACK_T != 0:
-      # Once per stall, not per chunk: the hand-back is at the grant.
+      # Once per stall: the hand-back is at the grant.
       if first_chunk:
         mem_dma_tick(mem, gb, SPEED_SWITCH_OAM_DMA_HANDBACK_T)
         # Frozen from here to the stall's end, as under a HALT.
@@ -1174,42 +1067,31 @@ proc mem_tick_stalled(mem: GbMemory; gb: GB; cycles: int;
 
 
 const SPEED_SWITCH_STALL_ENDS_ON_IRQ* {.intdefine.} = 1
-  ## An interrupt arriving during the stall ends it, as it ends any HALT.
-  ## c-sp speed-switch/caution/spsw-interrupts-*: a 262 kHz timer overflowing
-  ## mid-stall reads DIV = $10 on hardware, which a stall that runs to
-  ## completion (2^17 cycles, 16-bit divider) can only answer as $00.
+  ## An interrupt during the stall ends it, as it ends any HALT. c-sp
+  ## speed-switch/caution/spsw-interrupts-*: a timer overflowing mid-stall
+  ## reads DIV = $10 on hardware; a full 2^17 stall can only give $00.
 const SPEED_SWITCH_HALT_PPU_LEAD* {.intdefine.} = 1
-  ## The stall is the CGB HALT of the switch leaf, so it holds the PPU back
-  ## the way any CGB halt does (CGB_HALT_PPU_LEAD, gb.nim): its first M-cycle
-  ## runs no dots, and the wake pays them back. A no-op for a stall that runs
-  ## out (the dots are paid at its end); a stall a STAT or VBlank request ends
-  ## wakes one M-cycle later, a timer wake does not move. DocBoy
-  ## `double_speed/interrupts/speed_switch_to_{double,single}_interrupt_
-  ## {stat,vblank}*` (CGB E, both directions: one M-cycle of the new speed,
-  ## the timer rows beside them unchanged) and SameBoy (CGB E) on the same
-  ## rows; the timer half is c-sp `speed-switch/caution/spsw-interrupts-*`'s
-  ## hardware-checked `.speed_switch_with_timer_interrupt` block, unmoved.
+  ## The stall is the switch leaf's CGB HALT, so it holds the PPU back like
+  ## any CGB halt (CGB_HALT_PPU_LEAD, gb.nim): its first M-cycle runs no dots
+  ## and the wake pays them back. No-op for a stall that runs out; a STAT or
+  ## VBlank wake lands one M-cycle later, a timer wake does not move. DocBoy
+  ## `double_speed/interrupts/speed_switch_to_*_interrupt_*` (CGB E); timer
+  ## half: c-sp `spsw-interrupts-*` (hardware-checked).
 const SPEED_SWITCH_ENTRY_IRQ_CHECK* {.intdefine.} = 1
-  ## Whether the stall's HALT also asks for an interrupt before its first
-  ## M-cycle, so a request rising inside STOP itself (after the leaf choice
-  ## saw none pending) ends it with no stall cycle spent. By then the PPU has
-  ## run the switch's extra dots less the held-back ones (6 into double speed,
-  ## none into single); every later check is where it was. DocBoy
-  ## `speed_switch_to_double_interrupt_{stat,vblank}_aligned_with_stop_nops_*`
-  ## (54 rows, CGB E) walk the STOP across the mode-0 and VBlank edges one
-  ## M-cycle at a time: the stall that would have lasted one M-cycle lasts
-  ## none, the longer ones are unchanged. The entry check's 6 dots are
-  ## two-sided: 5 loses `..._nops_37_scx2_round1`, 7 `..._nops_37_scx3_round2`.
-  ## SameBoy (CGB E) passes 49 of the 54.
+  ## Whether the stall's HALT also checks for an interrupt before its first
+  ## M-cycle, so a request rising inside STOP (after the leaf choice saw none)
+  ## ends it with no stall cycle spent. By then the PPU has run the switch's
+  ## extra dots less the held-back ones (6 into double speed, none into
+  ## single; the 6 pinned both sides). DocBoy
+  ## `speed_switch_to_double_interrupt_*_aligned_with_stop_nops_*` (CGB E).
 proc mem_stall_until_irq(mem: GbMemory; gb: GB; stall_cycles: int;
                          ppu_debt: var int): int =
-  ## The stall in M-cycle steps, stopping as soon as an interrupt is ready;
-  ## only the first step carries the once-per-stall work. `ppu_debt`: the
-  ## dots held back (SPEED_SWITCH_HALT_PPU_LEAD), for the caller to pay at
-  ## the wake.
+  ## The stall in M-cycle steps, stopping once an interrupt is ready; the
+  ## first step carries the once-per-stall work. `ppu_debt`: dots held back
+  ## (SPEED_SWITCH_HALT_PPU_LEAD) for the caller to pay at the wake.
   const step = 4
-  # IE = 0 cannot wake, so the whole stall is one call (most games switch
-  # with IE = 0, and 2^17 cycles is 32768 steps).
+  # IE = 0 cannot wake: one call instead of 32768 steps (most games switch
+  # with IE = 0).
   let irq = gb.interrupts
   if not (irq.vblank_enabled or irq.lcd_stat_enabled or irq.timer_enabled or
           irq.serial_enabled or irq.joypad_enabled):
@@ -1220,15 +1102,13 @@ proc mem_stall_until_irq(mem: GbMemory; gb: GB; stall_cycles: int;
     else: 0
   var pre = 0
   when SPEED_SWITCH_ENTRY_IRQ_CHECK != 0:
-    # The halt asks for an interrupt before its first M-cycle as well, with
-    # the PPU already through the switch's extra dots less the held-back ones
-    # (SPEED_SWITCH_ENTRY_IRQ_CHECK).
+    # SPEED_SWITCH_ENTRY_IRQ_CHECK.
     pre = max(0, spsw_extra_dots(mem) - hold)
     if pre > 0: fifo_tick(gb.fifo_ppu, gb, pre)
     if interrupt_ready(gb.interrupts):
-      # Woken before the stall's first M-cycle: only its once-per-stall work.
-      # Into single speed the extra dots are fewer than the held-back ones,
-      # so the wake owes that much less.
+      # Woken before the first M-cycle: only the once-per-stall work. Into
+      # single speed the extra dots are fewer than the held-back ones, so the
+      # wake owes that much less.
       let short = min(0, spsw_extra_dots(mem) - hold - pre)
       mem_tick_stalled(mem, gb, 0, first_chunk = true,
                        ppu_hold = hold + pre + short)
@@ -1242,8 +1122,8 @@ proc mem_stall_until_irq(mem: GbMemory; gb: GB; stall_cycles: int;
                      ppu_hold = (if first: hold + pre else: 0))
     done += n
     if interrupt_ready(gb.interrupts):
-      # The stall is a halt: its latch misses a serial request this
-      # M-cycle's tap edge raised (SERIAL_HALT_TAIL_BLIND, serial.nim).
+      # As a halt, the latch misses a serial request this M-cycle's tap
+      # edge raised (SERIAL_HALT_TAIL_BLIND, serial.nim).
       when SERIAL_CPU_SAMPLE_T < 4 and SERIAL_HALT_TAIL_BLIND != 0:
         if not halt_serial_tail_blind(gb): break
       else:
@@ -1252,21 +1132,17 @@ proc mem_stall_until_irq(mem: GbMemory; gb: GB; stall_cycles: int;
   done
 
 const STOP_RTC_RUNS* {.intdefine.} = 1
-  ## Whether a cartridge clock (MBC3, HuC3, TAMA5) keeps counting while the
-  ## Game Boy is in STOP mode. Pan Docs, "MBC3": the "RTC requires an
-  ## external 32.768 kHz Quartz Oscillator, and an external battery (if it
-  ## should continue to tick when the Game Boy is turned off)", so stopping
-  ## the console's oscillator cannot stop it. dingbat books the clock's second as a
-  ## scheduler event and STOP freezes the scheduler, so each STOP step moves
-  ## that one event on by the step's cycles. DocBoy
-  ## `mbc/mbc3/interactive/mbc3_rtc_gb_stopped_recover` (DMG: seconds held
-  ## across a STOP of about two seconds, released by a key).
+  ## Whether a cartridge clock (MBC3, HuC3, TAMA5) keeps counting in STOP.
+  ## Pan Docs, "MBC3": the "RTC requires an external 32.768 kHz Quartz
+  ## Oscillator", so stopping the console's oscillator cannot stop it. STOP
+  ## freezes the scheduler, so each STOP step moves the RTC-second event on
+  ## by hand. DocBoy `mbc/mbc3/interactive/mbc3_rtc_gb_stopped_recover`.
 
 proc mem_tick_stopped*(mem: GbMemory; gb: GB) =
-  ## One step in STOP mode: the whole machine clock is stopped (Pan Docs,
-  ## "Using the STOP Instruction"), so nothing ticks but a cartridge clock
-  ## (STOP_RTC_RUNS). This otherwise only paces the frontend: step_frame
-  ## waits for `frame`, which a frozen PPU never sets.
+  ## One step in STOP mode: the machine clock is stopped (Pan Docs, "Using the
+  ## STOP Instruction"); only a cartridge clock ticks (STOP_RTC_RUNS). The rest
+  ## paces the frontend: step_frame waits for `frame`, which a frozen PPU
+  ## never sets.
   let ppu = gb.ppu
   ppu.dots_since_frame += int32(4 shr mem.current_speed)
   if ppu.dots_since_frame >= DOTS_PER_FRAME:
@@ -1288,10 +1164,9 @@ proc mem_tick_stopped*(mem: GbMemory; gb: GB) =
     if gb_harness_input != nil: gb_harness_input(gb, true)
 
 proc stop_panel(mem: GbMemory; gb: GB) =
-  ## The panel during STOP (Pan Docs, "Using the STOP Instruction"; daid
-  ## stop_instr.gb, stop_instr_gbc_mode3.gb): DMG blanks white; CGB with the
-  ## LCD on shows black, except in mode 3, where the current image holds. The
-  ## mode is sampled on the STOP fetch, which is what the mode-3 ROM aims at.
+  ## The panel during STOP (Pan Docs; daid stop_instr*): DMG blanks white;
+  ## CGB with the LCD on shows black, except in mode 3, where the image
+  ## holds. The mode is sampled on the STOP fetch.
   let ppu = gb.ppu
   if not ppu.lcd_enabled or not gb.cgb_enabled:
     ppu_blank_frame(ppu, gb)
@@ -1304,36 +1179,24 @@ const SPEED_SWITCH_IME0_LEAF_HOLD_T* {.intdefine.} = 8
   ## SPEED_SWITCH_IRQ_LEAF_HOLD_T for the leaf Pan Docs' STOP chart defines:
   ## a switch with an interrupt pending and IME clear ("STOP is a 1-byte
   ## opcode, mode doesn't change, DIV is reset, CPU speed changes"). c-sp's
-  ## measurements behind SPEED_SWITCH_IRQ_LEAF_HOLD_T run with IME set (EI
-  ## right before STOP), the chart's "CPU glitches non-deterministically"
-  ## leaf. DocBoy `speed_switch_to_double_interrupt_{stat,vblank}_aligned_
-  ## with_stop_nops_*` (CGB E, IME clear, the request pending at STOP: 16
-  ## rows) and SameBoy (CGB E) on the same rows want two M-cycles of the new
-  ## speed: [5, 8] T scores alike, 4 loses every `_round1`, 9 every
-  ## `_round2`. CGB B/C are unmeasured on this leaf and take the same value.
-  ## DocBoy's IME-set rows (`double_speed/interactive/*_ime1_*_div_round1`)
-  ## want 8 on the glitch leaf too; c-sp's CGB-E measurement and SameBoy say
-  ## 4 there (docs/gb-failure-triage.md I7).
+  ## measurements behind SPEED_SWITCH_IRQ_LEAF_HOLD_T are on the IME-set
+  ## "glitches" leaf. DocBoy `*_aligned_with_stop_nops_*` (CGB E, IME clear)
+  ## want 5..8 T; 4 and 9 fail. CGB B/C unmeasured, same value. On the glitch
+  ## leaf DocBoy's `*_ime1_*` want 8 where c-sp's CGB-E measurement says 4
+  ## (docs/gb-failure-triage.md I7).
 
 const STOP_MODE_OPERAND_MCYCLE* {.intdefine.} = 1
-  ## The two-byte STOP-mode leaf runs its operand M-cycle, the whole machine
-  ## ticking, before the clock stops, and the DIV reset lands at that
-  ## M-cycle's end, one M-cycle after the fetch (where the switch leaf's reset
-  ## sits too, SPEED_SWITCH_DIV_RESET_T). DocBoy `timers/interactive/
-  ## stop_read_tima_*` (DMG ABC, CGB E) and `double_speed/interactive/
-  ## double_speed_stop_read_tima_*` (the CGB ones marked for a hand-pressed
-  ## key on hardware) read TIMA one count higher after the wake: the 262 kHz
-  ## tap is low at the fetch and high one M-cycle later, so only the later
-  ## reset ticks TIMA; SameBoy (DMG B, CGB E) passes all eight.
-  ## `dma/interactive/dma_stop_during_transfer_timing_round2` (DMG) wants the
-  ## OAM DMA one byte further on, which only the full M-cycle gives. 2 ticks
-  ## the divider alone (the eight TIMA rows, not the DMA one); 0 is the old
-  ## reset at the fetch.
+  ## 1: the two-byte STOP-mode leaf runs its operand M-cycle, whole machine
+  ## ticking, before the clock stops; the DIV reset lands at its end, one
+  ## M-cycle after the fetch (as SPEED_SWITCH_DIV_RESET_T). 2: tick only the
+  ## divider. 0: reset at the fetch. DocBoy `*stop_read_tima_*` read TIMA one
+  ## higher after the wake (the 262 kHz tap rises in that M-cycle; 1 or 2
+  ## pass); `dma/interactive/dma_stop_during_transfer_timing_round2` wants the
+  ## OAM DMA one byte further on, which only 1 gives.
 
 proc stop_instr*(mem: GbMemory; gb: GB): bool =
   ## STOP ($10). Returns whether the byte after the opcode is consumed. Pan
-  ## Docs' STOP flow chart ("Reducing Power Consumption", imgs/stop_diagram.svg)
-  ## over what is sampled at the fetch:
+  ## Docs' STOP flow chart ("Reducing Power Consumption"), sampled at the fetch:
   ##
   ##   button held ─ IRQ pending → 1 byte, mode unchanged, DIV not reset
   ##               └ no IRQ      → 2 bytes, HALT mode,     DIV not reset
@@ -1342,12 +1205,11 @@ proc stop_instr*(mem: GbMemory; gb: GB): bool =
   ##             └ switch ─ no IRQ      → 2 bytes, HALT mode, DIV reset, speed changes
   ##                      └ IRQ pending → 1 byte, mode unchanged, DIV reset, speed changes
   ##
-  ## A held button beats a requested switch, so it is tested first. The
-  ## chart's IME split on the last leaf ("glitches non-deterministically")
-  ## takes the defined leaf. Not modelled: whether the skipped byte is read,
-  ## and an oscillator restart delay on leaving STOP mode.
-  # The speed switch and stop_panel both reach the pipeline and the idle
-  # skip's horizon.
+  ## A held button beats a requested switch. The chart's IME split on the
+  ## last leaf ("glitches non-deterministically") takes the defined leaf. Not
+  ## modelled: whether the skipped byte is read, and an oscillator restart
+  ## delay on leaving STOP mode.
+  # The speed switch and stop_panel reach the pipeline and the idle horizon.
   fifo_sync(gb)
   gb.wl_mark = gb.scheduler.cycles
   let button_held = joypad_lines(gb.joypad) != 0x0F'u8
@@ -1363,12 +1225,11 @@ proc stop_instr*(mem: GbMemory; gb: GB): bool =
   if mem.requested_speed_switch and gb.cgb_enabled:
     mem.requested_speed_switch = false
     when HDMA_SPEEDSWITCH_KILL_W != 0 and HDMA_HALT_REQ == 0:
-      # Armed only while a transfer exists to lose (HDMA_SPEEDSWITCH_KILL_W).
+      # HDMA_SPEEDSWITCH_KILL_W: armed only while a transfer exists.
       if gb.ppu.hdma_active: gb.ppu.hdma_kill_from = gb.ppu.cycle_counter
-    # Pan Docs' chart: the switch resets DIV. Through the timer's own entry
-    # point so the divider's consumers (frame sequencer, serial, TIMA edge)
-    # see it as a write, at the old speed; where in the opcode it lands is
-    # SPEED_SWITCH_DIV_RESET_T in timer.nim.
+    # The switch resets DIV (Pan Docs' chart), through the timer so the
+    # divider's consumers see a write at the old speed
+    # (SPEED_SWITCH_DIV_RESET_T, timer.nim).
     timer_speed_switch_div_reset(gb.timer, gb)
     let old_speed = mem.current_speed
     mem.current_speed = mem.current_speed xor 1
@@ -1376,18 +1237,15 @@ proc stop_instr*(mem: GbMemory; gb: GB): bool =
     # The channels' next_step deadlines live outside the scheduler's events.
     gb.apu.apu_rescale_speed(gb, old_speed, mem.current_speed)
     gb.scheduler.set_speed(mem.current_speed)
-    # Re-aim the DIV-APU edge at the NEW speed: the aim above went through
-    # set_speed's rescale, which would also scale the tap's lag
-    # (APU_SPSW_TAP_LAG_T in timer.nim).
+    # Re-aim the DIV-APU edge at the NEW speed: set_speed's rescale would
+    # also scale the tap's lag (APU_SPSW_TAP_LAG_T, timer.nim).
     gb.scheduler.clear(etAPUFrameSeq)
     gb.scheduler.schedule(apu_div_phase(gb.timer, gb), etAPUFrameSeq)
-    # The switch leaf's HALT with its countdown; skipped when an interrupt is
-    # already pending (the chart's "1 byte, mode doesn't change" leaf).
+    # The switch leaf's HALT; skipped when an interrupt is pending (the
+    # chart's "1 byte, mode doesn't change" leaf).
     when SPEED_SWITCH_IRQ_LEAF_HOLD_T != 0:
       if irq_pending:
-        # Oscillator restart on the aborted-halt leaf: the divider owes these
-        # T-cycles (SPEED_SWITCH_IRQ_LEAF_HOLD_T; with IME clear,
-        # SPEED_SWITCH_IME0_LEAF_HOLD_T).
+        # Oscillator restart on the aborted-halt leaf: T-cycles the divider owes.
         let hold =
           if not gb.cpu.ime: SPEED_SWITCH_IME0_LEAF_HOLD_T
           elif gb.quirks.spsw_irq_leaf_hold_short: SPEED_SWITCH_IRQ_LEAF_HOLD_T div 2
@@ -1395,19 +1253,19 @@ proc stop_instr*(mem: GbMemory; gb: GB): bool =
         gb.timer.hold_t = hold
         when SPEED_SWITCH_LEAF_PPU != 0:
           if hold > 0 and (not gb.cpu.ime or SPEED_SWITCH_LEAF_PPU_IME1 != 0):
-            # The PPU sits out the same restart and then takes the switch's
-            # extra dots, as the stall gives them (SPEED_SWITCH_LEAF_PPU).
+            # The PPU sits out the restart, then takes the switch's extra
+            # dots (SPEED_SWITCH_LEAF_PPU).
             fifo_tick(gb.fifo_ppu, gb, spsw_extra_dots(mem))
             mem.ppu_mdot_shift = PPU_SIT_OUT
     if not irq_pending:
-      # In cycles of the CPU clock the switch lands in, the scheduler's domain.
+      # In cycles of the new-speed CPU clock (the scheduler's domain).
       const stall_cycles = SPEED_SWITCH_STALL_CPU
       var spent = stall_cycles
       var ppu_debt = 0
       when HDMA_HALT_REQ != 0:
-        # The stall is a halt for the VRAM DMA: its edge detector stops with
-        # the CPU clock, and a request the STOP's own execute cycle meets
-        # is taken there (HDMA_HALT_REQ, gb.nim).
+        # A halt for the VRAM DMA: its edge detector stops with the CPU
+        # clock; a request the STOP's execute cycle meets is taken there
+        # (HDMA_HALT_REQ, gb.nim).
         let ppu = gb.ppu
         let hdma_live = ppu.hdma_active
         when defined(gb_dma_trace):
@@ -1433,16 +1291,16 @@ proc stop_instr*(mem: GbMemory; gb: GB): bool =
         else:
           mem_tick_stalled(mem, gb, stall_cycles)
       else:
-        # The DIV-APU event models the frozen divider's tap: lift it over the
-        # stall and re-aim it from the reset divider.
+        # The divider is frozen: lift the DIV-APU event over the stall and
+        # re-aim it from the reset divider.
         gb.scheduler.clear(etAPUFrameSeq)
         mem_tick_stalled(mem, gb, stall_cycles)
         gb.scheduler.schedule(apu_div_phase(gb.timer, gb), etAPUFrameSeq)
       when HDMA_HALT_REQ != 0:
         if hdma_live:
-          # The stall's end is the wake (cpu_halt_wake): the taken
-          # block's bytes, or a block that came due under the stall while
-          # its HBlank lasts. A stall that ran out has paid the PPU's lead.
+          # The stall's end is the wake (cpu_halt_wake): the taken block's
+          # bytes, or a block that came due while its HBlank lasts. A stall
+          # that ran out has paid the PPU's lead.
           gb.hdma_switch_stall   = false
           gb.hdma_halt_open = false
           when defined(gb_dma_trace):
@@ -1451,9 +1309,8 @@ proc stop_instr*(mem: GbMemory; gb: GB): bool =
           let lead_paid =
             int32(CGB_HALT_PPU_LEAD_DOTS shr mem.current_speed) - int32(ppu_debt)
           when HDMA_WAKE_BLIND_DOTS > 0:
-            # A stall an interrupt ends is a wake like a HALT's; one that
-            # runs out its count has no wake M-cycle for the edge detector
-            # to miss (HDMA_WAKE_BLIND_DOTS, gb.nim).
+            # Only a stall an interrupt ends has a wake M-cycle for the edge
+            # detector to miss (HDMA_WAKE_BLIND_DOTS, gb.nim).
             gb.hdma_wake_dot =
               if spent < stall_cycles: ppu.cycle_counter
               else: ppu.cycle_counter - int32(HDMA_WAKE_BLIND_DOTS) - 1'i32
@@ -1465,7 +1322,7 @@ proc stop_instr*(mem: GbMemory; gb: GB): bool =
       if ppu_debt != 0:
         # The wake pays the held-back dots (as at a HALT's, cpu.nim).
         mem_tick_ppu(mem, gb, ppu_debt, ignore_speed = true)
-      # Charge the stall to the instruction so mem_tick_extra does not repeat it.
+      # Charged to the instruction so mem_tick_extra does not repeat it.
       mem.cycle_tick_count += spent
     return
 
@@ -1475,9 +1332,8 @@ proc stop_instr*(mem: GbMemory; gb: GB): bool =
   elif STOP_MODE_OPERAND_MCYCLE == 2:
     if result: timer_tick(gb.timer, gb, SPEED_SWITCH_DIV_RESET_T)
   timer_write(gb.timer, gb, 0xFF04, 0)
-  # `halted` + `locked` is cpu_lock's pair (no interrupt ends this); `stopped`
-  # says the rest of the machine is stopped too and a P10-P13 line going low
-  # does end it (cpu.nim tick).
+  # `halted` + `locked` as cpu_lock (no interrupt ends this); `stopped`: the
+  # machine is stopped and a P10-P13 line going low ends it (cpu.nim tick).
   gb.cpu.halted  = true
   gb.cpu.locked  = true
   gb.cpu.stopped = true

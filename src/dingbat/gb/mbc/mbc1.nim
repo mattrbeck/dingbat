@@ -1,9 +1,8 @@
 # MBC1 cartridge (included by gb.nim)
 #
-# MBC1M multicarts wire the cart differently: BANK1 bit 4 is not connected
-# (only 4 bits reach the ROM) and BANK2 drives ROM address lines 18-19, i.e.
-# it shifts by 4 instead of 5. The BANK1 register itself is still 5 bits wide
-# with the full-register zero check, so e.g. $10 stays $10 (wired bank 0).
+# MBC1M multicarts: BANK1 bit 4 is not wired and BANK2 drives address lines
+# 18-19 (shift 4, not 5). BANK1 is still 5 bits with the full-register zero
+# check, so $10 stays $10 (wired bank 0).
 
 proc mbc1_lo_bank(cart: Mbc1): int =
   if cart.multicart: int(cart.reg2) shl 4

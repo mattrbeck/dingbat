@@ -1,9 +1,8 @@
-# Input-rollback netplay session for GB/GBC (GGPO-style) over the local 2-core
-# GB link; the GB analogue of gba/rollback.nim. Both peers run both cores;
-# only button inputs cross the network. The transport calls `tick(localBits)`
-# once per display frame and ships the returned frame's input, and calls
-# `feed_remote(frame, bits)` as peer inputs arrive. Requires identical build,
-# ROM and save on both sides.
+# Input-rollback netplay (GGPO-style) over the local 2-core GB link, like
+# gba/rollback.nim. Both peers run both cores; only inputs cross the network.
+# The transport calls `tick(localBits)` per frame and ships the result, and
+# `feed_remote(frame, bits)` as peer inputs arrive. Needs identical build, ROM
+# and save on both sides.
 
 import ../common/input
 import link
@@ -126,10 +125,9 @@ proc tick*(sess: GbRollbackSession; localBits: uint16): GbRbStatus =
   sess.localIn[sess.head] = localBits
   sess.sim(sess.head)
   inc sess.head
-  # Remote inputs that arrived before head reached them extend the confirmed
-  # frontier now (they were simulated as known, so nothing re-runs); left to
-  # the next arrival, a peer that goes quiet would leave this side stalled at
-  # the window with the inputs it needs already in hand.
+  # Extend the frontier over remote inputs that arrived early (nothing
+  # re-runs); waiting for the next arrival would stall this side at the window
+  # if the peer goes quiet.
   sess.reconcile()
   grbAdvanced
 

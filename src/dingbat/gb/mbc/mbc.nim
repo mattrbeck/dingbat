@@ -7,22 +7,18 @@ type
     rumble*: bool  # transient motor state; deliberately not serialized
 
 proc header_logo_ok(rom: seq[uint8]; base: int): bool =
-  ## Does a cartridge header whose $0100 entry point sits at `base` carry the
-  ## boot logo (Pan Docs, "The Cartridge Header", $0104-$0133)? The reference
-  ## is the cart's own header at $0104, which the boot ROM has already
-  ## checked, so no copy of the bitmap is kept here. Weaker than a checksum
-  ## on purpose: the older build of mooneye's multicart_rom_8Mb puts only
-  ## the logo in its extra quarters.
+  ## Does the header with its $0100 entry at `base` carry the boot logo
+  ## ($0104-$0133), compared against the cart's own header? Weaker than a
+  ## checksum on purpose: an older mooneye multicart_rom_8Mb has only the logo
+  ## in its extra quarters.
   if base < 0 or base + 0x34 > rom.len: return false
   for i in 0x04 ..< 0x34:
     if rom[base + i] != rom[0x100 + i]: return false
   true
 
 proc is_mbc1_multicart(rom: seq[uint8]): bool =
-  ## MBC1M multicarts (Pan Docs, "MBC1M"): 8 Mbit carts wiring only 4 bits of
-  ## BANK1, with BANK2 on ROM address lines 18-19. There is no header flag;
-  ## each 256 KiB quarter holds a complete game with its own header, so count
-  ## logos at the quarter boundaries (>= 3 of 4).
+  ## MBC1M (Pan Docs): 8 Mbit, 4 bits of BANK1, BANK2 on address lines 18-19.
+  ## No header flag, so count logos at the 256 KiB quarters (>= 3 of 4).
   if rom.len != 0x100000: return false
   var headers = 0
   for page in 0 ..< 4:
@@ -35,37 +31,22 @@ method mbc_write*(cart: Mbc; idx: int; val: uint8) {.base.} = discard
 # ---------------------------------------------------------------------------
 # Flat-ROM window cache
 #
-# `mbc_read` is a method, so every instruction fetch paid a dynamic dispatch, a
-# chckNilDisp and the post-call error-flag test. For every mapper here except
-# MBC6 the CPU's 0x0000-0x7FFF window is nothing but two flat 16 KiB views into
-# `rom`: address A below 0x4000 reads rom[lo + A], and A at or above it reads
-# rom[hi + A - 0x4000]. mbc_rom_map returns those two offsets so read_byte can
-# index straight into the buffer; a mapper that cannot be described that way
-# returns (-1, -1) and keeps the method call.
+# `mbc_read` is a method (dynamic dispatch on every fetch). Most mappers' ROM
+# window is two flat 16 KiB views: A < 0x4000 reads rom[lo + A], else
+# rom[hi + A - 0x4000]. mbc_rom_map returns (lo, hi) so read_byte can index
+# directly; (-1, -1) keeps the method call.
 #
-# The bases are a pure function of the banking registers, and the registers only
-# move on a write into 0x0000-0x7FFF. The complete set of points that can change
-# the map, and where each is resynced:
-#
-#   1. Any cartridge write below 0x8000 -- every banking register on every
-#      mapper here is written through this window. gb/memory.nim write_byte,
-#      immediately after mbc_write.
-#   2. Cartridge construction, including MBC1's multicart detection and MMM01's
-#      rom_rotate, both of which are decided from the ROM image at load time.
-#      load_cartridge.
-#   3. Save-state / rollback-snapshot load, which writes the banking registers
-#      back directly rather than through mbc_write. gb/savestate.nim
+# The map changes only at these resync points:
+#   1. A cartridge write below 0x8000: gb/memory.nim write_byte, after mbc_write.
+#   2. Cartridge construction (MBC1 multicart, MMM01 rom_rotate): load_cartridge.
+#   3. State / rollback load, which bypasses mbc_write: gb/savestate.nim
 #      load_mbc_state.
 #
-# Two mappers deliberately opt out by not overriding the base method:
-#   * MBC6 splits 0x4000-0x7FFF into two independent 8 KiB windows that can each
-#     be ROM or flash, so there is no single `hi`.
-#   * TAMA5 selects its ROM bank from registers written through 0xA000-0xBFFF,
-#     which is NOT one of the resync points above; giving it a map would need a
-#     sync on every cart-RAM write, which costs more than the one cartridge it
-#     would speed up is worth.
-# Build with -d:mbc_map_check to have every ROM read cross-checked against the
-# method at runtime (tools/gbfuzz sweep, see notes).
+# Opted out: MBC6 (two independent 8 KiB ROM/flash windows, no single `hi`)
+# and TAMA5 (banks via 0xA000-0xBFFF writes, not a resync point; syncing on
+# every cart-RAM write costs more than it saves).
+# -d:mbc_map_check (off by default) cross-checks every ROM read against the
+# method.
 # ---------------------------------------------------------------------------
 
 method mbc_rom_map*(cart: Mbc): (int, int) {.base.} = (-1, -1)
@@ -73,8 +54,7 @@ method mbc_rom_map*(cart: Mbc): (int, int) {.base.} = (-1, -1)
   ## when this mapper's ROM window is not two flat views.
 
 proc mbc_sync_rom_map*(cart: Mbc) =
-  ## Recompute the cache. Cheap (one virtual call) and only on the three
-  ## events enumerated above, never on a read.
+  ## Recompute the cache at the three resync points above, never on a read.
   let (lo, hi) = mbc_rom_map(cart)
   cart.rom_lo_base = lo
   cart.rom_hi_base = hi
@@ -87,8 +67,7 @@ when defined(mbc_map_check):
     quit(3)
 
 proc mbc_read_rom_lo*(cart: Mbc; idx: int): uint8 {.inline.} =
-  ## 0x0000-0x3FFF. Identical index (and therefore identical bounds check) to
-  ## the `cart.rom[...]` the method would have run.
+  ## 0x0000-0x3FFF. Same index (and bounds check) as the method.
   when defined(mbc_map_check):
     let want = mbc_read(cart, idx)
     if cart.flat_rom:
@@ -115,27 +94,19 @@ method mbc_rumble*(cart: Mbc): bool {.base.} = false
 
 proc load_cartridge*(rom_path: string): Mbc =
   let raw = readFile(rom_path)
-  # Every cartridge's ROM is a power of two and at least 32 KiB (Pan Docs,
-  # "$0148 - ROM size": 32 KiB shifted left by the value), and the CPU reads
-  # the whole $0000-$7FFF window and any bank a mapper selects. A file that is
-  # shorter (homebrew, a truncated dump) or not a whole number of banks is
-  # padded to that shape with $FF, what the bus reads where no chip answers:
-  # its code runs, and a jump past its end meets RST $38, not an IndexDefect.
+  # ROMs are a power of two >= 32 KiB (Pan Docs $0148). Short or odd-sized
+  # files are padded with $FF (open bus): a jump past the end meets RST $38,
+  # not an IndexDefect.
   var size = 0x8000
   while size < raw.len: size = size shl 1
   var rom = newSeq[uint8](size)
   for i in 0 ..< raw.len: rom[i] = uint8(raw[i])
   for i in raw.len ..< size: rom[i] = 0xFF
 
-  # MMM01 compilations put their real header in the last 32 KiB, where the menu
-  # program lives: Pan Docs, "the correct ROM header (with Nintendo logo)
-  # therefore needs to be located at offset (size - 32 KiB) + $100 in the ROM
-  # rather than the usual $0000 + $100 (which contains the header of the first
-  # game in the collection instead)". Dumps of the released cartridges disagree
-  # about which end they store the menu at, so both orders have to be
-  # recognised, and hdr_base then points at whichever header is the cartridge's
-  # rather than a contained game's. rom_rotate is how far mbc/mmm01.nim has to
-  # turn the file to get the menu back to the top.
+  # MMM01: the real header sits with the menu in the last 32 KiB (Pan Docs).
+  # Dumps disagree on which end holds the menu, so both orders are recognised;
+  # hdr_base points at the cartridge's header, and rom_rotate is how far
+  # mbc/mmm01.nim turns the file to put the menu at the top.
   var cart_type   = rom[0x0147]
   var hdr_base    = 0
   var mmm01_rotate = 0
@@ -162,8 +133,7 @@ proc load_cartridge*(rom_path: string): Mbc =
     of 0x05: 0x2000 * 8
     else:    0
 
-  # changeFileExt, not "up to the last dot": an extensionless path (the
-  # command line takes any) would otherwise name `<parent>.sav` or `.sav`
+  # changeFileExt: "up to the last dot" mis-names extensionless paths.
   let sav_path = rom_path.changeFileExt(".sav")
 
   var cart: Mbc
@@ -205,10 +175,8 @@ proc load_cartridge*(rom_path: string): Mbc =
                        rom_bank_num: 1)
     cart = c
   of 0x20:
-    # The header's RAM-size code cannot express what MBC6 has: eight 4 KiB banks
-    # (Pan Docs, "RAM Bank A 00-07"), which is 32 KiB reached through two 4 KiB
-    # windows rather than the usual 8 KiB ones. The flash chip beside it powers
-    # up erased, and erased flash reads all-ones.
+    # MBC6 RAM: eight 4 KiB banks (Pan Docs), which the header cannot express.
+    # Flash powers up erased (all ones).
     let c = Mbc6(rom: rom, ram: newSeq[uint8](0x8000),
                  sav_path: sav_path, has_battery: has_battery,
                  flash: newSeq[uint8](0x100000),
@@ -217,10 +185,8 @@ proc load_cartridge*(rom_path: string): Mbc =
     for i in 0 ..< c.flash_hidden.len: c.flash_hidden[i] = 0xFF
     cart = c
   of 0x22:
-    # The header's RAM-size byte is 0 on MBC7 carts; the save is the 256-byte
-    # EEPROM. An erased EEPROM reads all-ones, and the games check for that to
-    # decide whether the cartridge holds a save, so power-on has to be 0xFF and
-    # not the zeroes newSeq would give.
+    # MBC7: header RAM size 0; the save is the 256-byte EEPROM. Erased reads
+    # all ones and the games test for it, so power-on must be 0xFF.
     let c = Mbc7(rom: rom, ram: newSeq[uint8](0x100),
                  sav_path: sav_path, has_battery: has_battery,
                  x_sample: 0x8000, y_sample: 0x8000, latch_armed: true,
@@ -233,24 +199,20 @@ proc load_cartridge*(rom_path: string): Mbc =
                          rom_bank_num: 1)  # "The initial mapped bank is 01"
     cart = c
   of 0xFD:
-    # endrift, in the one thread that documents this part: "RAM is 32 bytes".
-    # The header's RAM-size byte is 0. The clock is battery-backed too and runs
-    # with the Game Boy switched off, so it needs a starting point even when no
-    # .sav exists to load one from.
+    # "RAM is 32 bytes" (endrift's TAMA5 notes); header RAM size is 0. The
+    # battery-backed clock needs a start even with no .sav.
     let c = Tama5(rom: rom, ram: newSeq[uint8](0x20),
                   sav_path: sav_path, has_battery: has_battery)
     c.tama5_seed_clock()
     cart = c
   of 0xFE:
-    # HuC3's battery backs the clock as well as the RAM, so with no .sav the
-    # clock starts at zero, stamped with the host's current second.
+    # HuC3 clock: with no .sav it starts at zero, stamped with host time.
     let c = Huc3(rom: rom, ram: newSeq[uint8](ram_sz),
                  sav_path: sav_path, has_battery: has_battery,
                  rom_bank_num: 1, last_second: gb_rtc_now())
     cart = c
   of 0xFF:
-    # bank_low powers up at 1 like every other mapper's bank register, but
-    # unlike them a later write of 0 is honoured and maps bank 0 twice.
+    # bank_low powers up at 1; a later write of 0 maps bank 0 twice.
     let c = Huc1(rom: rom, ram: newSeq[uint8](ram_sz),
                  sav_path: sav_path, has_battery: has_battery,
                  bank_low: 1)
@@ -262,14 +224,11 @@ proc load_cartridge*(rom_path: string): Mbc =
     cart = c
 
   mbc_load(cart)
-  # Resync point 2 of 3: MBC1's multicart detection and MMM01's rom_rotate are
-  # both decided from the ROM image here, so the map is only well defined once
-  # the cartridge object exists.
+  # Resync point 2 of 3.
   mbc_sync_rom_map(cart)
-  # Identity from the file's bytes as loaded, once, without the padding, so a
-  # state saved before the padding existed still names this cart. See the GBA
-  # side: hashing the live buffer let a Game Genie code orphan the player's
-  # save states.
+  # Identity from the file's bytes without padding, so states saved before
+  # padding existed still match; hashed once, since hashing the live buffer
+  # lets a cheat code orphan save states.
   cart.rom_identity = fnv1a(cart.rom.toOpenArray(0, raw.len - 1))
   cart.rom_file_size = raw.len
   result = cart

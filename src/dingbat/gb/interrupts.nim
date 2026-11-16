@@ -9,11 +9,9 @@ const
   INT_NONE*   = 0x0000'u16
 
 when defined(gb_phase_trace):
-  # Diagnostic (compiled out of shipping builds): which T-cycle of its M-cycle
-  # an IF bit rose on. `gb_phase` is set by the PPU dot loop and the timer's
-  # per-cycle loop and read by the STATIRQ/VBLIRQ/TIMIRQ/LYREAD echoes;
-  # `gb_ticklen` is the tick length the phase counts within (4, or 2 for a
-  # split halted M-cycle). The instrument HALT_IF_SAMPLE_T was derived with.
+  # Diagnostic, off by default: which T-cycle of its M-cycle an IF bit rose
+  # on. `gb_phase` is set by the PPU dot loop and the timer loop; `gb_ticklen`
+  # is the tick length it counts within (4, or 2 for a split halted M-cycle).
   var gb_phase*: int32 = 0
   var gb_ticklen*: int32 = 0
 
@@ -50,9 +48,8 @@ proc clear_interrupt*(irq: GbInterrupts; line: uint16) =
 
 proc irq_clear_live*(irq: GbInterrupts; now: CycleCount): bool {.inline.} =
   ## Is a CGB dispatch still holding its timer or serial line clear
-  ## (IRQ_SAMPLE_CGB_TIMER_SERIAL_ADD, cpu.nim)? The window is a few T-cycles
-  ## long; the upper bound keeps a stale `clear_until` from matching after the
-  ## scheduler's per-frame rebase.
+  ## (IRQ_SAMPLE_CGB_TIMER_SERIAL_ADD, cpu.nim)? The upper bound keeps a stale
+  ## `clear_until` from matching after the scheduler's per-frame rebase.
   irq.clear_line != 0'u16 and now <= irq.clear_until and
     irq.clear_until - now < CycleCount(16)
 
@@ -78,22 +75,18 @@ when IF_READ_SAMPLE_T < 4:
 
 # What a CPU read of $FF0F sees. The dispatch decides at the M-cycle boundary
 # (IRQ_SAMPLE_T in cpu.nim) but a read latches its data part way through its
-# M-cycle: GBMicrotest vblank_int_if_a, hblank_int_if_a, lyc1_int_if_edge_a and
-# oam_int_if_edge_a all print one extra IF bit for an end-of-M-cycle read, and
-# gambatte m1/lycint_vblankirq_{1,2} separate a late read from an early source
-# (GBMicrotest int_vblank1_nops, which times the dispatch, is exact). Not a
-# whole M-cycle: gambatte ly0/lycint152_lyc0irq_{1,2} wait for the snapback's
-# LYC = 0 match on the second dot of its M-cycle and hardware sees it.
-# IF_READ_SAMPLE_T (gb.nim) is the T-count; it is only scorable together with
-# STAT_M0_LEAD_T, the two being compensating errors. The split M-cycle must
-# keep fifo_tick's read_mode latch (mem_tick_if_read); -d:gb_if_split_control
-# keeps the split and returns the live byte as the control. -1 (the latch
-# ahead of the bus half too) loses gambatte tima/* because the timer runs its
-# four T-cycles as one step at the head of the M-cycle.
+# M-cycle (GBMicrotest `*_int_if_*`; an end-of-M-cycle read sees one bit too
+# many). Not a whole M-cycle early: gambatte ly0/lycint152_lyc0irq_* see the
+# LYC = 0 match on the second dot of its M-cycle. IF_READ_SAMPLE_T (gb.nim) is
+# the T-count; it is only scorable together with STAT_M0_LEAD_T (compensating
+# errors). The split M-cycle must keep fifo_tick's read_mode latch
+# (mem_tick_if_read). -d:gb_if_split_control (off by default) keeps the split
+# but returns the live byte. -1 fails gambatte tima/*: the timer runs its four
+# T-cycles as one step at the head of the M-cycle.
 proc irq_read*(irq: GbInterrupts; idx: int): uint8 =
   case idx
   of 0xFF0F:
-    # gb_if_split_control: the split tick with the live byte (control build).
+    # gb_if_split_control: control build, live byte.
     when IF_READ_SAMPLE_T < 4 and not defined(gb_if_split_control):
       irq.if_prev
     else:
@@ -108,8 +101,8 @@ proc irq_read*(irq: GbInterrupts; idx: int): uint8 =
   else: 0xFF'u8
 
 proc interrupt_ready*(irq: GbInterrupts): bool {.inline.} =
-  ## Run after every instruction and on every HALT; the five pairs directly
-  ## rather than building the IF/IE bytes to mask them.
+  ## Run after every instruction and on every HALT, so it tests the pairs
+  ## directly rather than building the IF/IE bytes.
   (irq.vblank_interrupt   and irq.vblank_enabled)   or
   (irq.lcd_stat_interrupt and irq.lcd_stat_enabled) or
   (irq.timer_interrupt    and irq.timer_enabled)    or

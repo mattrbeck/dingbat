@@ -1,46 +1,28 @@
 # MBC7 cartridge (included by gb.nim)
 #
-# Cart type $22: Kirby Tilt 'n' Tumble, Command Master. Written from two
-# documents and nothing else:
-#   * Pan Docs, "MBC7": the register map, the two RAM-enable gates, the
-#     accelerometer latch protocol and the EEPROM pin register at Ax8x.
-#   * Microchip DS21794F (93AA56/93LC56/93C56, "2K Microwire Compatible
-#     Serial EEPROM"): Table 1-3 (instruction set, x16 organisation), 2.1
-#     (Start condition), 2.4-2.9 (Erase/ERAL/EWDS/EWEN/Read/Write/WRAL),
-#     3.1-3.4 (pin behaviour, Ready/Busy status).
+# Cart type $22: Kirby Tilt 'n' Tumble, Command Master. Sources: Pan Docs
+# "MBC7", and Microchip DS21794F (93LC56 Microwire EEPROM; section numbers
+# below refer to it).
 #
-# There is no cartridge RAM. $A000-$AFFF is a register file (Pan Docs:
-# "Registers are addressed through bits 4-7 of the address. Bits 0-3 and 8-11
-# are ignored") in front of a two-axis accelerometer and the four serial pins
-# of the EEPROM. The EEPROM is what the battery backs: 128 x 16-bit words
-# (Pan Docs: "data is addressed 16 bits at a time, so address 1 corresponds to
-# bits 16-31, thus bytes 2-3"), and `ram` holds it as 256 bytes with each word
-# little-endian, i.e. word N is ram[2N] (low byte) and ram[2N+1]. That byte
-# order is the .sav interchange layout the existing saves already use and is
-# kept as-is.
+# No cartridge RAM: $A000-$AFFF is a register file (address bits 4-7 select)
+# in front of a two-axis accelerometer and the EEPROM's four pins. The
+# battery-backed EEPROM is 128 x 16-bit words; `ram` holds them as 256 bytes,
+# word N little-endian at ram[2N]. That is the .sav layout; keep it.
 #
-# The Mbc7 fields are declared in gb.nim (the save-state code reads them);
-# what this file means by each of the EEPROM ones:
-#   pin_cs/clk/di    the pin levels last written, so edges can be seen.
-#   pin_do           the output latch driven while a READ streams data.
-#   instr_shift      the instruction shift register. 0 = no Start bit seen.
-#                       The Start bit enters as bit 0 and is pushed up one
-#                       place per opcode/address bit clocked in beneath it;
-#                       when it reaches bit 10 (EE_CMD_DONE) the 10-bit
-#                       instruction is complete: bits 9-8 opcode, 7-0 address.
-#   data_reg           the chip's 16-bit data register (datasheet block
-#                       diagram): data shifts in here for WRITE/WRAL and out of
-#                       it, MSB first, for READ.
-#   bits_to_shift  bits still to shift for the instruction in progress;
-#                       with no instruction (instr_shift == 0) a nonzero
-#                       value is the Ready/Busy countdown of a self-timed
-#                       programming cycle.
-#   write_enabled  the EWEN/EWDS state (datasheet 2.6).
+# Mbc7 EEPROM fields (declared in gb.nim):
+#   pin_cs/clk/di  pin levels last written, for edge detection.
+#   pin_do         output latch while a READ streams data.
+#   instr_shift    0 = no Start bit seen. The Start bit enters as bit 0 and
+#                  moves up per bit clocked in; at bit 10 (MBC7_EE_CMD_DONE)
+#                  the instruction is complete: bits 9-8 opcode, 7-0 address.
+#   data_reg       the chip's 16-bit data register, MSB first.
+#   bits_to_shift  bits left for the instruction; with instr_shift == 0, a
+#                  nonzero value is the Ready/Busy countdown.
+#   write_enabled  EWEN/EWDS state (2.6).
 
 const
-  # Pan Docs: "Data is 16-bit and centered at the value 81D0. Earth's gravity
-  # affects the value by roughly $70". Before the first latch, and after the
-  # $55 erase, both axes read $8000.
+  # Pan Docs: centred at $81D0, gravity moves it by roughly $70. Unlatched
+  # (before the first latch, after the $55 erase) both axes read $8000.
   MBC7_ACCEL_CENTRE    = 0x81D0
   MBC7_ACCEL_PER_G     = 0x70
   MBC7_ACCEL_UNLATCHED = 0x8000'u16
@@ -65,11 +47,9 @@ const
   EE_EXT_ERAL = 2
   EE_EXT_EWEN = 3
 
-  # A self-timed erase/write cycle takes up to 6 ms (datasheet A12-A15) and
-  # software polls DO for Ready. There is no cycle counter among the Mbc7
-  # fields, so the cycle is measured in polls instead: this many reads of
-  # (or clocks on) the port with CS high report Busy before Ready. Assumed;
-  # any value >= 1 satisfies a polling loop and the games only ever poll.
+  # The self-timed program cycle (up to 6 ms) is counted in polls, not time:
+  # this many reads of (or clocks on) the port with CS high report Busy.
+  # Assumed; any value >= 1 satisfies the games' polling loops.
   MBC7_EE_BUSY_POLLS = 4
 
 # --------------------------------------------------------------------------
@@ -104,13 +84,12 @@ proc ee_begin_instruction(cart: Mbc7) =
   ## The tenth bit after the Start bit has just been clocked in.
   case cart.ee_opcode()
   of EE_OP_READ:
-    # Datasheet 2.7: "A dummy zero bit precedes the ... 16-bit output string".
-    # The dummy appears on this edge; the word follows, MSB first.
+    # 2.7: a dummy zero bit (this edge) precedes the word, MSB first.
     cart.data_reg = cart.ee_load(cart.ee_address())
     cart.bits_to_shift = 16
     cart.pin_do = false
   of EE_OP_WRITE:
-    # Table 1-3: WRITE is "followed by 16 bits of data" (2.8).
+    # 16 data bits follow (2.8).
     cart.data_reg = 0
     cart.bits_to_shift = 16
   of EE_OP_ERASE:
@@ -127,17 +106,13 @@ proc ee_begin_instruction(cart: Mbc7) =
       cart.bits_to_shift = 0
 
 proc ee_clock(cart: Mbc7; di: bool) =
-  ## One rising CLK edge with CS high. Datasheet 2.0: "Instructions, addresses
-  ## and write data are clocked into the DI pin on the rising edge of the
-  ## clock (CLK)"; 3.2: "Data bits are also clocked out on the positive edge".
+  ## One rising CLK edge with CS high: bits clock in and out on it (2.0, 3.2).
   if cart.instr_shift == 0:
     if cart.bits_to_shift > 0:
-      # Busy. 3.2: "CLK cycles are not required during the self-timed write
-      # cycle", but a poll that clocks is time passing (see MBC7_EE_BUSY_POLLS).
+      # Busy: a clocking poll counts down (MBC7_EE_BUSY_POLLS).
       dec cart.bits_to_shift
     elif di:
-      # 2.1: "The Start bit is detected by the device if CS and DI are both
-      # high with respect to the positive edge of the clock for the first time."
+      # 2.1: Start bit = first rising edge with CS and DI both high.
       cart.instr_shift = 1
     return
   if not cart.ee_instruction_complete():
@@ -150,17 +125,15 @@ proc ee_clock(cart: Mbc7; di: bool) =
     cart.data_reg = cart.data_reg shl 1
     dec cart.bits_to_shift
     if cart.bits_to_shift == 0:
-      # 2.7: "Sequential read is possible when CS is held high. The memory
-      # data will automatically cycle to the next register and output
-      # sequentially" -- no second dummy bit (Figure 2-7).
+      # 2.7: with CS held high the read continues at the next word, with no
+      # second dummy bit (Figure 2-7).
       let next = (cart.ee_address() + 1) and (MBC7_EE_WORDS - 1)
       cart.instr_shift = (cart.instr_shift and not 0x7F'u16) or uint16(next)
       cart.data_reg = cart.ee_load(next)
       cart.bits_to_shift = 16
   of EE_OP_WRITE, EE_OP_EXT:
-    # WRITE and WRAL take 16 data bits; the other 00-opcode instructions have
-    # bits_to_shift == 0 and ignore further clocks (3.2: "CLK and DI then
-    # become 'don't care' inputs waiting for a new Start condition").
+    # WRITE/WRAL take 16 data bits; the other 00-opcode instructions have
+    # bits_to_shift == 0 and ignore clocks until a new Start (3.2).
     if cart.bits_to_shift > 0:
       cart.data_reg = (cart.data_reg shl 1) or uint16(di)
       dec cart.bits_to_shift
@@ -168,12 +141,9 @@ proc ee_clock(cart: Mbc7; di: bool) =
     discard
 
 proc ee_deselect(cart: Mbc7) =
-  ## CS has fallen. 3.1: "If CS is low, the internal control logic is held in
-  ## a Reset status." For 93LC devices the falling edge of CS after the last
-  ## address/data bit is what "initiates the self-timed auto-erase and
-  ## programming cycle" (2.4, 2.5, 2.8, 2.9), so this is where the array
-  ## changes. 2.6: every programming mode "must be preceded by an EWEN
-  ## instruction"; without it the instruction is dropped here unexecuted.
+  ## CS has fallen: the chip resets (3.1), and a completed program instruction
+  ## starts its self-timed cycle here (2.4, 2.5, 2.8, 2.9), so this is where
+  ## the array changes. Without a prior EWEN (2.6) it is dropped.
   var programmed = false
   if cart.ee_instruction_complete() and cart.write_enabled and
      cart.bits_to_shift == 0:
@@ -197,19 +167,14 @@ proc ee_deselect(cart: Mbc7) =
       else: discard
     else: discard
   cart.instr_shift = 0
-  # 3.4: the status "is available on the DO pin if CS is brought high after
-  # being low for tCSL and an erase or write operation has been initiated".
+  # 3.4: Ready/Busy shows on DO once CS rises again after a program start.
   cart.bits_to_shift = if programmed: MBC7_EE_BUSY_POLLS else: 0
   if programmed: cart.ram_dirty = true
   cart.pin_do = true
 
 proc ee_do_level(cart: Mbc7): bool =
-  ## What DO shows right now. 2.0: "The DO pin is normally held in a High-Z
-  ## state except when reading data from the device, or when checking the
-  ## Ready/Busy status"; "DO will enter the High-Z state on the falling edge
-  ## of CS". High-Z reads as 1 on this cartridge: Assumed (a pull-up), which
-  ## also makes an idle port read the same $FF-ish shape as the empty
-  ## registers around it.
+  ## DO is High-Z except during a READ or a Ready/Busy check, and with CS low
+  ## (2.0). High-Z reads 1: Assumed (pull-up).
   if not cart.pin_cs: true
   elif cart.ee_busy(): false           # 3.4: "DO low indicates ... in progress"
   elif cart.ee_instruction_complete() and cart.ee_opcode() == EE_OP_READ:
@@ -217,9 +182,8 @@ proc ee_do_level(cart: Mbc7): bool =
   else: true
 
 proc ee_port_read(cart: Mbc7): uint8 =
-  ## Ax8x read: bit 0 is DO; DI/CLK/CS read back the levels last written.
-  ## Assumed for the latter (the register is a latch and Pan Docs lists the
-  ## four pin bits without saying which are readable); the unused bits read 0.
+  ## Ax8x read: bit 0 is DO; DI/CLK/CS read back the levels last written
+  ## (Assumed: Pan Docs does not say which bits are readable); unused bits 0.
   result = if cart.ee_do_level(): MBC7_EE_DO else: 0'u8
   if cart.pin_di:  result = result or MBC7_EE_DI
   if cart.pin_clk: result = result or MBC7_EE_CLK
@@ -228,10 +192,8 @@ proc ee_port_read(cart: Mbc7): uint8 =
   if cart.pin_cs and cart.ee_busy(): dec cart.bits_to_shift
 
 proc ee_port_write(cart: Mbc7; val: uint8) =
-  ## Ax8x write: bit 7 CS, bit 6 CLK, bit 1 DI. Bit 0 is the chip's output and
-  ## a write to it goes nowhere. Only edges matter: CS falling resets the chip
-  ## (3.1) and starts a pending programming cycle; CLK rising with CS high
-  ## moves one bit.
+  ## Ax8x write: bit 7 CS, bit 6 CLK, bit 1 DI (bit 0 is output-only). Only
+  ## edges matter: CS falling ends the instruction, CLK rising moves a bit.
   let cs  = (val and MBC7_EE_CS) != 0
   let clk = (val and MBC7_EE_CLK) != 0
   let di  = (val and MBC7_EE_DI) != 0
@@ -248,20 +210,16 @@ proc ee_port_write(cart: Mbc7; val: uint8) =
 # --------------------------------------------------------------------------
 
 proc accel_sample(g: float): uint16 =
-  ## Pan Docs: centre $81D0, about $70 per g. `g` is the frontend's tilt on
-  ## this axis (set_accelerometer), already signed so that a positive input
-  ## raises the reading; the frontends calibrate their own sign to that.
-  ## Clamped to the 16-bit register: "Maximum range is unknown" (Assumed).
+  ## `g` is the frontend's tilt on this axis; positive raises the reading.
+  ## Clamped to 16 bits (Pan Docs: "Maximum range is unknown").
   var v = float(MBC7_ACCEL_CENTRE) + g * float(MBC7_ACCEL_PER_G)
   if v < 0.0: v = 0.0
   if v > 65535.0: v = 65535.0
   uint16(int(v + 0.5))
 
 proc set_accelerometer*(cart: Mbc; x, y: float) =
-  ## Frontend tilt, -1.0 .. 1.0 per axis, 0 = level; ~1 = one g. Only MBC7
-  ## has a sensor; a no-op on every other mapper so callers need not check.
-  ## A flat cartridge at rest has gravity on neither axis, so (0, 0) samples
-  ## as the $81D0 centre on both (Assumed: no sensor noise).
+  ## Frontend tilt, -1.0 .. 1.0 per axis, 0 = level, ~1 = one g. A no-op on
+  ## mappers other than MBC7. (0, 0) samples as the centre (Assumed: no noise).
   if cart of Mbc7:
     let c = Mbc7(cart)
     c.accel_x = x
@@ -287,9 +245,8 @@ proc mbc7_reg_write(cart: Mbc7; reg: int; val: uint8) =
       cart.y_sample = MBC7_ACCEL_UNLATCHED
       cart.latch_armed = true
   of 0x1:
-    # "... then $AA to Ax1x to latch the accelerometer and update the
-    # addressable registers. Note that you cannot re-latch the accelerometer
-    # value without first erasing it; attempts to do so yield no change."
+    # "$AA to Ax1x to latch"; re-latching without an erase first does
+    # nothing (Pan Docs).
     if val == 0xAA and cart.latch_armed:
       cart.x_sample = accel_sample(cart.accel_x)
       cart.y_sample = accel_sample(cart.accel_y)
@@ -307,8 +264,7 @@ proc mbc7_registers_enabled(cart: Mbc7): bool {.inline.} =
   cart.ram_enabled and cart.ram_enable2
 
 method mbc_rom_map*(cart: Mbc7): (int, int) =
-  ## Two flat views: bank 0 low, the selected bank high. Nothing written
-  ## through $A000-$BFFF moves the ROM window.
+  ## Bank 0 low, the selected bank high.
   (0, mbc_rom_bank_offset(cart, int(cart.rom_bank_num)))
 
 method mbc_read*(cart: Mbc7; idx: int): uint8 =
@@ -324,19 +280,16 @@ method mbc_read*(cart: Mbc7; idx: int): uint8 =
 method mbc_write*(cart: Mbc7; idx: int; val: uint8) =
   case idx
   of 0x0000..0x1FFF:
-    # "RAM Enable 1 ... Mostly the same as for MBC1, a value of $0A will
-    # enable"; MBC1 decides on the low nibble alone. Dropping the gate is the
-    # moment a game has finished with the EEPROM, so flush the save there.
+    # RAM Enable 1: $0A in the low nibble, as MBC1. Dropping the gate means
+    # the game is done with the EEPROM, so flush the save there.
     let enabling = (val and 0x0F) == 0x0A
     if cart.ram_enabled and not enabling: mbc_save(cart)
     cart.ram_enabled = enabling
   of 0x2000..0x3FFF:
-    # "ROM Bank 00-7F ... Same as for MBC5": seven bank bits, and bank 0 is
-    # bank 0 (Pan Docs marks the latter as needing confirmation).
+    # Seven bank bits, as MBC5; bank 0 is bank 0 (unconfirmed in Pan Docs).
     cart.rom_bank_num = val and 0x7F
   of 0x4000..0x5FFF:
-    # "RAM Enable 2 ... Writing $40 to this region enables access to the RAM
-    # registers. Writing any other value appears to disable access".
+    # RAM Enable 2: $40 enables, anything else disables (Pan Docs).
     cart.ram_enable2 = val == 0x40
   of 0xA000..0xAFFF:
     if cart.mbc7_registers_enabled(): cart.mbc7_reg_write((idx shr 4) and 0xF, val)

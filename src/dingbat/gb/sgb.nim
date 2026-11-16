@@ -3,12 +3,10 @@
 # SGB functions (Pan Docs, "Unlocking and Detecting SGB Functions") and the
 # machine is not in CGB mode.
 #
-# Pan Docs, "SGB Functions". Modelled: the P1 pulse receiver, PAL01/23/03/12,
-# PAL_SET, PAL_TRN, ATTR_BLK/LIN/DIV/CHR, ATTR_TRN, ATTR_SET, MASK_EN, CHR_TRN,
-# PCT_TRN, MLT_REQ's player count. SNES-side commands (SOUND/SOU_TRN, OBJ_TRN,
+# Pan Docs, "SGB Functions". SNES-side commands (SOUND/SOU_TRN, OBJ_TRN,
 # DATA_SND/DATA_TRN/JUMP, ATRC_EN/TEST_EN/ICON_EN/PAL_PRI) are accepted and
-# dropped; none feeds anything back to the Game Boy. The SGB's 2.4% faster
-# master clock is not modelled (docs/sgb.md).
+# dropped; none feeds back to the Game Boy. The SGB's 2.4% faster master
+# clock is not modelled (docs/sgb.md).
 
 const SGB_ATTR_W* = 20
 const SGB_ATTR_H* = 18
@@ -25,9 +23,8 @@ proc sgb_unlocked*(rom: seq[uint8]): bool =
   rom.len > 0x14C and rom[0x0146] == 0x03'u8 and rom[0x014B] == 0x33'u8
 
 proc new_sgb_state*(): SgbState =
-  # prev_lines starts at 3, both select lines idle high (the boot handoff
-  # leaves neither group selected); starting at 0 would swallow the first
-  # reset pulse a game sends.
+  # prev_lines = 3: both select lines idle high after boot. 0 would swallow
+  # the game's first reset pulse.
   result = SgbState(players: 1, prev_lines: 3)
   # Power-on palettes: the DMG ramp until a game sends PAL*.
   for p in 0 ..< 4:
@@ -169,8 +166,7 @@ proc sgb_cmd_attr_chr(s: SgbState; d: openArray[uint8]) =
 
 proc sgb_render_border*(s: SgbState) =
   ## Decode the 32x28 SNES tilemap + 4bpp tiles into a 256x224 BGR555 image.
-  ## Colour index 0 is transparent (SGB_OPAQUE clear), which is how the Game
-  ## Boy window shows through the middle of the frame.
+  ## Colour index 0 is transparent (SGB_OPAQUE clear).
   for i in 0 ..< s.border.len: s.border[i] = 0
   var opaque = false
   for ty in 0 ..< 28:
@@ -178,8 +174,7 @@ proc sgb_render_border*(s: SgbState) =
       let e = s.map[ty * 32 + tx]
       let tile = int(e and 0xFF)
       let pal = int((e shr 10) and 7)
-      # Only palettes 4-6 exist for the border; anything else is a malformed
-      # map entry, and the SGB's own palette 0-3 would be the GB screen's.
+      # Only palettes 4-6 exist for the border; 0-3 are the GB screen's.
       let pbase = (if pal >= 4 and pal <= 6: (pal - 4) else: 0) * 16
       let xflip = (e and 0x4000) != 0
       let yflip = (e and 0x8000) != 0
@@ -201,24 +196,20 @@ proc sgb_render_border*(s: SgbState) =
           if ci != 0:
             s.border[dst + col] = (s.border_pal[pbase + ci] and 0x7FFF) or SGB_OPAQUE
             opaque = true
-  # "Valid" means something to show: between CHR_TRN and PCT_TRN the tilemap
-  # is all zeroes and decodes fully transparent, and a 256x224 window with an
-  # empty margin for those frames is worse than none.
+  # "Valid" = something to show: between CHR_TRN and PCT_TRN the tilemap is
+  # all zeroes, and an empty margin is worse than none.
   s.border_valid = opaque
   inc s.border_gen
 
 # ==================== VRAM transfers ====================
 
 proc sgb_read_transfer(gb: GB; dst: var array[4096, uint8]) =
-  ## Reconstruct the 4 KiB a real SGB reads out of the Game Boy's video
-  ## signal. Pan Docs, "VRAM Transfers", says the data is "normally" at
-  ## 0x8000-0x8FFF, but what the SNES gets is the picture: a cart with LCDC.4
-  ## clear (signed tile addressing) meets every listed precondition and
-  ## displays different memory. Pokemon Blue runs all three transfers with
-  ## LCDC = 0xE3, where a flat 0x8000 read returns mostly zeroes. So walk the
-  ## display as the PPU would: for each character $00-$FF read its BG map cell
-  ## (SCX/SCY, LCDC.3) and fetch the tile through LCDC.4's addressing.
-  ## Objects are ignored (Pan Docs requires they not overlap the background).
+  ## Reconstruct the 4 KiB a real SGB reads from the video signal. Pan Docs
+  ## says "normally" 0x8000-0x8FFF, but the SNES gets the picture: Pokemon
+  ## Blue transfers with LCDC = 0xE3 (signed tile addressing), where a flat
+  ## 0x8000 read is mostly zeroes. So for each character $00-$FF read its BG
+  ## map cell (SCX/SCY, LCDC.3) and fetch the tile through LCDC.4. Objects
+  ## are ignored (Pan Docs requires they not overlap).
   let ppu = gb.ppu
   let map_base = if (ppu.lcd_control and 0x08'u8) != 0: 0x1C00 else: 0x1800
   let signed_tiles = (ppu.lcd_control and 0x10'u8) == 0
@@ -235,10 +226,9 @@ proc sgb_read_transfer(gb: GB; dst: var array[4096, uint8]) =
       dst[n * 16 + k] = ppu.vram[0][(tile_addr + k) and 0x1FFF]
 
 proc sgb_vram_transfer(gb: GB; cmd, arg: uint8) =
-  ## Hardware reads over the five frames after the packet; dingbat reads when
-  ## the packet completes. Pan Docs requires the data on screen before the
-  ## packet is sent, so the picture is the same (Pokemon Blue's is byte-stable
-  ## across those frames), and an immediate read is safer for two CHR_TRNs
+  ## Hardware reads over the five frames after the packet; this reads at
+  ## once. Pan Docs requires the data on screen before the packet, so the
+  ## picture is the same, and reading at once is safer for two CHR_TRNs
   ## around one VRAM rewrite.
   let s = gb.sgb
   var buf: array[4096, uint8]
@@ -273,7 +263,7 @@ proc sgb_vram_transfer(gb: GB; cmd, arg: uint8) =
 # ==================== command dispatch ====================
 
 when defined(sgb_trace):
-  # Packet log (tools only).
+  # Packet log (-d:sgb_trace, off by default).
   const SGB_CMD_NAMES = [
     "PAL01", "PAL23", "PAL03", "PAL12", "ATTR_BLK", "ATTR_LIN", "ATTR_DIV",
     "ATTR_CHR", "SOUND", "SOU_TRN", "PAL_SET", "PAL_TRN", "ATRC_EN", "TEST_EN",
@@ -306,18 +296,15 @@ proc sgb_execute(gb: GB; d: openArray[uint8]) =
   of 0x0A: s.sgb_cmd_pal_set(d)
   of 0x0B, 0x13, 0x14, 0x15: sgb_vram_transfer(gb, cmd, d[1])
   of 0x11:                          # MLT_REQ
-    # The joypad-ID counter free-runs on P15 edges (sgb_p1_write) and is NOT
-    # reset by MLT_REQ: the packet's own pulses land first and the command only
-    # ANDs the counter down (SameSuite sgb/command_mlt_req). `players` is the
-    # modulus, mask players-1: requests 0/1/3 give 1/2/4 players. Request 2 is
-    # not a real mode (Pan Docs lists three): the counter wraps on mask 2 and
-    # sticks at 0 or 2, which command_mlt_req's last groups pin.
+    # The joypad-ID counter free-runs on P15 edges (sgb_p1_write); MLT_REQ
+    # does NOT reset it, only ANDs it down (SameSuite sgb/command_mlt_req).
+    # Mask = players-1: requests 0/1/3 give 1/2/4 players. Request 2 (not a
+    # Pan Docs mode) wraps on mask 2, sticking at 0 or 2.
     let req = d[1] and 3
     s.players = req + 1
     if req == 2:
-      # Request 2 also advances the counter once as it lands: hardware answers
-      # ((n+1) and 2) for counters 0..3 (command_mlt_req rows 16-19) where
-      # request 1 answers (n and 1) with no advance.
+      # Request 2 also advances the counter once: ((n+1) and 2), where
+      # request 1 gives (n and 1) (command_mlt_req).
       s.cur_player = (s.cur_player + 1) and req
     else:
       s.cur_player = s.cur_player and req
@@ -335,29 +322,23 @@ proc sgb_p1_write*(gb: GB; val: uint8) =
   ## bytes then a stop bit. Self-clocking, so no timing model.
   ##
   ## The bit is taken on the RELEASE back to both-high, from whichever line is
-  ## low then, and only if that line went low FROM both-high (`pending`):
-  ## cpp/sgb-ext-test's SendPacket20To10/10To20 read the line still low at
-  ## release, SendPacketShortStart (no $30 after the reset) loses its first
-  ## bit, and SendPacketAvoid30 (never both-high) receives nothing.
+  ## low then, and only if that line went low FROM both-high (`pending`).
+  ## Pinned by cpp/sgb-ext-test SendPacket*.
   let s = gb.sgb
   let cur = (val shr 4) and 3       # bit0 = P14 level, bit1 = P15 level
   let prev = s.prev_lines
   s.prev_lines = cur
   if cur == prev: return
   if cur == 0:
-    # Reset pulse: restarts the bit counter and abandons any bit in flight
-    # (cpp/sgb-ext-test SendPacket10To00, SendPacket20To00).
+    # Reset pulse: restarts the bit counter, drops any bit in flight.
     s.receiving = true
     s.pending = false
     s.bit_count = 0
     for i in 0 ..< 16: s.packet[i] = 0
     return
-  # MLT_REQ player rotation (Pan Docs: "The next joypad is automatically
-  # selected when P15 goes from LOW (0) to HIGH (1)"); bit 1 of `cur` is P15.
-  # Not suppressed while a packet is clocked in: the packet's own 1 bits are
-  # P15 pulses and hardware counts every one (SameSuite sgb/command_mlt_req,
-  # sgb/command_mlt_req_1_incrementing). In one-player mode the mask is 0 and
-  # the ID stays 0xF.
+  # MLT_REQ rotation on P15 rising (Pan Docs); bit 1 of `cur` is P15. Not
+  # suppressed during a packet: hardware counts the packet's own 1 bits
+  # (SameSuite sgb/command_mlt_req*). One player: mask 0, ID stays 0xF.
   if (prev and 2) == 0 and (cur and 2) != 0:
     s.cur_player = (s.cur_player + 1) and (s.players - 1)
   if prev == 3: s.pending = true    # a line just left both-high: bit incoming
@@ -420,26 +401,25 @@ proc sgb_active*(gb: GB): bool {.inline.} =
   gb != nil and gb.sgb != nil
 
 proc sgb_has_border*(gb: GB): bool {.inline.} =
-  ## As above, and a border has been transferred: a cart that only sends
-  ## palettes must not get a 256x224 window with an empty margin.
+  ## As above, and a border has been transferred (palette-only carts get no
+  ## empty margin).
   gb != nil and gb.sgb != nil and gb.sgb.border_valid
 
 proc sgb_border_gen*(gb: GB): uint32 {.inline.} = gb.sgb.border_gen
 
 proc sgb_border_ptr*(gb: GB): ptr uint16 =
-  ## The 256x224 border image, BGR555 with bit 15 = opaque. Colour index 0 is
-  ## transparent and shows the Game Boy window (or the backdrop) through it.
+  ## The 256x224 border image, BGR555 with bit 15 = opaque.
   addr gb.sgb.border[0]
 
 proc sgb_backdrop*(gb: GB): uint16 {.inline.} =
-  ## SGB colour 0, shared by all four screen palettes. What shows wherever the
-  ## border is transparent and the Game Boy window is not.
+  ## SGB colour 0 (all four palettes): shows where the border is transparent
+  ## outside the Game Boy window.
   gb.sgb.pal[0]
 
 proc sgb_attach*(gb: GB) =
-  ## Wire the renderer's two SGB hooks: the flat 4x4 palette table and the
-  ## 20x18 attribute map. Both stay nil on a non-SGB machine, and the
-  ## renderer tests `sgb_attr` for nil per emitted pixel.
+  ## Wire the renderer's SGB hooks: the 4x4 palette table and the 20x18
+  ## attribute map. Both nil on a non-SGB machine (the renderer tests
+  ## `sgb_attr` per pixel).
   if gb.sgb == nil: return
   gb.ppu.sgb_pal = cast[ptr UncheckedArray[uint16]](addr gb.sgb.pal[0])
   gb.ppu.sgb_attr = cast[ptr UncheckedArray[uint8]](addr gb.sgb.attr[0])

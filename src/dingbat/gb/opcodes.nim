@@ -58,13 +58,10 @@ proc cpu_add_hl(cpu: GbCpu; val: uint16) {.inline.} =
   cpu.fn = false
 
 proc cpu_push16(cpu: GbCpu; gb: GB; val: uint16) {.inline.} =
-  # Three OAM-bug M-cycles (oam_bug_access): the internal cycle with SP as the
-  # IDU operand, then the two writes, which mem_write hooks with their own
-  # destinations (the IDU step sharing the first write's M-cycle adds
-  # nothing). SP is stepped one at a time so each check reads the value that
-  # M-cycle drove.
+  # Three OAM-bug M-cycles (oam_bug_access): the internal IDU cycle on SP,
+  # then the two writes (hooked by mem_write). SP steps one at a time so each
+  # check sees the value that M-cycle drove.
   oam_bug_if(gb, cpu.sp, obIdu)
-  # Internal cycle before the writes.
   mem_tick_components(gb.memory, gb, 4)
   cpu.sp = cpu.sp - 1
   mem_write(gb.memory, gb, int(cpu.sp), uint8(val shr 8))
@@ -72,17 +69,17 @@ proc cpu_push16(cpu: GbCpu; gb: GB; val: uint16) {.inline.} =
   mem_write(gb.memory, gb, int(cpu.sp), uint8(val and 0xFF))
 
 proc cpu_pop16(cpu: GbCpu; gb: GB): uint16 {.inline.} =
-  # Two OAM-bug M-cycles, one per read, both hooked by mem_read (Pan Docs'
-  # "one read, one glitched write, and another read": the glitched write
-  # shares the first read's M-cycle and adds nothing; oam_bug_access). The
-  # `+ 1'u16` wrap is mem_read_word's (gambatte oamdma_src*_busypopFFFF).
+  # Two OAM-bug M-cycles, one per read (hooked by mem_read). Pan Docs' "one
+  # read, one glitched write, and another read": the glitched write shares the
+  # first read's M-cycle. The `+ 1'u16` wrap matches mem_read_word (gambatte
+  # oamdma_src*_busypopFFFF).
   let lo = mem_read_data(gb.memory, gb, int(cpu.sp))
   let hi_addr = cpu.sp + 1'u16
   let hi = mem_read_data(gb.memory, gb, int(hi_addr))
   cpu.sp = cpu.sp + 2
   result = uint16(lo) or (uint16(hi) shl 8)
 
-# Read two bytes (lo, hi) from PC and return as uint16, advancing PC twice.
+# Little-endian u16 at PC; PC advances by two.
 proc cpu_read_u16(cpu: GbCpu; gb: GB): uint16 {.inline.} =
   let lo = uint16(mem_read(gb.memory, gb, int(cpu.pc))); cpu_inc_pc(cpu)
   let hi = uint16(mem_read(gb.memory, gb, int(cpu.pc))); cpu_inc_pc(cpu)
@@ -211,14 +208,13 @@ var UNPREFIXED* = [
     4,
 
   # 0x10 STOP — one or two bytes; stop_instr decides which (Pan Docs' STOP
-  # chart). The second increment is skipped on the leaves where the byte after
-  # $10 is left to execute as an opcode of its own.
+  # chart). When it returns false the byte after $10 runs as its own opcode.
   proc(cpu: GbCpu; gb: GB): int =
     cpu_inc_pc(cpu)
     if stop_instr(gb.memory, gb): cpu_inc_pc(cpu)
     when HDMA_HALT_REQ != 0:
-      # The speed switch's stall took an HBlank request: STOP's
-      # second byte is executed from the latch (HDMA_HALT_REQ, gb.nim).
+      # The speed-switch stall took an HBlank request: STOP's second
+      # byte runs from the latch (HDMA_HALT_REQ, gb.nim).
       if unlikely(gb.hdma_latch_run): return cpu_latched_op(cpu, gb)
     4,
 
@@ -561,12 +557,10 @@ var UNPREFIXED* = [
   proc(cpu: GbCpu; gb: GB): int =
     cpu_inc_pc(cpu); cpu.b = cpu.b
     when defined(test_harness):
-      # mooneye's magic breakpoint: LD B,B ends a test, Fibonacci 3/5/8/13/21/34
-      # in BCDEHL on pass, $42 in all six on failure. Only those two signatures
-      # may finish the run (blargg executes LD B,B mid-test). A mooneye
-      # ASSERTION failure matches neither (its quit tail leaves A = $42 and the
-      # print routine's leftovers in BCDEHL) and shows up as a TIMEOUT; run the
-      # ROM under --mode=screenshot to read the assertion.
+      # mooneye breakpoint: LD B,B with Fibonacci in BCDEHL = pass, $42 in
+      # all six = fail. Only those two end the run (blargg runs LD B,B
+      # mid-test). A mooneye ASSERTION failure matches neither and shows as a
+      # TIMEOUT; read it with --mode=screenshot.
       if gb.test_output != nil:
         if cpu.b == 3 and cpu.c == 5 and cpu.d == 8 and
            cpu.e == 13 and cpu.h == 21 and cpu.l == 34:
@@ -577,8 +571,8 @@ var UNPREFIXED* = [
           gb.test_output.mooneye_result = 1
           gb.test_output.finished = true
         elif gb.test_output.bb_breakpoint:
-          # Suites where LD B,B runs exactly once, at the end, and any
-          # non-Fibonacci registers mean failure (AGE). Opt-in because of blargg.
+          # Suites (AGE) where LD B,B runs once, at the end, so anything
+          # else is a failure. Opt-in because of blargg.
           gb.test_output.mooneye_result = 1
           gb.test_output.finished = true
     4,
@@ -1421,10 +1415,9 @@ var UNPREFIXED* = [
   proc(cpu: GbCpu; gb: GB): int =
     cpu_inc_pc(cpu)
     when defined(test_harness):
-      # mooneye-wilbertpol's magic breakpoint is the undefined opcode 0xED
-      # (2016 mooneye-gb), same Fibonacci verdict as LD B,B; anything else is
-      # failure, since nothing but a breakpoint reaches an opcode that locks
-      # hardware up. Opt-in (dingbat_test --ed-breakpoint).
+      # mooneye-wilbertpol's breakpoint is 0xED: Fibonacci = pass, anything
+      # else = fail (only a breakpoint reaches a lock-up opcode). Opt-in
+      # (dingbat_test --ed-breakpoint).
       if gb.test_output != nil and gb.test_output.ed_breakpoint:
         if cpu.b == 3 and cpu.c == 5 and cpu.d == 8 and
            cpu.e == 13 and cpu.h == 21 and cpu.l == 34:
@@ -1432,7 +1425,6 @@ var UNPREFIXED* = [
         else:
           gb.test_output.mooneye_result = 1
         gb.test_output.finished = true
-    # Undefined on hardware: locks up unless the breakpoint above ended the run.
     cpu_lock(cpu); 4,
 
   # 0xEE XOR A,u8

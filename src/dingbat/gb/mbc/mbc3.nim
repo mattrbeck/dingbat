@@ -33,8 +33,7 @@ proc mbc3_ram_bank_top(cart: Mbc3): uint8 {.inline.} =
   if cart.ram.len >= 0x2000 * 8: 0x07'u8 else: 0x03'u8
 
 proc mbc3_rom_mask(cart: Mbc3): uint8 {.inline.} =
-  ## MBC30 drives 8 ROM-bank bits where MBC3 drives 7; keyed off the image
-  ## size so a 2 MiB MBC30 cart behaves identically either way.
+  ## MBC30 drives 8 ROM-bank bits, MBC3 7; keyed off the image size.
   if cart.rom.len > 0x4000 * 128: 0xFF'u8 else: 0x7F'u8
 
 method mbc_rom_map*(cart: Mbc3): (int, int) =
@@ -74,10 +73,8 @@ method mbc_write*(cart: Mbc3; idx: int; val: uint8) =
     # read open bus (CasualPokePlayer rtc-invalid-banks hardware capture).
     cart.ram_bank_num = val and 0x0F
   of 0x6000..0x7FFF:
-    # Latch Clock Data. Pan Docs documents the "$00 then $01" sequence, but
-    # that is how software drives the pin, not the latch condition: ANY write
-    # to this range latches (CasualPokePlayer latch-rtc-test hardware capture,
-    # 51/51 under every-write-latches vs 23/51 under a bit-0 edge rule).
+    # Latch: ANY write latches, not just Pan Docs' "$00 then $01" (a bit-0
+    # edge rule fails CasualPokePlayer latch-rtc-test, a hardware capture).
     if cart.has_rtc:
       cart.rtc_latched = cart.rtc_live
       # Retained only so the save-state payload keeps its shape; nothing reads

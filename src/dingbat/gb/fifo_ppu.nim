@@ -14,8 +14,8 @@ const TAIL_DOT0_OFF = -(1'i32 shl 20)
 const M3_AHEAD_HOLD* {.booldefine.} = true
   ## Hold the mode 3 -> 0 flag for the pipeline's advance so it lands on the
   ## dot it would with no advance (true, default). `false` moves the flag with
-  ## the pixels and shortens mode 3; refused by gambatte sprites, window and
-  ## speedchange, which pin the flag edge.
+  ## the pixels and shortens mode 3; fails gambatte sprites, window and
+  ## speedchange.
 
 const M3_GRID_EARLY* {.intdefine.} = 0
   ## CPU M-cycles the whole mode 2 -> 3 -> 0 dot grid (flags, STAT sources,
@@ -31,11 +31,10 @@ const M3_PIPE_AHEAD* {.intdefine.} = 1
   ## because obj_oam_dma_read sums it into the OAM DMA bus lead.
 
 const CGB_PIPE_MCYCLES* {.intdefine.} = 0
-  ## CGB-only extra M-cycles of the same advance. Default 0: what looked like a
-  ## device split was the DMG's mode-2 STAT source (STAT_M2_LEAD) and snapback
-  ## halt wake (LYC_SETTLE_HALT_SKIP, gb.nim) each cancelling part of a
-  ## device-independent advance. OBJ_DMA_BUS_LEAD and LY0_PIPE_MCYCLES are
-  ## functions of this phase and move with it.
+  ## CGB-only extra M-cycles of the same advance. Default 0: the advance is
+  ## device-independent; the apparent DMG/CGB split is the DMG's mode-2 STAT
+  ## source (STAT_M2_LEAD) and snapback halt wake (LYC_SETTLE_HALT_SKIP,
+  ## gb.nim). OBJ_DMA_BUS_LEAD and LY0_PIPE_MCYCLES move with this phase.
 
 when defined(gb_px_trace):
   # Trace-only state for the FDATA candidate columns (one GB per harness).
@@ -118,15 +117,13 @@ proc fifo_arm_window*(ppu: GbFifoPpu) =
     elif not window_enabled(ppu) and WIN_EN_HOLD == 0: WIN_LX_OFF
     elif ppu.window_trigger:
       # The comparator sits one slot LEFT of the shifter's first pixel: with
-      # SCX & 7 = 0 the target WX - 7 = -1 (WX = 6) is below anything `lx`
-      # takes, yet hardware fires it. mealybug m3_wx_6_change brackets it on
-      # adjacent lines of one frame (WX - 7 = -2: no window; -1: whole-line
-      # window), and its window line counter is one ahead of ours without
-      # this. Written as a clamp here rather than a `>=` in the dot loop (one
-      # extra branch there measured +1.7% of retired instructions; a `>=` would
-      # also fire at WX = 4 and 5, which that ROM refuses). win_start_reset
-      # reads the clamp back to put the tile at its true pixel. Not applied to
-      # the re-trigger branch: no ROM measures it there.
+      # SCX & 7 = 0, WX = 6 (target -1) is below anything `lx` takes, yet
+      # hardware fires it (mealybug m3_wx_6_change: WX - 7 = -2 gives no
+      # window, -1 a whole-line window). A clamp here, not a `>=` in the dot
+      # loop: that branch costs +1.7% of retired instructions and would also
+      # fire at WX = 4 and 5, which that ROM fails. win_start_reset reads the
+      # clamp back to put the tile at its true pixel. Not applied to the
+      # re-trigger branch: no ROM measures it there.
       let target = int32(ppu.wx) - 7
       let first  = -int32(7 and int(ppu.scx))
       when WIN_START_PRE_PIXEL != 0:
@@ -202,25 +199,22 @@ proc reset_render_scratch*(ppu: GbFifoPpu) =
   ppu.scan_line = -1
 
 # The mode-2 scan against an OAM DMA. The scan steps through its forty slots
-# whoever has the OAM bus; what it cannot do while a transfer has the bus is
-# load its Y/X input latches, so every slot inside the transfer's span
-# compares the word the latches last loaded (OAM_SCAN_DMA_HOLD).
+# whoever has the OAM bus; under a transfer it only cannot load its Y/X input
+# latches (OAM_SCAN_DMA_HOLD).
 const OAM_SCAN_DMA_LOCK* {.intdefine.} = 1
   ## An OAM DMA owns the OAM bus for its whole transfer and the mode-2 scan
   ## (one entry per two dots) reads nothing off it meanwhile. Default 1; 0 is
   ## the one-burst scan with the transfer ignored. The transfer moves one
-  ## entry per 16 dots (8 in double speed) against the scan's one per 2, which
-  ## is why no constant start latency (CGB_OAM_DMA_START_T) could fix these
-  ## rows. Pinned by gambatte oamdma/late_sp{00,01,02,39}{x,y}: sixteen
-  ## one-M-cycle brackets putting object N's dot at 2N (OBJ_SCAN_DOT_ADJ).
+  ## entry per 16 dots (8 in double speed) against the scan's one per 2, so
+  ## no constant start latency (CGB_OAM_DMA_START_T) fits. Pinned by gambatte
+  ## oamdma/late_sp*{x,y}: object N's dot is 2N (OBJ_SCAN_DOT_ADJ).
   ## At double speed see OAM_SCAN_DMA_EDGE_DS.
 
 # The OAM scan compares each object's Y against LCDC.2 as it stands in that
 # object's own two-dot slot (object N on dot 2N), since the CPU can move the
-# bit under the scan. gambatte sprites/late_sizechange*_sp{00,01,02,39}
-# brackets the DMG's sample dot into {2N - 1, 2N}. On CGB the same rows keep
-# the object if EITHER that dot or the one M-cycle before it reads 8x16
-# (CGB_OBJ_SCAN_LEAD, gb.nim): the bit arrives at the scan later on CGB.
+# bit under the scan (gambatte sprites/late_sizechange*: DMG sample dot in
+# {2N - 1, 2N}). On CGB the object stays if EITHER that dot or the one
+# M-cycle before it reads 8x16 (CGB_OBJ_SCAN_LEAD, gb.nim).
 const OAM_SCAN_DOTS = 80'i32
   ## Dots of mode 2. Also the discriminator for `lcdc2_flip`: an entry below it
   ## is one of this line's mode-2 writes, one at or above it belongs to the
@@ -234,58 +228,31 @@ const OAM_SCAN_DMA_HOLD* {.intdefine.} = 1
   ## What the mode-2 comparator compares for an entry whose slot falls inside
   ## an OAM DMA's span. 1 (default): the word its input latches last loaded,
   ## `scan_y_latch`/`scan_x_latch`. 0: nothing, the entry is dropped.
-  ##
   ## The latches load an entry's Y and X in its scan slot, until the line has
   ## its ten objects; an object's mode-3 fetch then replaces the Y latch with
   ## its tile byte (under a transfer, the unit's byte, obj_oam_dma_read).
-  ## Derived from DocBoy dmg/ppu `oam_scan_blocked_by_dma_nops{100..107,115..122}`:
-  ## ten objects (Y on the line, X = $10, $18, ... $58) in entries 0..9 or
-  ## 30..39, a transfer started one M-cycle later per ROM, and the length of
-  ## mode 3 measured to one M-cycle. A transfer that takes the bus after k
-  ## entries were read gives 60 + 5k dots of objects (k = 1, 3, 5, 7, 9 for
-  ## nops 101..105 and 116..120): the k objects read, each on its own tile
-  ## (11 dots), and 10 - k more objects at the X of the last one read (6 dots
-  ## each, same tile). Dropping the entries instead gives 11k and loses those
-  ## ten `_round1` tests; it also loses strikethrough (both frames) and mooneye
-  ## madness/mgb_oam_dma_halt_sprites (both copies), whose frozen-bus word
-  ## (OAMDMA_FREEZE_BUS) reaches the comparator through this path.
-  ## What the latches hold when a transfer takes the bus before a line's
-  ## first slot: gambatte oamdma/late_sp39y_2 (both devices) has entry 39 on
-  ## the line and fetched on the line before, and finds no object on the next
-  ## line, so the Y latch no longer holds entry 39's Y: the fetch replaced
-  ## it. late_sp39y_ds_2 [cgb] has the transfer already running at that
-  ## fetch and still finds none, so the fetch replaces it under a transfer
-  ## too.
-  ##
-  ## Pinned: the hold itself and which X the copies take (the DocBoy tests);
-  ## that a fetch replaces the Y latch, with or without a transfer running
-  ## (the two late_sp39y tests; both only need a Y off the line, and the tile
-  ## byte, $A0 in both, is one). Chosen, no test sees it: that the byte is the
-  ## tile and not some other off-line value; that the fetch leaves the X
-  ## latch alone (loading the flags byte into it scores the same); that the
-  ## latches stop loading once the line has ten objects (loading through
-  ## entry 39 scores the same).
+  ## A transfer that takes the bus after k entries gives k objects on their
+  ## own tiles (11 dots each) plus 10 - k copies at the last X (6 each).
+  ## Derived from DocBoy dmg/ppu `oam_scan_blocked_by_dma_nops{100..107,115..122}`
+  ## and gambatte oamdma/late_sp39y_2; 0 also fails strikethrough and mooneye
+  ## madness/mgb_oam_dma_halt_sprites (OAMDMA_FREEZE_BUS reaches the
+  ## comparator through this path). Tile byte, X latch left alone and the
+  ## stop at ten are unpinned choices. docs/gb-derivations.md §6, "The mode-2
+  ## scan under an OAM DMA compares what its latches last held".
 
 const OAM_SCAN_DMA_EDGE_DS* {.intdefine.} = 1
   ## Dots the OAM DMA's take/give edge sits earlier against the mode-2 scan at
   ## double speed (0 = as at single speed, the dot the edge's M-cycle starts
-  ## on). Default 1. gambatte oamdma/late_sp{00,01,39}{x,y}_ds_{1,2} [cgb], six
-  ## one-M-cycle pairs: 0 loses the six `_ds_1` tests (a take on dot 2N + 1
-  ## must still hide object N, a give on it must show it) and 3 loses
-  ## `late_sp{00,01}{x,y}_ds_2`; 1 and 2 score the same, since slots are on
-  ## even dots and these edges on odd ones. The value is relative to
-  ## OBJ_SCAN_DOT_ADJ = 0: at -1 the same tests want 2..3.
-  ## By their traced edge dots the single-speed tests would accept -1..2 on a
-  ## CGB and DocBoy's DMG tests (OAM_SCAN_DMA_HOLD) only -1..0, so the term is
-  ## not applied there.
+  ## on). Default 1; 1..2 pass gambatte oamdma/late_sp*_ds_{1,2} [cgb] (slots
+  ## on even dots, these edges on odd ones). Relative to OBJ_SCAN_DOT_ADJ = 0.
+  ## Double speed only: DocBoy's DMG tests accept only -1..0.
 const SCX_LATCH_LCDON_EXTRA* {.intdefine.} = 1
 const SCX_LATCH_LCDON_EXTRA_CGB* {.intdefine.} = 2
   ## Dots the LCD-on line's fine-scroll discard keeps taking an SCX store past
   ## its own length (SCX_FINE_LATCH_LIVE's window), DMG / CGB. Default 1 and 2,
   ## each a strict optimum on gambatte enable_display/ly0_late_scx7_m3stat_*
-  ## (SCX 0, 1 or 3 replaced by 7 one M-cycle apart, mode 3's end read back):
-  ## DMG 0 loses `scx0_2` [dmg] and 2 loses `scx3_2` [dmg]; CGB 1 loses
-  ## `scx1_1` [cgb] and 3 loses `scx0_2` [cgb].
+  ## (docs/gb-derivations.md §4, "The LCD-on line takes an SCX store for
+  ## longer").
 const CGB_OBJ_LAST_PX_YIELDS* {.intdefine.} = 1
   ## Whether, on a CGB, an object on the line's last pixel (OAM X = 167) waits
   ## for a window start on that pixel (WX = 166) as it does on every other
@@ -295,24 +262,18 @@ const CGB_OBJ_LAST_PX_YIELDS* {.intdefine.} = 1
 const CGB_OBJ_FETCH_OFF* {.intdefine.} = 1
   ## Whether a CGB's fetcher still stops for this line's objects with LCDC.1
   ## clear (1, default) or, like the DMG's, does not (0). LCDC.1 only keeps the
-  ## object pixels out of the mixer there (sprite_wins). gambatte
-  ## sprites/late_disable_ds_1 [cgb] never sets LCDC.1 and reads mode 3 as
-  ## long as ten objects make it; sprites/enable/late_disable_ds_{3,4} clear
-  ## the bit on the line before and bracket the same length to one
-  ## double-speed M-cycle; oamdma/late_sp39x_{3,4} and the six
-  ## oamdma/late_sp*_ds pairs run with LCDC = $91 throughout. 0 loses nine
-  ## tests. The DMG stops fetching with the bit (gambatte
-  ## sprites/sprite_late_disable_*, sixteen DMG tests, pass either way).
+  ## object pixels out of the mixer there (sprite_wins). The DMG stops
+  ## fetching with the bit. Pinned by gambatte sprites/late_disable_ds_* and
+  ## oamdma/late_sp*_ds [cgb]. docs/gb-derivations.md §3, "A CGB fetches
+  ## objects with LCDC.1 clear".
 
 const LCD_ON_LINE_NO_SCAN* {.intdefine.} = 1
   ## The line the LCD is switched on with has no mode 2 (STAT reads mode 0
   ## until mode 3 begins) and no OAM scan runs on it: it has no objects (1,
-  ## default). 0 scans it like any other line. DocBoy dmg/ppu
-  ## `turn_on_ly0_sprites_round{1,2}` (an object at X = $10 on line 0, STAT
-  ## read 59 and 60 M-cycles after the LCDC write: mode 3, then mode 0) and
-  ## gambatte enable_display/enable_display_ly0_sprites_m0stat_{1,2} (objects
-  ## at X = 8 and $18, both devices) time mode 3 on that line to one M-cycle
-  ## at its object-free length; 0 loses the three `_2` tests.
+  ## default). 0 scans it like any other line. Pinned by DocBoy
+  ## `turn_on_ly0_sprites_round*` and gambatte enable_display_ly0_sprites_*;
+  ## docs/gb-derivations.md §3, "The line the LCD is switched on with has no
+  ## objects".
 
 template obj_fetch_on(ppu: GbFifoPpu): bool =
   ## Whether the fetcher stops for this line's objects: LCDC.1, and on a CGB
@@ -379,11 +340,11 @@ proc fifo_get_sprites*(ppu: GbFifoPpu; gb: GB): seq[GbSprite] =
   ## The scan as one burst on the dot mode 2 ends (the CPU cannot write OAM in
   ## mode 2, so where inside it each entry is read is unobservable). LCDC.2
   ## moving under the scan and an OAM DMA holding the bus each get their own
-  ## body (fifo_scan_sprites_lcdc2, oam_scan_advance). Kept separate from
-  ## oam_scan_advance, which it is equivalent to: routing this path through it
-  ## costs +2.07% of retired instructions on dmg-acid2. Last reader of this
-  ## line's LCDC.2 history, so it retires it; moving the call above
-  ## fifo_reset_sprite instead costs +1.11% from code placement alone.
+  ## body (fifo_scan_sprites_lcdc2, oam_scan_advance). Do not route this
+  ## through the equivalent oam_scan_advance: +2.07% of retired instructions
+  ## on dmg-acid2. Last reader of this line's LCDC.2 history, so it retires
+  ## it; moving the call above fifo_reset_sprite costs +1.11% from code
+  ## placement alone.
   if unlikely(fifo_scan_lcdc2_live(ppu)):
     return fifo_scan_sprites_lcdc2(ppu, gb)   # retires the history itself
   ppu.lcdc2_flip[0] = NO_LCDC2_FLIP
@@ -411,11 +372,9 @@ proc fifo_get_sprites*(ppu: GbFifoPpu; gb: GB): seq[GbSprite] =
 # every entry the mode-2 comparator steps over latches it, and the mode-3
 # object fetch reads it too. The word is the destination word (address bit 0
 # ignored) wired-OR with the held byte, the low two bits of the 16-bit word
-# undriven -- mooneye madness/mgb_oam_dma_halt_sprites' own rule
-# (Y = (existing | incoming) & $FC, X = next_existing | incoming), whose
-# reference pins the mask pixel-exactly: its 18 dark pixels at x 83..88,
-# y 42..47 are tile $38 at Y=$38/X=$5A with flags $5A, and the unmasked Y=$3A
-# draws something else.
+# undriven: mooneye madness/mgb_oam_dma_halt_sprites' own rule
+# (Y = (existing | incoming) & $FC, X = next_existing | incoming); its
+# reference image pins the $FC mask pixel-exactly.
 const OAMDMA_FREEZE_BUS* {.intdefine.} = 1
   ## Model the frozen transfer's held write as a driven OAM bus (default 1; 0:
   ## a frozen transfer holds the bus like a running one). DMG family only: the
@@ -423,20 +382,16 @@ const OAMDMA_FREEZE_BUS* {.intdefine.} = 1
 const OAMDMA_FREEZE_DEST_LEAD {.intdefine.} = 1 - OAMDMA_HALT_GRACE
   ## M-cycles the frozen write's destination leads `dma_position` by. The
   ## unit freezes one M-cycle after the HALT's fetch (OAMDMA_HALT_GRACE,
-  ## gb.nim: the HALT's execute cycle still clocks it), so `dma_position`
-  ## already stands on the in-flight write and the lead is 0; with no grace
-  ## cycle it is 1 (mooneye-test-suite issue #1 puts the in-flight write at
-  ## $FE02 where the HALT's fetch left the position at 1). The two sum to 1.
-  ## Checked with the scan's held latches (OAM_SCAN_DMA_HOLD) in place: -1
-  ## loses mooneye madness/mgb_oam_dma_halt_sprites (both copies); 0 and 1
-  ## pass everything (the bus carries the destination WORD, address bit 0
-  ## ignored, so the two name one word where the test freezes). The tests do
-  ## not choose between them; 0 is what the grace cycle implies.
+  ## gb.nim), so `dma_position` already stands on the in-flight write and the
+  ## lead is 0; with no grace cycle it is 1 (mooneye-test-suite issue #1 puts
+  ## the in-flight write at $FE02 where the HALT's fetch left the position
+  ## at 1). The two sum to 1. -1 fails mooneye mgb_oam_dma_halt_sprites; 0
+  ## and 1 name the same word there, so 0 is chosen by the grace cycle.
 
 proc oam_dma_frozen*(gb: GB): bool {.inline.} =
   ## Is an OAM DMA frozen mid-write with its address and data on OAM? That is
   ## `dma_busy` with the CPU halted (OAMDMA_HALT_PAUSE). The console test is
-  ## spelled out because memory.nim is included after this file.
+  ## written out because memory.nim is included after this file.
   when OAMDMA_FREEZE_BUS == 0: false
   else:
     gb.memory.dma_busy and gb.cpu.halted and
@@ -560,11 +515,9 @@ proc fifo_oam_bus_taken*(ppu: GbFifoPpu; gb: GB) =
   ## A CPU access or the IDU's address on OAM for one M-cycle of mode 2
   ## (oam_bug_access, which calls this before it scrambles OAM): the scan
   ## reads nothing off OAM in that M-cycle, as under a running OAM DMA, and
-  ## the entries after it read OAM as the corruption
-  ## leaves it. DocBoy dmg/ppu `oam_scan_blocked_by_{cpu,idu}_write_round2`:
-  ## the write one row past an on-line object hides it while the object's
-  ## copy in the next row (the write corruption's) is found, one object in
-  ## all. Entries before the M-cycle are walked under OAM as it was.
+  ## the entries after it read OAM as the corruption leaves it; entries
+  ## before it are walked under OAM as it was. Pinned by DocBoy dmg/ppu
+  ## `oam_scan_blocked_by_{cpu,idu}_write_round2`.
   when OAM_SCAN_DMA_LOCK != 0:
     if ppu.mode_flag == 2 and not gb.memory.dma_busy:
       oam_scan_advance(ppu, gb, ppu.cycle_counter)
@@ -576,48 +529,39 @@ const SCX_FINE_BORROW* {.intdefine.} = 1
   ## by screen position plus the live SCX, `column = ((SCX + 8k - F) shr 3)
   ## and 31`, so lowering the low bits mid-line borrows one tile for the rest
   ## of the line while the emitted residue stays the old one. Default 1; 0 is
-  ## the control. Derived from gambatte scx_during_m3 read as a displacement
-  ## ruler (tools/gbscx): every failing span follows a write that lowers
-  ## SCX & 7 and is displaced by exactly 8, never 1..7. Not applied to the
-  ## window fetch, which has no SCX term. An `ord` term, not an `if`: this is
-  ## the mode 3 dot loop.
+  ## the control. Pinned by gambatte scx_during_m3 (tools/gbscx reads it as a
+  ## displacement ruler: always exactly 8). Not applied to the window fetch,
+  ## which has no SCX term. An `ord` term, not an `if`: this is the mode 3
+  ## dot loop. docs/gb-derivations.md §4, "The map column's borrow is
+  ## measured against the pixels the discard threw away".
 
 # SCX_LIVE_BORROW_LATCHED (gb.nim): the borrow above has its own reference
 # (`scx_fine`), separate from the running discard target SCX_FINE_LATCH_LIVE
-# moves (`scx_live_fine`). With one shared field a store inside the discard
-# that wrapped it left the reference at the new `SCX and 7`, without the
-# wrap's eight pixels, and the borrow could never fire again on that line;
-# gambatte scx_0360c0 and scx_0761c0 measure both halves. What the reference
-# is once a store has moved the discard is SCX_WRAP_BORROW (gb.nim): the
-# pixels the discard throws away, the new target plus eight per wrapped
-# pass. That closes scx_0761c0's CGB arm (the column after its $C0 store is
-# `($C0 - 9) shr 3`), which a reference frozen at the latched 7 cannot reach.
+# moves (`scx_live_fine`). One shared field loses a wrap's eight pixels and
+# the borrow never fires again on that line (gambatte scx_0360c0,
+# scx_0761c0). Once a store has moved the discard the reference is
+# SCX_WRAP_BORROW (gb.nim): the new target plus eight per wrapped pass.
 
 const SCX_FINE_BORROW_DMG_LEAD* {.intdefine.} = 1
   ## Pixels the DMG fetcher's position leads the CGB's by inside the borrow
-  ## compare. Bracketed both sides by gambatte scx{1,2}_scx{0,1}_during_m3_1,
-  ## the only rows that move SCX's low bits alone: the DMG borrows on a drop
-  ## of 2 but not of 1, the CGB on either. Subtracted into `scx_fine` at the
-  ## latch so the dot loop never sees it.
+  ## compare: the DMG borrows on a drop of 2 but not of 1, the CGB on either
+  ## (gambatte scx{1,2}_scx{0,1}_during_m3_1). Subtracted into `scx_fine` at
+  ## the latch so the dot loop never sees it.
 
 # SCX_FINE_LATCH_LIVE (gb.nim): a store to SCX joins the fine-scroll discard
 # for as long as the discard has pixels left, moving the line's fine scroll
 # and its length with it (true, default). The window is the discard's own
-# length, not a fixed number of dots: gambatte scx_during_m3's dot-89 store
-# is refused at F = 0 (scx_0063c0) and taken at F = 3 and 7 (scx_0367c0,
-# scx_0360c0, scx_0761c0); a capped `min(N, F)` saturates only at N = 7.
-# How much longer the LCD-on line keeps the window open is
-# SCX_LATCH_LCDON_EXTRA{,_CGB}; widening it on line 0 of every frame instead
-# loses eleven scx_during_m3 tests.
+# length, not a fixed number of dots (gambatte scx_during_m3's dot-89 store
+# fails at F = 0, is taken at F = 3 and 7; a capped `min(N, F)` fails).
+# The LCD-on line's longer window is SCX_LATCH_LCDON_EXTRA{,_CGB}; widening
+# it on line 0 of every frame fails scx_during_m3.
 
 # SCX_FINE_LATCH_WRAP (gb.nim): the discard is a three-bit SLOT COUNTER that
 # compares its slot against the live SCX & 7 every dot. A store that puts the
 # target below the slot already reached cannot match on this pass, so the
-# counter runs to 7, wraps and matches on the next: eight more dots. gambatte
-# scx_m3_extend brackets it -- its _ds pair writes SCX twelve times on one
-# line (4,2,0,6,... against a latched 7) and wants mode 3 71-72 dots longer,
-# which nine wraps give. Open: scx_m3_extend_1 [dmg] wants its edge 3-6 dots
-# later still, a sub-M-cycle question about where the DMG's store lands.
+# counter runs to 7, wraps and matches on the next: eight more dots. Pinned
+# by gambatte scx_m3_extend (_ds pair: twelve stores, nine wraps). Open:
+# scx_m3_extend_1 [dmg] wants its edge 3-6 dots later still.
 
 proc fifo_arm_scx*(ppu: GbFifoPpu) =
   ## Recompute the fetcher's SCX term. Called from ppu_store_scx and from the
@@ -632,8 +576,7 @@ proc fifo_arm_scx*(ppu: GbFifoPpu) =
       when SCX_FINE_LATCH_WRAP != 0:
         # Slot counter: `consumed` slots of this pass are gone and a target
         # below them wraps. `and 7` because every pass is eight slots; without
-        # it every later store wraps and mode 3 never ends (the _ds banging
-        # row reads 355 against hardware's 331).
+        # it every later store wraps and mode 3 runs on (scx_m3_extend _ds).
         let consumed = (ppu.cycle_counter - int32(ppu.scx_latch_slot)) and 7'i32
         # `want` carries the DMG's one-pixel lead, as SCX_FINE_BORROW's compare
         # does (the DMG arm of scx_m3_extend needs it).
@@ -657,8 +600,7 @@ proc fifo_arm_scx*(ppu: GbFifoPpu) =
     # while `SCX and 7` reaches the reference, one below a reference of up
     # to 8, one more per further eight. Clamped at none: a DMG's reference is
     # one less (-1 on an unscrolled line) and the plain floor would ADD a
-    # tile at `SCX and 7` = 7 there, which no test asks for and the rule
-    # before the wrap term never did.
+    # tile at `SCX and 7` = 7 there, which no test asks for.
     ppu.scx_tile = (int(ppu.scx) shr 3) -
                    SCX_FINE_BORROW * max(0, (ppu.scx_fine - (int(ppu.scx) and 7) + 7) shr 3)
   else:
@@ -721,13 +663,10 @@ proc fifo_sample_smooth_scroll*(ppu: GbFifoPpu) =
       ppu.scx_latch_slot = uint8(ppu.cycle_counter and 7'i32)
   if ppu.fetching_window:
     # A line that starts as a window line discards `7 - WX` for the window's
-    # fine scroll AND `SCX & 7`: mealybug m3_window_timing_wx_0 (WX = 0,
-    # SCX = LY, BGP driven black at a fixed dot) reads 11,9,8,7,6,5,4,3 across
-    # SCX & 7 = 0..7, and its header names both terms. Cross-checked by
-    # gambatte window/m2int_wx03_scx5_m3stat_1 and GBMicrotest win0_scx3_a/_b.
-    # The discard is `7 - WX` at WX = 0 too (WIN_WX0_PHASE, gb.nim): six puts
-    # the window's first tile one pixel right, visible only in mealybug
-    # m3_lcdc_win_en_change_multiple_wx.
+    # fine scroll AND `SCX & 7` (mealybug m3_window_timing_wx_0, whose header
+    # names both terms; gambatte window/m2int_wx03_scx5_m3stat_1). The discard
+    # is `7 - WX` at WX = 0 too (WIN_WX0_PHASE, gb.nim): six puts the first
+    # tile one pixel right, seen only in m3_lcdc_win_en_change_multiple_wx.
     win_line_start_lx(ppu, int32(ppu.wx))
     when WIN_WX0_PHASE == 0:
       if ppu.wx == 0:
@@ -737,9 +676,9 @@ proc fifo_sample_smooth_scroll*(ppu: GbFifoPpu) =
       # WX = 0's startup fetch is one dot shorter ("window activating one
       # T-cycle later when WX = 0 and SCX > 0", m3_window_timing_wx_0's
       # header), spent out of the fetch's sleep step so the map read and the
-      # SCX latch riding on it (mealybug m3_scx_low_3_bits) do not move. Spent
-      # here, the dot SCX is latched on, because two dots earlier at the head
-      # SCX is still the previous line's. An add, not a branch (+0.03%).
+      # SCX latch riding on it do not move. Spent here, the dot SCX is latched
+      # on: two dots earlier, at the head, SCX is still the previous line's.
+      # An add, not a branch (a branch costs +0.03%).
       ppu.fetch_counter += ord(ppu.wx == 0'u8 and (ppu.scx and 7) == 0'u8)
   else:
     ppu.lx = int32(-(7 and int(ppu.scx)))
@@ -780,9 +719,9 @@ proc win_start_reset(ppu: GbFifoPpu) {.inline.} =
   ## up to the shifter's first pixel so the match is noticed at all, but the
   ## tile belongs at WX - 7, so step the shifter back onto it (off-screen) and
   ## enter FETCHER_ORDER at the map read -- six dots, no extra pixel, so mode
-  ## 3's length is unchanged. The clamp is read back off `lx` rather than
-  ## stored (a store on every register write measured +0.07%). A held match
-  ## is excluded: WIN_EN_HOLD_BACK has already moved its `lx`.
+  ## 3's length is unchanged. The clamp is read back off `lx`, not stored (a
+  ## store on every register write costs +0.07%). A held match is excluded:
+  ## WIN_EN_HOLD_BACK has already moved its `lx`.
   when WIN_TAIL_FLAG_LEAD != 0:
     # A restart in the tail retires on a fixed dot (WIN_TAIL_FLAG_LEAD, gb.nim).
     ppu.win_tail_end =
@@ -864,25 +803,22 @@ proc try_push_bg_pixels(ppu: GbFifoPpu; gb: GB): bool =
   return false
 
 # A line whose WX < WIN_LINE_START_WX starts as a window line from its first
-# tile. mealybug m3_window_timing (WX = LY, BGP black at a fixed dot) reads a
-# flat 3 across WX = 0..10 and 4..9 across 11..16, and pins two things:
+# tile. Pinned by mealybug m3_window_timing (also GBMicrotest win<WX>_a/_b):
 #  * WIN_LINE_START_LATCH: WX is read at the end of the throw-away fetch (dot
 #    86; 82 on LY 0), after that ROM's dot-85 write and before
 #    m3_wx_6_change's dot-93 one.
 #  * WIN_HEAD_ABSORB: the window's own `7 - WX` discard costs no dots -- the
 #    head is the same six-dot startup fetch at every WX in 0..6, written as
 #    `WX - 1` idle dots (FETCHER_ORDER's negative steps). Seeding lx at a flat
-#    -6 instead collapses m3_wx_4/5_change and m3_window_timing_wx_0. Length
-#    cross-checks: GBMicrotest win<WX>_a/_b and gambatte window/m2int_wx03_*.
+#    -6 fails m3_wx_4/5_change and m3_window_timing_wx_0.
 proc fifo_head_window(ppu: GbFifoPpu) =
   ## The head of mode 3 reading WX: does this line start as a window line, and
   ## how many of the startup fetch's six dots are left once its discard has
   ## taken its share. Once per line, from the dot the throw-away fetch ends.
   when DMG_WIN_LAST_PX_CARRY != 0:
     # A start owed from the previous line (DMG_WIN_LAST_PX_CARRY), asked first
-    # because it is not a WX match. gambatte wxA6_late_we_reenable_1..4
-    # bracket its dot to this one (LCDC.5 back on at dots 77/81/85 taken, 89
-    # not).
+    # because it is not a WX match. gambatte wxA6_late_we_reenable_* bracket
+    # its dot to this one.
     if ppu.win_carry and window_enabled(ppu):
       ppu.win_carry = false
       ppu.fetching_window = true
@@ -966,8 +902,8 @@ proc fifo_wx_store_head*(ppu: GbFifoPpu; old_wx: uint8) {.noinline.} =
 
 proc fetcher_window_abort(ppu: GbFifoPpu) {.noinline.} =
   ## WIN_EN_ABORT's switch back to the background (see tick_bg_fetcher). Out
-  ## of line: it is rare and tick_bg_fetcher is on the dot loop (inline, the
-  ## DMG's column lead below cost +0.1% retired instructions on every game).
+  ## of line: rare, and inlined into the dot loop the DMG's column lead below
+  ## costs +0.1% retired instructions on every game.
   ppu.fetching_window = false
   ppu.fetcher_x = int((ppu.lx + int32(ppu.fifo.size) +
                        (if ppu.cgb: 0'i32 else: int32(WIN_ABORT_COL_LEAD))) div 8)
@@ -992,10 +928,7 @@ proc tick_bg_fetcher*(ppu: GbFifoPpu; gb: GB) =
         fifo_sample_smooth_scroll(ppu)
     # A CGB window start is revocable (CGB_WIN_EN_DEFER, gb.nim): LCDC.5 going
     # low during the six-dot startup fetch abandons the start and the line
-    # pays only the dots the fetch had run. A gambatte late_disable* row's
-    # geometry is three dots (WX match, LCDC.5 write, STAT read); only a pair
-    # at the same match and write dots with different read dots brackets
-    # mode 3's length.
+    # pays only the dots the fetch had run (gambatte window/late_disable*).
     when WIN_EN_ABORT != 0:
       # LCDC.5 cleared while the window is the fetch source: the switch takes
       # effect at this, the next map read (mealybug PPU notes: "at the end of
@@ -1151,9 +1084,9 @@ proc tick_bg_fetcher*(ppu: GbFifoPpu; gb: GB) =
       when M3_THROWAWAY_DOTS == 4:
         # The push lands on the dot the data arrives and the next fetch starts
         # on the next dot (Pan Docs: step 4 -> step 1 on a push); falling
-        # through Sleep/Push instead left every later VRAM read two dots late.
-        # The line's first B01s cycle waits for its own push step (that push is
-        # what makes the head 12 dots).
+        # through Sleep/Push puts every later VRAM read two dots late. The
+        # line's first B01s cycle waits for its own push step (that push makes
+        # the head 12 dots).
         if not ppu.head_cycle and try_push_bg_pixels(ppu, gb):
           ppu.fetch_counter = 0
       else:
@@ -1185,34 +1118,32 @@ proc tick_bg_fetcher*(ppu: GbFifoPpu; gb: GB) =
 # then a flat 6 for the object fetch. Here the BG FIFO holds exactly The Pixel
 # and everything right of it, so the wait is `fifo.size - 1 - 2`, and
 # "considered" is `fetcher_x` differing from the tile the last wait was
-# charged to. (6, 3) is the unique optimum of a sweep over gambatte/sprites,
-# and GBMicrotest ppu_spritex_vs_scx's 153 cells all match
-# (tools/gbppu/objtab.py): `6 + max(0, 5 - ((X + SCX) mod 8))` for X >= 1 and
-# Pan Docs' flat 11 at X = 0, a real special case. Cancelling the fetch by
-# clearing LCDC.1 is a separate rule (fifo_obj_abort).
+# charged to. That is `6 + max(0, 5 - ((X + SCX) mod 8))` for X >= 1 and Pan
+# Docs' flat 11 at X = 0, a real special case. Pinned by gambatte sprites and
+# GBMicrotest ppu_spritex_vs_scx (tools/gbppu/objtab.py);
+# docs/gb-derivations.md §3, "An object costs 6 dots plus a per-tile wait".
+# Cancelling the fetch by clearing LCDC.1 is a separate rule (fifo_obj_abort).
 const OBJ_FETCH_DOTS {.intdefine.} = 6'i32
 const OBJ_WAIT_SUB {.intdefine.} = 3'i32
 
 # An object at OAM X = 167 triggers on lx = 159, past the retire point, and
 # the dots the shifter walks into the tail burst to reach it were already
 # paid at the head (m3_delay): refund them, once a line (gated on
-# obj_last_px). wilbertpol acceptance/gpu/intr_2_mode0_timing_sprites_scx1_nops
-# test $55 and tools/gbppu/objtab2.py (X = 150..167, every SCX) pin it. The
-# window's walk into the tail is NOT refunded (CGB_WIN_TAIL_LAST,
-# DMG_WIN_LAST_PX_CARRY). The CGB's WX = 166 + X = 167 shared slot stays one
-# dot short either way (window/m2int_wxA6_spxA7_m3stat_{2,4} [cgb]); both
-# spellings of giving it its dot back trade the same rows and are net zero.
+# obj_last_px). Pinned by wilbertpol intr_2_mode0_timing_sprites_scx1_nops
+# and tools/gbppu/objtab2.py. The window's walk into the tail is NOT refunded
+# (CGB_WIN_TAIL_LAST, DMG_WIN_LAST_PX_CARRY). The CGB's WX = 166 + X = 167
+# shared slot stays one dot short (gambatte window/m2int_wxA6_spxA7_m3stat
+# [cgb]); giving it back is net zero on the tests.
 const OBJ_TAIL_WALK_REFUND {.intdefine.} = 1
 
-# LCDC.2 is read once per bitplane, OBJ_PLANE_GAP dots apart. mealybug
-# m3_lcdc_obj_size_change and _scx (tile $4C, one object per band, LCDC.2
-# pulsed four times across mode 3) decode to: low plane on the merge dot M,
-# high plane on M + 2, on the tail arm; both planes before dot 101 on the
-# idx < 0 head arm, whose six dots are the FIRST of the penalty (X = 8 is the
-# first object that takes the tail arm's dots). The CGB reads the bit three
-# dots later on six bands (CGB_OBJ_SIZE_LATENCY, gb.nim). The tile index's
-# low-bit mask is recomputed per plane; no ROM separates that from a mask at
-# the OAM read. A chained same-X object takes the tail arm's offset.
+# LCDC.2 is read once per bitplane, OBJ_PLANE_GAP dots apart (mealybug
+# m3_lcdc_obj_size_change and _scx): low plane on the merge dot M, high plane
+# on M + 2, on the tail arm; both planes before dot 101 on the idx < 0 head
+# arm, whose six dots are the FIRST of the penalty (X = 8 is the first object
+# that takes the tail arm). The CGB reads the bit later
+# (CGB_OBJ_SIZE_LATENCY, gb.nim). The tile index's low-bit mask is
+# recomputed per plane; no ROM separates that from a mask at the OAM read.
+# A chained same-X object takes the tail arm's offset.
 const OBJ_PLANE_GAP {.intdefine.} = 2'i32
   ## Dots between an object fetch's two bitplane reads (one VRAM access each).
 const OBJ_PLANE1_LAG {.intdefine.} = 2'i32
@@ -1224,26 +1155,22 @@ const OBJ_PLANE1_HEAD {.intdefine.} = 4'i32
   ## sits at the head of the penalty there). The mealybug ROMs only bound it
   ## from above (both planes before dot 101). 4: the object owns the VRAM bus
   ## from the dot after the trigger (tick_sprite_fetcher), so its two plane
-  ## steps end on T + 2 and T + 4, which is where DocBoy's VRAM DMA conflict
-  ## rows find them (`..._sprite_y16_x01`..`x06`: bus held on T + 2 and T + 4,
-  ## free on T + 6; VDMA_M3_PORT, gb.nim). Those rows see even dots only, so
-  ## 5 scores the same there; 6 fails them.
+  ## steps end on T + 2 and T + 4, where DocBoy's VRAM DMA conflict tests
+  ## `..._sprite_y16_x0*` find them (VDMA_M3_PORT, gb.nim). 5 passes those
+  ## too (even dots only); 6 fails them.
 
 # Hardware re-reads an object's tile and attributes from OAM at its mode-3
 # fetch; while an OAM DMA owns OAM that read gets the byte the unit has on its
 # bus (Pan Docs, "OAM DMA Transfer", says only that the PPU cannot read OAM
-# properly). Hacktix's strikethrough.gb pins which byte: forty objects, a
-# transfer spanning LY 68 whose source is $01 everywhere but one $00, and
-# hardware draws exactly one bar (object 7, screen x 71). The read lands one
-# M-cycle AHEAD of the fetch's own dots. Moving the DMA's start instead costs
-# sixteen mooneye oam_dma rows; the read is not inside the fetch (swept all
-# six dots and out to eleven).
+# properly). strikethrough.gb pins which byte: the read lands one M-cycle
+# AHEAD of the fetch's own dots. Moving the DMA's start instead fails
+# mooneye oam_dma; no dot inside the fetch (or out to eleven) fits.
 const OBJ_DMA_BUS_LEAD {.intdefine.} = 1
   ## M-cycles the object fetch's OAM read leads the DMA unit's bus by on a
   ## console whose pipeline is not advanced (0 = the byte the unit drives on
   ## the fetch's own M-cycle, mem.dma_latch). The effective lead adds every
-  ## pipeline advance, since the unit runs on machine time. strikethrough pins
-  ## 1 on DMG and the sum on CGB by the same 7 pixels.
+  ## pipeline advance (obj_oam_dma_read). strikethrough pins 1 on DMG and the
+  ## sum on CGB.
 
 proc obj_oam_dma_read(ppu: GbFifoPpu; gb: GB) {.noinline.} =
   ## The object's mode-3 OAM read while an OAM DMA owns OAM. Cold.
@@ -1262,7 +1189,7 @@ proc obj_oam_dma_read(ppu: GbFifoPpu; gb: GB) {.noinline.} =
     # past $A0. The lead moves with every pipeline advance (M3_PIPE_AHEAD,
     # CGB_PIPE_MCYCLES, CGB_HALT_PPU_LEAD): the unit is on machine time, so an
     # advanced fetch must look further ahead to land on the same source byte.
-    # Both strikethrough frames witness the SUM, not the phase.
+    # strikethrough pins the SUM, not the phase.
     let lead = OBJ_DMA_BUS_LEAD + M3_PIPE_AHEAD +
                (when CGB_PIPE_MCYCLES != 0 or CGB_HALT_PPU_LEAD != 0:
                   (if ppu.cgb: CGB_PIPE_MCYCLES + CGB_HALT_PPU_LEAD else: 0)
@@ -1303,7 +1230,7 @@ proc sprite_fetch_merge*(ppu: GbFifoPpu; gb: GB) =
     # The fetch's read replaces what the Y latch held from the scan with the
     # object's tile byte; under a transfer that is the unit's byte
     # (obj_oam_dma_read). The X latch is left alone: no test sees it after a
-    # fetch (OAM_SCAN_DMA_HOLD, "pinned" and "chosen").
+    # fetch (OAM_SCAN_DMA_HOLD).
     ppu.scan_y_latch = s.tile_num
   ppu.sprites.delete(0)
   # LCDC.2 per bitplane (OBJ_PLANE1_LAG): the low plane's dot is past; the
@@ -1351,8 +1278,7 @@ proc sprite_fetch_merge*(ppu: GbFifoPpu; gb: GB) =
     ppu.sprites.len > 0 and ppu.sprites[0].x == s.x
   if ppu.fetching_sprite:
     # A second object at the same X shares the tile and pays only another
-    # six-dot fetch (mooneye acceptance/ppu/intr_2_mode0_timing_sprites steps
-    # by exactly 6 per extra object at X = 0).
+    # six-dot fetch (mooneye intr_2_mode0_timing_sprites).
     ppu.obj_penalty = OBJ_FETCH_DOTS
     when OBJ_ABORT_LATE:
       # Its six dots are its stall: a tail-arm object for the late abort.
@@ -1381,18 +1307,16 @@ proc tick_sprite_fetcher*(ppu: GbFifoPpu; gb: GB): bool =
   #
   # The BG fetcher runs for the WAIT and is stopped for the object's own six
   # dots (one address bus). OBJ_BG_RUN = 4: the object fetch goes at a tile
-  # boundary chosen by the OBJECT, not the fetcher's phase -- mealybug
-  # m3_lcdc_tile_sel_change's 18 bands show a BG tile's reads are never split
-  # by an object fetch, and X = 0 and X = 8 trigger in identical fetcher
-  # states yet take different boundaries. idx >= 0: The Pixel is in the
-  # displayed tile; the fetch of the next one runs to completion inside the
-  # penalty and parks. idx < 0 (OAM X < 8): the fetch it waits for finished on
-  # the trigger dot, so the object owns the bus from the next dot for the
-  # whole penalty plus one tail dot (band 4 separates the two). Mode 3's
-  # length does not move (GBMicrotest ppu_spritex_vs_scx stays 0/153). Arms
-  # 0..3 are control spellings a quarter of a percent apart on mealybug
-  # pixels; 2 puts both fetches on the bus at once. Cost: up to six
-  # tick_bg_fetcher calls per object (+0.76% Pokemon Blue).
+  # boundary chosen by the OBJECT, not the fetcher's phase (mealybug
+  # m3_lcdc_tile_sel_change: a BG tile's reads are never split by an object
+  # fetch, and X = 0 and X = 8 trigger in identical fetcher states yet take
+  # different boundaries). idx >= 0: The Pixel is in the displayed tile; the
+  # fetch of the next one runs to completion inside the penalty and parks.
+  # idx < 0 (OAM X < 8): the fetch it waits for finished on the trigger dot,
+  # so the object owns the bus from the next dot for the whole penalty plus
+  # one tail dot. Mode 3's length does not move. Arms 0..3 are controls; 2
+  # puts both fetches on the bus at once. Cost: up to six tick_bg_fetcher
+  # calls per object (+0.76% Pokemon Blue).
   when OBJ_BG_RUN == 4:
     let bg_hold = ppu.obj_tile_fx != int32(ppu.fetcher_x)
     if ppu.obj_penalty <= 0:
@@ -1449,13 +1373,12 @@ proc win_react_last_park(ppu: GbFifoPpu): bool {.inline.} =
 # view, injected as idle dots at the head of mode 3 and paid back by retiring
 # the fetcher early (no mode boundary moves; 4 dots at normal speed, 2 in
 # double, so it is latched per line). Default 0: the M-cycle gambatte
-# bgtiledata/bgtilemap measure (two disjoint dot windows at the two speeds)
-# was the CPU write committing an M-cycle late, which mem_write now fixes.
+# bgtiledata/bgtilemap measure is the CPU write's commit point (mem_write).
 # M3_PIPE_DELAY: the additional speed-independent lead in dots. Default 2,
-# pinned by mealybug m3_bgp_change (BGP applied at the shifter, no objects)
-# and GBMicrotest ppu_spritex_vs_scx 153/153 once the fetcher's idle steps
-# sit at the tail of its cycle. The tail burst's accounting is approximate in
-# the last m3_lead pixels (six gambatte bgtilemap/sprites rows).
+# pinned by mealybug m3_bgp_change and GBMicrotest ppu_spritex_vs_scx
+# (docs/gb-derivations.md §1, "The BG fetch restarts on the dot it pushes").
+# The tail burst's accounting is approximate in the last m3_lead pixels (a
+# few gambatte bgtilemap/sprites tests).
 # Cost (~+0.2%): fetcher_retired folds the lead to an immediate with the
 # M-cycle term off; the head delay is spent in one step above the dot loop;
 # m3_delay is a uint8. Measure with DINGBAT_BENCH_COUNTERS on an idle machine
@@ -1465,38 +1388,35 @@ const M3_PIPE_MCYCLES {.intdefine.} = 0
 const M3_PIPE_DELAY {.intdefine.} = 2
 
 # Dots the mode 3 -> 0 edge comes early with the pipeline left alone: mode 3
-# gets shorter, no pixel moves. Default 0. GBMicrotest hblank_int_scx0..7 solve
-# to a uniform 2 (not the per-residue split they look like), but a uniform
-# -2 costs mooneye hblank_ly_scx_timing-GS, wilbertpol
-# intr_2_mode0_scx*_timing_nops and ~150 gambatte rows that pin the same edge
-# from the other side; see LCD_ON_LINE0_TRIM in gb.nim.
+# gets shorter, no pixel moves. Default 0, an instrument: 2 fits GBMicrotest
+# hblank_int_scx* but fails mooneye hblank_ly_scx_timing-GS, wilbertpol
+# intr_2_mode0_scx*_timing_nops and ~150 gambatte tests (docs/gb-derivations.md
+# §1, "`M3_END_EARLY` is an instrument, not a fix"; LCD_ON_LINE0_TRIM, gb.nim).
 const M3_END_EARLY {.intdefine.} = 0
 
 # CPU M-cycles line 0's pipeline runs ahead of lines 1..143, with every flag
 # and STAT source left alone (head delay shorter, flag held the same dots).
-# mealybug's line_0_fix (24 vs 28 T-cycles, "line 0 timing is different by 4
-# cycles") and gambatte scy/bgtilemap/bgtiledata/scx_during_m3/bgen's line-0
-# steps both measure it, and the _ds rows say it is an M-cycle, not 4 dots.
-# It is not a late line-0 mode 2 interrupt (mooneye intr_1_2_timing-GS,
-# gambatte m2enable/late_enable_ly0_*) and not a short mode 2 (gambatte
-# m0enable, vramw_m3end, ly0/lycint152_m2stat_1).
+# mealybug's line_0_fix ("line 0 timing is different by 4 cycles") and
+# gambatte's line-0 scy/bgtilemap/bgtiledata steps measure it; the _ds tests
+# say an M-cycle, not 4 dots. It is not a late line-0 mode 2 interrupt
+# (mooneye intr_1_2_timing-GS) and not a short mode 2 (gambatte m0enable).
 const LY0_PIPE_MCYCLES {.intdefine.} = 0
   ## Default 0: this is a DIFFERENCE between line 0 and its neighbours, and
-  ## M3_PIPE_AHEAD now carries the same M-cycle on every line; adding both
-  ## puts line 0 two M-cycles out.
+  ## M3_PIPE_AHEAD carries the same M-cycle on every line; adding both puts
+  ## line 0 two M-cycles out.
 
 # M3_PIPE_AHEAD's derivation: every gambatte family that writes a PPU register
-# out of the mode 2 handler (scy, bgtiledata, bgtilemap, scx_during_m3,
-# dmgpalette_during_m3, the mealybug m3_* frames) measures the dispatch
-# against the pipeline, so STAT_M2_LEAD (ppu.nim) and this advance are one
-# unknown to them and neither scores without the other. daid ppu_scanline_bgp
-# refuses the advance on the DMG only on its LY 153 -> 0 snapback anchor;
-# re-anchoring it on an ordinary line (a one-byte patch arming LYC = 2 or 4)
-# flips its answer to the CGB's, so the four dots belong to the snapback halt
-# wake (LYC_SETTLE_HALT_SKIP, gb.nim). Assumed; no ROM pins the re-anchored
-# reading. Not the DMG BGP selector (MIXER_PALETTE_OR) and not the DMG model;
-# LYC_SETTLE_DOTS = 0 (ppu.nim) moves the same wake for a running CPU too and
-# costs eleven gambatte ly0/lycEnable rows.
+# out of the mode 2 handler (scy, bgtiledata, bgtilemap, scx_during_m3, the
+# mealybug m3_* frames) measures the dispatch against the pipeline, so
+# STAT_M2_LEAD (ppu.nim) and this advance are one unknown to them. daid
+# ppu_scanline_bgp fails the advance on the DMG only on its LY 153 -> 0
+# snapback anchor; re-anchored on an ordinary line (LYC = 2 or 4 patch) it
+# gives the CGB's answer, so the four dots belong to the snapback halt wake
+# (LYC_SETTLE_HALT_SKIP, gb.nim). Assumed; no ROM pins the re-anchored
+# reading. Not the DMG BGP selector (MIXER_PALETTE_OR); LYC_SETTLE_DOTS = 0
+# (ppu.nim) also moves the wake for a running CPU and fails gambatte
+# ly0/lycEnable. docs/gb-derivations.md §1, "The pipeline runs one M-cycle
+# ahead of the STAT/mode machinery".
 const LY0_PIPE_ANY = LY0_PIPE_MCYCLES != 0 or M3_PIPE_AHEAD != 0 or
                      CGB_PIPE_MCYCLES != 0
 
@@ -1510,7 +1430,7 @@ template m3_retire_lx(ppu: GbFifoPpu): int32 =
   ## The first `lx` at which the BG fetcher can be retired -- `m3_lead` pixels
   ## short of the last one, which fifo_burst_tail emits on the retire dot.
   ## Shared with the mode-0 STAT lookahead (fifo_irq_m0_ready). The constant
-  ## case is spelled out: this is on the mode 3 dot loop.
+  ## case is written out: this is on the mode 3 dot loop.
   when M3_PIPE_MCYCLES == 0: int32(GB_WIDTH - M3_PIPE_DELAY - M3_END_EARLY)
   else: int32(GB_WIDTH) - ppu.m3_lead
 
@@ -1527,12 +1447,11 @@ proc window_reactivate(ppu: GbFifoPpu) =
   ## restarts; one colour-0, lowest-priority pixel is injected in front of the
   ## BG FIFO, displacing the rest of the line right by one (mealybug
   ## m3_wx_4_change; _sprites shows an OBJ-behind-BG sprite through it). The
-  ## edge survives on one fetcher position of eight (WIN_REACT_PHASE, swept
-  ## against m3_wx_4_change, _sprites and m3_wx_5_change) and is anchored to
-  ## the END of the fsPushPixel park: an object stretches the park and the
-  ## real nametable read does not move with it (m3_wx_4_change_sprites' zero
-  ## pixels stay on one lattice through the object bands). Reached through
-  ## the same cached `lx == win_lx` compare as the window start.
+  ## edge survives on one fetcher position of eight (WIN_REACT_PHASE, pinned
+  ## by m3_wx_4_change, _sprites and m3_wx_5_change) and is anchored to the
+  ## END of the fsPushPixel park: an object stretches the park and the real
+  ## nametable read does not move with it (m3_wx_4_change_sprites). Reached
+  ## through the same cached `lx == win_lx` compare as the window start.
   # Inserted behind the head: the pixel being displaced is the NEXT one.
   # Depth is 16 and the FIFO never holds more than 8.
   let h = (ppu.fifo.head - 1) and 15
@@ -1605,27 +1524,23 @@ proc window_refuse_start(ppu: GbFifoPpu) =
 proc obj_yields_to_window(ppu: GbFifoPpu): bool {.inline.} =
   ## Does the object the shifter just found wait for the window start? The
   ## two are ordered by COORDINATE: an object whose column is the window's
-  ## first column (`lag == 0`) waits, one to the left goes first. mealybug
-  ## m3_lcdc_win_map_change and m3_lcdc_tile_sel_win_change band 8 (object at
-  ## X = WX + 1) pin it -- the window's first tile's bitplane reads land on
-  ## dots 104/106 around the dot-105 write. Resolving both cases window-first
-  ## takes win_map_change 34 -> 318 wrong pixels. The object re-pays the wait
-  ## (gambatte window/late_disable_spx10_wx0f_2 and two sprites/space ties).
-  ## Not on the re-trigger (it may decline, parking the shifter) and not on
-  ## x = 159, where gambatte window/m2int_wxA6_spxA7_* [dmg] wants the object
-  ## charged in front of the restart; the CGB orders the two there as on
-  ## every other column (CGB_OBJ_LAST_PX_YIELDS). The WX = 166 DMG/CGB split
-  ## (m2int_wxA6_m3stat, 180 vs 190 dots) is not this rule's.
+  ## first column (`lag == 0`) waits, one to the left goes first (mealybug
+  ## m3_lcdc_win_map_change and m3_lcdc_tile_sel_win_change band 8; window
+  ## first in both cases fails them). The object re-pays the wait (gambatte
+  ## window/late_disable_spx10_wx0f_2). Not on the re-trigger (it may
+  ## decline, parking the shifter) and not on x = 159, where gambatte
+  ## window/m2int_wxA6_spxA7_* [dmg] wants the object charged in front of the
+  ## restart; the CGB orders the two there as on every other column
+  ## (CGB_OBJ_LAST_PX_YIELDS). The WX = 166 DMG/CGB split (m2int_wxA6_m3stat)
+  ## is not this rule's.
   ppu.lx == ppu.win_lx and not ppu.fetching_window and
     ppu.lx + 8 == int32(ppu.sprites[0].x) and
     (ppu.lx < int32(GB_WIDTH) - 1 or (CGB_OBJ_LAST_PX_YIELDS != 0 and ppu.cgb))
 
 proc win_start_reaches_pixels(ppu: GbFifoPpu): bool {.inline.} =
-  ## DMG_WIN_START_LAST_PX (off): refuse a DMG window START on x = 159. The
-  ## DMG renders the CGB reference pixel-exactly on gambatte
-  ## window/on_screen/wxA6_*, but does not simply decline the match (wxA6_3
-  ## gets worse with this on); what it does is DMG_WIN_LAST_PX_CARRY. Kept as
-  ## a control only. Keyed on WX: the comparator sits one slot left of
+  ## DMG_WIN_START_LAST_PX (control only, off): decline a DMG window START on
+  ## x = 159. Refuted by gambatte window/on_screen/wxA6_3; the DMG's rule is
+  ## DMG_WIN_LAST_PX_CARRY. Keyed on WX: the comparator sits one slot left of
   ## the first pixel.
   when DMG_WIN_START_LAST_PX == 0: true
   else:
@@ -1638,8 +1553,7 @@ proc fifo_mix*(ppu: GbFifoPpu; gb: GB; bg_px, sp_px: GbPixel;
   ## `x` is the real screen column (SGB attribute cell). LCDC.0's DMG meaning
   ## is sampled here per pixel (BG_EN_AT_MIX, gb.nim); in CGB mode it is
   ## master priority and sprite_wins reads it. The masked colour is threaded
-  ## as a value: copying the entry measured +1.2-1.7%, a branchless mask
-  ## worse.
+  ## as a value: copying the entry costs +1.2-1.7%, a branchless mask more.
   let bg_color =
     when BG_EN_AT_MIX != 0:
       if bg_display(ppu): bg_px.color        # the bit is set on almost every
@@ -1665,22 +1579,21 @@ proc fifo_mix*(ppu: GbFifoPpu; gb: GB; bg_px, sp_px: GbPixel;
   cast[ptr uint16](cast[int](arr_pram) + pal_offset)[]
 
 # The mixer is a TAIL behind the FIFO pop: LCDC's priority bits are read one
-# dot after the pixel leaves the FIFO (mealybug m3_lcdc_obj_en_change, all
-# nineteen bands), BGP/OBP0/OBP1 two dots after (m3_obp0_change). Registers
-# only change on M-cycle boundaries, so instead of holding stages in the dot
-# loop the write path re-mixes the pixels already emitted (fifo_recompose_*)
-# from a ring of held pairs, one store per pixel (+0.35-0.51%). Moving the
-# fetcher with M3_PIPE_DELAY = 3 instead helps every mixer row and hurts every
-# fetcher row. The tail does not stop at the mode 3 -> 0 edge
-# (m3_bgp_change's seventh write lands on the first dot of mode 0 and still
-# draws its edge at x = 157): the burst emits the last m3_lead pixels on the
-# retire dot, so the shifter's position afterwards is `cycle_counter -
-# tail_dot0` and a tail write reaches FORWARD to the burst's pixels too
-# (MIXER_TAIL_HBLANK). The tail is clocked in dots, so an object fetch drains
-# it rather than freezing it (MIXER_TAIL_DOTS, gb.nim; the mealybug _sprites
-# rows). Noting `cycle_counter - lx` per emitted pixel costs +5.02%, so it is
-# written only where the shifter STOPS -- object trigger, BG FIFO reset, tail
-# burst (mixer_note_stop) -- and mixer_tail_front tests for the stall.
+# dot after the pixel leaves the FIFO (mealybug m3_lcdc_obj_en_change),
+# BGP/OBP0/OBP1 two dots after (m3_obp0_change). Registers only change on
+# M-cycle boundaries, so instead of holding stages in the dot loop the write
+# path re-mixes the pixels already emitted (fifo_recompose_*) from a ring of
+# held pairs, one store per pixel (+0.35-0.51%). M3_PIPE_DELAY = 3 instead
+# helps every mixer test and fails every fetcher test. The tail does not stop
+# at the mode 3 -> 0 edge (m3_bgp_change's seventh write lands on the first
+# dot of mode 0 and still draws at x = 157): the burst emits the last m3_lead
+# pixels on the retire dot, so the shifter's position afterwards is
+# `cycle_counter - tail_dot0` and a tail write reaches FORWARD to the burst's
+# pixels too (MIXER_TAIL_HBLANK). The tail is clocked in dots, so an object
+# fetch drains it rather than freezing it (MIXER_TAIL_DOTS, gb.nim; mealybug
+# _sprites). Noting `cycle_counter - lx` per emitted pixel costs +5.02%, so
+# it is written only where the shifter STOPS -- object trigger, BG FIFO
+# reset, tail burst (mixer_note_stop) -- and mixer_tail_front tests for it.
 
 proc mixer_head_back(gb: GB): int32 {.inline.} =
   ## The deepest mixer stage on this console, in dots (the palettes' read,
@@ -1853,10 +1766,10 @@ proc fifo_obj_walked_past(ppu: GbFifoPpu): bool {.noinline.} =
   ## gone for the line. Asked at the trigger, not per dot: a first trigger
   ## lands on `lx + 8 == x`, so `lx + 8 > x` means the comparator was blocked
   ## on its dot, and a window yield blocks one dot, which OBJ_ABORT_LEAD = 2
-  ## does not reach (a per-dot prune measured +0.69%). OAM X < 8 is excluded:
+  ## does not reach (a per-dot prune costs +0.69%). OAM X < 8 is excluded:
   ## its trigger is the line's first shifter dot, and testing it retires
-  ## left-edge objects never passed (costs gambatte scx_during_m3 and sprites
-  ## rows). noinline: `delete` in the dot loop is the inline cliff.
+  ## left-edge objects never passed (fails gambatte scx_during_m3 and
+  ## sprites). noinline: `delete` in the dot loop is the inline cliff.
   let x = int32(ppu.sprites[0].x)
   if x < 8'i32 or ppu.lx - (x - 8'i32) < OBJ_ABORT_LEAD: return false
   ppu.sprites.delete(0)
@@ -1931,9 +1844,8 @@ proc tick_shifter*(ppu: GbFifoPpu; gb: GB) =
        # Off the hot path: reached only once the three tests above passed.
        not obj_yields_to_window(ppu) and
        # An object the shifter walked past with LCDC.1 low is gone: gambatte
-       # sprites/sprite_late_enable_spx{18,19,1A,1B}_{1,2} bracket the flip at
-       # W - T = +2 (the +2 row itself is unscored), which is OBJ_ABORT_LEAD
-       # spent on the rising edge.
+       # sprites/sprite_late_enable_spx* bracket the flip at W - T = +2,
+       # OBJ_ABORT_LEAD spent on the rising edge.
        not fifo_obj_walked_past(ppu):
       ppu.fetching_sprite = true
       # First object of the line inside the tail burst? (OBJ_TAIL_WALK_REFUND;
@@ -1959,8 +1871,7 @@ proc tick_shifter*(ppu: GbFifoPpu; gb: GB) =
       if ppu.obj_tile_fx != tile:
         ppu.obj_tile_fx = tile
         # Pan Docs' X = 0 exception: a flat 11 regardless of SCX, charged as
-        # index 0 of its tile (GBMicrotest ppu_spritex_vs_scx asserts it for
-        # all eight residues).
+        # index 0 of its tile (GBMicrotest ppu_spritex_vs_scx).
         let sub = if ppu.sprites[0].x == 0: 0'i32 else: idx and 7
         pen += max(0'i32, (7 - sub) - (OBJ_WAIT_SUB - 1))
       when OBJ_TAIL_WALK_REFUND != 0:
@@ -1991,9 +1902,9 @@ proc tick_shifter*(ppu: GbFifoPpu; gb: GB) =
     # be emitted, asked before the pop. gambatte window/arg/late_wy_FFto2_ly2_*
     # pin the dot (`83 + WX + (SCX and 7)`); a `>=` could not be un-satisfied
     # by a late WY write. Pre-emit so a WX = 7 window fires on the first
-    # pixel. Precomputed into win_lx: a second per-dot branch here measured
+    # pixel. Precomputed into win_lx: a second per-dot branch here costs
     # +1.7%. The restart enters FETCHER_ORDER at counter 0, six dots to the
-    # push (Pan Docs' window cost), now that the fetcher idles at the tail of
+    # push (Pan Docs' window cost), since the fetcher idles at the tail of
     # its cycle.
     if ppu.lx == ppu.win_lx and win_start_reaches_pixels(ppu):
       when defined(gb_m3_trace):
@@ -2059,8 +1970,8 @@ proc tick_shifter*(ppu: GbFifoPpu; gb: GB) =
     when WIN_EN_REVOKE_ANY:
       # A revocable window start's dots are counted here (CGB_WIN_EN_DEFER):
       # they are the restart's first five, all of which land in this
-      # empty-FIFO arm, where a byte test at the top of fifo_pipeline_dot
-      # measured +0.6%.
+      # empty-FIFO arm (a byte test at the top of fifo_pipeline_dot costs
+      # +0.6%).
       if ppu.win_defer > 0'u8:
         dec ppu.win_defer
         if ppu.win_defer == 0'u8 and ppu.win_revoking:
@@ -2110,8 +2021,7 @@ proc fetch_work_pending(ppu: GbFifoPpu; for_irq = false): bool {.inline.} =
   # A DMG line carried out of the previous one (DMG_WIN_LAST_PX_CARRY) owes
   # nothing for its own WX = 166 match: AGE stat-mode-window-dmgC reads the
   # line as 172 + SCX, the same as WX = 167, and gambatte window/m2int_wxA6_*
-  # [dmg] agree (holding mode 3 for it, as this once did, cost
-  # m2int_wxA6_scx3_m3stat_2 [dmg] and bought nothing).
+  # [dmg] agree (holding mode 3 for it fails m2int_wxA6_scx3_m3stat_2 [dmg]).
   false
 
 proc fetcher_retired(ppu: GbFifoPpu): bool {.inline.} =
@@ -2125,10 +2035,10 @@ proc fetcher_retired(ppu: GbFifoPpu): bool {.inline.} =
   ## term: it re-times the end of mode 3 on ordinary lines. Left inline: clang
   ## folds the first compare into the loop's `lx` test.
   when not M3_PIPE_LEAD_ANY:
-    # The degenerate case, spelled out for the mode 3 loop condition.
+    # The degenerate case, written out for the mode 3 loop condition.
     ppu.lx >= GB_WIDTH
   else:
-    # See `m3_retire_lx` for why the constant case is spelled out there.
+    # See `m3_retire_lx` for why the constant case is written out there.
     if ppu.lx < ppu.m3_retire_lx: return false
     if ppu.lx >= GB_WIDTH: return true
     not fetch_work_pending(ppu)
@@ -2261,17 +2171,15 @@ when WIN_REVOKE_DS_PUSH != 0:
 proc fifo_obj_abort*(ppu: GbFifoPpu; gb: GB) =
   ## LCDC.1 went low during an object's stall: the fetch is abandoned, the
   ## object dropped (it would re-trigger when the bit returns; gambatte
-  ## sprite_late_enable_spx18..1B set it back on this line), and the rest of
-  ## the penalty refunded to shifter and flag alike. charge = min(W -
-  ## OBJ_ABORT_LEAD - T, P): gambatte sprites/sprite_late_disable_spx{18,19,
-  ## 1A,1B}_{1,2} (STAT read at 257) and sprite_late_late_disable_* (read at
-  ## 261) fit k = 2 from both sides, and the _1 rows say the WAIT half is
-  ## abortable too. mealybug m3_lcdc_obj_en_change_variant bands 16/17 (a
-  ## BGP-black ruler) give the same k, so OBJ_ABORT_FLAG_HOLD is 0. A table of
-  ## trigger dots is only valid for the pipeline phase it was taken on. The
-  ## CGB does not cancel (CGB_OBJ_ABORT = 0): the variant's _cgb_c reference
-  ## keeps the full penalty, though a CGB LCDC.1 latency of 4+ dots would look
-  ## the same there.
+  ## sprite_late_enable_spx*), and the rest of the penalty refunded to
+  ## shifter and flag alike. charge = min(W - OBJ_ABORT_LEAD - T, P), with
+  ## OBJ_ABORT_LEAD = 2 fitted from both sides by gambatte
+  ## sprites/sprite_late_disable_* and sprite_late_late_disable_*; the WAIT
+  ## half is abortable too. mealybug m3_lcdc_obj_en_change_variant gives the
+  ## same lead, so OBJ_ABORT_FLAG_HOLD is 0. A table of trigger dots is only
+  ## valid for the pipeline phase it was taken on. The CGB does not cancel
+  ## (CGB_OBJ_ABORT = 0): the variant's _cgb_c reference keeps the full
+  ## penalty, though a CGB LCDC.1 latency of 4+ dots would look the same.
   ppu.fetching_sprite = false
   ppu.obj_penalty = 0
   if ppu.sprites.len > 0: ppu.sprites.delete(0)
@@ -2286,14 +2194,14 @@ proc fifo_obj_abort*(ppu: GbFifoPpu; gb: GB) =
 when OBJ_ABORT != 0 and OBJ_ABORT_LATE:
   proc fifo_obj_abort_late*(ppu: GbFifoPpu; gb: GB) =
     ## LCDC.1 went low on a dot the stall has already finished but which still
-    ## reaches the fetcher at W - OBJ_ABORT_LEAD (gambatte sprite_late_late_
-    ## disable_spx{1A,1B}_1, W = T + P): refund the dots still owed as catch-up
-    ## pipeline dots. Nothing else of the abort applies (the fetch has merged;
-    ## its pixels are the mixer's question). obj_abort_last is a sentinel on
-    ## the idx < 0 arm, where mealybug m3_lcdc_obj_en_change_variant band 0
-    ## wants no refund. Only while this mode 3 still draws: on a dot of
-    ## H-Blank or V-Blank that matches the window, the refund's shifter dots
-    ## wrote past the line, and past the framebuffer after line 143
+    ## reaches the fetcher at W - OBJ_ABORT_LEAD (gambatte
+    ## sprite_late_late_disable_*, W = T + P): refund the dots still owed as
+    ## catch-up pipeline dots. Nothing else of the abort applies (the fetch has
+    ## merged; its pixels are the mixer's question). obj_abort_last is a
+    ## sentinel on the idx < 0 arm, where mealybug
+    ## m3_lcdc_obj_en_change_variant band 0 wants no refund. Only while this
+    ## mode 3 still draws: in H-Blank or V-Blank the refund's shifter dots
+    ## would write past the line, and past the framebuffer after line 143
     ## (tests/gb_obj_abort_late_test.nim).
     let refund = ppu.obj_abort_last + 1 + OBJ_ABORT_LEAD - ppu.cycle_counter
     ppu.obj_abort_last = OBJ_ABORT_LAST_OFF
@@ -2314,7 +2222,7 @@ template m3_start_dot(gb: GB): int32 =
 template fifo_skip_target(ppu: GbFifoPpu; gb: GB; m: uint8): int32 =
   ## The next dot of this line an idle mode has something to do on. On the
   ## hottest path in the PPU (once per M-cycle of every memory access), so a
-  ## template: as a proc it measured +1.0%. Line 143's mode 0 has the CGB
+  ## template: as a proc it costs +1.0%. Line 143's mode 0 has the CGB
   ## early mode-2 pulse to visit first (M2_144_EARLY_DOT); `ly == 143` leads
   ## because it is false on 153 of 154 lines.
   when not STAT_M0_LEAD_DOMAIN:
@@ -2367,7 +2275,7 @@ proc fifo_line153_edge(ppu: GbFifoPpu; gb: GB) {.noinline.} =
   ## The LY 153 -> 0 snapback is an edge the STAT line has to see inside line
   ## 153 (daid ppu_scanline_bgp resyncs on it every frame): LY changes on the
   ## near side and the comparator re-latches LYC_SETTLE_DOTS later. noinline:
-  ## the caller is inlined into the bus path; in line this measured +0.37%.
+  ## the caller is inlined into the bus path; inlined, this costs +0.37%.
   if ppu.ly == 153:
     # Near side: LY changes; the comparator is blind for LYC_SETTLE_DOTS.
     ppu.ly = 0
@@ -2377,8 +2285,8 @@ proc fifo_line153_edge(ppu: GbFifoPpu; gb: GB) {.noinline.} =
                         ppu.cycle_counter == lyc_src_relatch_dot(gb)):
     # Far side: the comparator re-latches (`mode 1 with LY 0` is line 153).
     # Two dots in a double-speed build: the SOURCE relatches an M-cycle before
-    # the readable bit (LYC_SRC_RELATCH_LEAD, ppu.nim); at normal speed the
-    # the two compares fold to one; at a lead of 0 they are the same dot.
+    # the readable bit (LYC_SRC_RELATCH_LEAD, ppu.nim); at normal speed or a
+    # lead of 0 the two compares are the same dot.
     when CGB_LYC153_SRC_HOLD:
       # A CGB STAT write's enables landing on the source's relatch dot still
       # find the 153 match (CGB_LYC153_SRC_HOLD, gb.nim): the landing first.
@@ -2446,8 +2354,6 @@ when STAT_IRQ_SPLIT:
     ## The comparator's LY steps to the next line lyc_lead_dots before the
     ## readable LY does (the boundary's catch-up keeps the two equal
     ## everywhere else). Line 153's snap to 0 is its own machinery.
-    # The window's next-line WY check: removed 2026-11-13 for a clean
-    # rewrite.
     when CGB_LINE_END_ACTIVE:
       if gb.cgb_enabled and (ppu.lcd_status and 3'u8) == 0'u8:
         fifo_cgb_line_end(ppu, gb)
@@ -2887,22 +2793,21 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int)
 
 when CGB_LYC_CMP_LATCH:
   # A CGB LYC write in flight to the comparator has to turn every tick into
-  # fifo_tick_lyc_land until it has landed, for at most three ticks. Asked
-  # as a compare of its own in fifo_tick that is +0.30..0.53% of retired
-  # instructions on five GBC games (one load and branch per M-cycle), so it
-  # is folded into two compares the fast paths already make: the idle skip
+  # fifo_tick_lyc_land until it has landed, for at most three ticks. A
+  # compare of its own in fifo_tick costs +0.30..0.53% of retired
+  # instructions on GBC games (one load and branch per M-cycle), so it is
+  # folded into two compares the fast paths already make: the idle skip
   # stops at the window check's pending dot (fifo_skip_target), so that slot
   # is lent out, set to the current dot, and no idle span is skipped; and a
   # deferred mode 3 runs while the counter is short of `lazy_end`, which is
-  # held below every dot, where fifo_tick_slow's existing "is a span
-  # deferred" test finds it. Both are put back for the dots themselves
-  # (the loan never meets a window check or a real deferred span) and
-  # around every PPU register write (mem_write_open).
+  # held below every dot, where fifo_tick_slow's "is a span deferred" test
+  # finds it. Both are put back for the dots themselves (the loan never
+  # meets a window check or a real deferred span) and around every PPU
+  # register write (mem_write_open).
   const LYC_STOP_FOLD {.booldefine.} = true
   const LYC_STOP_FOLDED* = LYC_STOP_FOLD and WIN_CHECK_DEFER_ANY and PLAIN_LAZY_ON
     ## false (-d:LYC_STOP_FOLD=false, the A/B control, or either host
-    ## mechanism compiled out) = the explicit compare. The two are the same
-    ## machine: frame for frame on the five games, row for row on gambatte.
+    ## mechanism compiled out) = the explicit compare; the same machine.
   const LYC_LAZY_HOLD = -1'i32   # no span ends there: every dot is past it
 
   proc lyc_stop_release*(ppu: GbFifoPpu; gb: GB) {.noinline.} =
@@ -3090,9 +2995,9 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
           # WX < 7 puts the window's first pixel left of the screen, where the
           # equality cannot reach it: the line starts as a window line with the
           # window's own fine scroll and no restart (gambatte
-          # m2int_wx00_m3stat_1/2, GBMicrotest win0_scx3_a/b). WX = 7 is an
-          # ordinary start. Which WX decides it is read at the end of the
-          # throw-away fetch (fifo_head_window, WIN_LINE_START_LATCH).
+          # m2int_wx00_m3stat). WX = 7 is an ordinary start. Which WX decides
+          # it is read at the end of the throw-away fetch (fifo_head_window,
+          # WIN_LINE_START_LATCH).
           when WIN_LINE_START_LATCH != 0:
             fifo_reset_bg(ppu, false)
           else:
@@ -3167,8 +3072,8 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
                           (if ppu.cgb: CGB_PIPE_MCYCLES else: 0)
                         else: 0)
             # LY0_PIPE_MCYCLES is a DIFFERENCE, so line 0 takes the max of the
-            # two, not the sum (the sum puts thirteen CGB mealybug rows wrong on
-            # line 0 alone; mealybug's own line_0_fix compensates a difference).
+            # two, not the sum (the sum fails CGB mealybug tests on line 0;
+            # mealybug's own line_0_fix compensates a difference).
             let mc = if ppu.ly == 0 and not ppu.first_line:
                        max(base, LY0_PIPE_MCYCLES)
                      else: base
@@ -3200,10 +3105,9 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
           when DMG_WIN_LAST_PX_CARRY != 0:
             # Hardware clears "the window has started" at the end of the line;
             # on a DMG that is also the dot a WX = 166 match fires on, so the
-            # match survives into the next line (gambatte wxA6_wy00 carries
-            # every line; wxA6_wy01 does not carry out of LY 0 because the WY
-            # latch is clear). LCDC.5 is not tested: wxA6_weoff_at_xposA6
-            # clears it at x = 96 and still carries.
+            # match survives into the next line (gambatte window/on_screen/
+            # wxA6_wy*). LCDC.5 is not tested: wxA6_weoff_at_xposA6 clears it
+            # at x = 96 and still carries.
             if not ppu.cgb and int(ppu.wx) == GB_WIDTH + 6 and
                ppu.window_trigger:
               ppu.win_carry = true
@@ -3214,8 +3118,8 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
               when STAT_IRQ_SPLIT:
                 # The far side of the hand-off: the dot with m3_hold == lead is
                 # `lead` dots before the flag, for any lead in 0..m3_hold,
-                # moving nothing else (not the double-speed mode 3 end the
-                # gambatte sprites/*_m3stat_ds_1 rows read).
+                # moving nothing else (not the double-speed mode 3 end
+                # gambatte sprites/*_m3stat_ds_1 read).
                 if ppu.irq_mode == 3 and
                    int32(ppu.m3_hold) <=
                      ppu.m0_source_lead(stat_irq_lead(gb)):
@@ -3237,12 +3141,12 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
           else:
             fifo_pipeline_dot(ppu, gb)
       of 0:  # H-Blank
-        # Gating the four line-end events behind one `cycle_counter >=
-        # line_end - 4` compare was tried: +2.2% on cgb-acid-hell and nothing
-        # for the DMG, because fifo_skip_target already jumps straight to
-        # these dots. CGB raises the line-144 mode 2 STAT source one M-cycle
-        # early (m2_line144); nothing else happens on that dot, so run the
-        # edge detector explicitly.
+        # Do not gate the four line-end events behind one `cycle_counter >=
+        # line_end - 4` compare: +2.2% on cgb-acid-hell, nothing for the DMG
+        # (fifo_skip_target already jumps straight to these dots). CGB raises
+        # the line-144 mode 2 STAT source one M-cycle early (m2_line144);
+        # nothing else happens on that dot, so run the edge detector
+        # explicitly.
         if ppu.cycle_counter == M2_144_EARLY_DOT and ppu.ly == 143 and
            m2_144_early_active(gb):
           ppu_handle_stat_interrupt(ppu, gb)
