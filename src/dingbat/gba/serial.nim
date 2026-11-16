@@ -56,8 +56,8 @@ proc normal_transfer_cycles*(serial: Serial): int =
   let cycles_per_bit = if fast: 8 else: 64
   # Start-up overhead before the first shifted bit, pinned by the mGBA suite
   # SIO timing tests. They end on a Halt wake, so they measure this plus the
-  # BIOS's Halt return (hle_bios.HALT_RETURN_COST); pass under both the HLE
-  # and the real BIOS.
+  # BIOS's Halt return (under the HLE the stub BIOS's return code, hle_halt);
+  # pass under both the HLE and the real BIOS.
   const SIO_TRANSFER_OVERHEAD = 7 - TIMER_STOP_DELAY  # fitted on rows that stop a timer to read it
   bits * cycles_per_bit + SIO_TRANSFER_OVERHEAD
 

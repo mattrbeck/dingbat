@@ -48,7 +48,7 @@ proc clear_interrupt*(irq: GbInterrupts; line: uint16) =
 
 proc irq_clear_live*(irq: GbInterrupts; now: CycleCount): bool {.inline.} =
   ## Is a CGB dispatch still holding its timer or serial line clear
-  ## (IRQ_SAMPLE_CGB_TIMER_SERIAL_ADD, cpu.nim)? The upper bound keeps a stale
+  ## (IRQ_SAMPLE_CGB_TIMER_SERIAL_ADD, gb.nim)? The upper bound keeps a stale
   ## `clear_until` from matching after the scheduler's per-frame rebase.
   irq.clear_line != 0'u16 and now <= irq.clear_until and
     irq.clear_until - now < CycleCount(16)

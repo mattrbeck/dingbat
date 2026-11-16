@@ -131,7 +131,7 @@ proc swi_frame(swi_num: uint32): (int, int, int) =
   ## A routine's own System-stack frame below the dispatcher's {r2, lr}:
   ## words pushed, then the pop as one or two ldm/pop blocks. Needed only
   ## for an IntrWait, CpuSet or CpuFastSet an earlier build left parked
-  ## (check_intr_wait, hle_copy.nim); hle_unc.nim's routines push and pop
+  ## (check_intr_wait here; the copies' resume in hle_copy.nim); hle_unc.nim's routines push and pop
   ## their frames as steps.
   case swi_num
   of 0x04, 0x05: (2, 2, 0)                  # IntrWait: push {r4, lr}
@@ -217,11 +217,13 @@ const SWI_HLE_EXIT = 16
 # docs/playtest-bugs.md §82)
 const SOFTRESET_BODY {.intdefine.} = 810
 
-# The part of the Stop routine the BIOS runs after the wake IRQ is serviced
+# The part of a Halt/Stop SWI the BIOS runs after the wake IRQ is serviced
 # (bx lr, pop {r2, lr}, mode restore, pop {fp, ip, lr}, movs pc, lr with
-# refill), deferred to after the wake (mGBA suite SIO timing tests). Halt
-# runs that return as stub-BIOS code (hle_halt). 21, not the 20 counted:
-# vbwait.s stamps sit one cycle off at 20.
+# refill = 21, less the cycle the IRQ return charges on the vector side =
+# 20), deferred to after the wake. Only Stop charges it here: Halt returns
+# as stub-BIOS code (hle_halt). 21, not 20, was measured on the Halt path
+# (vbwait.s stamps one cycle off at 20; mGBA suite SIO timing tests); Stop
+# shares that return code (0x1A8 shares 0x1AC) and is assumed to match.
 const HALT_RETURN_COST {.intdefine.} = 21
 
 # --- Routine-body cost models ---

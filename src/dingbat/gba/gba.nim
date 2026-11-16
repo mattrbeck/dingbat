@@ -1360,7 +1360,8 @@ const ROM_REFILL_ORDERED* {.booldefine.} = true
 const BRANCH_COMMIT_WAIT* {.booldefine.} = true
   ## A branch out of a gamepak stream waits out a prefetch halfword in its
   ## final cycle (cpu.clear_pipeline). Off: Final Fight One lands 9.7k
-  ## cycles sooner, still a frame behind (docs/playtest-bugs.md section 29).
+  ## cycles sooner, still a frame behind the reference runs
+  ## (docs/playtest-bugs.md section 29).
 const ROM_REFILL_ORDERED_PF* {.booldefine.} = true
 const DMA_KEEPS_PREFETCH* {.booldefine.} = true
   ## A DMA that never touches the gamepak leaves the prefetcher running: the

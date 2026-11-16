@@ -10,12 +10,13 @@
 ## write32), so it sees exactly what that CPU sees -- except TCM, which DMA
 ## cannot reach (bus9 checks `dma_access`).
 ##
-## Bus time. ARM9 (disp_dmatime; GBATEK gives no DMA timing beyond "main
-## memory read cycles are performed simultaneously with write cycles to
-## other memory"): a 32-bit unit costs its read (main RAM 1, VRAM/palette 2,
-## the 32-bit-bus regions 1) plus its write (main RAM 2, VRAM/palette 2,
-## others 1), a 16-bit unit 2, main RAM to main RAM 18 (32-bit) or 16
-## (16-bit); a block adds 1 cycle, 2 when it moves more than one unit.
+## Bus time. ARM9 (disp_dmatime on the reference runs, docs/oracles.md;
+## GBATEK gives no DMA timing beyond "main memory read cycles are performed
+## simultaneously with write cycles to other memory"): a 32-bit unit costs
+## its read (main RAM 1, VRAM/palette 2, the 32-bit-bus regions 1) plus its
+## write (main RAM 2, VRAM/palette 2, others 1), a 16-bit unit 2, main RAM to
+## main RAM 18 (32-bit) or 16 (16-bit); a block adds 1 cycle, 2 when it
+## moves more than one unit.
 ## GBA-slot sides and the ARM7 use an estimate (Assumed): one bus cycle per
 ## side on a 32-bit bus, one per halfword on a 16-bit one, plus 4 per block.
 

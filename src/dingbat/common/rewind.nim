@@ -22,13 +22,13 @@ when defined(rewindprof):
   const
     RpSerialize* = 0   ## the caller's state_payload()
     RpXor* = 1         ## XOR of the new payload against the previous one
-    RpCompress* = 2    ## zlib of the delta body
+    RpCompress* = 2    ## fast_pack of the delta body
     RpThumbGrab* = 3   ## the caller's framebuffer downscale
-    RpThumbZlib* = 4   ## zlib of the downscaled thumbnail
-    RpKeyZlib* = 5     ## zlib of a whole keyframe payload
+    RpThumbZlib* = 4   ## fast_pack of the downscaled thumbnail
+    RpKeyZlib* = 5     ## fast_pack of a whole keyframe payload
     RpEvict* = 6       ## eviction at the cap
     RpPushTotal* = 7   ## the whole push, serialize included
-    RpPops* = 8        ## pop(): inflate + XOR
+    RpPops* = 8        ## pop(): unpack + XOR
   var rewindprof*: array[16, int64]
   var rewindprof_n*: array[16, int]
   var rewindprof_bytes*: array[16, int64]
@@ -49,11 +49,11 @@ type
 
   Delta = object
     id: int         # absolute ID of the snapshot this body reconstructs
-    packed: string  # zlib XOR delta against the next-newer snapshot
+    packed: string  # fast_pack'd XOR delta against the next-newer snapshot
 
   KeyFrame = object
     id: int
-    packed: string  # whole snapshot payload, zlib
+    packed: string  # whole snapshot payload, fast_pack'd
 
   ThumbEntry = object
     id: int

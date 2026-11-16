@@ -503,7 +503,8 @@ template single_access[B](cpu: ArmCpu[B]; load: bool) =
   ## in parallel)"), so the access overlaps the opcode's own cycle (the
   ## bus's `data_overlap`) and the load interlock (GBATEK's "1L", charged
   ## only when the next opcode uses the result) is not modelled: Assumed
-  ## hidden (disp_cpu9time, docs/nds/accuracy.md).
+  ## hidden (disp_cpu9time on the reference runs, docs/oracles.md,
+  ## docs/nds/accuracy.md).
   mixin data_overlap, armv5
   when armv5(B): data_overlap(cpu.bus)
   else:

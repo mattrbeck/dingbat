@@ -191,7 +191,8 @@ proc mmem_room*(e: Engine2D): bool {.inline.} =
 
 proc mmem_take*(e: Engine2D; x0: int) =
   ## The display takes 8 pixels for mmem_line[x0 ..< x0 + 8]; a dry FIFO
-  ## repeats the last pixel taken (Assumed; disp_mmem phase E agrees).
+  ## repeats the last pixel taken (Assumed; disp_mmem phase E on the reference
+  ## runs agrees, docs/oracles.md).
   for x in x0 ..< x0 + 8:
     if e.mmem_n > 0:
       e.mmem_last = e.mmem_fifo[e.mmem_rd]
@@ -284,12 +285,13 @@ template ch_b(c: uint32): uint32 = (c shr 10) and 0x1F
 
 # Engine A's colour effects and master brightness work on 6-bit channels
 # (GBATEK MASTER_BRIGHT: "6bit R,G,B Intensities"; the 3D layer is 6-bit),
-# as the LCD's 18-bit output. A 2D colour enters as 2c (disp_bright: a white
-# 7FFFh is 62 after every path), a 3D one with its own low bit. The
-# composite (`gfx`, capture source A) keeps the top five bits, as GBATEK's
-# capture stores ("15bit color depth (even when capturing 18bit
-# 3D-images)"), and `lsb` each channel's dropped low bit (bit 0 R, 1 G, 2 B)
-# for master brightness. The display line is the result's top five bits.
+# as the LCD's 18-bit output. A 2D colour enters as 2c (disp_bright on the
+# reference runs, docs/oracles.md: a white 7FFFh is 62 after every path), a
+# 3D one with its own low bit. The composite (`gfx`, capture source A) keeps
+# the top five bits, as GBATEK's capture stores ("15bit color depth (even
+# when capturing 18bit 3D-images)"), and `lsb` each channel's dropped low bit
+# (bit 0 R, 1 G, 2 B) for master brightness. The display line is the
+# result's top five bits.
 
 template ch6(c: uint16; lo: uint8; i: static int): uint32 =
   ## Channel i (0 R, 1 G, 2 B) of a 15-bit colour plus its low bits, 0..63.
@@ -302,20 +304,21 @@ proc pack6(r, g, b: uint32; lo: var uint8): uint16 {.inline.} =
 proc blend_alpha(a: uint16; la: uint8; b: uint16; lb: uint8; eva, evb: uint32;
                  lo: var uint8): uint16 {.inline.} =
   ## (a*EVA + b*EVB) / 16 per 6-bit channel, rounded, saturated (disp_bright
-  ## page 2 fails every other rounding; GBATEK gives the GBA's 5-bit form).
+  ## page 2 fails every other rounding on the reference runs, docs/oracles.md;
+  ## GBATEK gives the GBA's 5-bit form).
   template mix(i: static int): uint32 =
     min(63'u32, (ch6(a, la, i) * eva + ch6(b, lb, i) * evb + 8) shr 4)
   pack6(mix(0), mix(1), mix(2), lo)
 
 proc brighten(a: uint16; la: uint8; evy: uint32; lo: var uint8): uint16 {.inline.} =
-  ## I + (63-I)*EVY/16, rounded (disp_bright, as blend_alpha).
+  ## I + (63-I)*EVY/16, rounded (disp_bright reference runs, as blend_alpha).
   template up(i: static int): uint32 =
     (let x = ch6(a, la, i); x + (((63 - x) * evy + 8) shr 4))
   pack6(up(0), up(1), up(2), lo)
 
 proc darken(a: uint16; la: uint8; evy: uint32; lo: var uint8): uint16 {.inline.} =
-  ## I - I*EVY/16, the whole rounded (disp_bright: rounding I*EVY/16 before
-  ## the subtraction fails).
+  ## I - I*EVY/16, the whole rounded (disp_bright reference runs: rounding
+  ## I*EVY/16 before the subtraction fails).
   template down(i: static int): uint32 =
     (ch6(a, la, i) * (16 - evy) + 8) shr 4
   pack6(down(0), down(1), down(2), lo)
@@ -330,8 +333,9 @@ template lsb3d(p: uint32): uint8 =
 
 proc blend_3d(p: uint32; below: uint16; lb: uint8; lo: var uint8): uint16 {.inline.} =
   ## 3D over a 2nd-target layer: the 3D pixel's own alpha weights it,
-  ## (c3d*(a+1) + c2d*(31-a)) / 32 on 6-bit channels, rounded (disp_bright;
-  ## GBATEK only guesses "EVA=A/2, EVB=16-A/2", which fits 16).
+  ## (c3d*(a+1) + c2d*(31-a)) / 32 on 6-bit channels, rounded (disp_bright
+  ## reference runs, docs/oracles.md; GBATEK only guesses
+  ## "EVA=A/2, EVB=16-A/2", which fits 16).
   let a = alpha5(p)
   template mix(i: static int): uint32 =
     (((p shr (8 * i)) and 0x3F) * (a + 1) + ch6(below, lb, i) * (31 - a) + 16) shr 5
@@ -1032,9 +1036,9 @@ template bright_dot(c: var uint16; lo: uint8; mode, factor: uint32) =
 proc apply_master_brightness(e: Engine2D; lsb: bool) =
   ## MASTER_BRIGHT on 6-bit channels (GBATEK: "New = Old + (63-Old) *
   ## Factor/16", "New = Old - Old * Factor/16"), the result truncated
-  ## (disp_bright page 1; truncating Old*Factor/16 before the subtraction
-  ## fails). `lsb`: the composite's low bits apply (display mode 1); VRAM and
-  ## main-memory pixels are 15-bit, widened as 2c.
+  ## (disp_bright page 1 on the reference runs; truncating Old*Factor/16
+  ## before the subtraction fails). `lsb`: the composite's low bits apply
+  ## (display mode 1); VRAM and main-memory pixels are 15-bit, widened as 2c.
   let mode = e.master_bright shr 14
   let factor = min(16'u32, uint32(e.master_bright and 0x1F))
   if mode == 0 or mode == 3 or factor == 0: return

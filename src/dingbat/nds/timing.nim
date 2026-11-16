@@ -376,8 +376,9 @@ proc wifi7*(cnt: uint16; a: uint32; width: int; seq: bool): int64 {.inline.} =
   ## times per halfword (GBATEK "DS Wifi Unused Registers", WIFIWAITCNT):
   ## WS0 (4800000h-4807FFFh, the RAM) N = 10/8/6/18, S = 6/4; WS1
   ## (4808000h-480FFFFh, the registers) N = 10/8/6/18, S = 10/4; a word is
-  ## two halfwords (arm7_timing, docs/nds/accuracy.md). Above 4810000h the WS
-  ## bit (address bit 15) is Assumed to pick the same way.
+  ## two halfwords (arm7_timing on the reference runs, docs/oracles.md,
+  ## docs/nds/accuracy.md). Above 4810000h the WS bit (address bit 15) is
+  ## Assumed to pick the same way.
   const first = [10'i64, 8, 6, 18]
   let ws1 = (a and 0x8000'u32) != 0
   let n = if ws1: first[(cnt shr 3) and 3] else: first[cnt and 3]

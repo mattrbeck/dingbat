@@ -466,7 +466,7 @@ proc cpu_halt_tick(gb: GB): bool {.inline.} =
       if result and halt_m2_lead_blind(gb): result = false
     when M0_HALT_BLIND_DOTS > 0 or CGB_M0_HALT_BLIND_DOTS > 0 or
          CGB_M0_HALT_BLIND_DS_DOTS > 0:
-      # M0_HALT_BLIND_DOTS (ppu.nim; default 0).
+      # M0_HALT_BLIND_DOTS (ppu.nim; default 2, DMG only; the CGB knobs default 0).
       if result and halt_m0_tail_blind(gb): result = false
   else:
     # Bus half whole, PPU half split: the timer is a head source and runs its

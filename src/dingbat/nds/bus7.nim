@@ -266,9 +266,9 @@ template break_fetch7(n: NDS) =
   ## PENALTY"). After a load GBATEK's 1S+1N+1I would leave it sequential;
   ## it is charged nonsequential anyway: Pokemon Mystery Dungeon's boot (ARM7
   ## code in main RAM testing wifi RAM) keeps its per-frame RNG on the
-  ## reference frames only so (arm7_timing, docs/nds/accuracy.md). Marked as
-  ## an odd `last_fetch7`: fetch_cost7 / fetch_jump7 then charge N without
-  ## the branch refill.
+  ## reference frames only so (arm7_timing on the reference runs,
+  ## docs/oracles.md, docs/nds/accuracy.md). Marked as an odd `last_fetch7`:
+  ## fetch_cost7 / fetch_jump7 then charge N without the branch refill.
   n.last_fetch7 = n.last_fetch7 or 1
 
 proc data_cost7(n: NDS; a: uint32; width: static int) {.inline.} =

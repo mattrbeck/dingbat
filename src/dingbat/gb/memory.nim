@@ -1238,7 +1238,7 @@ proc stop_instr*(mem: GbMemory; gb: GB): bool =
     gb.apu.apu_rescale_speed(gb, old_speed, mem.current_speed)
     gb.scheduler.set_speed(mem.current_speed)
     # Re-aim the DIV-APU edge at the NEW speed: set_speed's rescale would
-    # also scale the tap's lag (APU_SPSW_TAP_LAG_T, timer.nim).
+    # also scale the tap's lag (APU_SPSW_TAP_LAG_T, apu.nim).
     gb.scheduler.clear(etAPUFrameSeq)
     gb.scheduler.schedule(apu_div_phase(gb.timer, gb), etAPUFrameSeq)
     # The switch leaf's HALT; skipped when an interrupt is pending (the

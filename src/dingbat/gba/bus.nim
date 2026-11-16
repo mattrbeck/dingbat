@@ -1183,13 +1183,13 @@ proc install_fetch_cache(bus: Bus; page: uint32): bool =
   true
 
 const OBUS_LEAD {.intdefine.} = 0
+  ## -d:OBUS_LEAD=N (default 0, -d:obuslatch only): stamp latch halves N
+  ## cycles ahead, for the next fetch the pipeline issues before dingbat
+  ## charges it. The mGBA suite's Break test moves only in 34-read steps.
 const OBUS_BOUNDARY_HALF {.booldefine.} = true
   ## Thumb code in IWRAM/BIOS reading open bus right after a burst that won
   ## the bus from its own fetch sees half DMA word, half opcode
   ## (read_open_bus_word).
-  ## -d:OBUS_LEAD=N (default 0, -d:obuslatch only): stamp latch halves N
-  ## cycles ahead, for the next fetch the pipeline issues before dingbat
-  ## charges it. The mGBA suite's Break test moves only in 34-read steps.
 
 when defined(obuslatchdbg):
   # -d:obuslatchdbg (off by default): logs to OLAT_LOG, since the harness

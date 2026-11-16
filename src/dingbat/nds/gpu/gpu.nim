@@ -157,7 +157,8 @@ proc capture_line(g: Gpu; y: int) =
       if a_3d:
         # "Dest_Intensity = SrcA_Intensity; Dest_Alpha = SrcA_Alpha"
         # (GBATEK): a transparent 3D dot keeps its colour, without bit 15
-        # (disp_capture SRC3: the rear plane's colour)
+        # (disp_capture SRC3: the rear plane's colour on the reference runs,
+        # docs/oracles.md)
         if l3 != nil:
           ca = to_bgr555(l3[x]) or (if alpha5(l3[x]) != 0: 0x8000'u16 else: 0)
       else:

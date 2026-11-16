@@ -1496,7 +1496,7 @@ type
     spsw_irq_leaf_hold_short*: bool
       ## CGB E. Half the oscillator-restart hold on the aborted-halt speed
       ## switch leaf -- one M-cycle where CGB B and C lose two. See
-      ## `SPEED_SWITCH_IRQ_LEAF_HOLD_T` in memory.nim for both measurements;
+      ## `SPEED_SWITCH_IRQ_LEAF_HOLD_T` in timer.nim for both measurements;
       ## it is the same silicon difference c-sp's `spsw-interrupts.inc`
       ## encodes as `OFS_B`, and CGB D and AGB are unmeasured.
     spsw_div_mid_taps_slow*: bool
@@ -2325,9 +2325,9 @@ type
     first_half_of_length_period*: bool
     # The DIV-APU tap runs one M-cycle behind after an ODD number of switches
     # into double speed (AGE `speed-switch/spsw-ch2-lc-delay`; see
-    # APU_SPSW_TAP_LAG_T in timer.nim). Toggled on each KEY1 switch into
-    # double speed, cleared by an APU power-off. Serialized from GB payload
-    # rev 6.
+    # APU_SPSW_TAP_LAG_T in apu.nim). Toggled on each KEY1 switch into
+    # double speed, cleared by either APU power edge (apu_drop_spsw_lag).
+    # Serialized from GB payload rev 6.
     spsw_fs_lag*:         bool
     # Set by an APU power-on (and the boot hand-off), consumed by the next KEY1
     # switch: the first oscillator restart after a power-on re-phases the
