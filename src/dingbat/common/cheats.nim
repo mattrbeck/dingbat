@@ -1,10 +1,8 @@
 ## Cheat-code engine, shared by the GBA and GB cores.
 ##
-## The engine is deliberately decoupled from the emulator cores: it only knows
-## how to parse cheat codes into a flat list of `CheatOp`s and how to apply them
-## through a small set of memory-access callbacks (`MemHooks`). Each core wires
-## its own memory in and calls `apply_ram`/`apply_rom` — cheats.nim never imports
-## gba/gb, so there is no dependency cycle.
+## It parses codes into a flat list of `CheatOp`s and applies them through
+## memory callbacks (`MemHooks`); each core wires its memory in and calls
+## `apply_ram`/`apply_rom`. cheats.nim never imports gba/gb.
 ##
 ## Supported formats (auto-detected from the code's shape):
 ##   GB / GBC
@@ -231,8 +229,8 @@ const
   ## engine gates on L+R held together (KEYINPUT bits 9 and 8, active low).
   AR_BUTTON_MASK = 0x0300'u32
   ## A fill "[a0aaaaa..a0aaaaa+xxxxxx]=yy" expands to one op per element; a
-  ## count past this is rejected rather than allocating millions of ops.
-  ## Assumed: no real code fills more than a few KB.
+  ## longer count fails rather than allocating millions of ops (assumed: no
+  ## real code fills more than a few KB).
   FILL_LIMIT = 0x1000
 
 type
@@ -554,13 +552,11 @@ proc parse_gba_codes(codes: string; forced: CheatFormat):
   var lines: seq[GbaCodeLine]
   let tok_err = tokenise_gba(codes, forced, lines)
   if tok_err.len > 0: return (@[], tok_err)
-  # Encrypted or plain? A forced format decides. Otherwise: published lists
-  # are encrypted far more often than not, so that is tried first — the list
-  # is encrypted when its decryption reads entirely as RAW-table codes, and
-  # is taken as already decrypted when it does not. (An encrypted line reads
-  # as a plausible RAW code by accident a few percent of the time; a plain
-  # line decrypts to one about one percent of the time, and every extra line
-  # shrinks that.)
+  # Encrypted or plain? A forced format decides. Otherwise try decrypting
+  # first (published lists are usually encrypted): the list is encrypted when
+  # its decryption reads entirely as RAW-table codes, else taken as already
+  # decrypted. A plain line decrypts to a plausible code about 1% of the time,
+  # and every extra line shrinks that.
   var trial: seq[(uint32, uint32)]
   for l in lines:
     if l.codebreaker: continue
@@ -693,15 +689,13 @@ proc apply_ram*(engine: CheatEngine; mem: MemHooks) =
       of caAnd: width_write(mem, op.address, cond_read(mem, op.address, op.width) and op.value, op.width)
       of caAdd: width_write(mem, op.address, cond_read(mem, op.address, op.width) + op.value, op.width)
       of caIndirect:
-        # Follow the pointer stored at op.address, then write at ptr + offset.
         let target = mem.read32(op.address) + op.offset
         width_write(mem, target, op.value, op.width)
       of caCond:
         if not cond_passes(cond_read(mem, op.address, op.width), op.value, op.cmp):
           skip = int(op.skip)
       of caIfButtons:
-        # KEYINPUT is active-low: a held button reads 0. Gate unless every button
-        # in the mask is held.
+        # Active-low: gate unless every button in the mask is held.
         if (uint32(mem.read16(KEYINPUT_ADDRESS)) and op.value) != 0:
           skip = int(op.skip)
       of caRomPatch, caUnsupported: discard
@@ -714,7 +708,6 @@ proc rom_patch_offsets(rom_len: int; op: CheatOp): seq[int] =
   ## CPU addresses map to one or more ROM offsets. GB Game Genie addresses
   ## are 16-bit; GBA GSA_PATCH addresses are already absolute cart offsets.
   if op.address >= 0x08000000'u32:
-    # GBA: address is 0x08000000-based into the ROM image.
     let off = int(op.address - 0x08000000'u32)
     if off < rom_len: result.add off
     return
@@ -777,7 +770,7 @@ proc serialize*(engine: CheatEngine): string =
 
 proc deserialize*(engine: CheatEngine; text: string) =
   ## Inverse of `serialize`. Each `[x] name` header starts a new cheat; the
-  ## following non-blank lines are its codes until the next header/blank run.
+  ## non-blank lines after it are its codes until the next header.
   engine.cheats.setLen(0)
   var cur: Cheat
   var have = false

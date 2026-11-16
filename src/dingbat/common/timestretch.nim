@@ -91,10 +91,10 @@ proc bestOffset(ts: TimeStretch): int =
     let i = (ts.anNominal + lo + n) and CAPMASK
     ts.monoCand[n] = ts.inL[i] + ts.inR[i]
   # The window's energy slides one sample per candidate instead of being
-  # summed again, and the dot product runs eight independent sums: one
-  # chain of dependent adds was the whole cost of the search (-76 % native).
-  # The scores round differently, so a near-tie could pick another offset;
-  # on 70 s of FireRed audio every offset, so every output bit, is the same.
+  # summed again, and the dot product runs eight independent sums: one chain
+  # of dependent adds was the whole cost of the search (-76 % native). The
+  # scores round differently, so a near-tie could pick another offset; on
+  # 70 s of FireRed audio every output bit is the same.
   var energy = 0.0'f32
   for n in 0 ..< OVL: energy += ts.monoCand[n] * ts.monoCand[n]
   for cand in lo .. SEARCH:

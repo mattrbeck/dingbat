@@ -4,11 +4,10 @@
 # onto NR10-NR52), so both cores run the same channels. This module holds what
 # needs no host: the channel state and the state machines that only read it.
 # Everything that reads a clock, a register block or a revision lives in
-# psg_channels.nim, which each core `include`s after defining its hooks, so
-# each core compiles its own copy with its own constants folded in.
+# psg_channels.nim, which each core `include`s after defining its hooks.
 #
-# The channel objects carry the union of both cores' fields. A field only one
-# core uses today says so at its declaration.
+# The channel objects carry the union of both cores' fields; a field only one
+# core uses says so at its declaration.
 
 import scheduler
 
@@ -32,13 +31,11 @@ const ENV_TRIGGER_LEAD_T* {.intdefine.} = 4
   ## GB: a trigger within this many scheduler cycles before the frame
   ## sequencer's step 6 finds step 7 next already and gets its extra envelope
   ## clock (psg_env_trigger_extra): the write lands in the M-cycle whose end
-  ## is the DIV-APU edge. gambatte sound/ch2_init_reset_env_counter_timing_
-  ## {9..16}: a period-1 note triggered 8 cycles before step 6 steps at the
-  ## next step 7 (`_9`/`_10` [dmg], `_13`/`_14` [cgb]), one triggered 4
-  ## before it at the one after (`_11`/`_12` [dmg], `_15`/`_16` [cgb]). 4..7
-  ## pass; 0..3 lose `_11` [dmg] and `_15` [cgb], 8 loses `_10` [dmg] and
-  ## `_14` [cgb]. The same M-cycle as APU_POWERON_TAP_LEAD (gb/apu.nim) and
-  ## the DMG's sweep lead below. Measured at single speed only. 0 leaves
+  ## is the DIV-APU edge. Pinned by gambatte
+  ## sound/ch2_init_reset_env_counter_timing_*: a period-1 note triggered 8
+  ## cycles before step 6 steps at the next step 7, one 4 before at the one
+  ## after; 4..7 pass. The same M-cycle as APU_POWERON_TAP_LEAD (gb/apu.nim)
+  ## and the DMG's sweep lead below. Measured at single speed only. 0 leaves
   ## Pan Docs' rule alone.
 const SWEEP_TRIGGER_LEAD_T_DMG* {.intdefine.} = 4
 const SWEEP_TRIGGER_LEAD_T_CGB* {.intdefine.} = 8
@@ -46,27 +43,14 @@ const SWEEP_TRIGGER_LEAD_T_CGB* {.intdefine.} = 8
   ## 2 and 6) misses that clock: the sweep timer starts one clock later (0 =
   ## none). CPU cycles, so the same count of M-cycles at double speed
   ## (psg_sweep_trigger_extra). GB only.
-  ## DMG, 4: gambatte sound/ch1_init_reset_sweep_counter_timing_{1..6} [dmg]
-  ## (pace 2, step 0 at $700: the second clock's overflow check stops the
-  ## note unless NR10 is cleared first) take the clock 8 cycles after the
-  ## trigger (`_1`, `_3`) and miss the one 4 after (`_4`, `_6`); DocBoy
-  ## dmg/apu ch1_period_sweep_change_period_nr14_during_recalc_delay14284
-  ## (8 before: taken) and `_delay14285_round{1,2}` (4 before: missed).
-  ## 0 loses `_4` [dmg] and `delay14285_round2`; 8 loses `_3` [dmg],
-  ## `delay14284` and `step0_delay14284_round1`.
-  ## CGB, 8: gambatte `_7`..`_12` [cgb] take the clock 12 cycles after the
-  ## trigger (`_7`, `_9`) and miss the one 8 after (`_10`, `_12`); SameSuite
-  ## channel_1_sweep_restart_2 (CGB E) passes at 8 only; DocBoy cgb/double_
-  ## speed/apu/ch1 `..._nr14_during_recalc_delay1224{1,2}_round2` and six
-  ## `double_trigger_delay{0,1,2}_delay1224{3..6}_round1` rows want 8
-  ## scheduler cycles at double speed too (two M-cycles at either speed),
-  ## and `delay12240`, `step0_delay12240_round2` and `double_trigger_
-  ## delay{0,1,2}_delay1224{2,3,4}` fail at 12. 4 loses `_10` [cgb],
-  ## SameSuite's row and four of those DocBoy rows (0 all eight and cgb/apu
-  ## `delay14285_round2`); 12 loses `_9` [cgb], the 12240 rows and cgb/apu
-  ## `step0_delay14283_round2`. DocBoy's two single-speed CGB rows that
-  ## want 4 (`delay14284`, `step0_delay14284_round1`) are not scored (the
-  ## runner's DocboyNotScored).
+  ## DMG, 4: a trigger 8 cycles before the clock takes it, 4 before misses it
+  ## (gambatte sound/ch1_init_reset_sweep_counter_timing_* [dmg], DocBoy dmg/apu
+  ## ch1_period_sweep_change_period_nr14_during_recalc_delay1428*).
+  ## CGB, 8: 12 cycles before takes it, 8 before misses it; at double speed
+  ## too, two M-cycles at either speed (gambatte `_7`..`_12` [cgb], SameSuite
+  ## channel_1_sweep_restart_2, DocBoy cgb/double_speed/apu/ch1
+  ## `..._during_recalc_*delay1224*`). DocBoy's two single-speed CGB tests
+  ## that want 4 are not scored (the runner's DocboyNotScored).
 
 const PSG_WAVE_BANK* = 16
   ## Bytes in one wave RAM bank. The GB has one; the GBA two (SOUND3CNT_L).
@@ -77,11 +61,11 @@ type
     dac_enabled*:    bool
     length_counter*: int
     length_enable*:  bool
-    # Absolute scheduler cycle of the next waveform step, or PSG_NO_STEP.
-    # Replaces a per-period scheduler event: the waveform is advanced in
-    # closed form when something observes it (psg_channels.nim). NOT
-    # serialized as a field -- each savestate.nim converts it to/from an
-    # etAPUChannel<N> event so the state format is unchanged.
+    # Absolute scheduler cycle of the next waveform step, or PSG_NO_STEP. The
+    # waveform is advanced in closed form when something observes it
+    # (psg_channels.nim). NOT serialized as a field: each savestate.nim
+    # converts it to/from an etAPUChannel<N> event so the state format is
+    # unchanged.
     next_step*:      CycleCount
     # GBA: the delay the pending step was armed with, for the scheduler
     # tie-break a step landing on an observer's own cycle reproduces
@@ -96,12 +80,12 @@ type
     current_volume*:         uint8
     vol_env_is_updating*:    bool
     # An NRx2 write taking the envelope period from zero to non-zero makes a
-    # later DIV-APU step tick that channel's envelope once more (SameSuite
-    # channel_1_nrx2_speed_change): the number of steps until it lands, 0 for
-    # none. The GBA arms 1 and fires at the next odd stage; the GB arms 1 or 2
-    # by the tap bit's level (psg_write_nrx2). Serialized from GB payload
-    # rev 6 (a bool meaning "the next odd stage" until rev 8, which counts)
-    # and GBA rev 10 (as a bool): a 512 Hz step can span a frame edge.
+    # later DIV-APU step tick that channel's envelope once more: the number of
+    # steps until it lands, 0 for none. The GBA arms 1 and fires at the next
+    # odd stage; the GB arms 1 or 2 by the tap bit's level (psg_write_nrx2).
+    # Serialized from GB payload rev 6 (a bool meaning "the next odd stage"
+    # until rev 8, which counts) and GBA rev 10 (as a bool): a 512 Hz step can
+    # span a frame edge.
     env_extra_tick*:         uint8
 
   PsgSquare* = ref object of PsgEnvChannel

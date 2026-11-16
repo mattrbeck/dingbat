@@ -115,10 +115,9 @@ iterator events*(s: Scheduler): Event =
     yield s.evbuf[i]
 
 proc schedule*(s: Scheduler; cycles: int; kind: EventType) =
-  # Only a corrupt save state fills the buffer: one that loads with an event
-  # chain duplicated doubles it every line. The event is dropped rather than
-  # written past evbuf (an assert is gone in -d:danger, and in a quirky core
-  # the write would go ahead anyway).
+  # Only a corrupt save state fills the buffer (an event chain loaded twice
+  # doubles every line). Drop the event rather than write past evbuf: an
+  # assert is gone in -d:danger.
   if s.nevents >= MAX_EVENTS: return
   let target = s.cycles + CycleCount(cycles)
   # Ties keep the newest event at the higher index so it pops first
@@ -317,11 +316,10 @@ proc load_from*(s: Scheduler; r: var Reader; pad = false) =
     if int(kind) > int(high(EventType)):
       raise state_error("unknown scheduler event kind in state")
     let target = CycleCount(r.read_u64())
-    # Checked as a distance from `s.cycles`, not an absolute value, so one
-    # guard covers both a wild cycle counter and a wild deadline (either
-    # overflows the cycle arithmetic on the next step_frame with a Defect,
-    # which is not a CatchableError). Unsigned wrap gives both distances,
-    # including for the uint32 emscripten CycleCount.
+    # Checked as a distance from `s.cycles`, so one guard covers a wild cycle
+    # counter and a wild deadline (either overflows the cycle arithmetic on
+    # the next step_frame with a Defect, not a CatchableError). Unsigned wrap
+    # gives both distances, also for the uint32 emscripten CycleCount.
     let ahead  = target - s.cycles
     let behind = s.cycles - target
     if ahead > MAX_EVENT_HORIZON and behind > MAX_EVENT_OVERDUE:
@@ -341,8 +339,7 @@ proc set_speed*(s: Scheduler; speed: uint8) =
   if speed == old: return
   s.current_speed = speed
   for i in 0 ..< s.nevents:
-    # etIME and etGbLycEdge are counted in M-cycles (4 CPU cycles at both
-    # speeds) and must not be rescaled; schedule_gb leaves the same two unscaled.
+    # etIME and etGbLycEdge are not rescaled (M-cycles; see schedule_gb).
     if s.evbuf[i].kind != etIME and s.evbuf[i].kind != etGbLycEdge:
       # Real-time events are stored in CPU cycles, which run twice as fast in
       # double speed: entering doubles the remaining delay, leaving halves it.

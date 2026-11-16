@@ -272,8 +272,8 @@ type
     vfHq4x = "hq4x"
     vfXbr  = "xbr"
     # Screen-structure looks share the selector with the smoothing filters so
-    # exactly one is active (this retired the separate Scanlines toggle). Not
-    # shader filter_mode values; the frontends translate them.
+    # exactly one is active. Not shader filter_mode values; the frontends
+    # translate them.
     vfGrid     = "grid"
     vfSubpixel = "rgb"
 
@@ -311,9 +311,9 @@ type
     # The window was fullscreen when dingbat last quit (or last toggled it);
     # window_restore.nim decides whether the next start honours it.
     fullscreen*:        bool
-    # DS Beta (Settings > General > Advanced): .nds games load. Off, the app
-    # is what it was before the DS core; the "nds" keys below are written
-    # only when they differ from their defaults, so a file stays as it was.
+    # DS Beta (Settings > General > Advanced): .nds games load. The "nds" keys
+    # below are written only when they differ from their defaults, so a file
+    # from a user who never turned it on stays as it was.
     ds_beta*:           bool
     nds_bios9_path*:    string   # DS ARM9 BIOS dump ("" = HLE)
     nds_bios7_path*:    string   # DS ARM7 BIOS dump ("" = HLE)

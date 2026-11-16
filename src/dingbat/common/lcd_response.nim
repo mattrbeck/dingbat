@@ -1,5 +1,5 @@
-## LCD response: a per-pixel model of how a Game Boy panel settles, replacing
-## symmetric interframe blending. Derivation and citations: docs/lcd_response.md.
+## LCD response: a per-pixel model of how a Game Boy panel settles.
+## Derivation and citations: docs/lcd_response.md.
 ##
 ## A normally-white TN cell darkens when driven and relaxes back on its own, so
 ## the two directions differ: darkening is fast and faster the harder it is

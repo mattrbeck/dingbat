@@ -1,6 +1,6 @@
 # Binary save-state serialization: a little-endian Writer/Reader pair plus the
-# .state file header. Every field is written explicitly (no std/marshal: JSON +
-# refs, not stable across builds).
+# .state file header. Every field is written explicitly (not std/marshal: JSON
+# + refs, not stable across builds).
 
 import std/[os, strutils]
 import zippy
@@ -54,7 +54,7 @@ const
   # STATE_VERSION moves only if this 32-byte header changes shape, which also
   # stops older builds recognising the file.
   # 8: STATE_FLAG_DEFLATED. A v7 reader would take a deflated body for a
-  # short payload and call a good file truncated; refusing v8 as "newer"
+  # short payload and call a good file truncated; failing v8 as "newer"
   # tells its owner to update instead.
   STATE_VERSION* = 8'u32
 
@@ -69,7 +69,7 @@ const
   #      · 9 in-flight section (irq line, fetch page, sync bits, DMA stamps,
   #        interrupt synchroniser, timer/DMA latches, memory control)
   #      · 10 the PSG section: the shift-0 check's four fields as real ones
-  #        (they had ridden in spare bits of channel 1's sweep fields),
+  #        (before: spare bits of channel 1's sweep fields),
   #        apu.power_on_at, and the shared PSG's per-channel latches
   #      · 11 the DMA section's sound-FIFO hand-back word (DMA.fifo_chain)
   #      · 12 the interrupt synchroniser's second raise in flight
@@ -139,10 +139,10 @@ proc state_error*(msg: string; kind = srkCorrupt): ref StateError =
 # ==================== Field range guards ====================
 #
 # A shared state is a stranger's file: every field later used as an index, a
-# length, or an operand of unchecked arithmetic gets a range check at load time
-# (a wild value otherwise raises a Defect on the next step_frame, which is not
-# a CatchableError and escapes the loaders). These raise StateError, which the
-# loaders already restore from.
+# length, or an operand of unchecked arithmetic gets a range check at load
+# time. A wild value would raise a Defect on the next step_frame, which is not
+# a CatchableError and escapes the loaders; these raise StateError, which the
+# loaders restore from.
 
 proc check_range*(v, lo, hi: int; field: string) =
   ## `field` names the thing for the log; user-facing text comes from the kind.
@@ -216,8 +216,7 @@ proc write_seq_u8*(w: var Writer; data: openArray[byte]) =
 
 proc write_seq_u16*(w: var Writer; data: openArray[uint16]) =
   ## Length-prefixed little-endian halfwords. One copy on a little-endian
-  ## host: element by element, the framebuffer alone was 153,600 appends a
-  ## payload, the rewind ring's largest serializing cost.
+  ## host: per element, the framebuffer alone is 153,600 appends a payload.
   w.write_u32(uint32(data.len))
   when cpuEndian == littleEndian:
     if data.len > 0:
@@ -249,8 +248,8 @@ proc read_bool*(r: var Reader): bool =
   r.read_u8() != 0
 
 # Multi-byte fields: one bounds check and one load on a little-endian host.
-# A restore runs every frame under run-ahead, and byte-at-a-time reads were
-# most of its cost.
+# A restore runs every frame under run-ahead; byte-at-a-time reads were most
+# of its cost.
 template read_le(r: var Reader; T: typedesc): untyped =
   r.need(sizeof(T))
   var v: T
@@ -362,8 +361,8 @@ proc legacy_payload_version*(core: CoreKind; container: uint32): uint32 =
   ##      6      |  4  | 3  | GB PPU dots_since_frame
   ##
   ## Inside container 4 the GB serial section's 5th byte changed meaning at
-  ## the same width (previous_bit -> clock_history, f678d02); it is 0 in any
-  ## state not taken mid-transfer and both readings of 0 agree.
+  ## the same width (previous_bit -> clock_history); it is 0 in any state not
+  ## taken mid-transfer and both readings of 0 agree.
   case core
   of ckGBA:
     if container <= 1: 1'u32

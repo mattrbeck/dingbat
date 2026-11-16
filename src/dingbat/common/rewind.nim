@@ -1,14 +1,14 @@
-# Rewind history: a bounded ring of compressed XOR deltas between consecutive
+# Rewind history: a bounded ring of packed XOR deltas between consecutive
 # state snapshots, plus the newest snapshot kept whole. Rewind only steps
 # backward from the newest state, so each delta decodes against its successor:
-# prev = inflate(delta) XOR cur. Consecutive snapshots differ in a small
-# fraction of bytes, so deltas deflate to a few percent of the payload.
+# prev = unpack(delta) XOR cur. Consecutive snapshots differ in a small
+# fraction of bytes, so deltas pack to a few percent of the payload.
 #
 # For the scrubber: absolute snapshot IDs (positional indexes shift under
 # eviction; IDs are never reused, so a stale ID resolves to "gone"), thumbnails
 # captured at push time (rendering the strip from history would walk every
 # delta), and keyframes every `key_every` pushes bounding a seek to that many
-# inflations. Thumbnails and keyframes count toward mem_used and are evicted
+# unpacks. Thumbnails and keyframes count toward mem_used and are evicted
 # with the deltas they belong to: the cap is a real budget (16 MB on iOS,
 # where memory pressure gets the wasm JIT demoted).
 
@@ -16,8 +16,8 @@ import std/deques
 import fastpack
 
 when defined(rewindprof):
-  # -d:rewindprof: per-snapshot cost in nanoseconds and call counts, printed
-  # by tests/dingbat_bench.nim.
+  # -d:rewindprof (off by default): per-snapshot cost in nanoseconds and call
+  # counts, printed by tests/dingbat_bench.nim.
   import std/monotimes, std/times
   const
     RpSerialize* = 0   ## the caller's state_payload()
@@ -146,13 +146,13 @@ proc xor_bytes_at(dst: var string; d0: int; src: string; s0, k: int) =
 # Sparse-block pre-pass on the delta (the ring's codec). The delta is an XOR,
 # so "unchanged" is a zero byte and the payload is ~99% zeros; a bitmap of
 # which 64-byte blocks contain any non-zero byte, followed by only those
-# blocks, skips the rest with a word-at-a-time scan, and zlib then compresses
-# what survives. Format: u32 original length, u32 block size, ceil(nblocks/8)
-# bitmap bytes, then the set blocks back to back (the last may be short; its
-# length follows from the original length). Smaller and faster than plain
-# zlib, by far the most under wasm (the bake-off in common/rewind_codecs.nim
-# runs in-page for that reason). In-process only: nothing persists or
-# transmits a delta, so there is no format version.
+# blocks, skips the rest with a word-at-a-time scan, and fast_pack then
+# compresses what survives. Format: u32 original length, u32 block size,
+# ceil(nblocks/8) bitmap bytes, then the set blocks back to back (the last may
+# be short; its length follows from the original length). Smaller and faster
+# than packing the raw delta, most of all under wasm (bake-off:
+# common/rewind_codecs.nim). In-process only: nothing persists or transmits a
+# delta, so there is no format version.
 
 const SparseBlock* = 64
 
@@ -250,8 +250,8 @@ proc sparse_xor_encode*(prev, cur: string; bs = SparseBlock): string =
 proc encode_delta(prev, cur: string): string =
   ## Delta body reconstructs `prev` given `cur`: XOR over the overlapping
   ## prefix, raw tail where prev extends past cur. Built and scanned in one
-  ## pass (sparse_xor_encode): copying prev to XOR it in place first was a
-  ## third of a push's time outside zlib.
+  ## pass (sparse_xor_encode): copying prev to XOR it in place first cost a
+  ## third of a push's time outside compression.
   rp(0 + 2):  # RpCompress
     result = fast_pack(sparse_xor_encode(prev, cur))
   when defined(rewindprof):
@@ -304,8 +304,8 @@ proc push*(rw: Rewind; payload: string; thumb: proc(): RewindThumb = nil) =
       rp(3): t = thumb()
       if t.pixels.len > 0:
         # Raw BGR555 is 19-26 KB a picture, on GB three times the whole delta
-        # stream; game frames are flat-coloured, so BestSpeed takes them to
-        # 4-22% of raw.
+        # stream; game frames are flat-coloured, so they pack well (zlib
+        # BestSpeed: 4-22% of raw).
         var packed: string
         rp(4): packed = fast_pack_bytes(t.pixels)
         rw.thumbs.addLast(ThumbEntry(id: id, w: t.w, h: t.h, packed: packed))
@@ -431,7 +431,7 @@ proc reconstruct(rw: Rewind; target_pos: int): string =
     if pick >= 0:
       let kid = rw.keys[pick].id
       let kpos = if kid == rw.latest_id: rw.deltas.len else: rw.find_delta_pos(kid)
-      # +1 for inflating the keyframe itself; skip it when `latest` is closer.
+      # +1 for unpacking the keyframe itself; skip it when `latest` is closer.
       if kpos >= target_pos and kpos + 1 < start_pos:
         start_pos = kpos
         cur = fast_unpack(rw.keys[pick].packed)

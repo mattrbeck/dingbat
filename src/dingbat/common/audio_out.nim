@@ -5,16 +5,13 @@
 ##
 ## Desktop: an SDL 3 audio stream bound to the default playback device.
 ## The stream converts to whatever the device wants, so what is queued is
-## always played at the rate and format it was opened with (SDL 2 needed
-## `obtained = nil` for that; Windows WASAPI otherwise handed back its own
-## float32 44.1/48 kHz and pacing ran at ~2x).
+## always played at the rate and format it was opened with (otherwise
+## Windows WASAPI hands back float32 44.1/48 kHz and pacing runs at ~2x).
 ##
 ## iOS: src/dingbat_ios_audio.c, a ring buffer the shell's
 ## AVAudioSourceNode drains, behind the same calls. The test harness takes
-## that branch too: the APUs and the desktop's DS game leave audio out
-## there, so only the iOS C API reaches this module (tests/ios_api_test,
-## whose DS sound goes to the ring), and src/dingbat_ios.nim compiles the
-## ring in.
+## that branch too; only the iOS C API reaches this module there
+## (tests/ios_api_test), and src/dingbat_ios.nim compiles the ring in.
 ##
 ## Not compiled for the web (Web Audio, fed from the cores' own buffers).
 

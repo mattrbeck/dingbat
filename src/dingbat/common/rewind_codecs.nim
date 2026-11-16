@@ -1,12 +1,9 @@
 ## Candidate codecs for the rewind ring's XOR delta, plus a bake-off reporting
-## size and time for each. Shared by tests/rewind_codec_test.nim and, under
-## -d:codecbench, by src/dingbat_wasm.nim so browsers run the identical code
-## over the identical deltas: a codec ranking does not necessarily survive the
-## move from native to JavaScriptCore, and Safari is the closest proxy for the
-## oldest device that has to run this. Kept so "why not lz4?" can be re-run
-## rather than trusted. The sparse codec duplicates rewind.nim's on purpose, so
-## a changed codec can be A/B'd against the shipped one. Nothing here is on a
-## shipping path.
+## size and time for each, run by tests/rewind_codec_test.nim. A ranking
+## measured natively need not hold under JavaScriptCore. Kept so "why not
+## lz4?" can be re-run rather than trusted. The sparse codec duplicates
+## rewind.nim's on purpose, so a changed codec can be A/B'd against the
+## shipped one. Nothing here is on a shipping path.
 
 import std/[strutils, times, monotimes]
 import zippy
