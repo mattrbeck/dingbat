@@ -117,6 +117,17 @@ let netAttach = true;   // attach mode of the current/last pending session (for 
 let manualFallbackTimer = 0;
 const MANUAL_FALLBACK_DELAY = 2000;
 const SIG_DIAL_TIMEOUT = 4000;
+// This client's signaling protocol level, sent with every rendezvous: a
+// server raising SIGNAL_MIN_CLIENT past it answers {"t":"error","code":"update"}
+// (web/signaling/server.js). Bump it with a change older servers can't serve
+// or newer ones must tell apart.
+const SIGNAL_PROTOCOL = 1;
+// The server says this build is too old to link online: its message is shown
+// as the failure, and the app looks for the update (index.js).
+const sigWantsUpdate = (msg) => {
+  if (msg.code === "update" && typeof onServerWantsUpdate === "function") onServerWantsUpdate();
+};
+
 // Sent with every rendezvous, the same across redials: the server drops this
 // page's stale seat (a socket that died without it hearing, e.g. iOS suspended
 // the tab) instead of pairing us with it or calling the code in use.
@@ -349,7 +360,7 @@ const armManualFallback = (session, ms = MANUAL_FALLBACK_DELAY) => {
 };
 
 const sigRendezvous = (session) => {
-  sigSend({ t: "rendezvous", code: session.code, id: NET_PAGE_ID });
+  sigSend({ t: "rendezvous", code: session.code, id: NET_PAGE_ID, v: SIGNAL_PROTOCOL });
   armManualFallback(session);
 };
 
@@ -486,6 +497,7 @@ const onSigMessage = async (msg) => {
         sigRewait("friend left before pairing");
         break;
       case "error":
+        sigWantsUpdate(msg);
         netFail(msg.msg || "Connection error");
         break;
     }
@@ -2501,7 +2513,7 @@ const rsDial = (rb) => {
   let ws;
   try { ws = new WebSocket(NET_SIGNAL_URL); } catch { rsRestart(rb, "no socket"); return; }
   rb.rsWs = ws;
-  ws.onopen = () => ws.send(JSON.stringify({ t: "rendezvous", code: rb.resume.code, id: NET_PAGE_ID }));
+  ws.onopen = () => ws.send(JSON.stringify({ t: "rendezvous", code: rb.resume.code, id: NET_PAGE_ID, v: SIGNAL_PROTOCOL }));
   ws.onerror = () => {};
   ws.onclose = () => {
     if (rb.rsWs !== ws) return;
@@ -2548,6 +2560,10 @@ const rsDial = (rb) => {
         rb.byeIn = true;
         log("netplay: redial: the friend " + (msg.why === "gave-up" ? "gave up" : "left"));
         netPeerGone(msg.why === "gave-up" ? "Couldn't reconnect" : "Your friend disconnected");
+      } else if (msg.t === "error" && msg.code === "update") {
+        // No redial can get past this one.
+        sigWantsUpdate(msg);
+        netPeerGone(msg.msg);
       } else if (msg.t === "error") {
         rsRestart(rb, "server: " + msg.msg);
       }

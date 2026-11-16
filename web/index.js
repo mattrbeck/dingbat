@@ -9202,6 +9202,130 @@ const retryStateLoad = async (rec) => {
   else if (rec.kind === "bytes" && rec.bytes) applyImportedState(rec.bytes);
 };
 
+// --- Announcements and required updates ---
+// status.json (docs/dev/announcements.md) is fetched past every cache at boot and
+// on a return to the tab at most hourly. Any failure leaves the app as it is:
+// offline, a missing file and bad JSON all mean "nothing to say".
+//
+// A required update compares build times (the commit time of the build's
+// version, stamped by deploy-pages.yml; "" in a development build, which is
+// never required to update). It is enforced only when the live build meets
+// the requirement and is fetchable (build-id.txt and sw.js agree with
+// version.txt), so a minBuild ahead of every deploy can't strand anyone.
+var BUILD_TIME = document.querySelector?.('meta[name="dingbat-build-time"]')?.getAttribute("content") || "";
+const STATUS_SEEN_KEY = "dingbat_seen_announcements";
+const STATUS_CHECK_INTERVAL = 60 * 60 * 1000;
+const STATUS_SEEN_MAX = 64;
+const statusTime = (s) => (typeof s === "string" ? Date.parse(s) : NaN);
+let statusCheckedAt = 0;
+let requiredShown = false;
+
+const fetchStatus = async () => {
+  try {
+    const res = await fetch("status.json", { cache: "no-store" });
+    if (!res.ok) return null;
+    const s = await res.json();
+    return s && typeof s === "object" ? s : null;
+  } catch {
+    return null;
+  }
+};
+
+// build-id.txt: "<content hash> <version> <build time>".
+const fetchLiveBuild = async () => {
+  try {
+    const res = await fetch("build-id.txt", { cache: "no-store" });
+    if (!res.ok) return null;
+    const [, version, built] = (await res.text()).trim().split(/\s+/);
+    return version ? { version, built: built || "" } : null;
+  } catch {
+    return null;
+  }
+};
+
+const announcementApplies = (a, now) =>
+  !!a && typeof a.id === "string" && typeof a.text === "string" &&
+  (!Array.isArray(a.platforms) || a.platforms.includes("web")) &&
+  !(statusTime(a.from) > now) && !(statusTime(a.until) <= now) &&
+  (a.builtBefore == null || statusTime(BUILD_TIME) < statusTime(a.builtBefore));
+
+const readSeen = () => {
+  try {
+    const v = JSON.parse(localStorage.getItem(STATUS_SEEN_KEY) || "[]");
+    return Array.isArray(v) ? v : [];
+  } catch {
+    return [];
+  }
+};
+
+// Each announcement shows once per browser, marked seen as it shows.
+const showAnnouncements = (list) => {
+  if (!Array.isArray(list)) return;
+  const now = Date.now();
+  const seen = readSeen();
+  for (const a of list.filter((a) => announcementApplies(a, now) && !seen.includes(a.id)).slice(0, 2)) {
+    seen.push(a.id);
+    const link = typeof a.url === "string" && /^https:\/\//.test(a.url) ? a.url : "";
+    showActionToast(a.text, a.label || (link ? "Read more" : "OK"),
+      () => { if (link) window.open(link, "_blank", "noopener"); }, 30000);
+  }
+  try { localStorage.setItem(STATUS_SEEN_KEY, JSON.stringify(seen.slice(-STATUS_SEEN_MAX))); } catch {}
+};
+
+const requiredModal = document.getElementById("required-modal");
+
+const enforceRequired = async (req) => {
+  if (!req || requiredShown || appUpdating) return;
+  const min = statusTime(req.minBuild);
+  if (!(statusTime(BUILD_TIME) < min)) return;
+  const [builds, live] = await Promise.all([probeBuilds(), fetchLiveBuild()]);
+  if (!builds || !live) return;
+  const { current, latest, deployed } = builds;
+  if (!latest || latest === current || deployed !== latest || live.version !== latest) return;
+  if (!(statusTime(live.built) >= min)) return;
+  // A link session is a friend's game too: it waits for the next check.
+  if (linkMode || rollbackMode || netActive()) return;
+  requiredShown = true;
+  if (currentRomName) paused = true;
+  showUpdateButton();
+  const text = document.getElementById("required-text");
+  if (text) text.textContent = typeof req.message === "string" && req.message
+    ? req.message : "This version of dingbat has a problem that the update fixes.";
+  requiredModal?.classList.add("open");
+  if (requiredModal) trapFocus(requiredModal);
+};
+
+document.getElementById("required-update")?.addEventListener("click", async () => {
+  if (appUpdating) return;
+  if (currentRomName && currentOriginalName) {
+    try {
+      await persistSave(currentRomName, currentOriginalName);
+      await persistAutoState();
+    } catch {}
+  }
+  requiredModal?.classList.remove("open");
+  applyUpdate();
+});
+
+const checkStatus = async () => {
+  statusCheckedAt = Date.now();
+  const status = await fetchStatus();
+  if (!status) return;
+  showAnnouncements(status.announcements);
+  await enforceRequired(status.required?.web);
+};
+
+// The signaling server turned this build away (netplay.js sigWantsUpdate):
+// the Update button, when there is one to give.
+const onServerWantsUpdate = () => { if (!updateAvailable) checkForUpdate(); };
+
+checkStatus();
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible" && Date.now() - statusCheckedAt >= STATUS_CHECK_INTERVAL) {
+    checkStatus();
+  }
+});
+
 // Apply a state image; true when accepted. keepRewind is only for undoing
 // a rewind-scrubber commit (same timeline as the ring); every other load
 // drops the ring.

@@ -5,9 +5,10 @@
 ##   ./server [port]        # default 8790 (or $PORT)
 ##
 ## Wire protocol (JSON text messages; client side in netplay.js):
-##   client -> server: {"t":"rendezvous","code":"PIKA","id":"..."}
+##   client -> server: {"t":"rendezvous","code":"PIKA","id":"...","v":1}
 ##                                                       both peers send the code;
-##                                                       id is the page's (optional)
+##                                                       id is the page's (optional);
+##                                                       v the protocol level (absent = 0)
 ##   server -> client: {"t":"waiting"}                   first arrival holds a room
 ##                     {"t":"paired","role":"host"}      first arrival's role
 ##                     {"t":"paired","role":"guest"}     second arrival's role
@@ -16,6 +17,9 @@
 ##                                                       this code resumes (POST /bye);
 ##                                                       why is "left" or "gave-up"
 ##                     {"t":"error","msg":"..."}         then the socket closes
+##                     {"t":"error","msg":"...","code":"update"}
+##                                                       v below SIGNAL_MIN_CLIENT:
+##                                                       update to link online
 ##   After "paired", only {"t":"sdp"} and {"t":"ice"} envelopes are relayed,
 ##   payloads uninspected, within a per-room byte budget; anything else closes
 ##   the room, so the server cannot carry game/save/ROM bytes.
@@ -135,6 +139,13 @@ var
   notes = initTable[string, Note]()     # retry code -> the goodbye left on it
 
 let statsEnabled = getEnv("SIGNAL_STATS") == "1"
+# The oldest client protocol level served (rendezvous `v`); 0 serves every build.
+let minClient = block:
+  var v = 0
+  try: v = parseInt(getEnv("SIGNAL_MIN_CLIENT", "0"))
+  except ValueError: discard
+  v
+const UpdateMsg = "This version of dingbat can't link online any more. Update dingbat, then try again."
 let noteTtl = block:                     # seconds; SIGNAL_NOTE_TTL_MS for tests
   var v = 600.0
   try: v = parseInt(getEnv("SIGNAL_NOTE_TTL_MS", "600000")).float / 1000
@@ -357,11 +368,13 @@ proc onText(c: Conn, text: string) {.async.} =
     await c.peer.sendText(text)
     return
   var t, codeRaw, idRaw: string
+  var level = 0
   try:
     let j = parseJson(text)
     t = j{"t"}.getStr("")
     codeRaw = j{"code"}.getStr("")
     idRaw = j{"id"}.getStr("")
+    level = j{"v"}.getInt(0)
   except CatchableError:
     await c.fail("not JSON")
     return
@@ -376,6 +389,10 @@ proc onText(c: Conn, text: string) {.async.} =
   rzWindows[c.ip] = w
   if w.count > MaxRzPerWindow:
     await c.fail("too many attempts — wait a minute and try again")
+    return
+  if level < minClient:
+    await c.sendText($(%*{"t": "error", "msg": UpdateMsg, "code": "update"}))
+    teardown(c)
     return
   if c.code.len > 0:
     await c.fail("already in a room")

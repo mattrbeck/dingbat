@@ -141,7 +141,7 @@ test("a solo peer parked on 'waiting' outlives the 2s fallback and still pairs",
   const ws = lastWS();
   ws.open();
   await clicked;
-  assert.deepEqual(ws.sent, [{ t: "rendezvous", code: "TESTX", id: api.pageId }]);
+  assert.deepEqual(ws.sent, [{ t: "rendezvous", code: "TESTX", id: api.pageId, v: 1 }]);
 
   ws.reply({ t: "waiting" });
   await flush();
@@ -190,7 +190,7 @@ test("a socket that drops mid-wait redials, re-registers the code, and keeps wai
   assert.notEqual(ws2, ws, "a fresh socket was dialed");
   ws2.open();
   await flush();
-  assert.deepEqual(ws2.sent, [{ t: "rendezvous", code: "REDIA", id: api.pageId }],
+  assert.deepEqual(ws2.sent, [{ t: "rendezvous", code: "REDIA", id: api.pageId, v: 1 }],
     "same code re-registered, under the same page id");
 
   ws2.reply({ t: "waiting" });
@@ -427,7 +427,7 @@ test("a friend gone before the descriptions crossed sends us back to waiting, no
   assert.notEqual(ws2, ws, "a fresh socket was dialed");
   ws2.open();
   await t.flush();
-  assert.deepEqual(ws2.sent, [{ t: "rendezvous", code: "FROZE", id: t.api.pageId }],
+  assert.deepEqual(ws2.sent, [{ t: "rendezvous", code: "FROZE", id: t.api.pageId, v: 1 }],
     "the same code, the same page");
   ws2.reply({ t: "waiting" });
   await t.flush();
@@ -459,7 +459,7 @@ test("a mid-handshake drop doesn't redial; a friend who never answers sends us b
   assert.equal(sockets.length, 3, "one rendezvous again, on the same code");
   lastWS().open();
   await flush();
-  assert.deepEqual(lastWS().sent, [{ t: "rendezvous", code: "TESTX", id: api.pageId }]);
+  assert.deepEqual(lastWS().sent, [{ t: "rendezvous", code: "TESTX", id: api.pageId, v: 1 }]);
 });
 
 test("two pairings that exchanged descriptions and never opened are the NAT verdict", async () => {

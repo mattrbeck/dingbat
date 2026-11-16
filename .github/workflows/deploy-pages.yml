@@ -144,26 +144,36 @@ jobs:
         # the live version: the same sw.js and version.txt, no update. The
         # probe busts the edge cache as sw.js's probeVersion does; on any
         # failure (the first deploy, an outage) the commit is the version.
+        # status.json (announcements, required updates) is not the app: an
+        # edit to it deploys without moving the version.
+        # The build time is the version's commit time (UTC), carried in
+        # build-id.txt so a reused version keeps it: status.json's required
+        # updates compare it (index.js enforceRequired). A live build-id.txt
+        # without one moves the version once.
         run: |
           set -eo pipefail
           content=$(cd web && find . -type f \
               ! -path './bench/*' ! -path './e2e/*' ! -path './tests/*' \
               ! -path './types/*' ! -path './signaling/*' ! -path './node_modules/*' \
               ! -name '*.test.mjs' ! -name 'package.json' ! -name 'package-lock.json' \
-              ! -name 'serve.py' ! -name 'lattest.html' -print0 \
+              ! -name 'serve.py' ! -name 'lattest.html' ! -name 'status.json' -print0 \
             | LC_ALL=C sort -z | xargs -0 sha256sum | sha256sum | cut -c1-16)
           live=$(curl -fsS --max-time 30 \
             "${{ steps.pages.outputs.base_url }}/build-id.txt?probe=${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" || true)
-          read -r live_content live_version <<< "$live" || true
+          read -r live_content live_version live_built <<< "$live" || true
           version=${GITHUB_SHA::7}
-          if [ "$live_content" = "$content" ] && [[ "$live_version" =~ ^[0-9a-f]{7}$ ]]; then
+          built=$(TZ=UTC git show -s --date=format-local:%Y-%m-%dT%H:%M:%SZ --format=%cd HEAD)
+          if [ "$live_content" = "$content" ] && [[ "$live_version" =~ ^[0-9a-f]{7}$ ]] &&
+             [[ "$live_built" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]]; then
             version=$live_version
+            built=$live_built
             echo "::notice::The app is unchanged ($content): staying on $version"
           else
             echo "::notice::The app changed (${live_content:-none} -> $content): version $version"
           fi
-          echo "$content $version" > web/build-id.txt
+          echo "$content $version $built" > web/build-id.txt
           echo "VERSION=$version" >> "$GITHUB_ENV"
+          echo "BUILT=$built" >> "$GITHUB_ENV"
 
       - name: Stamp service worker version
         run: |
@@ -173,6 +183,11 @@ jobs:
             exit 1
           }
           echo -n "${VERSION}" > web/version.txt
+          sed -i "s/<meta name=\"dingbat-build-time\" content=\"\"/<meta name=\"dingbat-build-time\" content=\"${BUILT}\"/" web/index.html
+          grep -q "name=\"dingbat-build-time\" content=\"${BUILT}\"" web/index.html || {
+            echo "::error::build-time stamping failed - the meta in web/index.html did not match"
+            exit 1
+          }
 
       - name: Write the asset manifest
         # Every precached file's digest (sw.js checks each copy its install

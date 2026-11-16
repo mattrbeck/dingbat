@@ -85,6 +85,10 @@ final class NetLink: ObservableObject {
 
     /// Sent with every rendezvous: the server drops a stale seat of ours
     /// instead of pairing us with it (web NET_PAGE_ID).
+    /// web SIGNAL_PROTOCOL: sent with every rendezvous; a server whose
+    /// SIGNAL_MIN_CLIENT is past it answers {"t":"error","code":"update"}.
+    static let signalProtocol = 1
+
     private static let pageID: String = (0..<4).map { _ in
         String(format: "%08x", UInt32.random(in: 0 ... .max))
     }.joined()
@@ -341,7 +345,7 @@ final class NetLink: ObservableObject {
         ws.onOpen = { [weak self] in
             guard let self, self.session === s, s.ws === ws else { return }
             self.serverUp = true
-            ws.send(["t": "rendezvous", "code": s.code, "id": Self.pageID])
+            ws.send(["t": "rendezvous", "code": s.code, "id": Self.pageID, "v": Self.signalProtocol])
             // No answer in time: the manual exchange instead.
             self.arm(s, after: Self.rendezvousTimeout) { [weak self] in
                 self?.serverUp = false
@@ -430,6 +434,7 @@ final class NetLink: ObservableObject {
             if s.sdpIn { return }
             rewait(s, "friend left before pairing")
         case "error":
+            if msg["code"] as? String == "update" { AppStatus.shared.check() }
             fail((msg["msg"] as? String) ?? "Connection error")
         default:
             break
@@ -1370,7 +1375,7 @@ final class NetLink: ObservableObject {
         rb.rsWs = ws
         ws.onOpen = { [weak self, weak s, weak rb, weak ws] in
             guard let self, let s, let rb, let ws, self.session === s, rb.rsWs === ws else { return }
-            ws.send(["t": "rendezvous", "code": rb.resumeCode, "id": Self.pageID])
+            ws.send(["t": "rendezvous", "code": rb.resumeCode, "id": Self.pageID, "v": Self.signalProtocol])
         }
         ws.onClose = { [weak self, weak s, weak rb, weak ws] _ in
             guard let self, let s, let rb, let ws, rb.rsWs === ws else { return }
@@ -1413,6 +1418,10 @@ final class NetLink: ObservableObject {
                 let gaveUp = (msg["why"] as? String) == "gave-up"
                 NSLog("netlink: redial: the friend %@", gaveUp ? "gave up" : "left")
                 self.peerGone(gaveUp ? "Couldn't reconnect" : "Your friend disconnected")
+            case "error" where msg["code"] as? String == "update":
+                // No redial can get past this one.
+                AppStatus.shared.check()
+                self.peerGone((msg["msg"] as? String) ?? "Update dingbat to link online")
             case "error":
                 self.rsAgain(rb, s, "server: " + ((msg["msg"] as? String) ?? "error"))
             default:

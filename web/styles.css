@@ -4658,6 +4658,12 @@ body.game-menu-open #toast {
   animation: overlay-in 0.15s ease-out;
 }
 
+/* A required update: over every other modal, under the toasts (600) and the
+   update's own card (#updating, 900). */
+#required-modal {
+  z-index: 550;
+}
+
 @keyframes overlay-in {
   from {
     opacity: 0;

@@ -13,10 +13,12 @@
 //   node server.js [port]        # default 8790
 //
 // Wire protocol (JSON text messages):
-//   client -> server: {"t":"rendezvous","code":"PIKA","id":"..."}
+//   client -> server: {"t":"rendezvous","code":"PIKA","id":"...","v":1}
 //                                                    both peers send the same
 //                                                    code they agreed on; id
-//                                                    is the page's (optional)
+//                                                    is the page's (optional);
+//                                                    v is the client's protocol
+//                                                    level (absent = 0)
 //   server -> client: {"t":"waiting"}                first arrival with a code;
 //                                                    hold for the peer
 //                     {"t":"paired"}                 both present (whoever
@@ -30,6 +32,11 @@
 //                                                    POST /bye); "why" is
 //                                                    "left" or "gave-up"
 //                     {"t":"error","msg":"..."}      then the socket closes
+//                     {"t":"error","msg":"...","code":"update"}
+//                                                    v is below SIGNAL_MIN_CLIENT:
+//                                                    update to link online. Every
+//                                                    build shows msg, so builds
+//                                                    from before v are told too
 //   after "paired", ONLY {"t":"sdp",...} and {"t":"ice",...} envelopes are
 //   relayed (their payloads are never inspected). Anything else — any other
 //   type, non-JSON, or exceeding the per-room relay byte budget — closes the
@@ -131,6 +138,10 @@ const MAX_NOTES = 2000;
 const MAX_NOTES_PER_WINDOW = 10;     // POST /bye per IP per RENDEZVOUS_WINDOW_MS
 
 const STATS_ENABLED = process.env.SIGNAL_STATS === '1';
+// The oldest client protocol level served (rendezvous `v`): raised with a
+// change older clients can't follow. 0 serves every build.
+const MIN_CLIENT = parseInt(process.env.SIGNAL_MIN_CLIENT, 10) || 0;
+const UPDATE_MSG = "This version of dingbat can't link online any more. Update dingbat, then try again.";
 const ALLOWED_ORIGINS = new Set(
   (process.env.SIGNAL_ALLOWED_ORIGINS || '')
     .split(',').map((s) => s.trim().toLowerCase()).filter(Boolean));
@@ -440,6 +451,12 @@ function attach(ws) {
       rzWindows.set(ws.ip, w);
       if (w.count > MAX_RENDEZVOUS_PER_WINDOW) {
         return fail(ws, 'too many attempts — wait a minute and try again');
+      }
+      if ((Number.isInteger(msg.v) ? msg.v : 0) < MIN_CLIENT) {
+        clearHandshakeTimer();
+        send(ws, { t: 'error', msg: UPDATE_MSG, code: 'update' });
+        ws.close();
+        return;
       }
       if (ws.roomCode) return fail(ws, 'already in a room');
       const c = normalizeCode(msg.code);

@@ -120,6 +120,10 @@ targets:
           plist="$TARGET_BUILD_DIR/$INFOPLIST_PATH"
           /usr/libexec/PlistBuddy -c "Set :DingbatCommit $sha" "$plist" 2>/dev/null \
             || /usr/libexec/PlistBuddy -c "Add :DingbatCommit string $sha" "$plist"
+          # Its commit time in UTC, for status.json's required updates (AppStatus).
+          built=$(TZ=UTC git -C "$PROJECT_DIR/.." show -s --date=format-local:%Y-%m-%dT%H:%M:%SZ --format=%cd HEAD 2>/dev/null || true)
+          /usr/libexec/PlistBuddy -c "Set :DingbatBuildTime $built" "$plist" 2>/dev/null \
+            || /usr/libexec/PlistBuddy -c "Add :DingbatBuildTime string $built" "$plist"
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.mattrb.dingbat

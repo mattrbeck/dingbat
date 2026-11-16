@@ -647,6 +647,30 @@ async function run() {
     } finally { unlinkSync(secretFile); }
   } finally { google.close(); }
 
+  // SIGNAL_MIN_CLIENT turns away clients below that protocol level with an
+  // error every build shows (code "update" for the ones that know it); a
+  // client at or above it rendezvouses as ever.
+  console.log('SIGNAL_MIN_CLIENT turns away older clients:');
+  await withServer(PORT2, { SIGNAL_STATS: '1', SIGNAL_MIN_CLIENT: '2' }, async (port) => {
+    for (const v of [undefined, 1, '2']) {
+      const old = await wsConnect(port);
+      old.send({ t: 'rendezvous', code: 'MINV1', ...(v === undefined ? {} : { v }) });
+      const e = await old.next();
+      assert(e.t === 'error' && e.code === 'update' && /Update dingbat/.test(e.msg),
+        `v=${JSON.stringify(v)} is told to update`);
+      await sleep(50);
+      assert(old.isClosed, 'and its socket closes');
+    }
+    assert((await liveRooms(port)) === 0, 'a turned-away client holds no room');
+    const a = await wsConnect(port), b = await wsConnect(port);
+    a.send({ t: 'rendezvous', code: 'MINV2', v: 2 });
+    assert((await a.next()).t === 'waiting', 'v=2 waits');
+    b.send({ t: 'rendezvous', code: 'MINV2', v: 3 });
+    assert((await b.next()).t === 'paired', 'v=3 pairs with it');
+    a.close(); b.close();
+    await waitRooms(port, 0);
+  });
+
   // A page that redials sends the same id: its stale seat (a socket that died
   // without the server hearing, e.g. a phone that suspended the tab) is
   // dropped, never paired with or counted as a third peer

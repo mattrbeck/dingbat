@@ -52,6 +52,7 @@
          core's download"). The figure below is em.wasm's decoded size for
          that download's progress, stamped by deploy-pages.yml. -->
     <meta name="dingbat-core-bytes" content="" />
+    <meta name="dingbat-build-time" content="" />
     <link rel="icon" type="image/png" href="favicon-96x96.png" sizes="96x96" />
     <link rel="icon" type="image/svg+xml" href="favicon.svg" />
     <link rel="shortcut icon" href="favicon.ico" />
@@ -766,6 +767,18 @@
         <div class="modal-actions">
           <button type="button" class="button" id="update-not-now">Not Now</button>
           <button type="button" class="button button-primary" id="update-confirm">Update</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- status.json's required update (index.js enforceRequired): no way out but the update. -->
+    <div id="required-modal" class="modal-overlay">
+      <div class="modal" role="alertdialog" aria-modal="true" aria-labelledby="required-title" aria-describedby="required-text">
+        <h2 id="required-title">Update dingbat to keep playing</h2>
+        <p id="required-text"></p>
+        <p>Your games and saves stay on this device.</p>
+        <div class="modal-actions">
+          <button type="button" class="button button-primary" id="required-update">Update now</button>
         </div>
       </div>
     </div>
