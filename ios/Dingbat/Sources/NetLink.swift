@@ -251,7 +251,6 @@ final class NetLink: ObservableObject {
     /// A fresh connect sheet (web openNetConnect): the game is frozen while
     /// it is up (AppModel.openSheet pauses it).
     func openSheet() {
-        if AppStatus.shared.blocksLink() { return }
         if session != nil { shutdown(keepSheet: true) }
         setStatus("")
         connecting = false

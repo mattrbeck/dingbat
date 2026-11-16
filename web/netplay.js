@@ -216,7 +216,6 @@ let netFrozeGame = false;
 // Both players type the same code; the server makes the first arrival host.
 
 const openNetConnect = async (attach) => {
-  if (typeof linkNeedsUpdate === "function" && linkNeedsUpdate()) return;
   if (netMode || net) await netShutdown();
   if (linkMode) await exitLinkMode();
   netAttach = attach;

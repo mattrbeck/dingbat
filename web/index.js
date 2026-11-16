@@ -8635,7 +8635,6 @@ document.addEventListener("keydown", (e) => {
     }
     closeSavesModal();
     closeUpdateModal();
-    closeRequired();
     closeStatesModal();
     closeMomentsModal();
     closeCheatsModal();
@@ -9211,11 +9210,12 @@ const retryStateLoad = async (rec) => {
 // Each announcement shows as a toast (once per browser), a home-screen banner
 // (until dismissed), or both. A required update compares build times (the
 // commit time of the build's version, stamped by deploy-pages.yml; "" in a
-// development build, which is never required to update). Scope "link" offers
-// Not now and holds the link cable until the update; any other scope, or one
-// this build doesn't know, blocks the app. Either is enforced only when the
-// live build meets it and is fetchable (build-id.txt and sw.js agree with
-// version.txt), so a minBuild ahead of every deploy can't strand anyone.
+// development build, which is never required to update), and blocks the app
+// until the update. It is enforced only when the live build meets it and is
+// fetchable (build-id.txt and sw.js agree with version.txt), so a minBuild
+// ahead of every deploy can't strand anyone. A link-only break needs none of
+// this: the signaling server's SIGNAL_MIN_CLIENT turns old builds away as
+// they dial (netplay.js sigWantsUpdate).
 var BUILD_TIME = document.querySelector?.('meta[name="dingbat-build-time"]')?.getAttribute("content") || "";
 const STATUS_SEEN_KEY = "dingbat_seen_announcements";
 const STATUS_DISMISSED_KEY = "dingbat_dismissed_banners";
@@ -9225,13 +9225,7 @@ const statusTime = (s) => (typeof s === "string" ? Date.parse(s) : NaN);
 let statusCheckedAt = 0;
 /** @type {any[]} */
 let statusBanners = [];
-// What the card is showing: "app" (no way out) or "link" (Not now); null when shut.
-/** @type {"app" | "link" | null} */
-let requiredShown = null;
-// The link-scope requirement this build is under, holding the link cable.
-/** @type {any} */
-let linkRequired = null;
-let linkNoticeShown = false;
+let requiredShown = false;
 
 const fetchStatus = async () => {
   try {
@@ -9367,67 +9361,35 @@ try {
 renderBanners();
 
 const requiredModal = document.getElementById("required-modal");
-// [title, message when status.json gives none, the line under it].
-const REQUIRED_COPY = {
-  app: ["Update Required", "This version of dingbat has a problem that the update fixes.",
-    "Your games and saves stay on this device."],
-  link: ["Link Cable Needs an Update", "This version can't link with the current one. Update to link with friends again.",
-    "Everything else keeps working."],
-};
-const REQUIRED_IN_GAME_FOOT = "Your game is saved before the update.";
+const REQUIRED_DEFAULT = "This version of dingbat has a problem that the update fixes.";
 
-const showRequired = (/** @type {"app" | "link"} */ kind, req) => {
+const showRequired = (req) => {
   if (!requiredModal) return;
-  if (kind === "app" && currentRomName) paused = true;
-  requiredShown = kind;
+  if (currentRomName) paused = true;
+  requiredShown = true;
   showUpdateButton();
-  const title = document.getElementById("required-title");
   const text = document.getElementById("required-text");
   const foot = document.getElementById("required-foot");
-  const later = document.getElementById("required-later");
-  if (title) title.textContent = REQUIRED_COPY[kind][0];
-  if (text) text.textContent = typeof req.message === "string" && req.message ? req.message : REQUIRED_COPY[kind][1];
-  if (foot) foot.textContent = kind === "app" && currentRomName ? REQUIRED_IN_GAME_FOOT : REQUIRED_COPY[kind][2];
-  if (later) later.hidden = kind !== "link";
+  if (text) text.textContent = typeof req.message === "string" && req.message ? req.message : REQUIRED_DEFAULT;
+  if (foot) foot.textContent = currentRomName ? "Your game is saved before the update."
+    : "Your games and saves stay on this device.";
   requiredModal.classList.add("open");
   trapFocus(requiredModal);
 };
 
-const closeRequired = () => {
-  if (requiredShown !== "link") return; // an app-wide requirement has no way out
-  requiredShown = null;
-  requiredModal?.classList.remove("open");
-  if (requiredModal) releaseFocus(requiredModal);
-};
-
 const enforceRequired = async (list) => {
-  if (!Array.isArray(list) || appUpdating) return;
+  if (!Array.isArray(list) || appUpdating || requiredShown) return;
   const own = statusTime(BUILD_TIME);
   const due = list.filter((r) => r && forWeb(r) && own < statusTime(r.minBuild));
-  if (!due.length) { linkRequired = null; return; }
+  if (!due.length) return;
   const [builds, live] = await Promise.all([probeBuilds(), fetchLiveBuild()]);
   if (!builds || !live) return;
   const { current, latest, deployed } = builds;
   if (!latest || latest === current || deployed !== latest || live.version !== latest) return;
-  const met = due.filter((r) => statusTime(live.built) >= statusTime(r.minBuild));
-  const app = met.find((r) => r.scope !== "link");
-  const link = met.find((r) => r.scope === "link");
-  linkRequired = link || null;
-  // A link session is a friend's game too: neither card cuts into one.
-  if (linkMode || rollbackMode || netActive() || requiredShown === "app") return;
-  if (app) showRequired("app", app);
-  else if (link && !linkNoticeShown && !requiredShown) {
-    linkNoticeShown = true;
-    showRequired("link", link);
-  }
-};
-
-// The link cable's ways in (netplay.js openNetConnect, launchLinkRom): true
-// when a link-scope requirement holds it, the card up again in its place.
-const linkNeedsUpdate = () => {
-  if (!linkRequired) return false;
-  showRequired("link", linkRequired);
-  return true;
+  const req = due.find((r) => statusTime(live.built) >= statusTime(r.minBuild));
+  // A link session is a friend's game too: the card waits for the next check.
+  if (!req || linkMode || rollbackMode || netActive()) return;
+  showRequired(req);
 };
 
 document.getElementById("required-update")?.addEventListener("click", async () => {
@@ -9438,11 +9400,9 @@ document.getElementById("required-update")?.addEventListener("click", async () =
       await persistAutoState();
     } catch {}
   }
-  requiredShown = null;
   requiredModal?.classList.remove("open");
   applyUpdate();
 });
-document.getElementById("required-later")?.addEventListener("click", closeRequired);
 
 const checkStatus = async () => {
   statusCheckedAt = Date.now();
@@ -9452,9 +9412,15 @@ const checkStatus = async () => {
   await enforceRequired(status.required);
 };
 
-// The signaling server turned this build away (netplay.js sigWantsUpdate):
-// the Update button, when there is one to give.
-const onServerWantsUpdate = () => { if (!updateAvailable) checkForUpdate(); };
+// The signaling server turned this build away (netplay.js sigWantsUpdate; its
+// message is the link screen's error). When there is an update to give, it is
+// offered over the link screen too: the bar's Update sits under the modal.
+const onServerWantsUpdate = async () => {
+  if (!updateAvailable) await checkForUpdate();
+  if (updateAvailable && !appUpdating) {
+    showActionToast("A newer dingbat is ready", "Update", () => updateBtn.click(), 20000);
+  }
+};
 
 checkStatus();
 document.addEventListener("visibilitychange", () => {
@@ -15511,7 +15477,6 @@ const exitLinkMode = async () => {
 };
 
 const launchLinkRom = async (rom) => {
-  if (linkNeedsUpdate()) return;
   // Same runtime gate as launchRom.
   await ensureRuntimeReady();
   if (linkMode) {

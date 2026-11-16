@@ -1,27 +1,10 @@
 // status.json: announcements as toasts (once each) and home-screen banners
 // (until dismissed), and required updates that only block when the live
-// build meets them and can be fetched; a "link" one offers Not now and holds
-// the link cable instead.
+// build meets them and can be fetched.
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import vm from "node:vm";
 import { loadApp } from "./helpers.mjs";
-
-// netplay.js beside index.js, for its Connect Link Cable (openNetConnect).
-const withNetplay = (app) => {
-  const { sandbox } = app;
-  sandbox.WebSocket = class { constructor() { this.readyState = 0; } send() {} close() {} };
-  sandbox.navigator.onLine = true;
-  sandbox.location.hostname = "localhost";
-  sandbox.crypto = { getRandomValues: (a) => a };
-  vm.runInContext(
-    readFileSync(new URL("../sdputil.js", import.meta.url), "utf8") + "\n" +
-    readFileSync(new URL("../netplay.js", import.meta.url), "utf8"),
-    app.context, { filename: "web/netplay.js" });
-  return app;
-};
 
 const settle = async (n = 30) => {
   for (let i = 0; i < n; i++) await new Promise((r) => setTimeout(r, 0));
@@ -173,50 +156,12 @@ test("an app-wide required update blocks with its message, and Update now saves 
   await app.runIn("checkStatus()");
   assert.equal(modalOpen(app), true);
   assert.equal(app.elements.get("required-text").textContent, "Saves can be lost on this build.");
-  assert.equal(app.elements.get("required-later").hidden, true, "no Not now");
   assert.equal(app.elements.get("required-foot").textContent, "Your game is saved before the update.");
-  assert.equal(app.elements.get("required-title").textContent, "Update Required");
   assert.equal(app.runIn("paused"), true, "the game waits behind the card");
-  app.runIn("closeRequired()"); // Escape's closer
-  assert.equal(modalOpen(app), true, "Escape doesn't close it");
   app.elements.get("required-update").click();
   await settle();
   assert.ok(app.idb.get("stateauto:A.gba"), "the session was saved before the reload");
   assert.equal(app.state.reloads, 1);
-});
-
-test("a link-scope update offers Not now, then holds the link cable with the card", async () => {
-  const app = withNetplay(await loadApp());
-  serve(app, { status: { required: [{ minBuild: FIX, scope: "link", message: "Link needs 2026-11." }] } });
-  await app.runIn("checkStatus()");
-  assert.equal(modalOpen(app), true);
-  assert.equal(app.elements.get("required-title").textContent, "Link Cable Needs an Update");
-  assert.equal(app.elements.get("required-foot").textContent, "Everything else keeps working.");
-  assert.equal(app.elements.get("required-later").hidden, false);
-  app.elements.get("required-later").click();
-  assert.equal(modalOpen(app), false, "Not now closes it");
-  await app.runIn("checkStatus()");
-  assert.equal(modalOpen(app), false, "once per visit, not every check");
-  await app.runIn("openNetConnect(true)");
-  assert.equal(modalOpen(app), true, "Connect Link Cable brings the card back instead");
-  assert.equal(app.elements.get("net-modal").classList.contains("open"), false);
-  app.elements.get("required-later").click();
-  await app.runIn("launchLinkRom({ name: 'A.gb', data: new Uint8Array(4) })");
-  assert.equal(modalOpen(app), true, "and so does a local link launch");
-  assert.equal(app.runIn("linkMode"), false);
-});
-
-test("a scope this build doesn't know blocks the app, and app-wide wins over link", async () => {
-  for (const required of [
-    [{ minBuild: FIX, scope: "drive" }],
-    [{ minBuild: FIX, scope: "link" }, { minBuild: FIX }],
-  ]) {
-    const app = await loadApp();
-    serve(app, { status: { required } });
-    await app.runIn("checkStatus()");
-    assert.equal(modalOpen(app), true, JSON.stringify(required));
-    assert.equal(app.elements.get("required-later").hidden, true, JSON.stringify(required));
-  }
 });
 
 test("a required update waits while the live build doesn't meet it, or isn't fetchable yet", async () => {
@@ -226,13 +171,10 @@ test("a required update waits while the live build doesn't meet it, or isn't fet
     { latest: "aaa1111" },                    // this is the live build
     { built: NEW },                           // this build already meets it
   ]) {
-    for (const scope of ["app", "link"]) {
-      const app = await loadApp();
-      serve(app, { status: { required: [{ minBuild: FIX, scope }] }, ...opts });
-      await app.runIn("checkStatus()");
-      assert.equal(modalOpen(app), false, JSON.stringify(opts) + scope);
-      assert.equal(app.runIn("linkNeedsUpdate()"), false, JSON.stringify(opts) + scope);
-    }
+    const app = await loadApp();
+    serve(app, { status: { required: [{ minBuild: FIX }] }, ...opts });
+    await app.runIn("checkStatus()");
+    assert.equal(modalOpen(app), false, JSON.stringify(opts));
   }
 });
 
@@ -253,4 +195,17 @@ test("a link session holds a required update off; offline and a broken status.js
     ? { ok: true, status: 200, json: async () => { throw new SyntaxError("bad"); } } : missing));
   await broken.runIn("checkStatus()");
   assert.equal(modalOpen(broken), false);
+});
+
+test("turned away by the signaling server: the update is offered over the link screen", async () => {
+  const app = await loadApp();
+  serve(app, { status: {} });
+  await app.runIn("onServerWantsUpdate()");
+  assert.ok(app.liveToasts().some((t) => /A newer dingbat is ready/.test(t)));
+  assert.equal(app.elements.get("update-btn").hidden, false, "and the bar's Update");
+
+  const none = await loadApp();
+  serve(none, { status: {}, latest: "aaa1111" });
+  await none.runIn("onServerWantsUpdate()");
+  assert.ok(!none.liveToasts().some((t) => /newer dingbat/.test(t)), "nothing to update to: the link screen's message alone");
 });

@@ -298,7 +298,7 @@ struct RootView: View {
             }
             FlightOverlay()
             LaunchIntroOverlay()
-            if let required = status.required, !required.link {
+            if let required = status.required {
                 RequiredUpdateView(required: required)
                     .transition(.opacity)
             }
@@ -320,18 +320,7 @@ struct RootView: View {
                                                          set: { if !$0 { model.notice = nil } })) {
             Button("OK", role: .cancel) {}
         }
-        // A link-scope update asks, as the app's other questions do (romWarn).
-        .alert("Link Cable Needs an Update",
-               isPresented: Binding(get: { status.required?.link == true },
-                                    set: { if !$0 { status.later() } })) {
-            Button("Not Now", role: .cancel) { status.later() }
-            if let url = status.required?.url {
-                Button("Update") { UIApplication.shared.open(url); status.later() }
-            }
-        } message: {
-            Text((status.required?.message ?? "") + " Everything else keeps working.")
-        }
-        .onChange(of: status.required) { if $0?.link == false { model.sheet = nil } }
+        .onChange(of: status.required) { if $0 != nil { model.sheet = nil } }
         .onAppear { status.check() }
         .sheet(item: $model.sheet, onDismiss: sheetDismissed) { sheet in
             SheetHost(sheet: sheet)

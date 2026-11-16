@@ -7,9 +7,8 @@ import UIKit
 /// at launch and on a return to the app at most hourly; any failure means
 /// nothing to say.
 ///
-/// A required update's scope "link" asks with an alert (Not Now / Update) and
-/// holds the link cable (NetLink.openSheet, AppModel.launchTwoPlayer) until
-/// the update; any other scope, or one this build doesn't know, covers the app. Unlike the web
+/// A required update covers the app until the update (a link-only break is
+/// the signaling server's SIGNAL_MIN_CLIENT, as the link dials). Unlike the web
 /// build this one can't see whether a newer build is out, so status.json
 /// names an iOS minBuild only once the build that meets it is on the App
 /// Store (or TestFlight), and its `url` is where to get it.
@@ -25,17 +24,13 @@ final class AppStatus: ObservableObject {
     }
 
     struct Required: Equatable {
-        let link: Bool
         let message: String
         let url: URL?
     }
 
     @Published private(set) var banners: [Announcement] = []
-    /// On screen: an app-wide requirement (RequiredUpdateView), or a link
-    /// one the player can put off (RootView's alert).
+    /// On screen (RequiredUpdateView).
     @Published private(set) var required: Required?
-    /// The link-scope requirement this build is under, holding the link cable.
-    private(set) var linkRequired: Required?
 
     static var statusURL: URL {
         #if DEBUG
@@ -61,7 +56,6 @@ final class AppStatus: ObservableObject {
     private static let idsMax = 64
 
     private var checkedAt = Date.distantPast
-    private var linkNoticeShown = false
 
     private init() {
         if let data = UserDefaults.standard.data(forKey: Self.bannersKey),
@@ -154,63 +148,27 @@ final class AppStatus: ObservableObject {
     }
 
     private func applyRequired(_ list: [[String: Any]]) {
-        guard let built = Self.buildTime else { return }
-        let due = list.filter { r in
-            guard Self.forIOS(r), let min = Self.parse(r["minBuild"] as? String) else { return false }
-            return built < min
-        }
-        func make(_ r: [String: Any], link: Bool) -> Required {
-            let message = (r["message"] as? String).flatMap { $0.isEmpty ? nil : $0 }
-                ?? (link ? "This version can't link with the current one. Update to link with friends again."
-                         : "This version of dingbat has a problem that the update fixes.")
-            return Required(link: link, message: message, url: (r["url"] as? String).flatMap(URL.init(string:)))
-        }
-        let app = due.first { ($0["scope"] as? String) != "link" }.map { make($0, link: false) }
-        linkRequired = due.first { ($0["scope"] as? String) == "link" }.map { make($0, link: true) }
-        if required?.link == false { return }
-        // A link session is a friend's game too: neither card cuts into one.
+        guard required == nil, let built = Self.buildTime,
+              let r = list.first(where: { r in
+                  guard Self.forIOS(r), let min = Self.parse(r["minBuild"] as? String) else { return false }
+                  return built < min
+              }) else { return }
+        // A link session is a friend's game too: the screen waits for the next check.
         if NetLink.shared.holdsCore || GameSession.shared.twoPlayer { checkedAt = .distantPast; return }
-        if let app {
-            let session = GameSession.shared
-            if session.game != nil {
-                session.setPaused(true)
-                session.persistSession()
-                session.flushSave()
-            }
-            required = app
-        } else if let link = linkRequired, !linkNoticeShown, required == nil {
-            linkNoticeShown = true
-            required = link
+        let session = GameSession.shared
+        if session.game != nil {
+            session.setPaused(true)
+            session.persistSession()
+            session.flushSave()
         }
-    }
-
-    /// The link cable's ways in: true when a link-scope requirement holds
-    /// it, the alert up in its place. A sheet goes first (the tile menu's
-    /// 2P): an alert under a sheet never shows, nor one raised while it goes.
-    func blocksLink() -> Bool {
-        guard let link = linkRequired else { return false }
-        guard required == nil else { return true }
-        let model = AppModel.shared
-        if model.sheet != nil {
-            model.sheet = nil
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { [weak self] in
-                if self?.required == nil { self?.required = link }
-            }
-        } else {
-            required = link
-        }
-        return true
-    }
-
-    /// Not Now (or Update, which leaves for the store), on the link alert.
-    func later() {
-        if required?.link == true { required = nil }
+        let message = (r["message"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+            ?? "This version of dingbat has a problem that the update fixes."
+        required = Required(message: message, url: (r["url"] as? String).flatMap(URL.init(string:)))
     }
 }
 
-/// An app-wide required update: the whole screen, nothing behind it to reach,
-/// the button at the bottom within the thumb's reach. (A link-scope one is
-/// RootView's alert.)
+/// A required update: the whole screen, nothing behind it to reach, the
+/// button at the bottom within the thumb's reach.
 struct RequiredUpdateView: View {
     let required: AppStatus.Required
     @Environment(\.palette) private var palette

@@ -222,7 +222,6 @@ final class AppModel: ObservableObject {
 
     /// Local 2P on this game (the tile's 2P, behind `-2p`).
     func launchTwoPlayer(_ entry: RomEntry) {
-        if AppStatus.shared.blocksLink() { return }
         toasts.removeAll { $0.game }
         guard session.openTwoPlayer(entry) else { return }
         heroGame = entry

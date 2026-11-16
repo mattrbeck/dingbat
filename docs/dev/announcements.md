@@ -39,8 +39,8 @@ file can't stop anyone playing. Both lists take any number of entries.
     }
   ],
   "required": [
-    { "platforms": ["web"], "minBuild": "2026-11-16T19:51:20Z", "scope": "link",
-      "message": "Link cable play changed on 16 November: update to link again." },
+    { "platforms": ["web"], "minBuild": "2026-11-16T19:51:20Z",
+      "message": "This build can lose saves when the tab closes. The update fixes it." },
     { "platforms": ["ios"], "minBuild": "2026-11-16T19:51:20Z",
       "message": "This build can lose saves. The update fixes it.",
       "url": "https://apps.apple.com/app/id…" }
@@ -92,23 +92,17 @@ Set `minBuild` to the time of the first commit that has the fix.
 
 ### Required updates
 
-Each entry has `minBuild`, and optionally `platforms`, `message`, `url` (iOS)
-and `scope`:
+Each entry has `minBuild`, and optionally `platforms`, `message` and `url`
+(iOS). A build older than `minBuild` shows "Update Required" with no way out
+but **Update**: a card on web, the whole screen on iOS. A game in progress is
+paused, then saved before the update. A link session in progress is never
+interrupted; the card waits for the next check.
 
-- `"scope": "app"` (the default): a card ("Update Required") with no way out but **Update**.
-  A game in progress is paused, then saved before the update.
-- `"scope": "link"`: "Link Cable Needs an Update" with **Not Now** and
-  **Update**, once per launch: a card on web, a system alert on iOS (as the
-  app's other questions). After that the app runs as usual, but every way into
-  the link cable brings it back instead:
-  - web: Connect Link Cable (online and same-browser) and local 2P;
-  - iOS: the link sheet and two-player.
-- Any other scope is treated as `"app"` by builds that don't know it. A build
-  that can't hold just the broken feature holds everything, which errs on the
-  safe side. So adding a new scope means older builds block entirely.
-
-If several entries apply, an app-wide one wins over a link one. Neither card
-interrupts a link session in progress; it waits for the next check.
+Required updates are for the whole app. A break that only touches link play
+needs no entry: the signaling server's minimum client (below) turns old
+builds away at the moment they try to link, every build back to before this
+existed. Same-device link (2P, two tabs) runs one build on both sides and
+can't break that way.
 
 **Web**: a requirement blocks only when this build is older than `minBuild`,
 **and** the live build meets it, **and** the live build can be fetched
@@ -143,11 +137,17 @@ To make an incompatible link change:
 
 1. Bump `SIGNAL_PROTOCOL` / `signalProtocol` in the change that needs it, and
    ship those clients.
-2. Add a `"scope": "link"` entry to status.json, so players hear about it at
-   launch and their local link is held as well.
-3. Deploy the new server with `SIGNAL_MIN_CLIENT=<new level>` in its
-   environment (both server.js and server.nim read it). This is the backstop
-   for builds older than status.json.
+2. Deploy the new server with `SIGNAL_MIN_CLIENT=<new level>` in its
+   environment (both server.js and server.nim read it). Older builds trying to
+   link online are told to update, in the link screen, and newer ones also
+   show the Update button.
+3. Optionally post a banner with `builtBefore` set to the change's build time,
+   so those players hear about it before they try.
+
+Not covered: two builds whose peer-to-peer link protocol differs, paired by
+the manual code exchange (no server). The peers don't compare versions today,
+and a mismatched pair fails late ("are you both on the same emulator
+build?"). The fix for that is a version check in the peers' own handshake.
 
 ## Costs and limits
 
