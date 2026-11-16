@@ -1,40 +1,34 @@
 <p align="center"><img src="README/dingbat_large.png"></p>
 
-<p align="center">A Game Boy, Game Boy Color, and Game Boy Advance emulator written in Nim.</p>
+<h3 align="center">dingbat</h3>
 
-<h3 align="center"><a href="https://dingbat.gg">▶ Play it in your browser</a></h3>
+<p align="center">a game boy & game boy advance emulator</p>
 
-<p align="center"><img width="800" src="README/GoldenSun.gif"></p>
+<p align="center">play on <a href="https://dingbat.gg">dingbat.gg</a></p>
 
-## Highlights
+### Highlights
 
-**Link cable.** Trade and battle over the internet or on one machine. → [Multiplayer guide](docs/link-usage.md)
+<ins>Internet link cable</ins> - Trade and battle over the internet.
 
-**Enhanced MP2K audio.** Music in games using Nintendo's MP2K/M4A sound engine can be
-re-rendered per note, above the hardware's native mix rate. Optional.
+<ins>Enhanced audio</ins> - Games using the MP2K sound engine can be
+rendered clearer than on hardware.
 
-**Cross-device sync.** Games, saves, and save states sync through Google Drive.
+<ins>Cross-device backups</ins> - Games and saves sync through Google Drive.
 
-**Accuracy.** Scored every CI run against the mGBA suite, jsmolka's gba-tests, the AGS
-aging cartridge, blargg, mooneye, mealybug, SameSuite, gambatte, GBMicrotest, AGE and the
-acid2 ROMs — current tallies in [tests/results.md](tests/results.md).
+<ins>Accuracy</ins> - One of the most accurate Game Boy, Game Boy Color, and Game Boy Advance emulators. See for yourself in [tests/results.md](tests/results.md).
 
-**No BIOS file required.** An HLE BIOS is built in; a real dump can be supplied instead.
+<ins>No BIOS required</ins> - An accurate HLE BIOS is built in.
 
-**Everything else.** Nine save-state slots with thumbnails, rewind, fast forward, cheats,
-hq4x / xBR upscaling, per-panel LCD color correction, and a cycle-accurate Game Boy FIFO
-PPU.
+<ins>Extras</ins> - Featuring save states, rewind, fast forward, cheats,
+upscaling, color correction, and more.
 
-## Documentation
+### Documentation
 
-- [**Downloads**](docs/downloads.md) — prebuilt desktop binaries for Linux, macOS, Windows
-- [**Features**](docs/features.md) — what both front-ends and both systems support
-- [**Usage**](docs/usage.md) — loading ROMs, BIOS files, save files
-- [**Multiplayer**](docs/link-usage.md) — local 2P, online room codes, native TCP
-- [**Building**](docs/building.md) — native, WebAssembly, and Windows cross-builds
-- [**Everything else**](docs/README.md) — the index of every reference doc: hardware derivations, test-suite sources and triage, hardware-probe catalogue, tool kits
+- [Downloads](docs/downloads.md) - prebuilt desktop binaries for Linux, macOS, Windows
+- [Building](docs/building.md) - native, WebAssembly, and Windows cross-builds
+- [Index](docs/README.md) - the index of every reference doc
 
-## Acknowledgements
+### Acknowledgements
 
 The Game Boy and Game Boy Color work would not be possible without the
 [Pan Docs](https://gbdev.io/pandocs), [izik's opcode table](https://izik1.github.io/gbops),
@@ -45,9 +39,6 @@ The Game Boy Advance work would not be possible without
 [GBATEK](http://problemkaputt.de/gbatek.htm), [Tonc](https://www.coranac.com/tonc),
 [mGBA](https://mgba.io/), or the wonderful emudev community.
 
-dingbat is MIT licensed; the licences of the components compiled into the binaries are
-listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
-
 A special thanks goes out to those in the emudev community who are always helpful, both
 with insightful feedback and targeted test ROMs:
 [ladystarbreeze](https://github.com/ladystarbreeze),
@@ -56,3 +47,8 @@ with insightful feedback and targeted test ROMs:
 [destoer](https://github.com/destoer),
 [GhostRain0](https://github.com/GhostRain0),
 [bmchtech](https://github.com/bmchtech).
+
+dingbat is MIT licensed; the licences of the components compiled into the binaries are
+listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+<p align="center"><img width="800" src="README/GoldenSun.gif"></p>
