@@ -11,6 +11,16 @@ import gb
 const INPUT_COUNT = 10  # Input enum cardinality (UP..R)
 
 type
+  HeldKeys = object
+    ## What a state image leaves out of a joypad (live host input, and the
+    ## interrupt edge detector a load re-seeds from it). A checkpoint keeps
+    ## them: restored from the image alone, the detector would be seeded from
+    ## the keys of the newest frame simulated, and the re-simulated frame's
+    ## press would raise the joypad interrupt (IF bit 4) or not depending on
+    ## when the rollback came, so two peers' cores drift apart.
+    down, up, left, right, start, jselect, b, a: bool
+    prev_lines: uint8
+
   GbRbStatus* = enum
     grbAdvanced   ## simulated one new frame
     grbStalled    ## at the prediction-window limit; wait for remote input
@@ -30,6 +40,7 @@ type
     usedRemote: seq[uint16]      ## remote input actually applied per frame (misprediction check)
     ring: seq[GbLinkSnapshot]    ## checkpoint ring; slot (f mod cap) holds state BEFORE frame f
     ringFrame: seq[int]          ## frame each ring slot currently holds (-1 = empty)
+    ringKeys: seq[array[2, HeldKeys]]  ## each core's HeldKeys entering that frame
     cap: int                     ## ring capacity (> maxAhead so the frontier never evicts)
 
 proc bit(v: uint16; i: int): bool {.inline.} = ((v shr i) and 1) != 0
@@ -43,7 +54,8 @@ proc new_gb_rollback_session*(link: GbLink; local: int; maxAhead = 12): GbRollba
   let cap = maxAhead + 4
   result = GbRollbackSession(
     link: link, local: local, head: 0, confirmed: -1, maxAhead: maxAhead,
-    ring: newSeq[GbLinkSnapshot](cap), ringFrame: newSeq[int](cap), cap: cap)
+    ring: newSeq[GbLinkSnapshot](cap), ringFrame: newSeq[int](cap),
+    ringKeys: newSeq[array[2, HeldKeys]](cap), cap: cap)
   for i in 0 ..< cap: result.ringFrame[i] = -1
 
 proc grow(sess: GbRollbackSession; f: int) =
@@ -72,12 +84,23 @@ proc store_ckpt(sess: GbRollbackSession; f: int) =
   let idx = f mod sess.cap
   sess.ring[idx] = sess.link.capture_state()
   sess.ringFrame[idx] = f
+  for p in 0 .. 1:
+    let j = sess.link.cores[p].joypad
+    sess.ringKeys[idx][p] = HeldKeys(down: j.down, up: j.up, left: j.left,
+      right: j.right, start: j.start, jselect: j.jselect, b: j.b, a: j.a,
+      prev_lines: j.prev_lines)
 
 proc load_ckpt(sess: GbRollbackSession; f: int) =
   let idx = f mod sess.cap
   doAssert sess.ringFrame[idx] == f,
     "rollback: checkpoint for frame " & $f & " evicted (window too small?)"
   sess.link.restore_state(sess.ring[idx])
+  for p in 0 .. 1:
+    let j = sess.link.cores[p].joypad
+    let k = sess.ringKeys[idx][p]
+    j.down = k.down; j.up = k.up; j.left = k.left; j.right = k.right
+    j.start = k.start; j.jselect = k.jselect; j.b = k.b; j.a = k.a
+    j.prev_lines = k.prev_lines
 
 proc sim(sess: GbRollbackSession; f: int) =
   # Snapshot the state entering frame f, apply its inputs, advance one frame.
