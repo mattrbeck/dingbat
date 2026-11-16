@@ -46,4 +46,27 @@ push_cmd(mcFrameSize, 4)
 doAssert take_cmds() == @[(mcPause, 0), (mcFrameSize, 4)]
 doAssert take_cmds().len == 0
 
+# ── Settings rows (settings_model.nim) ──
+
+import dingbat/frontend/settings_model
+
+proc video(filter: int; ds: bool; border_help = ""): seq[SettingRow] =
+  result = @[label("Filter:", "help", @[choice(siFilter, ["None", "xBR"], [0, 2], filter)]),
+             toggle(siSgbBorder, "Show SGB border", true, border_help, enabled = filter == 0)]
+  if ds: result.add choice(siNdsHd, ["Native", "2x"], [1, 2], 1, inline = true)
+
+# The shape changes with rows coming and going, not with values, text,
+# greying or help: a window updates those in place
+doAssert signature(video(0, false)) == signature(video(2, false, "other help"))
+doAssert signature(video(0, false)) != signature(video(0, true))
+# Nested rows are part of the shape
+doAssert signature(@[group(@[note("a")])]) != signature(@[group(@[note("a"), note("b")])])
+
+var r: SettingRow
+doAssert video(2, false).find(siFilter, 0, r) and r.value == 2 and r.options.len == 2
+doAssert r.option_on == @[true, true]   # every option open unless said otherwise
+doAssert video(2, false).find(siSgbBorder, 0, r) and not r.enabled
+doAssert not video(2, false).find(siNdsHd, 0, r)
+doAssert binding(siKeyBinding, DS_ARG + 1, "Y (DS)", "C", false, 48).arg == DS_ARG + 1
+
 echo "desktop menu tests passed"

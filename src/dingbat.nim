@@ -35,6 +35,7 @@ import dingbat/frontend/menu_model
 import dingbat/frontend/imgui_menu
 when defined(macosx):
   import dingbat/frontend/mac_menu
+  import dingbat/frontend/mac_settings
 when defined(gui_driver):
   import dingbat/frontend/gui_driver
 import dingbat/common/cheats
@@ -1601,6 +1602,10 @@ proc menu_state(cmd: MenuCmd; arg: int): MenuState =
   case cmd
   of mcNone, mcOpenRom, mcOpenRecent, mcClearRecents, mcSettings, mcQuit,
      mcHelp, mcReset, mcVolume, mcVolumeDone: (true, false)
+  # The game window's ImGui field being typed in (the Cheats code, the Link
+  # Cable address)
+  of mcUndo, mcRedo, mcCut, mcCopy, mcPaste, mcSelectAll:
+    (app.io != nil and app.io[].WantTextInput, false)
   of mcRecentMenu: (app.cfg.recents.len > 0, false)
   of mcChannelsMenu: (gba or gb, false)
   of mcQuickSave, mcSaveStates, mcScreenshot: (game, false)
@@ -1679,7 +1684,26 @@ proc run_menu(cmd: MenuCmd; arg: int) =
   of mcQuickLoad: app.pending_load = true
   of mcSaveStates: app.save_states.window = true
   of mcScreenshot: save_screenshot()
-  of mcSettings: app.ce.open = true
+  of mcSettings:
+    when defined(macosx):
+      if app.ce.native:
+        mac_settings_show()
+        return
+    app.ce.open = true
+  of mcUndo, mcRedo, mcCut, mcCopy, mcPaste, mcSelectAll:
+    # The field's own shortcut, as ImGui reads it (Cmd: io.ConfigMacOSXBehaviors)
+    let key = case cmd
+              of mcUndo, mcRedo: ImGui_Key_Z
+              of mcCut: ImGui_Key_X
+              of mcCopy: ImGui_Key_C
+              of mcPaste: ImGui_Key_V
+              else: ImGui_Key_A
+    var mods = @[ImGui_Mod_Super]
+    if cmd == mcRedo: mods.add ImGui_Mod_Shift
+    for m in mods: ImGuiIO_AddKeyEvent(app.io, m, true)
+    ImGuiIO_AddKeyEvent(app.io, key, true)
+    ImGuiIO_AddKeyEvent(app.io, key, false)
+    for m in mods: ImGuiIO_AddKeyEvent(app.io, m, false)
   of mcQuit: app.running = false
   of mcHelp: discard openURL(HELP_URL)
   of mcReset: reset_game()
@@ -1830,6 +1854,15 @@ proc menu_bar(native: bool): seq[MenuItem] =
       separator(),
       action("Quit dingbat", mcQuit, key = "q")])
   result.add submenu("File", file)
+  if native:
+    result.add submenu("Edit", @[
+      edit("Undo", mcUndo, "undo:", "z"),
+      edit("Redo", mcRedo, "redo:", "z", shift = true),
+      separator(),
+      edit("Cut", mcCut, "cut:", "x"),
+      edit("Copy", mcCopy, "copy:", "c"),
+      edit("Paste", mcPaste, "paste:", "v"),
+      edit("Select All", mcSelectAll, "selectAll:", "a")])
   result.add submenu("Emulation", emu)
   result.add submenu("Audio/Video", av)
   result.add submenu("Debug", debug)
@@ -1859,7 +1892,7 @@ proc render_imgui() =
   let menu_visible = show_menu_bar()
   if app.emu_kind != ekNone and not app.paused and not app.rewinding and
      not menu_visible and not app.enable_overlay and
-     not app.fe.open and not app.ce.open and
+     not app.fe.open and not (app.ce.open and not app.ce.native) and
      (app.dbg == nil or not app.dbg.any_window_open) and
      (app.gb_dbg == nil or not app.gb_dbg.any_window_open) and
      not app.link_window and not app.cheats.window and
@@ -2117,6 +2150,13 @@ proc nds_view_top_left(): (int, int, int, int) =
   let (vx, vy, vw, vh) = letterbox(ww, wh)
   (int(vx), int(wh) - int(vy) - int(vh), int(vw), int(vh))
 
+proc settings_capturing_keys(): bool =
+  ## A Keybindings capture takes this window's keys. The native Settings
+  ## window takes its own while it has the keyboard (mac_settings.m).
+  result = app.ce.capturing_keys()
+  when defined(macosx):
+    if app.ce.native and mac_settings_has_keyboard(): result = false
+
 proc handle_input() =
   when defined(gui_driver):
     # A pushed drop event can't carry its path through SDL's event memory,
@@ -2144,7 +2184,7 @@ proc handle_input() =
                                  shortcut_mod = (mods and MOD_KEY_MASK) != 0,
                                  imgui_keyboard = app.io != nil and
                                                   app.io[].WantCaptureKeyboard,
-                                 capturing = app.ce.capturing_keys(),
+                                 capturing = settings_capturing_keys(),
                                  ds_bindings = if app.emu_kind == ekNDS:
                                                  app.cfg.nds_keybindings
                                                else: no_ds_keys)
@@ -2691,8 +2731,12 @@ proc main() =
   app.save_states.on_delete = proc(slot: int) = delete_state_slot(slot)
   when defined(macosx):
     if native_menu:
-      mac_menu_install(proc(): seq[MenuItem] = menu_bar(native = true),
+      mac_menu_install(window, proc(): seq[MenuItem] = menu_bar(native = true),
                        menu_state, VERSION)
+      # Settings in a native window too (DINGBAT_IMGUI_MENU=1 keeps ImGui's)
+      var driven = false
+      when defined(gui_driver): driven = driver_enabled()
+      mac_settings_init(ce, driven)
 
   # GLSL uniforms default to 0/false, so push the configured value now
   # (tex_height too: 0 would make the scanline fract() darken everything)
@@ -2996,6 +3040,7 @@ proc main() =
     handle_input()
     lat_poll_input()
     run_menu_cmds()
+    when defined(macosx): mac_settings_tick()
     update_rumble()
     update_link_auto()
     service_link_setup()

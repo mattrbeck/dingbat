@@ -14,7 +14,10 @@ import menu_model
 {.passL: "-framework Cocoa -framework UniformTypeIdentifiers".}
 
 {.push cdecl, importc.}
-proc dbm_install(titles: ptr cstring; fixed: ptr cint; n: cint; version: cstring)
+proc dbm_install(titles: ptr cstring; fixed: ptr cint; n: cint; version: cstring;
+                 sdl_window: pointer)
+proc dbm_add_edit(menu: pointer; title: cstring; cmd: cint; selector, key: cstring;
+                  shift: cint)
 proc dbm_add_action(menu: pointer; title: cstring; cmd, arg: cint; key: cstring;
                     alt, shown: cint)
 proc dbm_add_submenu(menu: pointer; title: cstring; cmd: cint): pointer
@@ -52,6 +55,9 @@ proc populate(menu: pointer; items: seq[MenuItem]) =
     of mkSystem:
       dbm_add_system(menu, cstring(it.title), cstring(it.selector),
                      cstring(it.key), cint(ord(it.alt)))
+    of mkEdit:
+      dbm_add_edit(menu, cstring(it.title), cint(ord(it.cmd)), cstring(it.selector),
+                   cstring(it.key), cint(ord(it.shift)))
 
 # AppKit calls these. Nothing may raise out of them into Objective-C.
 
@@ -84,7 +90,7 @@ proc dingbat_open_panel_done(path: cstring) {.exportc, cdecl.} =
 proc nswindow(window: Window): pointer =
   getPointerProperty(getWindowProperties(window), PROP_WINDOW_COCOA_WINDOW_POINTER, nil)
 
-proc mac_menu_install*(build: proc(): seq[MenuItem];
+proc mac_menu_install*(window: Window; build: proc(): seq[MenuItem];
                        state: proc(cmd: MenuCmd; arg: int): MenuState;
                        version: string) =
   ## Replace SDL's stock menus with `build()`'s. The app menu (first), Window
@@ -98,7 +104,8 @@ proc mac_menu_install*(build: proc(): seq[MenuItem];
   for i, top in bar:
     titles.add cstring(top.title)
     fixed.add cint(ord(i == 0 or top.title in ["Window", "Help"]))
-  dbm_install(addr titles[0], addr fixed[0], cint(bar.len), cstring(version))
+  dbm_install(addr titles[0], addr fixed[0], cint(bar.len), cstring(version),
+              nswindow(window))
   installed = true
 
 proc mac_open_panel*(window: Window; exts: openArray[string]; dir: string) =

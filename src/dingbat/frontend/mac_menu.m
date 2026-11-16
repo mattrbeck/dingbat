@@ -23,6 +23,7 @@ enum { VK_TAB = 48, VK_F12 = 111 };
 
 @interface DbmTag : NSObject
 @property int cmd, arg, shown;
+@property SEL edit;   // an Edit item's standard action, for a native field
 @end
 @implementation DbmTag
 @end
@@ -44,6 +45,13 @@ enum { VK_TAB = 48, VK_F12 = 111 };
 @end
 
 static DbmController *controller;
+static __weak NSWindow *game_window;   // SDL's: its text fields are ImGui's
+
+// The game's window has the keyboard (or no window has: the GUI driver's
+// hidden one)
+static BOOL game_has_keys(void) {
+  return NSApp.keyWindow == nil || NSApp.keyWindow == game_window;
+}
 
 @implementation DbmController
 
@@ -56,6 +64,10 @@ static DbmController *controller;
 - (BOOL)validateMenuItem:(NSMenuItem *)item {
   DbmTag *t = item.representedObject;
   if (![t isKindOfClass:DbmTag.class]) return YES;
+  // Edit: the game's window asks ImGui; any other (Settings, a panel) asks
+  // whoever in its responder chain takes the action
+  if (t.edit && !game_has_keys())
+    return [NSApp targetForAction:t.edit to:nil from:item] != nil;
   int checked = 0;
   BOOL on = dingbat_menu_state(t.cmd, t.arg, &checked) != 0;
   if (item.submenu == nil)
@@ -74,6 +86,20 @@ static DbmController *controller;
     if (e.isARepeat && item.keyEquivalent.length > 0) return;
   }
   dingbat_menu_action(t.cmd, t.arg);
+}
+
+- (void)dbmEdit:(NSMenuItem *)item {
+  DbmTag *t = item.representedObject;
+  if (!game_has_keys()) {
+    [NSApp sendAction:t.edit to:nil from:item];
+    return;
+  }
+  // Its own shortcut reached ImGui through SDL already
+  NSEvent *e = NSApp.currentEvent;
+  if (e.type == NSEventTypeKeyDown &&
+      [e.charactersIgnoringModifiers.lowercaseString isEqualToString:item.keyEquivalent.lowercaseString])
+    return;
+  dingbat_menu_action(t.cmd, 0);
 }
 
 - (void)dbmSubmenu:(id)sender {}
@@ -122,8 +148,10 @@ static NSMenuItem *tagged(NSString *title, SEL action, int cmd, int arg) {
   return it;
 }
 
-void dbm_install(const char **titles, const int *fixed, int n, const char *version) {
+void dbm_install(const char **titles, const int *fixed, int n, const char *version,
+                 void *sdl_window) {
   if (controller == nil) controller = [DbmController new];
+  game_window = (__bridge NSWindow *)sdl_window;
   controller.version = str(version);
   NSMenu *bar = [NSMenu new];
   for (int i = 0; i < n; i++) {
@@ -171,6 +199,15 @@ void *dbm_add_submenu(void *menu, const char *name, int cmd) {
   it.submenu = sub;
   [(__bridge NSMenu *)menu addItem:it];
   return (__bridge void *)sub;
+}
+
+void dbm_add_edit(void *menu, const char *name, int cmd, const char *selector, const char *key,
+                  int shift) {
+  NSMenuItem *it = tagged(title(name), @selector(dbmEdit:), cmd, 0);
+  ((DbmTag *)it.representedObject).edit = NSSelectorFromString(str(selector));
+  it.keyEquivalent = str(key);
+  it.keyEquivalentModifierMask = NSEventModifierFlagCommand | (shift ? NSEventModifierFlagShift : 0);
+  [(__bridge NSMenu *)menu addItem:it];
 }
 
 void dbm_add_separator(void *menu) { [(__bridge NSMenu *)menu addItem:NSMenuItem.separatorItem]; }
@@ -320,7 +357,7 @@ char *dbm_dump(void) {
 
 int dbm_pick(const char *path) {
   // 1 chosen, 0 no such item, -1 greyed out
-  NSArray<NSString *> *parts = [str(path) componentsSeparatedByString:@">"];
+  NSArray<NSString *> *parts = [title(path) componentsSeparatedByString:@">"];
   NSMenu *m = nil;
   for (NSMenuItem *top in NSApp.mainMenu.itemArray)
     if ([top.submenu.title isEqualToString:parts[0]]) m = top.submenu;

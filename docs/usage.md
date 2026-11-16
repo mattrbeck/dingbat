@@ -11,9 +11,11 @@ Native: run `dingbat`, pass a ROM path (`./dingbat /path/to/rom`), or drag a fil
 the window.
 
 On macOS the menus live in the system menu bar (Settings and Quit in the dingbat menu),
-File > Open ROM… (⌘O) is the system's Open panel, and the app opens ROMs from Finder:
-Open With, or a drop on the Dock icon. Games you open show in the Dock icon's and the
-Apple menu's recent items. `DINGBAT_IMGUI_MENU=1` brings back the in-window menu bar.
+Settings… (⌘,) opens a Mac settings window, File > Open ROM… (⌘O) is the system's Open
+panel, and the app opens ROMs from Finder: Open With, or a drop on the Dock icon. Games
+you open show in the Dock icon's and the Apple menu's recent items. The Edit menu's Cut,
+Copy, Paste and Undo work in any text field, the Cheats and Link Cable windows' too.
+`DINGBAT_IMGUI_MENU=1` brings back the in-window menu bar and Settings window.
 
 Zipped ROMs work in both: the first `.gba` / `.gb` / `.gbc` in the archive is loaded.
 

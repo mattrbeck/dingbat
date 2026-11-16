@@ -27,12 +27,16 @@ type
     mcFullscreen
     # Debug
     mcOverlay, mcGbaDebug, mcGbDebug
+    # Edit (macOS): an ImGui text field's, when the game's window has the keyboard
+    mcUndo, mcRedo, mcCut, mcCopy, mcPaste, mcSelectAll
 
   MenuKind* = enum
     mkAction     ## runs `cmd` with `arg`
     mkSeparator
     mkSubmenu    ## `items`; greyed out when `cmd`'s state says so
     mkSlider     ## `cmd` with the value while dragging, `done` once let go
+    mkEdit       ## macOS only: Edit's `selector` ("copy:") for a native
+                 ## field, or `cmd` for the ImGui field in the game's window
     mkSystem     ## macOS only: AppKit's own action `selector` ("hide:"), or
                  ## "services" for the Services submenu
 
@@ -49,6 +53,7 @@ type
     arg*:      int
     key*:      string    ## a Cmd (macOS) / Ctrl shortcut, lowercase ("s", ",")
     alt*:      bool      ## `key` with Option too (macOS Hide Others)
+    shift*:    bool      ## `key` with Shift too (macOS Redo)
     hint*:     string    ## ImGui's shortcut column ("Tab"), not bound
     shown*:    ShownKey
     enabled*:  bool
@@ -73,6 +78,10 @@ proc submenu*(title: string; items: seq[MenuItem]; cmd = mcNone): MenuItem =
 proc slider*(title: string; cmd, done: MenuCmd; value, lo, hi: int): MenuItem =
   MenuItem(kind: mkSlider, title: title, cmd: cmd, done: done, value: value,
            lo: lo, hi: hi, enabled: true)
+
+proc edit*(title: string; cmd: MenuCmd; selector, key: string; shift = false): MenuItem =
+  MenuItem(kind: mkEdit, title: title, cmd: cmd, selector: selector, key: key,
+           shift: shift, enabled: true)
 
 proc system*(title, selector: string; key = ""; alt = false): MenuItem =
   MenuItem(kind: mkSystem, title: title, selector: selector, key: key,

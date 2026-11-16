@@ -41,6 +41,15 @@
 ##                                     [off] greyed, [Cmd+S] its shortcut)
 ##   menu pick <Menu>Item[>Sub]>       choose an item as a click would; acked
 ##                                     `error greyed` or `error no item`
+##   settings dump <path.txt>          macOS Settings window: each tab's rows
+##                                     as they show ([x] ticked or chosen, [off]
+##                                     greyed, [waiting] for a key, [invalid])
+##   settings do <Tab>[><Title>[><text>]]  pick a tab, or click the row titled
+##                                     so in it; a path row takes <text> as
+##                                     typed. Tab "" is the button row (">OK")
+##   settings key <mac key code>       a key let go in the window (kVK_*: 0x06 Z)
+##   settings close                    the window's close button
+##   settings shot <path.png>          the window as drawn (shown or not)
 ##
 ## With the macOS menu bar, a `key ... down cmd` also goes through it, as a
 ## real Cmd shortcut does (the key handler leaves those to the menus).
@@ -56,6 +65,7 @@ import imguin/glad/gl
 import stb_image/write as stbiw
 when defined(macosx):
   import mac_menu
+  import mac_settings
 
 type
   Step = object
@@ -325,6 +335,22 @@ proc run(window: Window; s: Step): bool =
         else: raise newException(ValueError, "no item")
       else: raise newException(ValueError, "menu dump|pick")
     else: raise newException(ValueError, "menu: macOS only")
+  of "settings":
+    when defined(macosx):
+      case w[1]
+      of "dump": writeFile(w[2], mac_settings_dump())
+      of "do":
+        let parts = s.rest[len("do") .. ^1].strip().split('>')
+        let res = mac_settings_do(parts[0], (if parts.len > 1: parts[1] else: ""),
+                                  (if parts.len > 2: parts[2] else: ""))
+        if res == 0: raise newException(ValueError, "no item")
+        if res < 0: raise newException(ValueError, "greyed")
+      of "key": mac_settings_key(parseHexInt(w[2]))
+      of "close": mac_settings_close_button()
+      of "shot":
+        if not mac_settings_snapshot(w[2]): raise newException(IOError, "no snapshot")
+      else: raise newException(ValueError, "settings dump|do|key|close")
+    else: raise newException(ValueError, "settings: macOS only")
   else: raise newException(ValueError, "unknown command " & w[0])
   true
 

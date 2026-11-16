@@ -3,7 +3,7 @@
 # real event loop (-d:gui_driver) in a hidden, muted window with a scratch
 # HOME, as tests/desktop_gui_test.sh drives the rest:
 #
-#   home      the app, File, Emulation, Audio/Video, Debug, Window and Help
+#   home      the app, File, Edit, Emulation, Audio/Video, Debug, Window and Help
 #             menus; with no game, the game's items greyed out
 #   game      a GBA game: its items enabled, Open Recent lists it, the speed
 #             items show Tab and Shift+Tab
@@ -57,7 +57,7 @@ run "" "1 frames 30
 3 menu pick File>Quick Save
 4 quit"
 check "menus" "$(grep -v '^ ' "$work/home.txt" | tr '\n' ' ')" \
-      "dingbat File Emulation Audio/Video Debug Window Help "
+      "dingbat File Edit Emulation Audio/Video Debug Window Help "
 check "Settings… in the app menu" "$(item "$work/home.txt" 'Settings… [Cmd+,]')" present
 check "Quit dingbat" "$(item "$work/home.txt" 'Quit dingbat [Cmd+Q]')" present
 check "Open ROM…" "$(item "$work/home.txt" 'Open ROM… [Cmd+O]')" present

@@ -9,7 +9,7 @@ proc render_items(items: seq[MenuItem]; mod_name: string) =
   for it in items:
     case it.kind
     of mkSeparator: igSeparator()
-    of mkSystem: discard   # AppKit's own actions: macOS bar only
+    of mkSystem, mkEdit: discard   # AppKit's own actions: macOS bar only
     of mkSubmenu:
       if igBeginMenu(cstring(it.title), it.enabled):
         render_items(it.items, mod_name)
