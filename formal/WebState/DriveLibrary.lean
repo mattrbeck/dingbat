@@ -4421,7 +4421,7 @@ def reimportTrace : List EvG :=
 
 def saves (dv : DevG) (k : Nat) : List Nat := (dv.store.filter (·.kind == k)).map (·.blob)
 
-/-- **The finding** (the UI pass; FINDINGS.md "a design question"): with the
+/-- **The finding** (the UI pass; FINDINGS.md "a deleted game loaded again"): with the
 rules before generations, device 0's game, loaded again after its delete,
 gets the deleted game's save back from device 1. -/
 theorem bug_reimport_gets_deleted_save :

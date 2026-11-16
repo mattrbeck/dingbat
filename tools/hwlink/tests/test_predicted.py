@@ -54,10 +54,14 @@ class Registry(unittest.TestCase):
             self.assertEqual(used, set(p['who']), row)
 
     def test_the_probe_rows_stay_out_of_the_frozen_gate(self):
+        # The §79 probes are recorded rows that need no cartridge. One leaves
+        # OPEN_ROWS (and joins the frozen gate) once a model matches its
+        # console cells, as timergeo and obusdma16 did; these three have not.
         for row in ('timergeo', 'wakehb', 'obusdma16', 'fifolog', 's0age', 'psgrace', 'hdmarace'):
             self.assertIn(row, r0table.TABLE)
-            self.assertIn(row, r0table.OPEN_ROWS)
             self.assertNotIn(row, r0table.NEEDS_CART)
+        for row in ('fifolog', 'psgrace', 'hdmarace'):
+            self.assertIn(row, r0table.OPEN_ROWS)
 
     def test_fifolog_samples_add_up(self):
         s = predicted.fifolog_samples()
