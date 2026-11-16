@@ -634,8 +634,10 @@ proc obj_row(g: ObjGeometry; line: int): int {.inline.} =
   ## lines, GBATEK: one "located at Y>128 will be treated as at Y>-128, the
   ## OBJ is then displayed parts offscreen at the TOP of the display". The
   ## same 8-bit test also keeps its first rows on the bottom lines (Y..159),
-  ## where GBATEK adds "it is then NOT displayed at the bottom": unmeasured
-  ## (docs/hwprobe-questions.md, GBA table). Any other height never reaches
+  ## where GBATEK adds "it is then NOT displayed at the bottom". OPEN: gbaedge
+  ## page 38's 2026-09-04 photo (a 128-tall OBJ at Y=130) showed lines 130-159
+  ## and nothing at the top, which this test contradicts; re-shoot the page
+  ## (docs/hwprobe-questions.md, the 2026-10-16 OBJ row). Any other height never reaches
   ## both ends, so only that case differs from a plain signed Y.
   (line - g.y) and 0xFF
 
