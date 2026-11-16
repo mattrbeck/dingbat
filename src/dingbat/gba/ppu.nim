@@ -682,8 +682,8 @@ proc render_sprites_impl(ppu: PPU; force_scan: bool) =
   # Interval Free bit (GBATEK "LCD OBJ Overview"). A regular sprite costs
   # `width` cycles, an affine one 10 + 2*width over its drawn footprint; once
   # the budget is spent, later OAM entries do not render. The sprite that
-  # exhausts the budget still draws fully: Assumed; hardware likely truncates
-  # it (docs/hwprobe-questions.md, GBA table). The Famicom Mini FDS carts
+  # exhausts the budget still draws fully: AGB SP, gbaedge page 37 OBJBUDGET
+  # (docs/hwprobe-results-agb.md, session 5). The Famicom Mini FDS carts
   # park full-width masking sprites at the end of OAM that hardware has no
   # time to draw.
   var obj_cycles = if ppu.dispcnt.hblank_interval_free: 954 else: 1210
@@ -762,8 +762,9 @@ proc render_sprites_impl(ppu: PPU; force_scan: bool) =
             offset *= 0x20
         offset += tex_x shr 3
         var pal_idx: uint32
-        # OBJ character fetches wrap within the 32K of OBJ VRAM. Assumed; no
-        # ROM pins this.
+        # OBJ character fetches wrap within the 32K of OBJ VRAM: AGB SP, gbaedge
+        # page 38 OBJGEOM's tile-1020 sprite (docs/hwprobe-results-agb.md,
+        # session 5).
         if bit(sprite.attr0, 13):  # 8bpp
           # GBATEK "LCD OBJ - OAM Attributes", OBJ Tile Number: in 256-colour
           # mode "the lower bit of the tile number should be zero (in
