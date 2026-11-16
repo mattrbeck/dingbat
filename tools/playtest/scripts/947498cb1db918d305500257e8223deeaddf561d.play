@@ -18,7 +18,7 @@
 # the screen one frame after the references (console-measured VRAM
 # contention in the IWRAM decompressor at f723-727, which neither reference
 # models), so its ball stays still where theirs rolls right
-# (docs/playtest-bugs.md, "Yoshi Topsy-Turvy: the calibration ball is frame
+# (docs/dev/playtest-bugs.md, "Yoshi Topsy-Turvy: the calibration ball is frame
 # parity, not the sensor").
 [new]
 wait 600

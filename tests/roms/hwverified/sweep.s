@@ -50,7 +50,7 @@
 @
 @ PROVENANCE: verified on GBA SP AGS-001 (gbaedge pages 23 SWEEPQ and 31
 @ SWEEP2, the latter carrying the four discriminator rows); see
-@ docs/hwprobe-results-agb.md.
+@ docs/dev/hwprobe-results-agb.md.
     .arm
     .text
     .global _start

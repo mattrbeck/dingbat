@@ -12,10 +12,10 @@
 # From f611 (area 1's first frames) the second reference plays another
 # game: other Toroid waves, another explosion behind the menus. It ran a
 # frame ahead of dingbat-bios and mgba through the boot (f61 on; its boot
-# lead, docs/playtest-bugs.md §65), so START (f361) reached the NES program
+# lead, docs/dev/playtest-bugs.md §65), so START (f361) reached the NES program
 # on another of its frames. dingbat-bios and mgba hash alike on every frame
 # to f1200.
-# Audio: FIXED 2026-10-16 (IMM_NEEDS_EDGE, gba/dma.nim; docs/playtest-bugs.md
+# Audio: FIXED 2026-10-16 (IMM_NEEDS_EDGE, gba/dma.nim; docs/dev/playtest-bugs.md
 # §99). The interrupt restarts DMA 1 with
 # DMA1CNT = 0x84400004 first, which switched the running channel to
 # immediate timing with its enable kept; another burst ending in the next 24

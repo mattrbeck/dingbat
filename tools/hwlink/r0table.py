@@ -49,7 +49,7 @@ TABLE = {
     # before it (ldrh, then ldrb at odd addresses), at k = 0..3 phases,
     # prefetcher off / on, against a load of another address; then (bit 6,
     # slot empty) the halfword read: addr >> 1 for an N access, 0xFFFF for
-    # an S one (docs/playtest-bugs.md, "Klonoa 2")
+    # an S one (docs/dev/playtest-bugs.md, "Klonoa 2")
     'romdataseq': ([b | p | c | k for b in (0, 0x80) for p in (0, 0x10) for c in (0, 0x20)
                     for k in range(4)]
                    + [0x40, 0x50, 0x60, 0x70]),
@@ -266,7 +266,7 @@ TABLE = {
     # blocks read cleanly, then the second again after a stray strh / strb
     # (immediately, after an idle gap, a ready poll, a ROM read, a read of
     # 0x09FFE000) or between the request and its data (Columns Crown's boot
-    # flash probe, docs/playtest-bugs.md §95; payloads/eestray.s). Read
+    # flash probe, docs/dev/playtest-bugs.md §95; payloads/eestray.s). Read
     # only: no cell stores a 0 to the chip. A 64 Kbit cart in the slot,
     # booted holding SELECT+START; without a cart every cell answers DEAD0001
     'eestray': list(range(9)),
@@ -316,7 +316,7 @@ TABLE = {
     # DEAD0001
     'sramloop': [1, 2, 0x10, 0x40, 0x110, 0x140, 0x210, 0x240, 0x310, 0x340, 0x440],
 
-    # The §79 probes (docs/playtest-bugs.md, "The console cells nobody
+    # The §79 probes (docs/dev/playtest-bugs.md, "The console cells nobody
     # reproduces"), each with its answers predicted before any console run
     # (predicted.py; `--score`). None needs a cartridge.
     #
@@ -330,7 +330,7 @@ TABLE = {
     # controls 0x28 and 0x60, wakeirq's cells moved by 4 cycles (payloads/wakehb.s)
     'wakehb': [0x80, 0x90, 0xA0, 0xA8, 0xE0, 0xA2, 0x28, 0x60],
     # an SIO transfer started on the external clock, then SC set with Start
-    # still set (Coloris / Dial Hex's link start-up, docs/playtest-bugs.md
+    # still set (Coloris / Dial Hex's link start-up, docs/dev/playtest-bugs.md
     # §101): the internal-clock control, the switch, the switch + the byte
     # store of Start (payloads/sioclk.s; its external-only control, 3, is
     # clocked by the host's next poll and is not recorded)
@@ -517,7 +517,7 @@ NEEDS_CART = {'f6q3', 'eesettle', 'eesettle4k', 'eestray', 'eestray4k', 'sramflo
               'sramloop'}
 
 # rows the console has answered and no dingbat model matches yet: kept out of
-# lawrom.py's frozen gate until one does (docs/playtest-bugs.md §61). The §79
+# lawrom.py's frozen gate until one does (docs/dev/playtest-bugs.md §61). The §79
 # probes are here from the start: they are recorded to score predictions
 # (`--score`), and one joins the gate once its cells are read and a model
 # matches them. hdmarace also names the race ROM lawrom.py writes for
@@ -536,7 +536,7 @@ FRAMES_PER_CELL = {'psgrace': 80, 'irqpoll': 2, 'anchorpoll': 2, 'c2ew': 2, 'c2f
 # probe with its entry phase fixed and walked by `phase << shift` in the
 # argument; a racing cell of the payload matches when every word the console
 # answered is one the emulator answers at some phase. hdmaobus's reader-first
-# sled cells race the arming's 7-cycle VCOUNT poll (docs/playtest-bugs.md,
+# sled cells race the arming's 7-cycle VCOUNT poll (docs/dev/playtest-bugs.md,
 # "hdmaobus's racing cells are the poll's phase").
 RACES = {'hdmaobus': ('hdmarace', 12, 7)}
 

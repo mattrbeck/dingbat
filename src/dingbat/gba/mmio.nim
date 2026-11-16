@@ -92,7 +92,7 @@ proc `[]=`*(mmio: MMIO; address: uint32; value: uint8) =
   of 0x301:
     # HALTCNT answers only to BIOS code; a byte write from ROM or RAM is
     # ignored (AGB SP, haltprobe: a `strb` from IWRAM does not halt;
-    # docs/playtest-bugs.md section 18). The HLE
+    # docs/dev/playtest-bugs.md section 18). The HLE
     # SWI 2 sets cpu.halted directly. What counts is the address of the
     # newest fetch (r15), not which memory answered it: under MEMCNT's swap
     # a `strb` with r15 01FFFFF8 halts and one with r15 02000000 does not

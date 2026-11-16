@@ -22,7 +22,7 @@
 # diagnostic). The pause dimming is a brightness decrease of the 2600
 # screen (BLDCNT 0x20C4, BLDY 8): dingbat and mgba take (13,19,8) to
 # (6,9,4), dingbat by t*(16-EVY) >> 4 (the SP-photographed rounding,
-# docs/playtest-bugs.md §40), the second reference to (7,9,4) by
+# docs/dev/playtest-bugs.md §40), the second reference to (7,9,4) by
 # t - (t*EVY >> 4) with green worked at 6 bits; the dimmed screens differ
 # there on every pause.
 

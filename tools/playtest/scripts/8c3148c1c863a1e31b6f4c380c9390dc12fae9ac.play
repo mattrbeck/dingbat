@@ -12,7 +12,7 @@
 # whip (R) and fire at the cow's ledge.
 # The pause darkens the screen: the three emulators' paused frames are all
 # within one 5-bit step of each other everywhere, dingbat the lower (the
-# darken rounding, docs/playtest-bugs.md §40).
+# darken rounding, docs/dev/playtest-bugs.md §40).
 # No emulator writes battery data: dingbat-bios writes no file, mgba an
 # empty one, the second reference 32 KB of FF.
 

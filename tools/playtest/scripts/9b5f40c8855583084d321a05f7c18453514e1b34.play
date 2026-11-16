@@ -26,7 +26,7 @@
 #   (20,11,12) and the white 0x7FFF letters as (24,27,27), the 5-bit
 #   min(31,(a*8+b*8)>>4); both references draw (21,11,12) and (25,27,28),
 #   which is that sum taken on 8-bit expanded channels (x<<3|x>>2). 1700
-#   pixels; dingbat's rounding is the one docs/hwprobe-questions.md has from
+#   pixels; dingbat's rounding is the one docs/dev/hwprobe-questions.md has from
 #   the SP photographs (colour special effects rounding).
 # - The race clock starts at a different frame on each emulator: at f3654
 #   dingbat-bios reads 0:04:68, mgba 0:04:80, the second reference 0:04:64, so the countdown

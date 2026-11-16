@@ -23,7 +23,7 @@
 //   settingsGlow()  the ambient-glow sampler (main thread, every 6th frame)
 //   settingsLowpass() the analog filter's BiquadFilterNode, rendered offline
 // ?rom=<file>&state=<file> pick the scene (default FireRed); everything lives
-// next to this page, gitignored. See docs/settings-cost.md.
+// next to this page, gitignored. See docs/dev/settings-cost.md.
 if (navigator.serviceWorker) {
   navigator.serviceWorker.getRegistrations?.().then((rs) => rs.forEach((r) => r.unregister()));
 }

@@ -14,7 +14,7 @@
 @ rows (+28, +30) are the method's own control: they must read as they do on
 @ a cart-booted run for the ROM rows to mean anything.
 @
-@ p50 (docs/hwprobe-results-agb.md session 6) put the H-blank DMA's request 2
+@ p50 (docs/dev/hwprobe-results-agb.md session 6) put the H-blank DMA's request 2
 @ cycles after the H-blank flag while the CPU looped on 1-cycle IWRAM
 @ accesses; inside a ROM load the write landed +5 later. One sample each, so
 @ it cannot tell a deferral that depends on WHERE in the CPU's bus cycle the

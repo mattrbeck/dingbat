@@ -1,4 +1,4 @@
-@ payload_mirror.s — ROM mirror / open-bus map (docs/hwprobe-questions.md,
+@ payload_mirror.s — ROM mirror / open-bus map (docs/dev/hwprobe-questions.md,
 @ multiboot row 3).  Pins cartridge.nim's 1 MiB rule (Classic NES Series:
 @ image mirrored 4x in a 4 MiB window, then the (addr/2)&0xFFFF pattern,
 @ Assumed) and what the WS1/WS2 regions return for a small cart.

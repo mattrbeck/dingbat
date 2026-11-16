@@ -85,7 +85,7 @@ instruction instead (`Bus.dma_open_bus_armed`, cleared in `cpu.tick`), which
 is the adjacent slot, not the same one. Closing the row means dispatching a
 DMA part-way through an instruction, not tuning a constant.
 
-**Measured 2026-09-18, and the premise above is false** (docs/playtest-bugs.md
+**Measured 2026-09-18, and the premise above is false** (docs/dev/playtest-bugs.md
 section 13). `obuswin.s` on an AGB SP: the window is not ended by the next
 gamepak fetch — a single MUL, one instruction touching no bus at all, already
 ends it — and it is not one instruction wide either. What ends it is the
@@ -99,7 +99,7 @@ predicate's lower bound to what hardware measures for ARM code in IWRAM makes
 every measured row right and costs `DMA Prefetch Read`, driving this row to
 `0x00000000`; both bounds tried are tabulated in that section.
 
-**The latch is not what this row turns on** (docs/playtest-bugs.md section
+**The latch is not what this row turns on** (docs/dev/playtest-bugs.md section
 14). Modelling it as a register was tried and is the wrong target. What this
 row turns on is *when the H-blank DMA's word reaches the bus*, and two sweeps
 prove no window can fix that: across a 13x13 grid of bounds `Break` takes only
@@ -151,7 +151,7 @@ row stays red on a landing window no ROM measures.
 
 
 **Closed as a verdict, 2026-09-18: this row stays red, and should**
-(docs/playtest-bugs.md section 17). Two anchor-free payloads measured every
+(docs/dev/playtest-bugs.md section 17). Two anchor-free payloads measured every
 quantity the row depends on against an AGB SP. `linegeo.s` starts one timer,
 never stops it, and reports only differences between reads of it: the
 scanline brackets 1232, the H-blank flag brackets 1006, and the V-blank flag

@@ -6,7 +6,7 @@ a console -- that the ROMs already in use (armwrestler, arm7wrestler,
 rockwrestler, gbe-plus-nds-tests, StrikerX3's window tests, devkitPro's
 nds-examples, our own `tests/nds/src`, the homebrew sweep of
 docs/nds/compat.md) do not cover; each run in `ndsrun` and in the reference
-core (`tools/ndsref`, black box; the core is named in docs/oracles.md), and the failures in our
+core (`tools/ndsref`, black box; the core is named in docs/dev/oracles.md), and the failures in our
 core fixed where they fall outside 3D edges.
 
 **Where the answer comes from.** Where a test checks itself (polyrastertest's
@@ -19,7 +19,7 @@ changes.
 ## What was found
 
 DS hardware tests are scarce: almost everything public was already in use.
-Searched: GitHub (repos and code), Codeberg, an emulator project's forum (named in docs/oracles.md) on
+Searched: GitHub (repos and code), Codeberg, an emulator project's forum (named in docs/dev/oracles.md) on
 kuribo64.net, GBAtemp, emudev.org's resource list, the BlocksDS SDK, and the
 repositories of DS test and emulator authors (only their test directories
 and READMEs were opened; no emulator source was read). New finds:
@@ -27,7 +27,7 @@ and READMEs were opened; no emulator source was read). New finds:
 | Suite | Source, licence | What it checks | Answer |
 |---|---|---|---|
 | polyrastertest v1.0.2-b | [Jaklyy/polyrastertest](https://github.com/Jaklyy/polyrastertest), MIT; release zip (source at 550c208e89) | 77 single-polygon scenes: fill rules (normal, swapped, overrides), line polygons, the "swapped vertical left" glitch, trapezoids, edge marking's overlapping-edge rule, vertical right edge shift, AA/edge-mark swapped edges, horizontal line polygons under clipping, second-vertex quirks; each scene captured (DISPCAPCNT, 3D only) and compared span by span and colour by colour | spans and colours recorded on a New 3DS XL in DS mode (TWiLight Menu++), built into the ROM; prints "Tests Passed: n/77" |
-| gx_powcnt, gx_clear | an emulator project's forum (docs/oracles.md), "Hardware test ROMs" thread (binaries only, no licence) | POWCNT1 toggles of the geometry/rendering engines and 2D engine A with PAL/OAM write-read counters; 3D clear colour latched per frame | described in the thread (the change "should reflect even though 3D graphics aren't being refreshed") |
+| gx_powcnt, gx_clear | an emulator project's forum (docs/dev/oracles.md), "Hardware test ROMs" thread (binaries only, no licence) | POWCNT1 toggles of the geometry/rendering engines and 2D engine A with PAL/OAM write-read counters; 3D clear colour latched per frame | described in the thread (the change "should reflect even though 3D graphics aren't being refreshed") |
 | gbe-plus `ARM9/Timer` | [shonumi/gbe-plus-nds-tests](https://github.com/shonumi/gbe-plus-nds-tests) a0df034a, GPLv2 | prescaler counts after 5 frames; count-up, stop, reload-value PASS/FAIL | PASS rows; counts have no recorded answer |
 | BlocksDS SDK tests | [blocksds/sdk](https://codeberg.org/blocksds/sdk) 01df02b5 `tests/` (42 built), CC0 | library self-tests on the hardware: cache ops, MPU regions, TCM placement, vector base, IRQ handling, SWI results, IPC FIFO full, hardware sqrt, cothreads waiting on IRQs, ... | each prints its own result; `cache/data_cache_ops`' source lists the hardware's screen |
 | BlocksDS SDK examples | same, `examples/` (136 built) | feature demos (2D, 3D, capture, effects, audio, BIOS); 52 hardware-feature ones swept | reference comparison only |
@@ -89,7 +89,7 @@ after which our screens keep the last picture and the reference's go black
 - **`video_effects/blending`**: was one 5-bit step apart from the
   reference in some blended pixels; identical since the colour effects
   work on 6-bit channels with the reference's rounding (`disp_bright`,
-  docs/oracles.md and docs/nds/commercial.md). The weights of a bitmap
+  docs/dev/oracles.md and docs/nds/commercial.md). The weights of a bitmap
   OBJ's alpha (EVA = alpha + 1, EVB = 15 - alpha) are still Assumed.
 - **`video_capture/*`**: `render_to_texture` (95 % of the top screen),
   `dual_screen_3d` (84 % of both), `motion_blur` (29-46 %), `bloom` (5 %),

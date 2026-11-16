@@ -23,7 +23,7 @@
 @     probe_data
 @
 @ Sweep the sled's count from the host, one cell per k. Each edge in the
-@ staircase is a one-cycle statement; see docs/cycle-hunt-method.md.
+@ staircase is a one-cycle statement; see docs/dev/cycle-hunt-method.md.
 @
 @ On the console: `bx pc` only on a word boundary; HALTCNT answers only to
 @ BIOS code, so halts go through SWI 2; keep literal pools in range of long

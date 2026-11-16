@@ -37,7 +37,7 @@ generator so every emulator gets the same timeline. It adds:
               Stop, so the run is not compared further
 
 Timing slips are expected (the emulators accumulate lag frames differently,
-docs/playtest-bugs.md section 29), so the same key press can land on a
+docs/dev/playtest-bugs.md section 29), so the same key press can land on a
 different frame in each and a game's path can fork. Nothing here compares
 frames one to one; every check is a gross property of the whole run, and a
 flag is only a lead until the screenshots (written per game beside the

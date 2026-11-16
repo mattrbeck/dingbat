@@ -30,7 +30,7 @@
 # - Translucent text boxes blend one 5-bit step apart: dingbat-bios one step
 #   darker than both references where they agree (Goemon 1's kuchiire-ya
 #   box, 2683 pixels, stable for 130 frames), the 5-bit alpha rounding the
-#   SP photographs gave (docs/hwprobe-questions.md; Trick Star's script has
+#   SP photographs gave (docs/dev/hwprobe-questions.md; Trick Star's script has
 #   the arithmetic). mgba and the second reference also differ from each other by a step in
 #   places (the player-select portrait, the beach stage's last scanline).
 # - Town villagers walk differently on all three (Satsuma, f7810 mgba, then

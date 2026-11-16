@@ -74,7 +74,7 @@ def _judge_fields(a, b):
     Which field lands on the checkpoint frame is a phase that can hang on a
     few hundred cycles anywhere before it (Phantasy Star Collection's field
     flag starts a V-blank later after a VRAM fill under contention,
-    docs/playtest-bugs.md §62), so the sides are compared by their whole
+    docs/dev/playtest-bugs.md §62), so the sides are compared by their whole
     field cycles, lined up at every rotation:
 
       - every field the same picture at some rotation: IDENTICAL, with the
@@ -203,7 +203,7 @@ def _classify_frames(a, b):
     # drawn as two alternating fields (A B A B: Phantasy Star Collection's
     # Master System line drop) matches at every other frame, and the first
     # match is the window's edge -- a one-field gap read as SLIP(-29)
-    # (docs/playtest-bugs.md §62).
+    # (docs/dev/playtest-bugs.md §62).
     offsets = [k - b['center'] for k, h in enumerate(b['hashes']) if h == a['hash']]
     if not offsets:
         offsets = [a['center'] - k for k, h in enumerate(a['hashes']) if h == b['hash']]
@@ -218,7 +218,7 @@ def _classify_frames(a, b):
     # The sign is the centre match's: negative when a shows a picture b
     # showed earlier (a behind). It was inverted here until 2026-10-14, so
     # a one-frame lag read +1 on this path and -1 on the one above
-    # (docs/playtest-bugs.md §80, Gradius Galaxies).
+    # (docs/dev/playtest-bugs.md §80, Gradius Galaxies).
     elsewhere = {h: k for k, h in enumerate(b['hashes'])}
     offsets = [(elsewhere[h] - b['center']) - (k - a['center'])
                for k, h in enumerate(a['hashes']) if h in elsewhere]
@@ -228,7 +228,7 @@ def _classify_frames(a, b):
     # A text-judged screen is read by OCR unless one side's checkpoint
     # picture is in the other's window: the same picture frames apart is a
     # slip whatever OCR makes of it (The Sims' language screen, a scrolling
-    # flag one frame behind, read MAJOR: docs/playtest-bugs.md §87). Windows
+    # flag one frame behind, read MAJOR: docs/dev/playtest-bugs.md §87). Windows
     # that merely share some other frame do not count here: a screen whose
     # blend differs at the centre shares its unblended frames (Aria of
     # Sorrow's Select Data, §72)

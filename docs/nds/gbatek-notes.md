@@ -1384,7 +1384,7 @@ in that DTCM.
 | POSTFLG (both) | 1 |
 | WRAMCNT | 3 (all shared WRAM to ARM7, needed for `0x37F8000` loads) |
 | EXMEMCNT | `0x6000` (sync RAM, ARM9 owns both slots, ARM9 RAM priority). Game crt0 may change it |
-| POWCNT1 | `0x820F`: LCDs, 2D A + B, 3D rendering + geometry, engine A on top (what the real firmware leaves at cart entry, and the reference's direct boot: docs/oracles.md) |
+| POWCNT1 | `0x820F`: LCDs, 2D A + B, 3D rendering + geometry, engine A on top (what the real firmware leaves at cart entry, and the reference's direct boot: docs/dev/oracles.md) |
 | POWCNT2 | 1 |
 | SOUNDBIAS | 0x200 (the BIOS SoundBias ramp) |
 | IME / IE / IF | 0 |

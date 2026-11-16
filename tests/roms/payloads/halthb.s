@@ -6,7 +6,7 @@
 @ the polling loop's seven cycles -- and the resident monitor invokes a
 @ payload wherever it likes, so that residue varies run to run. Nine runs of
 @ hdmageo were needed to pool a value set that a controlled entry would have
-@ given in one (docs/playtest-bugs.md section 17).
+@ given in one (docs/dev/playtest-bugs.md section 17).
 @
 @ A V-count match interrupt fixes the line exactly. With IME clear no handler
 @ runs, but HALT still exits when IE & IF is non-zero, so a halted CPU resumes

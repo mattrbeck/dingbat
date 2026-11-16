@@ -245,7 +245,7 @@ proc texel_uv[S: static int](r: RendererOf[S]; tex, pltt: uint32; u, v: int): ui
     rgb6(r.pal16(pbase + int(b and 7) * 2)) or ((b shr 3) shl 24)
   of 7:   # direct colour, bit 15 = alpha (a transparent texel keeps its
           # colour: wire-frames show it, 3d_lines on the reference runs,
-          # docs/oracles.md)
+          # docs/dev/oracles.md)
     let c = r.tex16(base + i * 2)
     rgb6(c) or (if (c and 0x8000) == 0: 0'u32 else: 31'u32 shl 24)
   else: 0'u32
@@ -351,7 +351,7 @@ when defined(r3dprof):
 # between X(y) and X(y) + the slope with its low 9 bits cleared (rounded half
 # up: hardware line captures); other edges the one dot holding X(y); a
 # vertical right edge the dot left of it. Pinned by 3d_probe_tri* on the
-# reference runs (docs/oracles.md); docs/nds/3d-edges.md "Edge rules".
+# reference runs (docs/dev/oracles.md); docs/nds/3d-edges.md "Edge rules".
 
 const
   XSHIFT = 18
@@ -514,7 +514,7 @@ proc blend_texel[S: static int](r: RendererOf[S]; c: PolyCtx; textured: bool; mo
     if not textured or ta == 0: return pack(vr, vg, vb, av)
     if ta == 31: return pack(tr, tg, tb, av)
     # 5-bit texel alpha over 32 (GBATEK writes (Rt*At + Rv*(63-At))/64;
-    # 3d_blendmodes pins this form on the reference runs, docs/oracles.md)
+    # 3d_blendmodes pins this form on the reference runs, docs/dev/oracles.md)
     pack((tr * ta + vr * (31 - ta)) shr 5, (tg * ta + vg * (31 - ta)) shr 5,
          (tb * ta + vb * (31 - ta)) shr 5, av)
   of 2:
@@ -527,7 +527,7 @@ proc blend_texel[S: static int](r: RendererOf[S]; c: PolyCtx; textured: bool; mo
     if c.highlight:
       # highlight: the texel modulated by the vertex red as a grey, plus the
       # table colour (GBATEK modulates by the table colour; 3d_highlight pins
-      # this form on the reference runs, docs/oracles.md)
+      # this form on the reference runs, docs/dev/oracles.md)
       rr = min(63, (((tr + 1) * (vr + 1) - 1) shr 6) + sr)
       gg = min(63, (((tg + 1) * (vr + 1) - 1) shr 6) + sg)
       bb = min(63, (((tb + 1) * (vr + 1) - 1) shr 6) + sb)
@@ -625,7 +625,7 @@ proc plot_k[S, K: static int](r: RendererOf[S]; c: PolyCtx; x, y: int; L, R: End
     # depth steps by an 18-bit reciprocal of the span length, landing just
     # short of the exact value: a later polygon wins the tie where its depth
     # rises along the span (3d_probe_zinterp_x on the reference runs,
-    # docs/oracles.md; 16..30 bits fit, 18 Assumed)
+    # docs/dev/oracles.md; 16..30 bits fit, 18 Assumed)
     z = L.z + ashr(dz * n * sp.zk, 18)
     if eqw:
       w = L.w
@@ -676,7 +676,7 @@ proc plot_k[S, K: static int](r: RendererOf[S]; c: PolyCtx; x, y: int; L, R: End
     # nearest one behind it, which a partly covered top dot mixes over at the
     # end. A dot hidden by the top layer still lands behind when nearer than
     # that layer: opaque replaces, translucent blends, in any drawing order
-    # (3d_aa, 3d_probe_aa2/_aa3 on the reference runs, docs/oracles.md). Only
+    # (3d_aa, 3d_probe_aa2/_aa3 on the reference runs, docs/dev/oracles.md). Only
     # partly covered or edge tops read it.
     if not aa or (r.px[i].aacov >= 31 and (r.px[i].flags and FLAG_EDGE) == 0) or
        dval >= r.px[i].below_depth: return
@@ -691,7 +691,7 @@ proc plot_k[S, K: static int](r: RendererOf[S]; c: PolyCtx; x, y: int; L, R: End
     tx = r.tex_at(c, at(L.s, R.s), at(L.t, R.t))
   var px = r.blend_texel(c, textured, mode, vr, vg, vb, tx)
   # wire-frame lines draw at alpha 31 (GBATEK), even transparent texels
-  # (3d_lines on the reference runs, docs/oracles.md)
+  # (3d_lines on the reference runs, docs/dev/oracles.md)
   if not simple and c.wire: px = px or (31'u32 shl 24)
   let a = int32(px shr 24)
   if a <= c.aref: return
@@ -779,7 +779,7 @@ proc fill[S: static int](r: RendererOf[S]; c: PolyCtx; y, x0, x1: int; L, R: End
 
 proc aa_cov(e: Edge; y, x: int; right: bool; lend = 0'i32): int32 =
   ## Anti-aliasing coverage (0..31) of dot x on row y by edge e
-  ## (3d_probe_aa, 3d_probe_aa4 on the reference runs, docs/oracles.md).
+  ## (3d_probe_aa, 3d_probe_aa4 on the reference runs, docs/dev/oracles.md).
   ## y-major edges
   ## measure where the edge crosses the row's middle within the dot: right
   ## edges keep floor(32 * covered), left ones 31 - floor(32 * uncovered).
@@ -867,7 +867,7 @@ proc draw_polygon[S: static int; P: static bool](r: RendererOf[S]; vram: Vram; p
   let full = wire or line or (disp3dcnt and 0x30) != 0 or poly.translucent and c.blend
   # anti-aliasing (DISP3DCNT.4): edges of opaque polygons, lines and
   # wire-frames too ("accidentally", GBATEK: dirty lines with missing dots,
-  # 3d_aa on the reference runs, docs/oracles.md), not translucent ones
+  # 3d_aa on the reference runs, docs/dev/oracles.md), not translucent ones
   let aa = (disp3dcnt and 0x10) != 0 and not poly.translucent
   if ymin == ymax:
     # all on one row: the dots from the leftmost to the rightmost of the
@@ -951,7 +951,7 @@ proc draw_polygon[S: static int; P: static bool](r: RendererOf[S]; vram: Vram; p
         # as unswapped, verticals at none). The left x-major edge keeps its
         # run's first dot's coverage, as if never stepped to its inner dot
         # (polyrastertest 56, 3d_probe_swap_aa on the reference runs,
-        # docs/oracles.md).
+        # docs/dev/oracles.md).
         template edge_dot(x: int32; e: Edge; right: bool; cx: int32) =
           if x >= 0 and x < WS:
             r.plot(c, int(x), y, EL, ER, sp, true,

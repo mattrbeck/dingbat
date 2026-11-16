@@ -9,7 +9,7 @@
 # records) on the way; [load] boots it to the Quick Race screen.
 # Regression guard: before 2026-10-02 an S-bit write to r15 in System mode
 # (the run-time library's `movs pc, lr`) restored a stale SPSR and came back
-# in Thumb state (docs/playtest-bugs.md section 46): dingbat hung on the way
+# in Thumb state (docs/dev/playtest-bugs.md section 46): dingbat hung on the way
 # into the race.
 
 [new]

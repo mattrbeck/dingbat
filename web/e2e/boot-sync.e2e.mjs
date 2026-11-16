@@ -3,7 +3,7 @@
 // boots with Google held back, so the pull is visibly out: its account
 // slot turns the ring from the page's first parse, and a game tapped
 // meanwhile waits ("Checking Drive…") for the other device's newer moment
-// instead of opening on the older copy here (docs/home-screen.md, "The
+// instead of opening on the older copy here (docs/dev/home-screen.md, "The
 // first sync").
 //
 //   cd web && npm ci && npx playwright install chromium webkit

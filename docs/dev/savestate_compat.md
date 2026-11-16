@@ -96,7 +96,7 @@ The reader migrates older revisions instead of refusing:
 | GB 1→2 | serial idle | the port was a stub |
 | GB 2→3 | `dots_since_frame=0` | states are written at frame boundaries (asserted) |
 | GBA 6→7 | RTC `status` = `02h \| irq<<3 \| m24<<6`; `bias_set=false`, `bias=0`, `wday_bias=0`, `bias_host=false` | rev ≤ 6 read status back with bit 1 forced and ignored clock writes, so the clock was always the source clock |
-| GB 4→5 | no `GB_SEC_SGB` section → fresh `SgbState` | see `docs/sgb.md` |
+| GB 4→5 | no `GB_SEC_SGB` section → fresh `SgbState` | see `docs/dev/sgb.md` |
 | GBA 7→8 | bus `pf_paused=false`, `pf_running=false`, `pf_count=0` | rev ≤ 7 had no pause state; a full buffer re-pauses on the next fetch, and a running prefetcher with credit is running again at once, so at most one branch's refill differs |
 | GB 5→6 | below | the batched carry |
 | GBA 8→9 | no `GBA_SEC_INFLIGHT` section: `irq_line` recomputed (low with a check pending), fetch page dropped, as rev 8 did; memory control and POSTFLG keep the running game's value, as rev 8 did; every other field a new machine's value (sync bits 0-2 clear, stamps 0, no synchroniser raise or stall, capture latch clear, `tm_pre = tm`, PSG `arm_delay` = the current period) | rev 8 dropped these or kept whatever the machine held before the load; the fresh values are what it did when loading into a just-booted game, and they make the load independent of what ran before it |

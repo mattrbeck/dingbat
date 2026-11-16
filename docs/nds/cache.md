@@ -137,7 +137,7 @@ entry as before.
 `tests/nds/src/icache_stale` (ours, `build_3d.sh`, bottom-screen hex
 digits read with `png_text.py`): code written into an instruction-cached
 line behind the cache, run before and after invalidating. GBATEK's
-semantics give the first column; the reference runs (docs/oracles.md)
+semantics give the first column; the reference runs (docs/dev/oracles.md)
 model no cache contents at all:
 
 | Row | What | GBATEK / ours | before this round | reference cores |

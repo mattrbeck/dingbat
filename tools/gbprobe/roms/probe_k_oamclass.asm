@@ -1,5 +1,5 @@
 ; probe_k_oamclass -- WHICH instruction classes corrupt OAM in mode 2?
-; docs/pandocs-audit.md, section C (OAM_Corruption_Bug).
+; docs/dev/pandocs-audit.md, section C (OAM_Corruption_Bug).
 ;
 ; Pan Docs (OAM Corruption Bug, "Affected Operations") says "Any memory access
 ; instruction, if it accesses OAM" corrupts a row of the OAM the scan is on.

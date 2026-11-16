@@ -214,7 +214,7 @@ const SWI_HLE_EXIT = 16
 # SoftReset's body over the base, mostly the 0x200-byte clear: swi 0 to the
 # end of the ROM's first instruction takes 895 under Nintendo's BIOS in
 # this core and 85 under the HLE without it (Super Mario Advance 3's swi 0,
-# docs/playtest-bugs.md §82)
+# docs/dev/playtest-bugs.md §82)
 const SOFTRESET_BODY {.intdefine.} = 810
 
 # The part of a Halt/Stop SWI the BIOS runs after the wake IRQ is serviced
@@ -355,7 +355,7 @@ proc hle_cont_ahead(cpu: CPU; c: var HleCont; clk: int; address: uint32;
 # Keep both halves architectural: a return charged as internal cycles lets
 # a sound FIFO burst run under it where the console's pops wait (Zelda II
 # (Classic NES Series)); sampling the interrupt line once between `msr` and
-# write misses one recognised after the routine's `bx ip` (docs/playtest-bugs.md).
+# write misses one recognised after the routine's `bx ip` (docs/dev/playtest-bugs.md).
 const HALT_COMMENT_READ_AT {.intdefine.} = 10
 const HALT_MSR_START {.intdefine.} = 10
 
@@ -451,7 +451,7 @@ proc hle_takes*(cpu: CPU; swi_num: uint32): bool {.inline.} =
   ## With a real BIOS image mapped (hle_after_bios, or a BIOS file given)
   ## the image runs the sound-driver SWIs, the routines hle_unc.nim runs,
   ## and Halt: the HLE's Halt frame is three SVC words and the image's
-  ## return pops four (docs/hle-bios-shortcomings.md). Stop keeps its
+  ## return pops four (docs/dev/hle-bios-shortcomings.md). Stop keeps its
   ## model: it parks on the caller's own instruction, in no BIOS code.
   if cpu.gba.bus.stub_bios: return true
   case swi_num

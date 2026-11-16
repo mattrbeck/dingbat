@@ -1,6 +1,6 @@
 @ runtime.inc — shared runtime for the hwverified proof ROMs.
 @ Derived from gbaedge.s (the probe ROM the AGS-001 hardware sessions
-@ ran — see docs/hwprobe-results-agb.md); machinery kept byte-compatible
+@ ran — see docs/dev/hwprobe-results-agb.md); machinery kept byte-compatible
 @ where it matters: mode 3 framebuffer, the same 8x8 1bpp font (so
 @ tests/roms/hwprobe_ocr.py can read these screenshots too), raw-hex
 @ result slot at 0x02000000.

@@ -5,7 +5,7 @@
 # written earlier in it (a loop-carried counter like `subs r2, #1` must run
 # at real speed). Only Thumb is hooked (thumb_conditional_branch). A verdict
 # sets cpu.entered_waitloop; cpu.tick then fast-forwards to the next event
-# instead of ticking. docs/research_waitloop_tracer.md surveys the limits.
+# instead of ticking. docs/dev/research_waitloop_tracer.md surveys the limits.
 
 proc build_waitloop_lut*(): seq[WLInstrKind] =
   result = newSeq[WLInstrKind](256)

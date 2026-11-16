@@ -10,7 +10,7 @@
 @ Vision 1-1, each polled to ready; dingbat (GBATEK's ca. 108368 cycles)
 @ reaches the level two frames before both references, and with
 @ -d:EEPROM_SETTLE_CYCLES=115005 it matches them pixel for pixel
-@ (docs/playtest-bugs.md, "Klonoa: the clouds are the darken rounding, the
+@ (docs/dev/playtest-bugs.md, "Klonoa: the clouds are the darken rounding, the
 @ Vision 1-1 card is the cart's EEPROM").
 @
 @ RIG: as eesettle.s, with Klonoa's cart (or another 4 Kbit EEPROM cart) in

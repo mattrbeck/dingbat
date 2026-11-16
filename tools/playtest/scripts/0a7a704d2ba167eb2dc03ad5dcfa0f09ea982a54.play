@@ -19,7 +19,7 @@
 # Language Select); it is in the list since (§94).
 # The two battle scenes start a frame off in every dingbat configuration
 # (melee_attack SLIP(-1): first still frame f3453 against f3452; ranged_attack
-# SLIP(+1): f4141 against f4142). Not a dingbat bug (docs/playtest-bugs.md
+# SLIP(+1): f4141 against f4142). Not a dingbat bug (docs/dev/playtest-bugs.md
 # §98). The battle map runs at 30 Hz (two V-blanks an iteration), and the
 # A press is read by the first iteration on or after it. At the melee
 # press dingbat's iterations start on even frames and the references' on

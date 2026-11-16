@@ -175,7 +175,7 @@ const APU_SPSW_REPHASE_GRID_T* {.intdefine.} = 1
   ## `_ds_2` tests). Pinned by gambatte `speedchange*_ch1_*` (grid: the
   ## nr4init tests; lead: the duty ladder). Measured on channel 1; channel 2
   ## assumed the same; channel 3 below; channel 4 untested, left alone.
-  ## docs/gb-failure-triage.md H2. 0 / 0 disables.
+  ## docs/dev/gb-failure-triage.md H2. 0 / 0 disables.
 const APU_SPSW_REPHASE_LEAD3_T* {.intdefine.} = 1
   ## The same one-off for the wave channel, whose sample timer steps on the
   ## 2 MHz grid: onto that grid's previous edge once it is GRID_T later, i.e.

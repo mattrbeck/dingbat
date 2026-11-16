@@ -1,5 +1,5 @@
 {
- "_about": "AGB SP (AGS-001) answers over tools/hwlink that are NOT laws: cells that answered more than one way, or whose rule dingbat does not model yet. Recorded 2026-09-25 with rig.ask (3 interleaved runs a cell, up to 6 more on disagreement; 'a | b' = every answer seen). Keys are the payload's r0 argument. Re-run any cell with: python3 tools/hwlink/r0table.py <payload> <args>. Open questions: docs/hwprobe-questions.md, GBA section.",
+ "_about": "AGB SP (AGS-001) answers over tools/hwlink that are NOT laws: cells that answered more than one way, or whose rule dingbat does not model yet. Recorded 2026-09-25 with rig.ask (3 interleaved runs a cell, up to 6 more on disagreement; 'a | b' = every answer seen). Keys are the payload's r0 argument. Re-run any cell with: python3 tools/hwlink/r0table.py <payload> <args>. Open questions: docs/dev/hwprobe-questions.md, GBA section.",
  "psg_shift0": {
   "_about": "Channel 1 shift-0 trigger timing off the slow path, and the length clock after a master-on. Laws already hold fsfirst, s0trig, s0time (master-on sync), s0long, s0write.",
   "s0path": {

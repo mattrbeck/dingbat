@@ -3,7 +3,7 @@
 @
 @ A classic place for emulators to differ, and one that has never been
 @ decidable here: the answer shows up as a phase, and until a V-count match
-@ halt fixed the entry (docs/playtest-bugs.md section 18) the payload's own
+@ halt fixed the entry (docs/dev/playtest-bugs.md section 18) the payload's own
 @ phase relative to the machine was whatever the monitor happened to hand us.
 @ With entry controlled the question becomes a single reproducible number.
 @

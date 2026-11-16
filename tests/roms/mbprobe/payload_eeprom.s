@@ -1,4 +1,4 @@
-@ payload_eeprom.s — EEPROM write-settle probe (docs/hwprobe-questions.md,
+@ payload_eeprom.s — EEPROM write-settle probe (docs/dev/hwprobe-questions.md,
 @ multiboot row 1).  Pins EEPROM_SETTLE_CYCLES (storage/eeprom.nim, 108368
 @ from GBATEK) and where the settle window starts (dingbat: after the LAST
 @ data bit, Assumed).

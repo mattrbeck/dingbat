@@ -20,7 +20,7 @@ proc update_waitcnt*(bus: Bus; w: WAITCNT) =
     bus.wait32_s[page] = int8(ACCESS_TIMING_TABLE[1][page])
   # EWRAM waits: 0x04000800 bits 24-27 (GBATEK "System Control"), waits =
   # 15 - field per halfword, a word twice. Field 13 (BIOS default) = 3/6.
-  # AGB SP, gbaedge MEMCTL (docs/hwprobe-results-agb.md). Field 15 hangs
+  # AGB SP, gbaedge MEMCTL (docs/dev/hwprobe-results-agb.md). Field 15 hangs
   # real hardware; here it is the fastest setting.
   block:
     let ws = int(bits_range(bus.gba.mmio.memctrl, 24, 27))
@@ -197,7 +197,7 @@ proc pf_serve(bus: Bus; now: CycleCount; page: int; halves: int): int {.pf_inlin
 # prefetcher affects only opcode fetches. -d:ROM_DATA_NONSEQ=false treats an
 # address-continuing data access as sequential under the prefetcher however
 # long the CPU was off the bus; that runs Klonoa 2's HuffUnComp loads a frame
-# early (docs/playtest-bugs.md §58).
+# early (docs/dev/playtest-bugs.md §58).
 const ROM_DATA_NONSEQ {.booldefine.} = true
 
 proc rom_access_cycles(bus: Bus; address: uint32; is32: bool; fetch: bool): int {.inline.} =
@@ -487,7 +487,7 @@ proc new_bus*(gba: GBA; bios_path: string): Bus =
     write_stub_u32(result.bios, 0x004, 0xEA000004'u32)
     # The prefetch-abort, data-abort and reserved vectors branch to the same
     # handler, as in the real BIOS. Only a jump there reaches one (a write of
-    # 0x10 to r15: AGB SP returns through the handler; docs/hwprobe-sst.md,
+    # 0x10 to r15: AGB SP returns through the handler; docs/dev/hwprobe-sst.md,
     # x.mrs_r15)
     write_stub_u32(result.bios, 0x00C, 0xEA000002'u32)  # b 0x1C
     write_stub_u32(result.bios, 0x010, 0xEA000001'u32)  # b 0x1C
@@ -1205,7 +1205,7 @@ when defined(obuslatchdbg):
 
 when defined(obuslatch):
   # -d:obuslatch (off by default): a real per-halfword open-bus latch
-  # (docs/playtest-bugs.md §13). How much one access fills depends on the
+  # (docs/dev/playtest-bugs.md §13). How much one access fills depends on the
   # memory (obusbus.s): IWRAM and BIOS fill the half address bit 1 selects,
   # OAM the aligned word, 16-bit memories (EWRAM, VRAM, gamepak) mirror.
   proc obus_stamp(bus: Bus): CycleCount {.inline.} =
@@ -1928,7 +1928,7 @@ proc read_open_bus_word*(bus: Bus; address: uint32): uint32 =
   # own unmapped reads see its latch. Otherwise the DMA's last word is seen
   # only by the CPU's first access after the burst; any later access, opcode
   # fetch included, replaces it (AGB SP, gbaedge DMAOPENBUS,
-  # docs/hwprobe-results-agb.md session 5). So the word is seen when the
+  # docs/dev/hwprobe-results-agb.md session 5). So the word is seen when the
   # request came after this instruction's fetch began and no later than this
   # read began; due bursts run first so such a request is known.
   if bus.dma_active:
@@ -1951,7 +1951,7 @@ proc read_open_bus_word*(bus: Bus; address: uint32): uint32 =
   # Thumb, two NOPs after a burst: DEAD6019, half DMA word, half opcode), so
   # no all-or-nothing bound is right. fetch_start + 1 (obuswin.s, ARM in
   # IWRAM) fails mGBA suite `DMA Prefetch Read` and zeroes `DMA Prefetch
-  # Break`. Left until the latch is modelled (docs/playtest-bugs.md §13).
+  # Break`. Left until the latch is modelled (docs/dev/playtest-bugs.md §13).
   when defined(obusdbg):
     # -d:obusdbg (off by default): this window's cycle stamps per unmapped
     # word read, to compare with obuswin.s / obuswint.s.
@@ -1991,7 +1991,7 @@ proc fetch_bus_word(bus: Bus; pc: uint32): uint32 =
     if bus.gba.cpu.cpsr.thumb:
       # Thumb open bus depends on how much of the latch one fetch fills
       # (AGB SP, payloads/obusprobe.s and obusbus.s, the same block run from
-      # each memory, display on or forced blank; docs/hwprobe-questions.md):
+      # each memory, display on or forced blank; docs/dev/hwprobe-questions.md):
       #   IWRAM  the two newest fetches ($+2, $+4) each in the half its own
       #          address bit 1 selects (3E0260A8 at 0x030000F0, 61283E02 at
       #          0x030000FA), not in fetch order

@@ -1,4 +1,4 @@
-@ payload_tilt.s — tilt sensor ready-bit probe (docs/hwprobe-questions.md,
+@ payload_tilt.s — tilt sensor ready-bit probe (docs/dev/hwprobe-questions.md,
 @ multiboot row 2, tilt half).  Pins bus.nim tilt_read's always-ready
 @ status bit: dingbat returns bit 7 of 0x0E008300 set on the first read
 @ after the 0x55/0xAA start, so every count below is 0 in dingbat.

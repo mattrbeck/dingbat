@@ -3,7 +3,7 @@
 // Drive held back, and is tapped into the game at once. The tap waits
 // ("Checking Drive…") and the game opens on the web's newer moment - so the
 // session the iPhone sends next carries the web's save, not its own older
-// one (DriveSync.holdForBootPull; docs/home-screen.md, "The first sync").
+// one (DriveSync.holdForBootPull; docs/dev/home-screen.md, "The first sync").
 //
 //   ios/build-core.sh sim && (cd ios && xcodegen generate)
 //   xcodebuild ... -sdk iphonesimulator -derivedDataPath <dd> build   # Debug

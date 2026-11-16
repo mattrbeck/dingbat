@@ -1,5 +1,5 @@
 @ payload: an SIO transfer started on the external clock, then switched to
-@ the internal clock with Start still set (docs/playtest-bugs.md §101)
+@ the internal clock with Start still set (docs/dev/playtest-bugs.md §101)
 @
 @ Nintendo's link start-up in Coloris and Dial Hex starts a normal 32-bit
 @ transfer on the external clock (SIOCNT 0x5080: nothing clocks it), and on

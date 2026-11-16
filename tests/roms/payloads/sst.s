@@ -1,5 +1,5 @@
 @ payload: where the SingleStepTests ARM7TDMI vectors and dingbat disagree,
-@ asked of the console (docs/hwprobe-sst.md has the questions and answers).
+@ asked of the console (docs/dev/hwprobe-sst.md has the questions and answers).
 @
 @ The vectors were made by running a reference emulator, not hardware, so a
 @ disagreement between them and dingbat is settled here. r0 = the cell's

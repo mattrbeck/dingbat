@@ -42,7 +42,7 @@
 @     m >= 4 (past ch2's death) leave the slow row; bit 8 clear stays slow
 @   H3, an NR10 write ends it (psgfirst +8): bit 9 rows leave the slow row
 @     at every m
-@ dingbat's actual answers: docs/playtest-bugs.md (the section that adds
+@ dingbat's actual answers: docs/dev/playtest-bugs.md (the section that adds
 @ this file).
     .include "probe.inc"
     .arm

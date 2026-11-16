@@ -250,7 +250,7 @@ proc thumb_high_reg_branch_exchange*[op: static uint32, h1, h2: static bool](cpu
       if rd == 15:
         # Thumb hi-reg CMP with Rd=pc is a full SPSR->CPSR restore (mode bits
         # included), no compare, no branch; in user/system mode it is a no-op
-        # (hardware: gbaedge THUMBPC/THUMBPC2 on AGB SP, docs/hwprobe.md).
+        # (hardware: gbaedge THUMBPC/THUMBPC2 on AGB SP, docs/dev/hwprobe.md).
         let mode = cast[CpuMode](cpu.cpsr.mode)
         if mode != modeUSR and mode != modeSYS:
           let new_spsr = uint32(cpu.spsr)

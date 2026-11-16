@@ -1,8 +1,8 @@
 # hwprobe: gbedge.gb + gbaedge.gba — hardware edge-case probe ROMs
 
 `tests/roms/gbedge.gb` (27 pages, DMG+CGB) and `tests/roms/gbaedge.gba` (37
-pages), built from committed sources. Questions: docs/hwprobe-questions.md;
-results: docs/hwprobe-results-agb.md, docs/flashcart-runbook.md.
+pages), built from committed sources. Questions: docs/dev/hwprobe-questions.md;
+results: docs/dev/hwprobe-results-agb.md, docs/dev/flashcart-runbook.md.
 
 A bundled suite bakes its expectation into the ROM; these ROMs store the **raw
 observed values** of a deterministic power-on sequence into 32-byte slots and
@@ -33,7 +33,7 @@ checksum low half).
 
 Caveats: GBA WAITSTATE/prefetch rows and open-bus-from-ROM bytes are
 flashcart-influenced (note the cart); everything else is on-die. Boot-handoff
-port bytes are suspect behind a flashcart menu (docs/flashcart-runbook.md).
+port bytes are suspect behind a flashcart menu (docs/dev/flashcart-runbook.md).
 gbedge on a GBA/SP runs only via a GB-slot flashcart (CGB-compat mode, MODEL
 `11 01`); a GBA-slot GB emulator measures the emulator.
 

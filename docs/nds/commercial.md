@@ -3,7 +3,7 @@
 Round 8 on branch `nds-commercial` (2026-10-02/03). Two commercial games
 that had never run on the DS core were driven from power-on into play by
 `ndsrun --press` scripts and compared, scene by scene, with the reference
-core (`tools/ndsref --depth5`, the core and its settings in docs/oracles.md); SoulSilver
+core (`tools/ndsref --depth5`, the core and its settings in docs/dev/oracles.md); SoulSilver
 went past the p12 script. The user's own dumps are read at run time only
 (`~/.cache/dingbat-nds/*.nds`, BIOS/firmware from `~/Documents/emu/nds/NDS
 Bios & Firmware`); no game byte is in the repository.
@@ -43,7 +43,7 @@ disp_bright fits), `perf.sh` (host instructions per frame).
 
 The reference runs with its firmware nickname, favourite colour and
 language taken from the user's firmware (the options are in
-docs/oracles.md): its own default nickname otherwise ends up in Golden
+docs/dev/oracles.md): its own default nickname otherwise ends up in Golden
 Sun's naming screen.
 
 Differences are classified as **phase** (the same picture a few frames
@@ -241,7 +241,7 @@ the reference every ~23; its first word comes ~38 byte times after the
 command, ours after 12. With the games' header setting (gap1 = 657h) a
 200h block takes 3.5 % longer on the reference. GBATEK's numbers (1.6
 MB/s for that setting) match ours, so ours is kept; the reference row is
-in docs/oracles.md.
+in docs/dev/oracles.md.
 
 ## Speed (for the perf work)
 
@@ -303,7 +303,7 @@ change, is docs/nds/accuracy.md section 7.
   hardware measurement of ARM9 I/O and timer reads would
   settle it.
 - Capture blending (`gpu.nim` capture_line) still truncates per GBATEK
-  where the reference rounds (docs/oracles.md); `video_capture/motion_blur`
+  where the reference rounds (docs/dev/oracles.md); `video_capture/motion_blur`
   trails differ for it.
 - 24-bit FLASH size: a 256 KB game gets a 512 KB chip; starting at 256 KB
   and growing would match the reference, but changes what RDID answers

@@ -1,7 +1,7 @@
 # hwverified — self-judging hardware proof ROMs
 
 One minimal GBA ROM per hardware-verified behaviour from the AGS-001 probe sessions
-(transcriptions in `../expected/agb-sp-*.txt`, analysis in `docs/hwprobe-results-agb.md`).
+(transcriptions in `../expected/agb-sp-*.txt`, analysis in `docs/dev/hwprobe-results-agb.md`).
 Each ROM runs one experiment at boot, prints the raw bytes as hex and loops, so a photo of
 real hardware and an emulator screenshot compare directly. Each `.s` explains the
 experiment and the provenance of its expected values.

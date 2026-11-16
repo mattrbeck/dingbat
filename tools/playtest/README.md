@@ -27,7 +27,7 @@ the check on the shipped default in every run.
 `dingbat-hleimg` is what a player with a BIOS file installed and the HLE on
 runs: every frontend passes the file when it exists, and the SWIs the HLE
 leaves to the image then run Nintendo's code. Metroid Fusion hung at boot
-there and nowhere else (docs/playtest-bugs.md §55, §60).
+there and nowhere else (docs/dev/playtest-bugs.md §55, §60).
 
 The references (`mgba`, `nba`) always run the official BIOS.
 
@@ -143,7 +143,7 @@ same way.
    every 2-4 frames) is judged by its fields: the same fields out of phase
    are IDENTICAL with the phase as a note, and fields that differ are
    judged field by field from the shots the runner keeps of them
-   (docs/playtest-bugs.md §62).
+   (docs/dev/playtest-bugs.md §62).
 3. **Save files** — size against the chip sizes named by the ROM's library ID
    string, trailers (bytes after the chip data), byte-diff ranges, and, for
    games with a decoder in `saves.py`, structural validity and the decoded
@@ -170,7 +170,7 @@ same way.
      blank cart's screens, as <the other reference> does, where mgba reads
      the save`).
      Columns Crown passed that way with dingbat reading no save at all
-     (docs/playtest-bugs.md §95, §96);
+     (docs/dev/playtest-bugs.md §95, §96);
    - dingbat showing its own save as a blank cart fails where a reference
      reads that save, and, where no reader does, where a reference reads its
      own save on the same timeline: the save does not round-trip;
@@ -187,7 +187,7 @@ same way.
    Every dump runs at 548.58 samples a frame (280896 cycles at 32768 Hz); one
    that does not is named in the summary and the verdict notes, since its
    windows drift against the frames (the second reference's capture lost
-   0.24% until 2026-10-15: docs/playtest-bugs.md, "Driv3r's audio").
+   0.24% until 2026-10-15: docs/dev/playtest-bugs.md, "Driv3r's audio").
 
 ## Scripts
 
@@ -216,7 +216,7 @@ on.
 the evidence puts on the references or on nobody: CONFIGS is `*` or a comma
 list of dingbat configurations, PROBLEM the start of the verdict's problem
 text (`checkpoint title:`) or, after a `~`, any part of it, WHY the
-docs/playtest-bugs.md section. A covered problem is listed as `known` and no
+docs/dev/playtest-bugs.md section. A covered problem is listed as `known` and no
 longer fails its configuration; a game whose only problems are covered is
 `KNOWN` in the suite, so a new failure stands out as `FAIL`. An entry that
 matched nothing is reported as a note (`@known ... no longer seen`): remove
@@ -364,21 +364,21 @@ being drawn, which by then holds the frame. (A DMA started on line 159 runs
 past 160 in one step; waiting for exactly 160 ran a second frame into that
 one: §83, "Mega Man Battle Network 2".) Its frames used to be `kCyclesPerFrame` cycles a call,
 ending at a drifting line before 160 with the previous frame's picture
-(docs/playtest-bugs.md §65).
+(docs/dev/playtest-bugs.md §65).
 
 Its frames now line up with the other two. The core runs a DMA burst
 whole, so a burst across line 160 used to make one harness frame of two or
 three V-blanks. Super Mario Advance 3's crt0 clears EWRAM with one 1.6-frame
 DMA, and many boots do the same. The driver now counts the presentations a
 frame ran through, and ends the next frames at once, one per V-blank start
-the frame swallowed (docs/playtest-bugs.md §82, "Super Mario Advance 3: 1-1
+the frame swallowed (docs/dev/playtest-bugs.md §82, "Super Mario Advance 3: 1-1
 after a soft reset"). Donkey Kong Country's boot still leads by one frame
 of its own (§65).
 
 `peek` in dingbat is untimed (it used to charge wait states, so peeking every
 frame moved the game's own timing); the second reference's leaves its audio
 byte-identical with a peek every frame. Comparing two emulators' instruction
-traces of the same code is how docs/playtest-bugs.md section 29 found
+traces of the same code is how docs/dev/playtest-bugs.md section 29 found
 which loops cost what.
 
 `rtc_crosscheck.py [rom]` uses these to prove the battery-save RTC trailer

@@ -68,7 +68,7 @@ it deliberately does not model:
   written so far, the frame loop stops between two steps and a save state
   holds a routine in progress. Every step of every call matches the
   official BIOS in this core on the tools/biosdrv probes (steptrace.nim,
-  stepcmp.py; docs/playtest-bugs.md, the stub-BIOS section). Not modelled:
+  stepcmp.py; docs/dev/playtest-bugs.md, the stub-BIOS section). Not modelled:
   - the registers an interrupt handler finds are the console's for
     LZ77UnCompWram/Vram and IntrWait (r12 = 0x04000000, r4 = 1, r2 the
     mirror, lr the console's return addresses); in the other routines r0-r12
@@ -106,7 +106,7 @@ it deliberately does not model:
   or the HLE with a BIOS file given) the image runs its own Halt
   (`hle_takes`), since the image's return pops four words. Until
   2026-10-13 a Halt there took the HLE path, parked in the image and came
-  back through a word that was never pushed, to 0 (docs/playtest-bugs.md,
+  back through a word that was never pushed, to 0 (docs/dev/playtest-bugs.md,
   "Metroid Fusion hung at boot over Nintendo's BIOS";
   `tests/swihalt_test.nim`).
 * **Stop** keeps its model (the halt-resume fields), under the stub and

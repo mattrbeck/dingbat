@@ -209,7 +209,7 @@ else:
       # The enable glitch's tick lands on the first DIV-APU step after the
       # tap bit next rises: the next step if the bit is low now, else the
       # one after (SameSuite channel_1_nrx2_speed_change, DocBoy
-      # ch1_change_volume_sweep_pace_*; docs/gb-failure-triage.md I8).
+      # ch1_change_volume_sweep_pace_*; docs/dev/gb-failure-triage.md I8).
       let d = psg_fs_next_edge_in(h)
       let half = (2 shl (12 + int(psg_shl(h)))) div 2
       ch.env_extra_tick = (if d > half: 1'u8 else: 2'u8)
@@ -373,7 +373,7 @@ when not PSG_AGB:
   # in NR10's current direction: a sweep clock writes back what the adder
   # shows and checks its overflow, then starts the next calculation on the
   # value it wrote. Pan Docs gives no timing; this is pinned by DocBoy
-  # `ch1_period_sweep_*` (docs/gb-failure-triage.md I2) and SameSuite
+  # `ch1_period_sweep_*` (docs/dev/gb-failure-triage.md I2) and SameSuite
   # channel_1_sweep*.
   const SWEEP_LOAD_ARRIVAL* = 1'u8
     ## sweep_load_at is a trigger reaching the sweep unit: one APU tick after
@@ -630,7 +630,7 @@ proc sweep_step(ch: PsgSweepSquare; h: PsgHost) =
           # AGB-native, measured: the second calculation, for its overflow
           # check, runs at once on the new shadow (AGB SP page 1F SWEEP2). A
           # GB cartridge on the same console runs the GB's pipeline
-          # (ch1_sweep_clock; docs/hwprobe-questions.md row 16), so this is
+          # (ch1_sweep_clock; docs/dev/hwprobe-questions.md row 16), so this is
           # GBA mode's own.
           discard ch1_sweep_calc(ch)
       else:

@@ -707,7 +707,7 @@ proc scene_timing() =
   check((g.read_reg(0x600) and (1'u32 shl 27)) != 0, "10 x MTX_IDENTITY busy until 190 cycles")
   sc.now = t0 + 2 * 190
   check((g.read_reg(0x600) and (1'u32 shl 27)) == 0, "10 x MTX_IDENTITY done at 190 cycles")
-  # NORMAL: 9, 9, 10, 11, 12 cycles for 0..4 lights (docs/oracles.md)
+  # NORMAL: 9, 9, 10, 11, 12 cycles for 0..4 lights (docs/dev/oracles.md)
   for (mask, want) in [(0, 9), (1, 9), (3, 10), (7, 11), (15, 12)]:
     g.cmd(0x29, uint32(mask) or 0x1F0080'u32)
     g.cmd(0x40, 0)
@@ -771,7 +771,7 @@ proc scene_budget() =
 # --- the 3d_* test ROMs through the whole machine ---------------------------
 #
 # Each ROM's 3D colour buffer after 30 frames, as a CRC32 of its pixels.
-# Where docs/oracles.md (NDS core) lists a ROM as matching a reference core
+# Where docs/dev/oracles.md (NDS core) lists a ROM as matching a reference core
 # at 18-bit colour, the hash is that output too, so a change here is a
 # regression against the reference, not just against ourselves.
 # NDS3D_UPDATE=1 prints the current table instead of checking it.
@@ -957,7 +957,7 @@ proc rom_disp_bright() =
   ## disp_bright (tests/nds/src/disp_bright): engine A's colour effects and
   ## master brightness on 6-bit channels, 2D colours entering as 2c and 3D
   ## ones as 2c+1, each result's top five bits displayed. The formulas are
-  ## the ones fitted to the reference runs' 6-bit output (docs/oracles.md,
+  ## the ones fitted to the reference runs' 6-bit output (docs/dev/oracles.md,
   ## disp_bright: every sample of all 55 settings); each frame is checked
   ## against them with the registers the frame was drawn with.
   echo "disp_bright ROM (6-bit colour effects and master brightness)"

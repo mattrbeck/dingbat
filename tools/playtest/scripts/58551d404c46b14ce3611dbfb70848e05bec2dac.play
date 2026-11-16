@@ -21,7 +21,7 @@
 # all); dingbat reaches the main loop's V-blank wait 459 cycles after the
 # V-blank starts, so the frame slips by one. A 0.17% margin is within the
 # references' known cheaper pricing of gamepak code under the prefetcher
-# (docs/playtest-bugs.md §63); not settled without the console.
+# (docs/dev/playtest-bugs.md §63); not settled without the console.
 # The race itself parts all three (no two share a frame from f4875), so
 # the two flagged audio windows (the pause sounds at f5805-5835) are
 # downstream of the race.

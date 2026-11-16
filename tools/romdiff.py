@@ -19,9 +19,9 @@ output, so a different toolchain shows up there -- and so does a different
 HARNESS: the mGBA suite fork's tests were byte-identical to upstream's and the
 row still could not pass, because `main` ran the suites back to back and a
 handler one suite registered cost the next 11 cycles a V-blank
-(docs/playtest-bugs.md section 23). Identical tests under a different main
+(docs/dev/playtest-bugs.md section 23). Identical tests under a different main
 are a different test. Do this before touching the emulator
-(docs/cycle-hunt-method.md).
+(docs/dev/cycle-hunt-method.md).
 
 Neither ROM is ours to commit; point this at files outside the repo.
 """

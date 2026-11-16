@@ -22,7 +22,7 @@
 @ +3 CPSR low byte at recovery = 1F (System, ARM), +4 marker word = 4.
 @
 @ PROVENANCE: verified on GBA SP AGS-001 (gbaedge page 8 MSRTBIT); see
-@ docs/hwprobe-results-agb.md and tests/roms/gbaedge.s.
+@ docs/dev/hwprobe-results-agb.md and tests/roms/gbaedge.s.
     .arm
     .text
     .global _start

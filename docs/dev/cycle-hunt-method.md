@@ -1,6 +1,6 @@
 # Hunting a cycle: the method
 
-How the last mGBA suite row fell (`docs/playtest-bugs.md` sections 20-26),
+How the last mGBA suite row fell (`docs/dev/playtest-bugs.md` sections 20-26),
 written as the order to do things in next time. Every item is here because
 skipping it cost days.
 

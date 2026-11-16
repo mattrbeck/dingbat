@@ -1,6 +1,6 @@
 ; probe (m): channel 4's output, one M-cycle at a time, after a trigger and up
 ; to two more writes -- where the LFSR clocks, not just whether one read
-; agrees. Built for the DocBoy CH4 rows (docs/gb-failure-triage.md I1), whose
+; agrees. Built for the DocBoy CH4 rows (docs/dev/gb-failure-triage.md I1), whose
 ; prologue it copies instruction for instruction so the APU sits at the same
 ; phase: DIV reset, APU off, KEY1 + STOP into double speed (DSPD=1), APU on.
 ;

@@ -29,14 +29,14 @@
 ## channel replaying the buffer a capture unit is filling (capture-based
 ## reverb) hears what was captured one loop earlier instead of feeding
 ## straight back. The depth (8 words) is Assumed; the loop-late delay was
-## compared by running snd_suite in a reference emulator (docs/oracles.md, NDS
+## compared by running snd_suite in a reference emulator (docs/dev/oracles.md, NDS
 ## core). Capture stores each word when it is complete (its FIFO not
 ## modelled).
 ##
 ## Repeat modes: 1 loops, 2 is one-shot, 3 ("Prohibited") loops like 1, and
 ## 0 ("Manual") keeps playing past PNT+LEN through the following memory,
 ## busy until stopped -- GBATEK names 0 and 3 only; both are Assumed
-## (docs/oracles.md, NDS core: the reference emulators disagree).
+## (docs/dev/oracles.md, NDS core: the reference emulators disagree).
 ##
 ## Not modelled: the 1.05 MHz internal mixer rate (the PWM word is the
 ## mixer's value at each 1024-cycle tick, so a channel faster than the

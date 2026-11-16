@@ -6,8 +6,8 @@
 const SVBK_READS_WRITTEN* {.booldefine.} = true
   ## true: $FF70 reads back the three bits last stored ($F8 after a stored 0
   ## and at hand-off). false: the bank mapped at $D000 ($F9 for both).
-  ## true matches the AGS read of gbedge p00 (docs/flashcart-runbook.md) and
-  ## DocBoy cgb/boot/boot_regs_cgb. docs/gb-derivations.md, "SVBK readback".
+  ## true matches the AGS read of gbedge p00 (docs/dev/flashcart-runbook.md) and
+  ## DocBoy cgb/boot/boot_regs_cgb. docs/dev/gb-derivations.md, "SVBK readback".
 
 proc new_gb_memory*(gb: GB): GbMemory =
   # DMA (FF46) reads back the last written value; post-boot it's 0xFF on
@@ -210,7 +210,7 @@ proc skip_boot*(mem: GbMemory; gb: GB) =
   mem_flush_deferred(mem, gb)
 
 # mem_read/mem_write and the tick halves sit on clang's inline threshold
-# across ~160 call sites (~0.9% retired instructions, docs/gb_oam_dma_cost.md).
+# across ~160 call sites (~0.9% retired instructions, docs/dev/gb_oam_dma_cost.md).
 # hot_bus_inline (gb.nim) pins it: always_inline on clang, `inline` on gcc,
 # where a failed always_inline is a hard error.
 
@@ -1183,7 +1183,7 @@ const SPEED_SWITCH_IME0_LEAF_HOLD_T* {.intdefine.} = 8
   ## "glitches" leaf. DocBoy `*_aligned_with_stop_nops_*` (CGB E, IME clear)
   ## want 5..8 T; 4 and 9 fail. CGB B/C unmeasured, same value. On the glitch
   ## leaf DocBoy's `*_ime1_*` want 8 where c-sp's CGB-E measurement says 4
-  ## (docs/gb-failure-triage.md I7).
+  ## (docs/dev/gb-failure-triage.md I7).
 
 const STOP_MODE_OPERAND_MCYCLE* {.intdefine.} = 1
   ## 1: the two-byte STOP-mode leaf runs its operand M-cycle, whole machine

@@ -5,7 +5,7 @@
 ; (gb.nim CGB_SCX_LATENCY, CGB_SCY_LATENCY, CGB_WX_LATENCY, CGB_TDSEL_LATENCY,
 ; CGB_MAP_LATENCY; memory.nim mem_tick_ppu_latched; the mixer's
 ; CGB_MIXER_LATENCY for BGP). That the six are independent numbers is
-; Assumed (docs/oracles.md). Every page here has the same code shape and the
+; Assumed (docs/dev/oracles.md). Every page here has the same code shape and the
 ; same anchor, so the DIFFERENCES between pages on one machine are free of
 ; the anchor, and the same page on a DMG and a CGB differ by the register's
 ; latency plus whatever the two machines' halt-wake phase differs by.

@@ -7,7 +7,7 @@
 ##       [--press SPEC] [--core NAME | --no-ref] [--ndsref PATH]
 ##       [--jobs N] [--timeout SECS] [--bios DIR] [--only NAME,..]
 ##
-## --core names the tools/ndsref core (or set $NDSSWEEP_CORE); docs/oracles.md
+## --core names the tools/ndsref core (or set $NDSSWEEP_CORE); docs/dev/oracles.md
 ## lists the cores and which one runs current libnds builds.
 ## Every ROM gets DIR/<name>/: ours_<F>.png, ref_<F>.png, ours.json (the
 ## metrics below), ours.err (our stderr: unmapped accesses, ...), ref.wav.
@@ -154,7 +154,7 @@ proc read_png(path: string; w, h: var int): seq[uint32] =
 
 proc ac_stats(s: openArray[float32]): (float, float) =
   ## Peak and RMS around the mean: SOUNDBIAS puts a DC level on the output
-  ## (bias - 200h, docs/oracles.md) that some cores filter away, and a
+  ## (bias - 200h, docs/dev/oracles.md) that some cores filter away, and a
   ## program that only sets the bias is silent, not loud.
   if s.len == 0: return (0.0, 0.0)
   var mean = 0.0
@@ -531,7 +531,7 @@ when isMainModule:
   var frames = 600
   var shots_s = DEFAULT_SHOTS
   var press = DEFAULT_PRESS
-  var core = getEnv("NDSSWEEP_CORE")   # the reference core (docs/oracles.md)
+  var core = getEnv("NDSSWEEP_CORE")   # the reference core (docs/dev/oracles.md)
   var ndsref = ""
   var bios = ""
   var width = max(1, countProcessors() - 1)
@@ -575,7 +575,7 @@ when isMainModule:
   files.sort()
   if files.len == 0: quit("usage: ndssweep ROM_OR_DIR.. [--out DIR] (see the header)")
   if core.len == 0 and not no_ref and one.len == 0:
-    quit("pass --core NAME (a tools/ndsref core; docs/oracles.md says which runs " &
+    quit("pass --core NAME (a tools/ndsref core; docs/dev/oracles.md says which runs " &
          "current libnds builds) or --no-ref")
   if core.len > 0 and ndsref.len == 0:
     ndsref = getAppFilename().parentDir / "ndsref"

@@ -14,7 +14,7 @@
   `web/bench/README.md`.
 * **Per-setting cost (web):** `web/bench/settings.html` times every user
   setting through `loop_tick` / `runahead_tick`, the presenter, the glow and
-  the analog filter; results and method in `docs/settings-cost.md`. Native
+  the analog filter; results and method in `docs/dev/settings-cost.md`. Native
   knobs for the same: `DINGBAT_BENCH_FIFO_INTERP=0`, `DINGBAT_BENCH_SGB=1`.
 * **Web core, headless:** `web/bench/node_wasm.sh build <out.js>` compiles
   the native harness with the web build's flags for Node (same V8 wasm
@@ -47,11 +47,11 @@
   IRQs and "measures" 2.3x).
 * **Calibrate on several gameplay states, never one.** A FireRed title-screen
   state that is 100 % windowed compositing inverted the PPU ranking; see
-  `docs/research_ppu_hotspots.md`.
+  `docs/dev/research_ppu_hotspots.md`.
 * **One wasm binary for A/B.** Two builds differ in code layout by more than a
   3 %-of-tick feature costs; compile both arms into one binary and interleave.
 * `mem_read` / `mem_write` sit on clang's inline threshold; a small edit there
-  can re-roll inlining and move everything (`docs/gb_oam_dma_cost.md`).
+  can re-roll inlining and move everything (`docs/dev/gb_oam_dma_cost.md`).
 
 ## Build flags that matter
 
@@ -75,7 +75,7 @@ named PPU 21–38 % (`render_reg_bg` 11–17 %, `composite_span` 6–11 %,
 already doing LICM, register promotion and redundant-load elimination:
 hand-hoisting invariants measures as noise. Gains come from doing less work.
 
-Measured ceilings and verdicts are in `docs/research_ppu_hotspots.md`. A
+Measured ceilings and verdicts are in `docs/dev/research_ppu_hotspots.md`. A
 block cache / JIT was assessed at only +8–12 % because the cycle-accurate
 timing model cannot be precomputed, and must preserve the bit-exact
 determinism rollback netplay depends on. Layer-at-a-time SIMD compositing:

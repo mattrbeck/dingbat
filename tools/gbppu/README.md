@@ -105,7 +105,7 @@ pixel is the last, the only case that can walk the shifter past `m3_retire_lx`
 neighbours lose rows; `vram_m3` and `oam_access` do not move at any value), and the two
 OBJ-penalty alternatives that move `NspritesPrLine_m3stat` are refused by `objtab.py`.
 What remains in those families is a sub-M-cycle error in the mode 3 → 0 edge as the CPU
-reads it (`docs/gb-failure-triage.md`).
+reads it (`docs/dev/gb-failure-triage.md`).
 
     ./dt_m3len <rom> --mode screenshot --frames 140 --screenshot /dev/null --dmg --nosave 2>&1 \
       | grep -E '^M3(IN|LEN)' > /tmp/m3.log
@@ -158,7 +158,7 @@ per device. If the write dot and the window-start dot match on both devices, wha
 decides the row is not in this file (`late_wy_FFto2_ly2_3` diverges a frame earlier, in
 the ROM's vblank wait). A gambatte window family is one write moved one M-cycle at a time,
 so the dot turns the family into an equation for the sampling dot (`late_wy_*` solves to
-`83 + WX + (SCX and 7)`, `docs/gb-derivations.md` §2). `reactsweep.sh` re-pins
+`83 + WX + (SCX and 7)`, `docs/dev/gb-derivations.md` §2). `reactsweep.sh` re-pins
 `WIN_REACT_PHASE` against the mealybug rows that see the window's re-trigger edge; re-run
 it whenever the shifter's window rules or the fetcher's phase move, because the fetcher
 parks on `fsPushPixel` and a phase is not portable between two points in the dot. `WINHIT`
@@ -237,7 +237,7 @@ question (which otherwise reports only in `$FF80`). The harnesses reproduce GBMi
 own hardware staircases (`int_hblank_nops_scx0..7`, `hblank_int_scx0..7`). The steady-state
 and LCD-on-line measurements both re-anchor on the ROM's own `LDH ($40),A`, so the
 second emulator's boot-ROM phase offset cancels. What they currently say about the
-mode-0 edge is recorded in `docs/gb-failure-triage.md` (A5).
+mode-0 edge is recorded in `docs/dev/gb-failure-triage.md` (A5).
 
 ## wilbertpol `acceptance/gpu` ROMs as measurements
 
@@ -265,7 +265,7 @@ can only find a mismatch it already models.
 `sm83dis.py` disassembles enough of a test ROM's body to read its preamble (`lcd_offset`'s
 `offsetN`: `offset1` = 2 speed switches, `offset2` = 4, `offset3` = 2 plus a NOP).
 `counters.sh` wraps `DINGBAT_BENCH_COUNTERS=1`
-around both slots of a `tools/gbgate` build; `docs/gb_oam_dma_cost.md` is the authority
+around both slots of a `tools/gbgate` build; `docs/dev/gb_oam_dma_cost.md` is the authority
 (fps cannot resolve this path; `cycles=` must match between arms; check the build's exit
 code, since a failed `nim c` leaves the previous binary in place). One extra branch in
 `tick_shifter` is +1.7%. `blargg_canary.sh` compares all eleven `blargg/cpu_instrs` frames

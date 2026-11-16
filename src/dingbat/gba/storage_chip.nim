@@ -82,7 +82,7 @@ proc storage_candidates*(content: string): set[StorageType] =
   ## ROM cannot say which chip its board has: Breath of Fire (J) and Super
   ## Monkey Ball Jr (U) both link EEPROM_V121, FLASH_V124 and SRAM_V112, and
   ## save to SRAM and EEPROM respectively. So the battery file, or what the game does with save
-  ## memory, chooses (storage/pending.nim; docs/playtest-bugs.md §105). FRAM (SRAM_F_V) answers as SRAM.
+  ## memory, chooses (storage/pending.nim; docs/dev/playtest-bugs.md §105). FRAM (SRAM_F_V) answers as SRAM.
   if names_no_save_library(content):
     return {stEEPROM, stSRAM, stFLASH512, stFLASH1M}
   if not content.contains("EEPROM_V"):

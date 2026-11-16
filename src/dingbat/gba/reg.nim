@@ -24,7 +24,7 @@ converter toPSR*(v: uint32): PSR   = cast[PSR](v)
 const PSR_PHYS_MASK* = 0xF00000FF'u32
   ## Status bits that physically exist on the ARM7TDMI (N/Z/C/V, I/F/T,
   ## mode); bits 8-27 never latch, and SPSR forces bit4 high (hardware:
-  ## gbaedge CPSRBITS on AGB SP, docs/hwprobe.md).
+  ## gbaedge CPSRBITS on AGB SP, docs/dev/hwprobe.md).
 
 type
   WAITCNT* {.packed.} = object

@@ -541,7 +541,7 @@ proc powered_off*(n: NDS): bool {.inline.} =
 
 proc show_power_off(n: NDS) =
   ## Powered off, the LCDs are unpowered: both screens black (reference runs,
-  ## docs/oracles.md). Cheap enough to repeat on every call while off, which
+  ## docs/dev/oracles.md). Cheap enough to repeat on every call while off, which
   ## also covers a state loaded off.
   for i in 0 ..< 256 * 192:
     n.gpu.top[i] = 0

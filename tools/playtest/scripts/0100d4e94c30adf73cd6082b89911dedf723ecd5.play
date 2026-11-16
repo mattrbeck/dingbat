@@ -22,7 +22,7 @@
 # check was drained inside the DMA3 burst and nothing booked it again. The
 # outermost burst's end now books a check whenever none is left at or
 # before the recognition (dma.nim run_pending): taken 26 cycles after the
-# raise, 3 plus the 23 the bursts held the CPU (docs/playtest-bugs.md §100).
+# raise, 3 plus the 23 the bursts held the CPU (docs/dev/playtest-bugs.md §100).
 [new]
 wait 300
 checkpoint title window=30

@@ -4,7 +4,7 @@
 N frames with no window and no audio device, and writes frames as 256x384
 PNGs in `tools/ndsrun.nim`'s layout (top screen above bottom) plus the run's
 audio as a WAV. It is the black-box half of a comparison: the core is only
-ever *run* (docs/oracles.md: running another emulator is allowed and
+ever *run* (docs/dev/oracles.md: running another emulator is allowed and
 recorded; reading its implementation is not). Only the public libretro API
 header (`libretro.h`, MIT, vendored here) is used.
 
@@ -136,5 +136,5 @@ frame. Relocating changes no code, only where it sits in the file.
   read the host clock for the RTC (a ROM that shows the date/time will
   differ run to run) and for JIT / threaded-renderer options; set them off.
 
-Per-core settings and findings are recorded in docs/oracles.md (DS reference
+Per-core settings and findings are recorded in docs/dev/oracles.md (DS reference
 cores).

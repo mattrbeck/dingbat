@@ -12,7 +12,7 @@
 @ IE & IF whether or not a handler would run, and a resident monitor owns the
 @ IRQ vector so no handler may run.
 @
-@ Measured on an AGB SP (docs/playtest-bugs.md section 18):
+@ Measured on an AGB SP (docs/dev/playtest-bugs.md section 18):
 @
 @   method 0, strb to 0x04000301   hardware 11, line 100   -- it does NOT halt
 @   method 1, SWI 2 (BIOS Halt)    hardware 4931, line 104

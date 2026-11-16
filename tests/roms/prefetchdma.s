@@ -377,7 +377,7 @@ part_d:
 
 @ Enter the top of a chosen line exactly, by halting on its V-count match.
 @ IME stays off, so no handler runs and the vector is never needed; HALT
-@ still exits on IE & IF. Proven on this rig, docs/playtest-bugs.md 18.
+@ still exits on IE & IF. Proven on this rig, docs/dev/playtest-bugs.md 18.
 @ r0 = the line.
     .align 2
 sync_at:

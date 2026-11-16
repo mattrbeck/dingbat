@@ -1,5 +1,5 @@
 """The SingleStepTests ARM7TDMI probe: where dingbat and the vectors disagree,
-asked of the console (docs/hwprobe-sst.md has the questions and answers).
+asked of the console (docs/dev/hwprobe-sst.md has the questions and answers).
 
     python3 sst.py emulators        # dingbat (HLE and real BIOS) -> sst-dingbat.json
     python3 sst.py console          # the AGB SP over the link   -> sst-agb.json
@@ -91,7 +91,7 @@ RISK_CELLS = ['x.mrc14_c0', 'x.mrc14_c1', 'x.mrc14_c2', 'x.mcr14_c1', 'x.mrc14_r
               'x.mrc14_c3', 'x.mrc14_c5', 'x.mrc14_c8', 'x.mrc14_c15', 'x.mcr14_c0', 'x.mcr14_c2',
               'x.mrsu_18', 'x.mrsu_19', 'x.mrsu_1A', 'x.mrsu_1B', 'x.mrsu_cpsr_und']
 # sstgap.s's table (group D): the forms of each known divergence the first
-# run's cells left out (docs/hwprobe-sst.md, section 7)
+# run's cells left out (docs/dev/hwprobe-sst.md, section 7)
 GAP_CELLS = ([f'ut.{op}p.usr' for op in ('tst', 'teq', 'cmp', 'cmn')]
              + [f'sa.{op}s_pc.sys' for op in ('add', 'and', 'orr', 'eor', 'bic', 'mvn', 'rsb')]
              + ['wb.ldrb_pc_post', 'wb.strb_pc_post', 'wb.ldrt_pc_post', 'wb.strt_pc_post',

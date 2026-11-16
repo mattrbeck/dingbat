@@ -7,7 +7,7 @@
  *
  * Only the public libretro API (libretro.h, MIT) is used. The core is a black
  * box: what it does is observed through its outputs, never its sources
- * (docs/oracles.md).
+ * (docs/dev/oracles.md).
  */
 #include <dlfcn.h>
 #include <errno.h>

@@ -4,7 +4,7 @@
     python3 r0table.py --drift [row ...]   # the emulators today against theirs
 
 A probe's predictions are the point of designing it first: an emulator's
-answer, or a named hypothesis's, set down in docs/playtest-bugs.md or the
+answer, or a named hypothesis's, set down in docs/dev/playtest-bugs.md or the
 payload's header before any console run. Once the row is recorded (`r0table.py
 --record`), `--score` counts, per row and over all of them, how many of each
 one's cells the console answered as predicted, and lists the cells still
@@ -48,7 +48,7 @@ def _timergeo():
     dingbat = ['001204BD', '001204BE', '001204BF', '001304C0', '001304C1', '001304EF', '001404F0']
     mgba = ['001304BD', '001304BE', '001304BF', '001304C0', '001304C1', '001304EF', '001304F0']
     return {
-        'where': 'docs/playtest-bugs.md@95f590ce §79 item 3', 'date': '2026-10-14',
+        'where': 'docs/dev/playtest-bugs.md@95f590ce §79 item 3', 'date': '2026-10-14',
         'who': {'dingbat': "the ÷64 edge at e = 7 on line 103, 16 cycles a line earlier",
                 'mgba': 'mGBA'},
         'cells': {label(a): {'dingbat': d, 'mgba': m} for a, d, m in zip(args, dingbat, mgba)},
@@ -66,7 +66,7 @@ def _wakehb():
     cells[label(0x28)] = {'wakeirq+4': '095Bxxxx'}
     cells[label(0x60)] = {'wakeirq+4': '0AFExxxx'}
     return {
-        'where': 'docs/playtest-bugs.md@95f590ce §79 item 2; tests/roms/payloads/wakehb.s', 'date': '2026-10-14',
+        'where': 'docs/dev/playtest-bugs.md@95f590ce §79 item 2; tests/roms/payloads/wakehb.s', 'date': '2026-10-14',
         'who': {'dingbat': 'the H-blank interrupt rising with the flag at 1007 through the 4-cycle sync',
                 'dingbat-bios': 'the same',
                 'mgba': 'mGBA',
@@ -92,7 +92,7 @@ def _obusdma16():
     cells = {label(o): {'dingbat': h1[o], 'dingbat-bios': h1[o], 'mgba': h1[o],
                         'H1': h1[o], 'H2': h2[o], 'H3': h3[o], 'H4': h4[o]} for o in sorted(h1)}
     return {
-        'where': 'tests/roms/payloads/obusdma16.s; docs/playtest-bugs.md@95f590ce §79 item 5', 'date': '2026-10-14',
+        'where': 'tests/roms/payloads/obusdma16.s; docs/dev/playtest-bugs.md@95f590ce §79 item 5', 'date': '2026-10-14',
         'who': {'dingbat': 'H1', 'dingbat-bios': 'H1', 'mgba': 'H1',
                 'H1': 'a halfword on both lanes (dma.nim)',
                 'H2': "each read drives its source address's lane",
@@ -139,7 +139,7 @@ def _fifolog():
         for i, s in enumerate(samples):
             cells.setdefault(label(fifolog_arg(k, w, n, i)), {})[who] = '7FFFFFFF&' + word(s & 0xFFFF)
     return {
-        'where': 'tests/roms/payloads/fifolog-predicted.txt; docs/playtest-bugs.md@95f590ce §79 item 6',
+        'where': 'tests/roms/payloads/fifolog-predicted.txt; docs/dev/playtest-bugs.md@95f590ce §79 item 6',
         'date': '2026-10-14',
         'who': {'dingbat': 'dingbat on 2026-10-14',
                 'mgba': 'mGBA',
@@ -173,7 +173,7 @@ def _s0age():
                     'dingbat': h0, 'dingbat-bios': h0, 'mgba': 'FFFF00FF',
                     'H0': h0, 'H1': h1, 'H2': h2, 'H3': h3}
     return {
-        'where': 'tests/roms/payloads/s0age.s; docs/playtest-bugs.md@95f590ce §79 item 7', 'date': '2026-10-14',
+        'where': 'tests/roms/payloads/s0age.s; docs/dev/playtest-bugs.md@95f590ce §79 item 7', 'date': '2026-10-14',
         'who': {'dingbat': 'H0', 'dingbat-bios': 'H0', 'mgba': 'L everywhere (no shift-0 check)',
                 'H0': 'the slow timing holds: every row 1 0 L F 7 7 7 3 3 3 L 3 3 3 1 1',
                 'H1': 'it runs out by itself: m > 0 rows turn C2 or C3',
@@ -186,7 +186,7 @@ def _s0age():
 def _psgrace():
     # "+12 (after ch2's note): lives ... dingbat over 256 phases 0/256"
     return {
-        'where': 'docs/playtest-bugs.md@95f590ce §79 item 7 (the psgrace sweep)', 'date': '2026-10-14',
+        'where': 'docs/dev/playtest-bugs.md@95f590ce §79 item 7 (the psgrace sweep)', 'date': '2026-10-14',
         'who': {'dingbat': '+12 (bit 18) never alive, at any of the 256 phases'},
         'cells': {label(c << 8 | d): {'dingbat': '00040000&00000000'}
                   for c in range(0, 128, 8) for d in range(16)},
@@ -211,7 +211,7 @@ def _hdmarace():
                 'same-wake': '0008' + hw,
                 'rotated': '|'.join('0008' + c for c in column)}
     return {
-        'where': 'tests/roms/payloads/hdmarace.s; docs/playtest-bugs.md@95f590ce §79 item 1', 'date': '2026-10-14',
+        'where': 'tests/roms/payloads/hdmarace.s; docs/dev/playtest-bugs.md@95f590ce §79 item 1', 'date': '2026-10-14',
         'who': {'dingbat': "dingbat's d x k table", 'dingbat-bios': 'the same', 'mgba': 'mGBA',
                 'same-wake': 'the console wakes on the core\'s cycle: unanimous cells, the table',
                 'rotated': "the wake c cycles off: the table's rows rotated (a word of the cell's column)"},
@@ -220,7 +220,7 @@ def _hdmarace():
 
 
 def _hdmaobus():
-    # docs/playtest-bugs.md, "a DMA burst that follows another reads the bus
+    # docs/dev/playtest-bugs.md, "a DMA burst that follows another reads the bus
     # the first one left" (ee23537d, 2026-10-02 10:47; recorded 13:59)
     x = {k: f'A5{0x11 * k:02X}' for k in range(8)}
     cells = {}
@@ -240,7 +240,7 @@ def _hdmaobus():
                                    'mgba': 'xxxx7F00', 'before': 'xxxx0000|xxxx0300',
                                    'previous-line': 'xxxx' + x[k - 1]}
     return {
-        'where': 'docs/playtest-bugs.md@95f590ce, the hdmaobus probe table ("predicted for the SP")',
+        'where': 'docs/dev/playtest-bugs.md@95f590ce, the hdmaobus probe table ("predicted for the SP")',
         'date': '2026-10-02',
         'who': {'dingbat': 'dingbat after DMA_BUS_BACK_TO_BACK (HLE)',
                 'dingbat-bios': 'the same, under the BIOS',
@@ -264,7 +264,7 @@ def _fiforeset():
         cells[label(0x100 | k)] = {'dingbat': ab(2), 'dingbat-bios': ab(2), 'mgba': ab(18 - k),
                                    'ref2': ab(survive[k]), 'keeps-word': ab(2), 'fifomap': ab(2)}
     return {
-        'where': 'tests/roms/payloads/fiforeset.s PROVENANCE; docs/playtest-bugs.md@95f590ce, '
+        'where': 'tests/roms/payloads/fiforeset.s PROVENANCE; docs/dev/playtest-bugs.md@95f590ce, '
                  '"Status before the console" (f8d9b730, 2026-10-02 11:26; recorded 13:59)',
         'date': '2026-10-02',
         'who': {'dingbat': 'the word dropped (as shipped)', 'dingbat-bios': 'the same',
@@ -290,7 +290,7 @@ def _sramloop():
             c['emptying'] = word(emptying[i])
         cells[label(a)] = c
     return {
-        'where': 'docs/playtest-bugs.md §84', 'date': '2026-10-14',
+        'where': 'docs/dev/playtest-bugs.md §84', 'date': '2026-10-14',
         'cart': 'Hamtaro - Rainbow Rescue (A84P)',
         'who': {'dingbat': 'the prefetcher reads through SRAM (28 a byte)', 'dingbat-bios': 'the same',
                 'held': 'SRAM_HOLDS_GAMEPAK_BUS, the buffer kept (29 a byte)',
@@ -309,7 +309,7 @@ def _eesettle():
         cells[label(a)] = {'dingbat': word(108362), 'dingbat-bios': word(108362),
                            'mgba': word(38), 'ref2': word(101392)}
     return {
-        'where': 'docs/playtest-bugs.md §36, §68, §87, §89', 'date': '2026-10-02 (§36) to 10-14',
+        'where': 'docs/dev/playtest-bugs.md §36, §68, §87, §89', 'date': '2026-10-02 (§36) to 10-14',
         'cart': 'a 64 Kbit EEPROM cart: Super Mario Advance 3, Car Battler Joe, '
                 "The Sims - Bustin' Out, Mario Party Advance (each answers for its own chip)",
         'who': {'dingbat': "GBATEK's ca. 108368", 'dingbat-bios': 'the same', 'mgba': 'mGBA',
@@ -323,7 +323,7 @@ def _eesettle4k():
     for a in (0x100, 0x101):
         cells[label(a)] = {'dingbat': word(108362), 'dingbat-bios': word(108362), 'mgba': word(114992)}
     return {
-        'where': 'docs/playtest-bugs.md §40, §67, §69', 'date': '2026-10-02 (§40) to 10-14',
+        'where': 'docs/dev/playtest-bugs.md §40, §67, §69', 'date': '2026-10-02 (§40) to 10-14',
         'cart': 'a 4 Kbit EEPROM cart: Klonoa - Empire of Dreams (§40), Super Mario Advance '
                 '(AMZE, §67), Starsky & Hutch (§69)',
         'who': {'dingbat': "GBATEK's ca. 108368", 'dingbat-bios': 'the same', 'mgba': 'mGBA'},
@@ -370,7 +370,7 @@ def _eestray4k():
     mgba = (['00xxxxxx|30FFFFFF'] + ['20FFFFFF|30FFFFFF'] * 4
             + ['00xxxxxx|30FFFFFF', '2FFFFFFF|3FFFFFFF', '10FFFFFF|30FFFFFF', '20FFFFFF|30FFFFFF'])
     return {
-        'where': 'docs/playtest-bugs.md §95; tests/roms/payloads/eestray.s', 'date': '2026-10-16',
+        'where': 'docs/dev/playtest-bugs.md §95; tests/roms/payloads/eestray.s', 'date': '2026-10-16',
         'cart': 'a 4 Kbit EEPROM cart whose last two blocks differ: Columns Crown (ACGE, §95)',
         'who': dict(_EESTRAY_WHO, mgba="mGBA (Columns Crown's save seeded; 30FFFFFF blank)"),
         'cells': _eestray_cells(0x100, mgba),
@@ -380,7 +380,7 @@ def _eestray4k():
 def _eestray():
     # mgba seeded with an 8 KB file still read both blocks as FF: no prediction
     return {
-        'where': 'docs/playtest-bugs.md §95; tests/roms/payloads/eestray.s', 'date': '2026-10-16',
+        'where': 'docs/dev/playtest-bugs.md §95; tests/roms/payloads/eestray.s', 'date': '2026-10-16',
         'cart': 'a 64 Kbit EEPROM cart whose last two blocks differ',
         'who': dict(_EESTRAY_WHO),
         'cells': _eestray_cells(0),
@@ -399,7 +399,7 @@ def _flashprog():
         cells[label(a)] = {'dingbat': word(v), 'mgba': '|'.join(word(m) for m in mgba[a]),
                            'ref2': word(0xD4BF if a == 0 else v)}
     return {
-        'where': 'docs/playtest-bugs.md §64, §90', 'date': '2026-10-14',
+        'where': 'docs/dev/playtest-bugs.md §64, §90', 'date': '2026-10-14',
         'cart': 'a FLASH cart: Mario vs. Donkey Kong (§64), The Urbz (§90); '
                 'cells 2, 0x102, 3, 0x103 only with sector 15 blank',
         'who': {'dingbat': 'no busy state (storage/flash.nim)', 'mgba': 'mGBA',

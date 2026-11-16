@@ -31,7 +31,7 @@
 @
 @ PROVENANCE: verified on GBA SP AGS-001 (gbaedge pages 21 DMAEDGE, 27
 @ IOBYTE and 30 DMABYTE2 — the 0x80 row on DMA0/1/2 and the 0xC0/0x40
-@ rows on DMA3); see docs/hwprobe-results-agb.md.
+@ rows on DMA3); see docs/dev/hwprobe-results-agb.md.
     .arm
     .text
     .global _start

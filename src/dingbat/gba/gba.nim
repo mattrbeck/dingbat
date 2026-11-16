@@ -570,7 +570,7 @@ type
     # until the CPU's next access, so only the first access after the burst
     # can read it unmapped (read_open_bus_value). dma_request_at: when the
     # latest burst was requested. AGB SP, gbaedge DMAOPENBUS and HDMAPHASE
-    # (docs/hwprobe-results-agb.md sessions 5-6); mGBA suite Misc "DMA
+    # (docs/dev/hwprobe-results-agb.md sessions 5-6); mGBA suite Misc "DMA
     # Prefetch Read". Games: Hello Kitty Collection: Miracle Fashion Maker's
     # boot (a sound-FIFO DMA's final zero) and Famicom Mini Metroid (a ROM
     # table walk stops only on an H-blank DMA's word).
@@ -620,7 +620,7 @@ type
     # -d:obuslatch (off by default): open bus as a real 32-bit register, halves
     # driven independently by opcode fetches and DMA words. Only this shape
     # gives the half-DMA, half-opcode word an AGB SP returns two NOPs after a
-    # burst (obuswint.s; docs/playtest-bugs.md section 13). Not serialized.
+    # burst (obuswint.s; docs/dev/playtest-bugs.md section 13). Not serialized.
     obus_latch*:         uint32
     # Cycle each half was last driven by an opcode fetch. DMA is resolved
     # against these at read time, not applied here: a deferred immediate DMA
@@ -1361,7 +1361,7 @@ const BRANCH_COMMIT_WAIT* {.booldefine.} = true
   ## A branch out of a gamepak stream waits out a prefetch halfword in its
   ## final cycle (cpu.clear_pipeline). Off: Final Fight One lands 9.7k
   ## cycles sooner, still a frame behind the reference runs
-  ## (docs/playtest-bugs.md section 29).
+  ## (docs/dev/playtest-bugs.md section 29).
 const ROM_REFILL_ORDERED_PF* {.booldefine.} = true
 const DMA_KEEPS_PREFETCH* {.booldefine.} = true
   ## A DMA that never touches the gamepak leaves the prefetcher running: the
@@ -1388,7 +1388,7 @@ const FIFO_FETCH_WINDOW* {.booldefine.} = true
   ## IMM_FETCH_WAIT's do. AGB SP, kit3 (flash cart, 3/1) and the empty-slot
   ## 4/2 sled: with the prefetcher off the interrupt lands on the sled's
   ## 4-cycle grid after the burst, which a mid-fetch grant cannot give
-  ## (docs/hwprobe-questions.md, fifo_6). Pinned by alyosha fifo_dma/*.
+  ## (docs/dev/hwprobe-questions.md, fifo_6). Pinned by alyosha fifo_dma/*.
 const FIFO_IRQ_PF_EXTRA* {.intdefine.} = 1
   ## With FIFO_FETCH_WINDOW: a FIFO burst's end interrupt comes a cycle later
   ## when the CPU runs from the gamepak through the prefetcher (AGB SP, kit3
@@ -1442,7 +1442,7 @@ const REFILL_WINDOW_SPLIT* {.booldefine.} = true
   ## not one block. AGB SP, hdmalag.s configuration 29: DMA1 (3 words) and
   ## DMA3 (302 halfwords) every H-blank leave an IWRAM `blo` loop 3 cycles a
   ## line, and every burst starts on its H-blank's cycle, 20 lines running
-  ## (docs/playtest-bugs.md section 42). ppu.start_hblank clears a leftover
+  ## (docs/dev/playtest-bugs.md section 42). ppu.start_hblank clears a leftover
   ## `window_closing` so the next line's window opens.
 const SB_SWAP* = 64'u8
   ## bus.sync_bits bit 6: MEMCNT's swap is on (bus.nim, swap_read_word).
@@ -1515,7 +1515,7 @@ const DMA_BUS_BACK_TO_BACK* {.booldefine.} = true
   ## reads the first's word every line, CPU in a NOP sled or halted).
   ## Phantasy Star Collection's Master System player needs it: DMA2 copies
   ## write-only BG1VOFS to BG0VOFS right after DMA1 writes it
-  ## (docs/playtest-bugs.md section 28).
+  ## (docs/dev/playtest-bugs.md section 28).
 const DMA_BUS_WHILE_HALTED* {.booldefine.} = true
   ## A halted CPU drives nothing, so the bus keeps the last DMA word until
   ## the CPU runs: a burst granted while the CPU stayed halted since the
@@ -1696,7 +1696,7 @@ proc exception_return_restore*(cpu: CPU)
 proc read_instr*(cpu: CPU): uint32 {.inline.}
 # The bank an undefined CPSR mode pattern selects: r13 and r14 read 0 and the
 # mode field holds the pattern (AGB SP, gbaedge UNDMODE, patterns 15/1A/1E,
-# docs/hwprobe-results-agb.md). Zeroed on entry, so nothing written survives;
+# docs/dev/hwprobe-results-agb.md). Zeroed on entry, so nothing written survives;
 # r8-r12 and SPSR are unprobed and follow the user bank. Never serialized.
 const UNDEF_BANK* = 6
 # The stub BIOS's room for the HLE's decompression and unpack routines

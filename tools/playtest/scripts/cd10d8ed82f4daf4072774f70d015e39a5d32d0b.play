@@ -13,7 +13,7 @@
 # (no key taken from f1498 on) at some clock times, the default 00:00 among
 # them: a timer interrupt raised inside a DMA3 burst was delivered a second
 # time with no source, and the game's handler jumped to a null vector
-# (docs/playtest-bugs.md section 27). Since that fix dingbat and
+# (docs/dev/playtest-bugs.md section 27). Since that fix dingbat and
 # dingbat-bios replay this timeline on the references' screens at every
 # checkpoint (title: 4 frames behind mgba), so with dingbat-bios in the
 # lockstep the slowest emulator, and the 604 resolved for 'PUSH START',

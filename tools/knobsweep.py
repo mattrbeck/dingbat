@@ -15,7 +15,7 @@ tools/playtest/bin or the repo root is swapped), then run through
 and the report is the DIFFERENCE from base: which console cells a value
 gains or loses, which suite rows flip. That is what a knob is for -- to learn
 what a constant touches and whether a model's structure is right. A value
-that turns a row green is not a measurement (docs/cycle-hunt-method.md): when
+that turns a row green is not a measurement (docs/dev/cycle-hunt-method.md): when
 a change the console measured breaks many passing rows by the same amount,
 the partner error is in what those rows share, and this report is how to see
 what they share.

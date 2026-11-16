@@ -20,7 +20,7 @@ names the cart used.
 ## Runs
 
 - `agb-sp-1/` — GBA SP AGS-001 + EverDrive GBA: gbaedge pages 0–15 + MSRTBIT post-START
-  (`ALL F54C`, post-START `1512`). Analysis: `docs/hwprobe-results-agb.md`.
+  (`ALL F54C`, post-START `1512`). Analysis: `docs/dev/hwprobe-results-agb.md`.
 - `agb-sp-2/` — same console: pages 16–24 (`ALL 4B70`; BXDECODE not run, it hangs the
   console). Partial runs omit page 0 and give `model:` in the `.txt`.
 - `agb-sp-3/` — same console: the v5 pages (`ALL FDE5`; BXDECODE run one press at a time,

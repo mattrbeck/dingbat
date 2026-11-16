@@ -26,7 +26,7 @@ differ from DMG's — that is data); SGB-only rows stay open.
 
 ## Folders
 
-**1. gbedge.gb** — protocol in docs/hwprobe.md. Order GBC, then GBA or SP, then
+**1. gbedge.gb** — protocol in docs/dev/hwprobe.md. Order GBC, then GBA or SP, then
 GBP; on GBA and SP photograph page 00 on both and skip the second if `ALL`
 matches. Priority pages if cut short: 00 IDENT (post-boot port readback, boot
 fingerprint, which CGB revision the -04 board carries), 02 TIMAGLITCH (the CGB
@@ -155,7 +155,7 @@ BASE 26, dingbat 24 at lead 0):
 - Not the VBlank header drawing (`-DNOHEADER` unchanged).
 - Hypothesis: daid's ruler is BGP (emission) and is exact on the same machine;
   probe (e)'s is LCDC.4 (the fetch grid). A 2 M separation between emission and
-  the fetch grid is the axis `docs/gb-failure-triage.md` names. Probe (c) puts
+  the fetch grid is the axis `docs/dev/gb-failure-triage.md` names. Probe (c) puts
   both rulers on one frame; its SP photos (IMG_3804–3806) cannot be registered
   because the ROM draws on black — add four white corner tiles (no timing
   change) and re-shoot.
@@ -175,8 +175,8 @@ is an upper bound on the true zero count.
 
 One folder of photos per console. gbedge pages: `tests/roms/hwprobe_ocr.py`
 reads dingbat screenshots of the same build for the diff side; photos are
-compared by eye. File each delta as a row in docs/hwprobe-questions.md or
-docs/pandocs-upstream.md §2 — each names the knob or model it moves.
+compared by eye. File each delta as a row in docs/dev/hwprobe-questions.md or
+docs/dev/pandocs-upstream.md §2 — each names the knob or model it moves.
 
 ## Session 3 kit (ROMs written 2026-09-03; GBA arms run 2026-09-04)
 
@@ -194,8 +194,8 @@ knob in the ROM's README.
 | gb-apu | `tests/roms/gbedge.gb` pages 1B–20 (hex; PCM readback needs a CGB/AGS, NR52 rows work on DMG too) | GB flashcart; photograph | tests/roms/gbedge_apu_notes.md |
 | gba-pages2 | `tests/roms/gbaedge.gba` pages 40–49 (IRQDECOMP, CONTEND2, MULTIME, TIMPHASE, PSGPHASE, MEMCTL, DMATIME, IWCYCLE, DMAFIFO, UNDMODE) | **run 2026-09-04 on the AGS** (`expected/agb-sp-5.txt`; the console survived UNDMODE) unless SELECT is held | tests/roms/README-probes-gba.md |
 | gba-pages3 | `tests/roms/gbaedge.gba` pages 50–51 (HDMAPHASE, PSGFIRST; both hex) | **run 2026-09-16 on the AGS** (`expected/agb-sp-6.txt`) — settles whether an H-blank DMA is granted on the cycle-960 edge or on the latched DISPSTAT flag. It is the last page in the viewer, so page right past UNDMODE (or hold SELECT at power-on to skip UNDMODE and reach them safely). PSGFIRST finishes the p44 PSGPHASE question session 5 left open | tests/roms/README-probes-gba.md "page v9" |
-| gba-pages4 | `tests/roms/gbaedge.gba` pages 52–53 (PSGWHY, HDMASWEEP; both hex, shown as P34/P35) | **unrun from the cart**; both pages were read on the link rig in 2026-09 (docs/playtest-bugs.md §10, §12), and page 52's six unstable rows still want a cart run — narrow session 6: which condition kills ch1's trigger, and whether a DMA grant waits on the CPU bus cycle. Hold SELECT at power-on; LEFT from the boot page reaches P35 then P34 | tests/roms/README-probes-gba.md "pages v10" |
-| gba-suite | three builds in `~/Documents/emu/gba/flashcart-tests/`: `mgba-suite-upstream-official.gba` (upstream's buildbot binary, menu-driven), `mgba-suite-irqreset.gba` (our fork with libgba's interrupt table reset before each suite), `mgba-suite.gba` (the fork as currently released) | **unrun; now a confirmation rather than a verdict.** Photograph the Misc. edge case page of each; on the official build do it twice, from a fresh boot and again after running SIO timing. With the H-blank flag at 1007 (docs/playtest-bugs.md section 25, measured over the link rig) dingbat, HLE and real BIOS alike, predicts the suite's own `0x10002A94` from a fresh table and on the irqreset build, and `0x10002540` with SIO timing's handler left in the table (official build after SIO timing, and the released fork). Anything else means a cycle is still hiding in the ROM-resident entry path, the one leg the rig cannot run | docs/playtest-bugs.md sections 22-25 |
+| gba-pages4 | `tests/roms/gbaedge.gba` pages 52–53 (PSGWHY, HDMASWEEP; both hex, shown as P34/P35) | **unrun from the cart**; both pages were read on the link rig in 2026-09 (docs/dev/playtest-bugs.md §10, §12), and page 52's six unstable rows still want a cart run — narrow session 6: which condition kills ch1's trigger, and whether a DMA grant waits on the CPU bus cycle. Hold SELECT at power-on; LEFT from the boot page reaches P35 then P34 | tests/roms/README-probes-gba.md "pages v10" |
+| gba-suite | three builds in `~/Documents/emu/gba/flashcart-tests/`: `mgba-suite-upstream-official.gba` (upstream's buildbot binary, menu-driven), `mgba-suite-irqreset.gba` (our fork with libgba's interrupt table reset before each suite), `mgba-suite.gba` (the fork as currently released) | **unrun; now a confirmation rather than a verdict.** Photograph the Misc. edge case page of each; on the official build do it twice, from a fresh boot and again after running SIO timing. With the H-blank flag at 1007 (docs/dev/playtest-bugs.md section 25, measured over the link rig) dingbat, HLE and real BIOS alike, predicts the suite's own `0x10002A94` from a fresh table and on the irqreset build, and `0x10002540` with SIO timing's handler left in the table (official build after SIO timing, and the released fork). Anything else means a cycle is still hiding in the ROM-resident entry path, the one leg the rig cannot run | docs/dev/playtest-bugs.md sections 22-25 |
 | gba-prefetchdma | `tests/roms/prefetchdma.gba` (`~/Documents/emu/gba/flashcart-tests/`) | **unrun, now a cross-check rather than the decider.** Its questions were answered from an empty slot (section 22): the loop period is 36 on silicon, an H-blank DMA's grant waits for the gamepak access in flight, the fetch after it is nonsequential, and the capture window is the load's own three-cycle fetch. A real cartridge still checks the one thing an empty slot cannot: sequential fetches that return real opcodes. Attach the link adapter and run `python3 tools/hwlink/gblink.py report`; decode with `python3 tests/roms/prefetchdma.py decode FILE` | tests/roms/prefetchdma.s header |
 | gba-prefetchsplit | `tests/roms/prefetchsplit.gba` | **unrun.** Splits the sums behind alyosha `prefetcher_branch_thumb_arm_3` and `bounday_test_1` (green on three rules read off their sources): an ARM-state branch to the prefetcher's next halfword (A), an ARM PC left misaligned by a Thumb `bx pc` (B, also whether the PC keeps bit 1), a 128 KiB block start served by the prefetcher (C1/C2), and GBATEK's nonsequential block start in a plain burst, which dingbat does not model (C3-C6). No screen: results go to SRAM, so boot it, wait a second, reset into the menu so the cart writes the save out, and decode the `.sav` with `python3 tests/roms/prefetchsplit.py decode FILE`; `prefetchsplit.py run` prints dingbat's own reading | tests/roms/prefetchsplit.s header |
 | multiboot | `tests/roms/mbprobe/build/sender.gba` (payloads embedded) | flashcart GBA + link cable + second GBA with the retail cart (SMA2 or any EEPROM title; Yoshi Topsy-Turvy; WarioWare Twisted; a Classic NES cart) | tests/roms/mbprobe/README.md |

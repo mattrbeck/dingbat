@@ -13,7 +13,7 @@
 @ programming time decides what grows on 1-1's first bush (tulip buds or
 @ white puffs) and where its first Shy Guy walks: one block write longer or
 @ shorter by ~1500 cycles moves the boot by a frame and can flip it
-@ (docs/playtest-bugs.md, "Super Mario Advance 3: the cart's EEPROM decides
+@ (docs/dev/playtest-bugs.md, "Super Mario Advance 3: the cart's EEPROM decides
 @ 1-1"). dingbat programs in GBATEK's "ca. 108368 clock cycles (ca. 6.5ms)"
 @ (storage/eeprom.nim EEPROM_SETTLE_CYCLES); the playtest's references
 @ behave as if ~115000 (mgba) and ~101500 (the second reference).

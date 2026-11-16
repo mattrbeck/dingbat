@@ -17,7 +17,7 @@ const FIFO_IRQ_CREDIT {.intdefine.} = 1
   ## after the CPU gets the bus back, than an immediate burst's
   ## (DMA_IRQ_FROM_BUS_END). AGB SP, payloads/dmairqv.s (IWRAM NOP sled,
   ## DMA1/2, EWRAM or IWRAM source, every phase): one sooner; immediate
-  ## DMA0/1/3 match the immediate rule. docs/hwprobe-questions.md.
+  ## DMA0/1/3 match the immediate rule. docs/dev/hwprobe-questions.md.
 const DMA_ROM_BOUNDARY_HOLD {.booldefine.} = true
   ## A ROM source with fixed or decrement control (the data still comes
   ## from successive addresses) on the last unit before a 0x20000 boundary
@@ -33,7 +33,7 @@ const IMM_NEEDS_EDGE {.booldefine.} = true
   ## running in another timing to immediate, enable kept set, arms nothing.
   ## Famicom Mini Xevious restarts its sound DMA with DMA1CNT = 0x84400004,
   ## then CNT_H 0x0400 and 0xB200; without this, a burst ending between the
-  ## first two stores ran DMA1 past its buffer: clicks (docs/playtest-bugs.md
+  ## first two stores ran DMA1 past its buffer: clicks (docs/dev/playtest-bugs.md
   ## §97, §99).
 const HDMA_DROP_BUSY {.booldefine.} = true
   ## An H-blank request that arrives while the same channel's burst still
@@ -106,7 +106,7 @@ proc `[]=`*(dma: DMA; io_addr: uint32; value: uint8) =
     let enabled = dma.dmacnt_h[channel].enable
     # Byte stores to CNT_H: an upper-byte store also copies its bit 7 into
     # the low byte's bit 7; a low-byte store drops bit 7. AGB SP, gbaedge
-    # DMAEDGE/IOBYTE, measured on DMA3 (docs/hwprobe-results-agb.md).
+    # DMAEDGE/IOBYTE, measured on DMA3 (docs/dev/hwprobe-results-agb.md).
     if dma.gba.bus.byte_io_write:
       if (io_addr and 1) == 1:
         let lo = read(dma.dmacnt_h[channel], 0)
@@ -250,7 +250,7 @@ proc trigger_video_capture*(dma: DMA; vcount: uint16) =
   ## DMA3 special timing = video capture: one transfer per line for VCOUNT
   ## 2..161 of the frame in which line 2 found the channel armed; the enable
   ## bit self-clears at line 162. Armed mid-frame, it waits for the next
-  ## frame's line 2 (AGB SP, gbaedge CAPDMA, docs/hwprobe-results-agb.md;
+  ## frame's line 2 (AGB SP, gbaedge CAPDMA, docs/dev/hwprobe-results-agb.md;
   ## the AGS aging cartridge pins the per-line cadence).
   if dma.dmacnt_h[3].enable and dma.dmacnt_h[3].start_timing == 3:
     if vcount == 2:
@@ -718,7 +718,7 @@ proc run_pending*(dma: DMA) =
           # (preempt_point), leaving delay_pending nothing to move. Without a
           # check at pipe_due nothing recognises it until another source books
           # one (Famicom Mini Nazo no Murasamejou: a timer 1 IRQ waited 39,272
-          # cycles with IME, CPSR.I and IE open; docs/playtest-bugs.md §100).
+          # cycles with IME, CPSR.I and IE open; docs/dev/playtest-bugs.md §100).
           # Due before the CPU stopped, it is taken at the first boundary
           # after the burst.
           intr.schedule_interrupt_check(

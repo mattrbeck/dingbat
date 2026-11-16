@@ -6,7 +6,7 @@ flash cart, in one ROM that sends its answers down the link cable.
 
 The link rig settled fifo_6's path at WAITCNT 0x4000 with the slot empty: an
 ARM sled there reads 0xFFFFxxxx, NV no-ops (payloads/nvcond.s, f6slot.s,
-f6q.s; docs/playtest-bugs.md). The empty slot does not answer reliably at
+f6q.s; docs/dev/playtest-bugs.md). The empty slot does not answer reliably at
 3/1, which is fifo_6's setting, and the one rule that made fifo_6 pass
 (PF_WAIT_UNDER_BURST) breaks fifo_2..4 there. A cartridge whose sled region
 holds 0xFFFFFFFF runs the same NV sled at any waits, so this is

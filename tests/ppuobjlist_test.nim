@@ -516,7 +516,7 @@ proc test_nonbus_writers(emu: GBA) =
         "save-state load invalidated the candidate list",
         "stale mask survived a state load")
 
-# 4c. Famicom Mini Akumajou Dracula (docs/playtest-bugs.md §97): four
+# 4c. Famicom Mini Akumajou Dracula (docs/dev/playtest-bugs.md §97): four
 # 128-tall OBJs (64x64 affine, double size) at Y=154, X=239 burn the 954
 # cycles of an H-blank-free line on lines 0-25, so the four full-width masks
 # after them in OAM (32x32 affine double, Y=218) never draw there. With Y

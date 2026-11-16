@@ -1,4 +1,4 @@
-# Transport-independent network-link state machine (docs/multiplayer.md).
+# Transport-independent network-link state machine (docs/dev/multiplayer.md).
 # The peer appears through a RemoteSioDriver; the wire protocol is
 # common/linkproto (timestamped bounded lead). Never blocks or touches a
 # transport: bytes arrive through `feed`, frames leave via `take_outgoing`,

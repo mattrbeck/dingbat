@@ -33,7 +33,7 @@ PAGES = ["IDENT", "OPENBUS", "BIOSPROT", "SWITIME", "TIMERS", "DMALATCH",
          # v7: two VISUAL pages (a picture, not a hex dump — see
          # README-probes-gba.md) and one hex page
          "OBJBUDGET", "OBJGEOM", "DMAOPENBUS",
-         # v8: the nine remaining open GBA rows of docs/hwprobe-questions.md
+         # v8: the nine remaining open GBA rows of docs/dev/hwprobe-questions.md
          # (all hex pages; UNDMODE is skipped when SELECT is held at boot)
          "IRQDECOMP", "CONTEND2", "MULTIME", "TIMPHASE", "PSGPHASE",
          "MEMCTL", "DMATIME", "IWCYCLE", "DMAFIFO", "UNDMODE",

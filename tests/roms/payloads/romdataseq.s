@@ -8,7 +8,7 @@
 @ used to price such a load S whenever it read the halfword after the last
 @ gamepak access and the prefetcher was on, however long the CPU had been
 @ elsewhere: Nintendo's HuffUnComp, walking a tree in the cartridge, ran a
-@ frame fast in Klonoa 2 (docs/playtest-bugs.md, "Klonoa 2"; bus.nim
+@ frame fast in Klonoa 2 (docs/dev/playtest-bugs.md, "Klonoa 2"; bus.nim
 @ ROM_DATA_NONSEQ).
 @
 @ From IWRAM: (k & 15) + 1 one-cycle NOPs, ldrh A (0x08004000), two NOPs,

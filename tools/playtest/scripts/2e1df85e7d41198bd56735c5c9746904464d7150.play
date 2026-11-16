@@ -10,7 +10,7 @@
 # entry), and on the 1 MB file every emulator mirrors sine-table data there,
 # so the boot's file lookup walked unmapped memory for good in dingbat and
 # the second reference and ended in mgba only through its open-bus rule
-# (docs/playtest-bugs.md §100). Here the lookup finds file 0xAC at once in
+# (docs/dev/playtest-bugs.md §100). Here the lookup finds file 0xAC at once in
 # all three.
 # Route: title, START: the file screen (セレクトシテクダサイ, NAME ENERGY
 # DAY), START, START picks the first slot, A A: "アア", SELECT three times

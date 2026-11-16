@@ -3,7 +3,7 @@
 Two ROMs, two photographs. They arbitrate `CGB_HALT_PPU_LEAD` (`gb/gb.nim`): the CGB's
 PPU running an M-cycle ahead of the CPU after a STAT/LYC halt wake, except on the LY
 153→0 snapback. `cgb-acid-hell` and daid's `ppu_scanline_bgp` agree with it; probe (e),
-this ROM, does not, and carries a 2 M offset against hardware (`docs/flashcart-runbook.md`,
+this ROM, does not, and carries a 2 M offset against hardware (`docs/dev/flashcart-runbook.md`,
 "g1, GBA SP").
 
 ## What to do

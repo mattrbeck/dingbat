@@ -19,7 +19,7 @@
 # least three lines (~3.7k cycles) sooner. From f9267, in the fights on the
 # bridge, dingbat runs a frame behind mgba (one more lag frame) and the
 # fight goes differently. Both are the main loop's pricing; mgba's cheaper
-# gamepak and EWRAM prices are docs/playtest-bugs.md §63.
+# gamepak and EWRAM prices are docs/dev/playtest-bugs.md §63.
 
 [new]
 wait 600

@@ -4,7 +4,7 @@
 @ as one number, entry plus return, so they cannot say how the two halves
 @ split. `DMA Prefetch Break` can: its loop starts when VBlankIntrWait
 @ returns, the SWI's entry was paid before the halt, and one cycle of the
-@ return is a whole scanline of loop iterations (docs/playtest-bugs.md
+@ return is a whole scanline of loop iterations (docs/dev/playtest-bugs.md
 @ section 24). vbwait.s checked that return into IWRAM. This checks it into
 @ the gamepak region, with no cartridge, by the slotexec.s trick: the target
 @ executes one opcode (A >> 1) and the floating 0xFFFF after it is a BL

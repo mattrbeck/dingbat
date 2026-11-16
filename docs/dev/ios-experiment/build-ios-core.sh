@@ -1,14 +1,14 @@
 #!/bin/sh
-# Reproduces the iOS cross-compile experiments from docs/ios-feasibility.md
+# Reproduces the iOS cross-compile experiments from docs/dev/ios-feasibility.md
 # (2026-07-10). Run from the repo root on a Mac with Xcode.app installed.
 #
 # Produces, under $OUT:
 #   dingbat_test_ios       arm64 iOS *device* binary of the SDL-free test harness
 #   dingbat_test_iossim    arm64 iOS *simulator* binary of the same
 #   libdingbat_core.a      arm64 iOS device static lib exporting the C API in
-#                          docs/ios-experiment/ios_core_api.nim
+#                          docs/dev/ios-experiment/ios_core_api.nim
 #   libdingbat_core_sim.a  simulator variant of the static lib
-#   driver_sim             docs/ios-experiment/driver.c linked against the sim lib
+#   driver_sim             docs/dev/ios-experiment/driver.c linked against the sim lib
 #
 # Verify / run (simulator must be booted, e.g. `xcrun simctl boot "iPhone 17 Pro"`):
 #   xcrun simctl spawn booted $OUT/dingbat_test_iossim <rom.gba> --mode=mgba-suite --timeout=36000
@@ -47,13 +47,13 @@ for tgt in device sim; do
     --nimcache:"$OUT/cache-staticlib-$tgt" \
     --passC:"-isysroot $tsdk -target $ttriple" \
     --passL:"-isysroot $tsdk -target $ttriple" \
-    -o:"$OUT/$lib" docs/ios-experiment/ios_core_api.nim
+    -o:"$OUT/$lib" docs/dev/ios-experiment/ios_core_api.nim
 done
 
 # 4. Link the C driver against the simulator lib (proves a plain-C/Swift
 #    consumer links with no Nim toolchain involvement)
 clang -target "arm64-apple-ios$MINVER-simulator" -isysroot "$SIMSDK" -O2 \
-  docs/ios-experiment/driver.c "$OUT/libdingbat_core_sim.a" -o "$OUT/driver_sim"
+  docs/dev/ios-experiment/driver.c "$OUT/libdingbat_core_sim.a" -o "$OUT/driver_sim"
 
 echo "--- artifacts ---"
 file "$OUT/dingbat_test_ios" "$OUT/dingbat_test_iossim" "$OUT/driver_sim"

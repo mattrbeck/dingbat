@@ -30,7 +30,7 @@
 @
 @ PROVENANCE: verified on GBA SP AGS-001 (gbaedge pages 20 IRQWIN, 26
 @ IRQWIN2 and 32 IRQWIN3 — the latter carries the mul/ROM-load/mixed
-@ sleds); see docs/hwprobe-results-agb.md.
+@ sleds); see docs/dev/hwprobe-results-agb.md.
     .arm
     .text
     .global _start

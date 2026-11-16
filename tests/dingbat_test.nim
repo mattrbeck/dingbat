@@ -1492,7 +1492,7 @@ proc gambatte_batch(list_path, out_path: string; frames, dump_tiles: int): int =
           detail = "bad reference image " & expected
         else:
           # A DMG palette write's transition pixel is a race on hardware
-          # (docs/gb-failure-triage.md C7: one DMG photographed shows both
+          # (docs/dev/gb-failure-triage.md C7: one DMG photographed shows both
           # outcomes in one frame), and gambatte's DMG references are its own
           # framebuffer dumps, which draw a clean edge there. On a DMG row the
           # reference may hold either clean colour at a pixel dingbat painted

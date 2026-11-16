@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """probe_l_stopwake -- what does a STOP woken by a key press do to the PPU
-and the timer? (docs/gb-failure-triage.md I13, docs/hwprobe-questions.md)
+and the timer? (docs/dev/gb-failure-triage.md I13, docs/dev/hwprobe-questions.md)
 
     python3 tools/gbprobe/probe_l_stopwake.py <out.gb> <logo-donor.gb>
 

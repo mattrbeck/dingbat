@@ -107,7 +107,7 @@ const FIFO_RESET_KEEPS_WORD {.booldefine.} = false
   ## keeps the offset). The master enable going off clears the word either
   ## way: keeping it there reads one refill burst short in the console's
   ## fifomap cells after a part-played cell (r0-agb.json, 0x1428) and fails
-  ## dbsuite fifodma "spike" cells (docs/playtest-bugs.md section 30).
+  ## dbsuite fifodma "spike" cells (docs/dev/playtest-bugs.md section 30).
 
 proc dma_channels_in_range*(address: uint32): bool =
   address >= DMA_CHANNELS_RANGE_LOW and address <= DMA_CHANNELS_RANGE_HIGH

@@ -255,7 +255,7 @@ proc write_siocnt(serial: Serial; old_val: uint16) =
   # A normal-mode transfer started on the external clock begins when SC is
   # switched to internal with Start still set: the AGB SP completes it one
   # transfer after the switching write (tests/roms/payloads/sioclk.s;
-  # Coloris and Dial Hex link start-up do this; docs/playtest-bugs.md §101).
+  # Coloris and Dial Hex link start-up do this; docs/dev/playtest-bugs.md §101).
   let clock_to_internal = mode in {smNormal8, smNormal32} and
     bit(old_val, 7) and bit(serial.siocnt, 7) and
     not bit(old_val, 0) and bit(serial.siocnt, 0)

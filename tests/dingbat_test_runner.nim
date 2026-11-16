@@ -940,7 +940,7 @@ const MicrotestBrokenExpected = [
   # `halt_op_dupe_delay` expects DIV = $55 about 62 M-cycles after resetting
   # DIV (DIV steps every 64 M-cycles; $55 is the suite's scratch marker; the
   # sibling `halt_op_dupe` is correctly written and passes). Derivation:
-  # docs/gb-test-suite-sources.md 8.6.
+  # docs/dev/gb-test-suite-sources.md 8.6.
   # `stat_write_glitch_l154_d` lacks the `xor a ; ldh ($FF0F),a` its three
   # siblings have at $0170, so it asserts IF = $E0 across a whole frame of
   # LCD-on time in which VBlank was never cleared. Restoring that clear makes
@@ -1999,7 +1999,7 @@ const NotScored: seq[(string, string)] = @[
     "scored. (build_small_screenshot_tests)"),
   ("mooneye/utils/ (bootrom_dumper, dump_boot_hwio)", "tools, not pass/fail " &
     "tests. bootrom_dumper waits for a boot ROM to dump and can only time out " &
-    "(docs/gb-failure-triage.md calls it unrecoverable); dump_boot_hwio ends " &
+    "(docs/dev/gb-failure-triage.md calls it unrecoverable); dump_boot_hwio ends " &
     "in quit_dump_mem, which sets the success byte unconditionally, so its " &
     "green row was a gate that could not fail. (build_mooneye_tests)"),
   ("mooneye-wilbertpol utils/, logic-analysis/", "tools and analysis " &
@@ -2056,7 +2056,7 @@ const NotScored: seq[(string, string)] = @[
     "of CGB revisions 0-D). Pan Docs (\"FEA0-FEFF range\") has CGB E, AGB, AGS " &
     "and GBP return the high nibble of the low address byte twice, and the AGS " &
     "read exactly that under gbedge p0F (`$FEA0`..`$FEF8` = `AA AA BB BB .. FF " &
-    "FF`, `$FEA5` still `$AA` after writing `$5A`; docs/flashcart-runbook.md). " &
+    "FF`, `$FEA5` still `$AA` after writing `$5A`; docs/dev/flashcart-runbook.md). " &
     "SameBoy (CGB E, either boot ROM) fails all 26. Three `cgb/hdma/gdma_source_" &
     "wram_dma_source_ram_{160,256,480_bytes_overflow}` rows compare `$FE00-$FEFF` " &
     "after an OAM DMA beside a GDMA, the area filled with `$EF` first: OAM " &
@@ -2083,7 +2083,7 @@ const NotScored: seq[(string, string)] = @[
     "of the current window tile\", and SameBoy (DMG B) draws dingbat's frame " &
     "pixel for pixel on all 40; on the other 3 all three emulators differ. " &
     "Hardware check pending: `window_turn_off_nops22_sprite_x4` on an MGB, " &
-    "line 8, x = 9..16 (docs/gb-failure-triage.md I6). The window retrigger " &
+    "line 8, x = 9..16 (docs/dev/gb-failure-triage.md I6). The window retrigger " &
     "and resume rows ARE scored. (build_docboy_rows, DocboyNotScored)"),
   ("DocBoy: single-unit OAM-bug margins (10)", "`oam_bug_ld_{hl,hli}_a_" &
     "round3_{fe5c,fe5e_noisy,fe5f}` and `_round23_{fe46,fe47}`: in these " &
@@ -2094,7 +2094,7 @@ const NotScored: seq[(string, string)] = @[
     "`fe5b`/`fe5d`/`fe5e` noisy (hardware runs that did not repeat), and " &
     "SameBoy gives the written bit on all ten. The other 258 rows of the " &
     "family ARE scored. Hardware check pending: the ten on an MGB " &
-    "(docs/gb-failure-triage.md I5). (build_docboy_rows, DocboyNotScored)"),
+    "(docs/dev/gb-failure-triage.md I5). (build_docboy_rows, DocboyNotScored)"),
   ("DocBoy: a CGB retrigger shortly before a sweep clock (2)",
     "`cgb/apu/ch1/ch1_period_sweep_change_period_nr14_during_recalc_" &
     "{delay14284,step0_delay14284_round1}` want the clock 2 M-cycles after a " &
@@ -2103,7 +2103,7 @@ const NotScored: seq[(string, string)] = @[
     "`sound/ch1_init_reset_sweep_counter_timing_10` [cgb04c] on the CGB's " &
     "trigger lead (SWEEP_TRIGGER_LEAD_T_CGB = 8, where they want 4), and " &
     "SameBoy (CGB E) fails both. The DMG rows of the same family ARE scored " &
-    "and pass (docs/gb-failure-triage.md I2). (build_docboy_rows, " &
+    "and pass (docs/dev/gb-failure-triage.md I2). (build_docboy_rows, " &
     "DocboyNotScored)"),
   ("DocBoy: compat-mode window frames under mid-line LCDC.5 pulses (51)",
     "`cgb_dmg_mode/ppu/visual/m3_lcdc_win_en_change_multiple_wx_*`: mealybug's " &
@@ -2116,7 +2116,7 @@ const NotScored: seq[(string, string)] = @[
     "colour-0 tiles), on 87 SameBoy alone differs. The same ROMs' timing twins " &
     "(`m3_lcdc_win_en_change_multiple_wx_timing_*`, 90) ARE scored and pass; " &
     "DocBoy disables two signed-addressing variants itself (\"glitch is " &
-    "different\"). (docs/gb-failure-triage.md I3; build_docboy_rows, " &
+    "different\"). (docs/dev/gb-failure-triage.md I3; build_docboy_rows, " &
     "DocboyNotScored)"),
   ("DocBoy: the CGB LCDC.4 tile-data glitch, DocBoy's variations (73)",
     "`change_{bg,win}_tile_data_glitch_*` in `cgb_dmg_mode/ppu/visual` (63) and " &
@@ -2128,7 +2128,7 @@ const NotScored: seq[(string, string)] = @[
     "(`m3_lcdc_tile_sel_change`, `_change2`, `_win_change`) and to " &
     "cgb-acid-hell, all of which pass; the family's other 56 rows (26 " &
     "`mealybug_shift*`, 24 `mealybug_var*`, 6 `sprites_nops*`) ARE scored and " &
-    "pass. (docs/gb-failure-triage.md I3; build_docboy_rows, " &
+    "pass. (docs/dev/gb-failure-triage.md I3; build_docboy_rows, " &
     "DocboyNotScored)"),
   ("DocBoy: the CGB background column resumed after the window at WX = 25 (1)",
     "`cgb/ppu/visual/window_bg_reprise_wx25`: the window disabled on the WY " &
@@ -2146,7 +2146,7 @@ const NotScored: seq[(string, string)] = @[
     "stay blank during the first frame\", which dingbat's frames follow. " &
     "SameBoy (CGB E) fails all 13. The three `_b` partners checked a frame " &
     "later (`turn_off_y42_turn_on_y148_round2 #2`, `..._y52_wait144 #2`, " &
-    "`..._y52_wait150 #2`) ARE scored and pass. (docs/gb-failure-triage.md " &
+    "`..._y52_wait150 #2`) ARE scored and pass. (docs/dev/gb-failure-triage.md " &
     "I12; build_docboy_rows, DocboyNotScored)"),
   ("DocBoy: fresh cart RAM reading $FF (1)", "`dmg/mbc/mbc1/mbc1_initial_ram` " &
     "wants every byte of a new MBC1 cart's RAM to read $FF before anything " &
@@ -2157,7 +2157,7 @@ const NotScored: seq[(string, string)] = @[
     "`emulator-only/mbc1/ram_*` read it disabled ($FF, open bus) and clear " &
     "it first. dingbat keeps $00 for a cart with no save file; $FF stays a " &
     "choice open to Matt (it would change every new save's first boot). " &
-    "SameBoy passes it. (docs/gb-failure-triage.md I \"Small\"; " &
+    "SameBoy passes it. (docs/dev/gb-failure-triage.md I \"Small\"; " &
     "build_docboy_rows, DocboyNotScored)"),
   ("DocBoy: a serial slave shifting with SC = $00 (1)", "the two-player " &
     "`dmg/serial/serial_two_players_basic_transfer_master + " &
@@ -2169,7 +2169,7 @@ const NotScored: seq[(string, string)] = @[
     "Gekkio's SCLK experiment (8 external edges counted with the main clock " &
     "stopped) does not say what bit 7 = 0 does. The SC = $80 pair " &
     "(`..._master + ..._slave`) IS scored and passes. Hardware question " &
-    "row 24 in docs/hwprobe-questions.md (the pair on two consoles and a " &
+    "row 24 in docs/dev/hwprobe-questions.md (the pair on two consoles and a " &
     "cable). (build_docboy_rows, DocboyNotScored)"),
   ("DocBoy: a VRAM DMA beside an object at X = 7 (1)", "`cgb/hdma/" &
     "gdma_ppu_on_pixel_transfer_conflict_relaxed_64_bytes_sprite_y16_x07`: a " &
@@ -2183,7 +2183,7 @@ const NotScored: seq[(string, string)] = @[
     "text places them. The other 82 rows of the family (SCX 0..7, a window, " &
     "one or two objects at X 1..50) ARE scored and pass (VDMA_M3_PORT). " &
     "Hardware question 21 (gbedge p21 VDMABUS) covers the background map. " &
-    "(docs/gb-failure-triage.md I4; build_docboy_rows, DocboyNotScored)"),
+    "(docs/dev/gb-failure-triage.md I4; build_docboy_rows, DocboyNotScored)"),
 ]
 
 proc provenance_line(): string =
@@ -2877,7 +2877,7 @@ proc run_mgba_suite(harness: string; previous: Table[string, bool];
   # The Misc "H-blank bit start" rows time compiler output, so the fork pins
   # `devkitpro/devkitarm:20260221` — the image that was `latest` when those
   # constants were re-measured. Built by any other gcc they disagree with
-  # their own expected values (docs/mgba-suite-verdicts.md).
+  # their own expected values (docs/dev/mgba-suite-verdicts.md).
   const MgbaSuiteSha1 = "35d330ee6b6ab0004c473d0f62c2c91b2f34f60a"
   let rom_path = ensure_rom_download(
     "https://github.com/mattrbeck/mgba-suite-auto/releases/latest/download/suite.gba",
@@ -2940,7 +2940,7 @@ proc run_mgba_suite(harness: string; previous: Table[string, bool];
           let vs_pos = inner.find(" vs ")
           # misc-edge.c alone passes (expected, value) to doResult where every
           # other suite source passes (value, expected); un-swap it here
-          # (docs/mgba-suite-verdicts.md).
+          # (docs/dev/mgba-suite-verdicts.md).
           let swapped = current_suite.startsWith("Misc")
           current_tests[^1].actual =
             if swapped: inner[vs_pos + 4 .. ^1] else: inner[0 ..< vs_pos]
@@ -3696,7 +3696,7 @@ proc generate_docboy_detail_md(groups: seq[DocboyGroup]): string =
   lines.add("VBlank (or at `ld b,b` / `ld c,c` when the row names one). DMG rows")
   lines.add("run on a DMG ABC, the three CGB manifests on a CPU CGB E with the")
   lines.add("cart header picking the mode. See tests/README.md for the mechanism")
-  lines.add("and docs/gb-failure-triage.md for the failing families.")
+  lines.add("and docs/dev/gb-failure-triage.md for the failing families.")
   lines.add("")
   var total_pass, total_all = 0
   for g in groups:

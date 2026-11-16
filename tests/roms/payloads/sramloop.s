@@ -11,7 +11,7 @@
 @ WHY: dingbat lets the prefetcher read ROM through an SRAM access, so the
 @ four ALU ops after the strb come out of a full buffer: 27.8 cycles a
 @ byte in the game, where mGBA charges 31.0, and the game's quit save ends
-@ a frame before both references (docs/playtest-bugs.md §84, "Hamtaro -
+@ a frame before both references (docs/dev/playtest-bugs.md §84, "Hamtaro -
 @ Rainbow Rescue"). SRAM is on the ROM's pins, so the access must hold the
 @ bus. A rule that stops the prefetcher for it and keeps what it had
 @ buffered (branch sram-holds-gamepak-bus) gives 29.0; one that also

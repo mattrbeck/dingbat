@@ -1,5 +1,5 @@
 ## LCD response: a per-pixel model of how a Game Boy panel settles.
-## Derivation and citations: docs/lcd_response.md.
+## Derivation and citations: docs/dev/lcd_response.md.
 ##
 ## A normally-white TN cell darkens when driven and relaxes back on its own, so
 ## the two directions differ: darkening is fast and faster the harder it is
@@ -52,7 +52,7 @@ const
   FRAME_MS = 16.742
 
   # Panel parameters are a fit: no instrument measurement of a Game Boy panel
-  # has been published (docs/lcd_response.md has the citations). Constraints:
+  # has been published (docs/dev/lcd_response.md has the citations). Constraints:
   # the DMG is a passive-matrix STN and must be slow (an RMS device with 144
   # multiplexed rows, tau >> 16.7 ms); the CGB and both GBAs are TFTs;
   # relaxation is the slow direction by ~2-3x; the CGB must leave 30 Hz

@@ -1,6 +1,6 @@
 ; probe_k_lcdon -- the 2-dot CPU<->PPU grid residual after an LCD enable:
 ; do line 0, line 1 and the steady state put the mode 3 -> 0 edge at the same
-; place?  docs/hwprobe-questions.md row 10.
+; place?  docs/dev/hwprobe-questions.md row 10.
 ;
 ; gb.nim: "Dots the first and second line after an LCD enable are short of
 ; 456. Both ship 0 ... Three families want the mode 3 -> 0 edge two dots

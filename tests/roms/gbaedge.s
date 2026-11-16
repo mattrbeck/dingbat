@@ -1,5 +1,5 @@
 @ gbaedge.s — GBA hardware edge-case probe ROM (built by gbaedge.py;
-@ docs/hwprobe.md catalogs every page).  Probes store RAW observed values
+@ docs/dev/hwprobe.md catalogs every page).  Probes store RAW observed values
 @ into 32-byte slots at 0x02000000; the viewer pages through them as hex.
 @ Real hardware is the oracle — nothing here encodes an expected value.
 @
@@ -25,8 +25,8 @@
 @  executing near-BX encodings) and can require a power cycle, though a
 @  timer-IRQ watchdog tries to recover first)
 @
-@ The question list is docs/hwprobe-questions.md; results are in
-@ docs/hwprobe-results-agb.md.  Pages 28-36 each isolate a model split the
+@ The question list is docs/dev/hwprobe-questions.md; results are in
+@ docs/dev/hwprobe-results-agb.md.  Pages 28-36 each isolate a model split the
 @ earlier pages could not separate; their comment blocks carry the
 @ discriminator math.
 @
@@ -1480,7 +1480,7 @@ msr_block:
     .word 0xE12FFF15               @ A+20
     .ltorg
 
-@ ═══════ pages 16-24 (question list: docs/hwprobe-questions.md) ══════════
+@ ═══════ pages 16-24 (question list: docs/dev/hwprobe-questions.md) ══════════
 
 .equ CAPDST,   0x02008000          @ CAPDMA destination ring
 .equ BXBLOCK,  0x03000300          @ BXDECODE candidate block (IWRAM copy)
@@ -6176,7 +6176,7 @@ probe_hdmaphase:
 
 
 @ ── slot 51: PSGFIRST — whose first trigger dies, and why? ───────────────
-@ Session 5 (docs/hwprobe-results-agb.md, p44 PSGPHASE) found that every ch1
+@ Session 5 (docs/dev/hwprobe-results-agb.md, p44 PSGPHASE) found that every ch1
 @ trigger which is the FIRST trigger after a SOUNDCNT_X 0->1 dies at once,
 @ for lengths 1, 2 and 4 ticks alike, while a ch2 trigger two stores later
 @ lives its full 486 polls.  That is not a length-unit effect, and the note
@@ -6377,7 +6377,7 @@ probe_psgfirst:
 
 
 @ ── slot 52: PSGWHY — which condition kills ch1's trigger? ───────────────
-@ p44 PSGPHASE and p51 PSGFIRST (AGB SP, docs/hwprobe-results-agb.md
+@ p44 PSGPHASE and p51 PSGFIRST (AGB SP, docs/dev/hwprobe-results-agb.md
 @ session 6) agree that a ch1 trigger shortly after a SOUNDCNT_X master-on
 @ dies while ch2/3/4 live, that NR10 = 0x11 saves it, and that the first two
 @ ch1 triggers die while a third lives.  Every ch1 row that died on either

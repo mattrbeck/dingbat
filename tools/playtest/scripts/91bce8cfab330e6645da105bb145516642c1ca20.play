@@ -9,7 +9,7 @@
 # on a blank cart) > CLEAR MODE > BASIC 01 > PRESS A > the board. Four A
 # presses one up-right of the centre, then START: CONTINUE / RETRY / SLEEP /
 # SELECT; SELECT > YES goes back to level select.
-# Finding (board, f1676; docs/playtest-bugs.md §101, Coloris): each emulator
+# Finding (board, f1676; docs/dev/playtest-bugs.md §101, Coloris): each emulator
 # is dealt another board. Not diagnostic (the references disagree too):
 # the board is drawn from a Mersenne Twister seeded from timer 1 (prescaler
 # 256) read in the frame that enters Clear Mode. dingbat and the second

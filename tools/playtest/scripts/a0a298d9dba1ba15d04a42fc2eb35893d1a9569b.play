@@ -23,7 +23,7 @@
 # rounding the SP's blendprobe photographs gave, not a scroll difference
 # (same cloud position); the second reference's clouds sit elsewhere
 # (14367 px from mgba).
-# The OCR of the copyright line flips (docs/playtest-bugs.md, "Klonoa: the
+# The OCR of the copyright line flips (docs/dev/playtest-bugs.md, "Klonoa: the
 # clouds are the darken rounding, the Vision 1-1 card is the cart's EEPROM").
 [new]
 wait 600

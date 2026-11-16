@@ -18,7 +18,7 @@
 # FIFO had played to neither side since the menu's clip, master on all
 # along); both references then play the rest of the word they were on
 # (the second reference: three samples, 0x21 0x22 0x23), dingbat drops it
-# with the reset, as the AGB SP does (docs/playtest-bugs.md §30, fiforeset
+# with the reset, as the AGB SP does (docs/dev/playtest-bugs.md §30, fiforeset
 # 18/18). From f2241 the three play the same soundtrack.
 [new]
 wait 270

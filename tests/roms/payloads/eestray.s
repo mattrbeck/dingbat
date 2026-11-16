@@ -11,7 +11,7 @@
 @ chip did with the stray.
 @ WHY: Columns Crown probes for a flash chip at boot with strh 0xFF, 0x90,
 @ 0xFF to 0x0DFFFFFE and a word read of 0x09FFE000, ~7000 cycles before
-@ its first command DMA (docs/playtest-bugs.md §95). dingbat took them as
+@ its first command DMA (docs/dev/playtest-bugs.md §95). dingbat took them as
 @ bits 1, 0, 1, sized the chip from a stale DMA3 count and lost every
 @ save; it now drops a command on a store outside a DMA (storage/eeprom.nim:
 @ a CPU access is its own /CS frame, after GBATEK's "manual transfers via

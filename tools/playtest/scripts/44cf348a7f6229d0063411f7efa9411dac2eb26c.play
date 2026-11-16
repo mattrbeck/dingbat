@@ -12,7 +12,7 @@
 # 4 Kbit EEPROM): its title menu opens on New, and Load leads to the
 # difficulty select; dingbat-bios and mgba read theirs.
 # Regression guard: before 2026-10-02 an interrupt return to a Thumb
-# halfword was word-aligned (docs/playtest-bugs.md section 45), the same
+# halfword was word-aligned (docs/dev/playtest-bugs.md section 45), the same
 # fault as Gradius Galaxies; this game (Airforce Delta II in Japan) hung on
 # the way into the first mission.
 

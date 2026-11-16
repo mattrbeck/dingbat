@@ -1,7 +1,7 @@
 @ payload: execute ONE opcode out of an empty cartridge slot, and time it
 @
 @ The link rig has no cartridge, so gamepak opcode timing looked unreachable
-@ (docs/playtest-bugs.md section 12). It is not. slotfloat.s shows an empty
+@ (docs/dev/playtest-bugs.md section 12). It is not. slotfloat.s shows an empty
 @ slot answers every NONSEQUENTIAL halfword read with addr >> 1 and every
 @ SEQUENTIAL one with 0xFFFF, deterministically. So:
 @

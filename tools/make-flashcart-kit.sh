@@ -1,6 +1,6 @@
 #!/bin/bash
 # Assemble flashcart-kit/ — everything to load on a GB flashcart for a
-# hardware-validation session (docs/flashcart-runbook.md says what to do with
+# hardware-validation session (docs/dev/flashcart-runbook.md says what to do with
 # each ROM).
 #
 # Sources: the repo's probe ROMs, the game-boy-test-roms bundle in
@@ -56,7 +56,7 @@ mkdir -p "$KIT"/0-cart-check
 cp tools/gbprobe/probe_cart.gb "$KIT/0-cart-check/"
 
 # probe (d): tile-select latency. Read by eye (sixteen bands) or with
-# read_probe_d.py; the question is docs/hwprobe-questions.md.
+# read_probe_d.py; the question is docs/dev/hwprobe-questions.md.
 cp tools/gbprobe/probe_d_tdsel.gb tools/gbprobe/probe_d_tdsel_scx*.gb \
    tools/gbprobe/probe_d_tdsel_compat.gb                                  "$KIT/8-shootout-261/"
 # probe (e): one paged ROM; D-pad picks SCX (left/right) and the object's X
@@ -72,7 +72,7 @@ cp "$CACHE"/same-suite/apu/channel_3/channel_3_restart_stop_delay.gb      "$KIT/
 cp "$CACHE"/same-suite/apu/channel_1/channel_1_sweep_restart.gb \
    "$CACHE"/same-suite/apu/channel_1/channel_1_sweep_restart_2.gb         "$KIT/7-apu/" 2>/dev/null || true
 
-# 9 — g1: the halt-wake PPU phase (docs/hwprobe-questions.md). Two fixed
+# 9 — g1: the halt-wake PPU phase (docs/dev/hwprobe-questions.md). Two fixed
 # builds rather than the paged ROM: the question is a 4-dot phase and a wrong
 # d-pad press would silently answer a different one. Each ROM prints its own
 # settings in the header.
@@ -90,4 +90,4 @@ echo "kit assembled:"
 find "$KIT" -type f | sort | sed 's/^/  /'
 echo
 echo "copy the whole $KIT/ folder to the flashcart SD card;"
-echo "then follow docs/flashcart-runbook.md."
+echo "then follow docs/dev/flashcart-runbook.md."

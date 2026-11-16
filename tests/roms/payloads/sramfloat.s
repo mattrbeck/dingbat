@@ -6,7 +6,7 @@
 @ reads 0xFFFFFFFF. In dingbat and the second reference the walk takes ~600
 @ frames (a dark screen between the DC logo and the menu); mGBA reads
 @ something else there and is at the menu by f1200. With an empty slot the
-@ console reads 0xFFFFFFFF at 0x0E000000 (docs/playtest-bugs.md section 11);
+@ console reads 0xFFFFFFFF at 0x0E000000 (docs/dev/playtest-bugs.md section 11);
 @ this asks with an EEPROM cart in the slot, whose /CS2 nothing answers.
 @
 @ RIG: as eesettle.s -- boot holding SELECT+START with the cart inserted

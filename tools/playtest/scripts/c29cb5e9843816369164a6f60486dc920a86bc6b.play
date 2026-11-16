@@ -10,7 +10,7 @@
 # off the road into the trees.
 # Regression guard: before 2026-10-02 an S-bit write to r15 in System mode
 # (the run-time library's `movs pc, lr`) restored a stale SPSR and came back
-# in Thumb state (docs/playtest-bugs.md section 46): after the difficulty
+# in Thumb state (docs/dev/playtest-bugs.md section 46): after the difficulty
 # menu the HLE configuration soft-reset to the Spellbound logo and the
 # official-BIOS one crashed into a garbage screen.
 
@@ -92,6 +92,6 @@ wait 300
 # no checkpoint here: after the steer the car's position on dingbat leaves
 # the references' (which agree; the lap timer still matches) -- the game runs
 # close to its frame budget and the emulators lose frames at different
-# points (docs/playtest-bugs.md section 29)
+# points (docs/dev/playtest-bugs.md section 29)
 wait 60
 release

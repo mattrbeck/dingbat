@@ -14,7 +14,7 @@
 # title: all three a few frames apart (dingbat 2 ahead of the second reference,
 # 8 ahead of mgba), the references 6 apart, so not diagnostic. The language
 # screen before it is IDENTICAL; between them the game makes its first flash
-# write, likely the flash chip's busy time again (docs/playtest-bugs.md §64).
+# write, likely the flash chip's busy time again (docs/dev/playtest-bugs.md §64).
 # continue_title: every dingbat configuration a frame behind both references
 # (IDENTICAL to each other). At boot the game runs a bitwise CRC-32 over its
 # 32,800-byte save copy in EWRAM, Thumb code in ROM with prefetch on

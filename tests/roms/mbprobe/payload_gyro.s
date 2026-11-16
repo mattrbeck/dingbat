@@ -1,4 +1,4 @@
-@ payload_gyro.s — gyro ADC clock-edge probe (docs/hwprobe-questions.md,
+@ payload_gyro.s — gyro ADC clock-edge probe (docs/dev/hwprobe-questions.md,
 @ multiboot row 2, gyro half).  Pins gpio.nim gyro_update's edge: dingbat
 @ shifts the next data bit out on the FALLING clock edge (Assumed).
 @

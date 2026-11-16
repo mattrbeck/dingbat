@@ -192,7 +192,7 @@ proc mmem_room*(e: Engine2D): bool {.inline.} =
 proc mmem_take*(e: Engine2D; x0: int) =
   ## The display takes 8 pixels for mmem_line[x0 ..< x0 + 8]; a dry FIFO
   ## repeats the last pixel taken (Assumed; disp_mmem phase E on the reference
-  ## runs agrees, docs/oracles.md).
+  ## runs agrees, docs/dev/oracles.md).
   for x in x0 ..< x0 + 8:
     if e.mmem_n > 0:
       e.mmem_last = e.mmem_fifo[e.mmem_rd]
@@ -286,7 +286,7 @@ template ch_b(c: uint32): uint32 = (c shr 10) and 0x1F
 # Engine A's colour effects and master brightness work on 6-bit channels
 # (GBATEK MASTER_BRIGHT: "6bit R,G,B Intensities"; the 3D layer is 6-bit),
 # as the LCD's 18-bit output. A 2D colour enters as 2c (disp_bright on the
-# reference runs, docs/oracles.md: a white 7FFFh is 62 after every path), a
+# reference runs, docs/dev/oracles.md: a white 7FFFh is 62 after every path), a
 # 3D one with its own low bit. The composite (`gfx`, capture source A) keeps
 # the top five bits, as GBATEK's capture stores ("15bit color depth (even
 # when capturing 18bit 3D-images)"), and `lsb` each channel's dropped low bit
@@ -304,7 +304,7 @@ proc pack6(r, g, b: uint32; lo: var uint8): uint16 {.inline.} =
 proc blend_alpha(a: uint16; la: uint8; b: uint16; lb: uint8; eva, evb: uint32;
                  lo: var uint8): uint16 {.inline.} =
   ## (a*EVA + b*EVB) / 16 per 6-bit channel, rounded, saturated (disp_bright
-  ## page 2 fails every other rounding on the reference runs, docs/oracles.md;
+  ## page 2 fails every other rounding on the reference runs, docs/dev/oracles.md;
   ## GBATEK gives the GBA's 5-bit form).
   template mix(i: static int): uint32 =
     min(63'u32, (ch6(a, la, i) * eva + ch6(b, lb, i) * evb + 8) shr 4)
@@ -334,7 +334,7 @@ template lsb3d(p: uint32): uint8 =
 proc blend_3d(p: uint32; below: uint16; lb: uint8; lo: var uint8): uint16 {.inline.} =
   ## 3D over a 2nd-target layer: the 3D pixel's own alpha weights it,
   ## (c3d*(a+1) + c2d*(31-a)) / 32 on 6-bit channels, rounded (disp_bright
-  ## reference runs, docs/oracles.md; GBATEK only guesses
+  ## reference runs, docs/dev/oracles.md; GBATEK only guesses
   ## "EVA=A/2, EVB=16-A/2", which fits 16).
   let a = alpha5(p)
   template mix(i: static int): uint32 =

@@ -13,7 +13,7 @@
 # false) the RTC shows host LOCAL time, or UTC in deterministic mode (a
 # zone would make peers disagree); RESET returns it there. A set clock
 # counts real seconds and ignores host daylight-saving changes. Why host
-# time rather than the chip's 2000-01-01 reset: docs/gba-rtc.md.
+# time rather than the chip's 2000-01-01 reset: docs/dev/gba-rtc.md.
 
 # Per-minute IRQ poll interval: one emulated second. The S-3511A asserts
 # /INT at second 00 of every minute; comparing whole minutes (not
@@ -106,7 +106,7 @@ proc rtc_set_clock(rtc: RTC; cal: int64; weekday: int) =
 
 proc rtc_follow_host(rtc: RTC) =
   ## Back to the source clock: host local time (UTC when deterministic). The
-  ## chip-level RESET lands here instead of 2000-01-01; docs/gba-rtc.md.
+  ## chip-level RESET lands here instead of 2000-01-01; docs/dev/gba-rtc.md.
   let changed = rtc.bias_set or rtc.wday_bias != 0
   rtc.bias = 0
   rtc.bias_set = false
@@ -218,7 +218,7 @@ proc rtc_strobe(rtc: RTC): bool =
   case rtc.reg
   of 0:  # RESET: datasheet 3.3 status 00h. The chip also loads 2000-01-01
          # 00:00:00; dingbat returns to the host clock instead so a new game
-         # shows today's date (docs/gba-rtc.md)
+         # shows today's date (docs/dev/gba-rtc.md)
     let before = rtc.status
     rtc_set_status(rtc, 0'u8)
     rtc_follow_host(rtc)

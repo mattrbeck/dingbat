@@ -81,7 +81,7 @@ const
   # Texcoord transform modes 2 and 3: (N or V, 1.0) * texture matrix, the
   # sum shifted right by these. GBATEK's parts table (N 1.9, V 4.12, matrix
   # 20.12, S/T 12.4) would give 17 and 20; 3d_texcoord on the reference runs
-  # (docs/oracles.md) pins 21 and 24 exactly, i.e. the products keep no
+  # (docs/dev/oracles.md) pins 21 and 24 exactly, i.e. the products keep no
   # fraction bits at all.
   TEXGEN_NORMAL_SHIFT {.intdefine.} = 21
   TEXGEN_VERTEX_SHIFT {.intdefine.} = 24
@@ -257,7 +257,7 @@ proc set_light_vector(g: Geometry; p: uint32) =
   g.light_vec[i] = l
   # half vector: light + line of sight (0, 0, -1.0) (GBATEK), here scaled
   # to unit length: the specular falloff (3d_probe_light_spec/_tab on the
-  # reference runs, docs/oracles.md) is cos(2 * angle to the unit half
+  # reference runs, docs/dev/oracles.md) is cos(2 * angle to the unit half
   # vector), far sharper than GBATEK's square of the unnormalised dot product
   let hx = float(l[0])
   let hy = float(l[1])
@@ -279,14 +279,14 @@ proc apply_normal(g: Geometry; p: uint32) =
   let n = g.vec_mul3(nx shl 3, ny shl 3, nz shl 3)
   # GBATEK's sum (emission + per light: specular, diffuse, ambient terms)
   # is kept with 17 fraction bits and truncated once at the end
-  # (3d_probe_light_sum; docs/oracles.md: the reference cores disagree)
+  # (3d_probe_light_sum; docs/dev/oracles.md: the reference cores disagree)
   var col = [int64(g.emission[0]) shl 17, int64(g.emission[1]) shl 17, int64(g.emission[2]) shl 17]
   for i in 0..3:
     if (g.attr and (1'u32 shl i)) == 0: continue
     let l = g.light_vec[i]
     let h = g.half_vec[i]
     # the diffuse level keeps 8 fraction bits (3d_probe_light on the reference
-    # runs, docs/oracles.md; a 12-bit level is one step brighter on 22 of 192)
+    # runs, docs/dev/oracles.md; a 12-bit level is one step brighter on 22 of 192)
     let dif = (clamp(-((int64(l[0]) * n[0] + int64(l[1]) * n[1] + int64(l[2]) * n[2]) shr 12),
                      0'i64, int64(ONE)) shr 4) shl 4
     var shi = clamp(-((int64(h[0]) * n[0] + int64(h[1]) * n[1] + int64(h[2]) * n[2]) shr 12),
@@ -326,7 +326,7 @@ proc intersect(a, b: Vertex; da, db: int64; plane: int): Vertex =
   let den = da - db
   # coordinates and texcoords round down, colours (5-bit) round up
   # (3d_probe_clip / _clip_persp / _clipq, 3d_vcolor, 3d_clip on the
-  # reference runs, docs/oracles.md)
+  # reference runs, docs/dev/oracles.md)
   template lerp(f: untyped): int32 =
     lo32(int64(a.f) + floorDiv((int64(b.f) - a.f) * da, den))
   template clerp(f: untyped): int32 =
@@ -359,7 +359,7 @@ proc clip_polygon*(src: openArray[Vertex]; dst: var array[MAX_CLIP, Vertex]): in
   for i in 0 ..< n: a[i] = src[i]
   # near/far first, then y, then x: vertices cut by two planes (a corner)
   # come out as 3d_vcolor and 3d_clip expect on the reference runs
-  # (docs/oracles.md)
+  # (docs/dev/oracles.md)
   const ORDER = [4, 5, 2, 3, 0, 1]
   for plane in ORDER:
     var m = 0
@@ -393,7 +393,7 @@ proc to_screen(g: Geometry; v: var Vertex) =
   # quotient (-4000h..4000h between the near and far planes), moved up so the
   # far plane lands on 7FFFh, then widened and clamped. 3d_probe_zmap{,_eq,
   # _far,_near} pin the truncation, the scale and both clamps; the reference
-  # cores sit one 200h step nearer against the clear depth (docs/oracles.md).
+  # cores sit one 200h step nearer against the clear depth (docs/dev/oracles.md).
   v.z24 = lo32(clamp(((int64(v.z) shl 14) div w + (0x7FFF - 0x4000)) * 0x200, 0'i64, 0xFF_FFFF'i64))
 
 proc hd_screen(g: Geometry; v: Vertex): array[2, int32] =

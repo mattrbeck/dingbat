@@ -16,7 +16,7 @@
 @ calls the game's status routine (copied to the stack, 0x03007E40) once a
 @ byte and finishes the sector 503k cycles (1.8 frames) before mGBA, which
 @ calls it ~1.95 times a byte, so the clear tally starts two frames apart
-@ (docs/playtest-bugs.md, "Mario vs. Donkey Kong"). Advance Wars' first-boot
+@ (docs/dev/playtest-bugs.md, "Mario vs. Donkey Kong"). Advance Wars' first-boot
 @ sector fill is the same question (section 35). GBATEK gives only the
 @ timeouts for the Panasonic and Sanyo parts dingbat identifies as.
 @

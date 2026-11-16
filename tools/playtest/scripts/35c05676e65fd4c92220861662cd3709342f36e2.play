@@ -18,7 +18,7 @@
 # configuration. The loads are Nintendo's HuffUnComp with the tree in the
 # cartridge, and dingbat priced a lone byte load from the gamepak S when it
 # read the halfword after the previous one, under the prefetcher; GBATEK and
-# the ARM7TDMI make it N. Fixed (docs/playtest-bugs.md, "Klonoa 2"):
+# the ARM7TDMI make it N. Fixed (docs/dev/playtest-bugs.md, "Klonoa 2"):
 # dingbat-bios now differs from mgba on no frame where mgba and the second reference agree
 # (f700-f5300). dingbat's own saves load in mgba and the second reference.
 # Elsewhere the references disagree with each other

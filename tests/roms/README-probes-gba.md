@@ -1,6 +1,6 @@
 # GBA probe pages v7 — OBJBUDGET, OBJGEOM, DMAOPENBUS, PSGBIAS
 
-Four probes for four GBA questions in `docs/hwprobe-questions.md`. Three
+Four probes for four GBA questions in `docs/dev/hwprobe-questions.md`. Three
 are `gbaedge.gba` pages (37-39); the fourth is a separate audio ROM,
 `psgbias.gba`, that is photographed **and recorded**.
 
@@ -93,7 +93,7 @@ hardware likely truncates it".
 dingbat's `expected/predicted-2026-09/p37.png` — in bands A and B TEST
 draws complete (all eight ramp colours, band B reversed) and NEXT is
 missing; band C complete. The sprite that exhausts the budget draws in
-full. dingbat matches. Recorded in `docs/hwprobe-results-agb.md`,
+full. dingbat matches. Recorded in `docs/dev/hwprobe-results-agb.md`,
 "Session 5", and `expected/agb-sp-5.txt`.
 
 ## Page 38 OBJGEOM (visual)
@@ -144,7 +144,7 @@ wide/tall for X=504+k / Y=248+k (k=1 is a single pixel column, so
 photograph close), the Y200 strip at rows 0-7, `Y130 DBL` cyan at rows
 130-159 with nothing at the top (`y > 159 -> y - 256`), and `T1020` green
 at rows 56-71 (the fetch wraps within OBJ VRAM). dingbat matches. Recorded
-in `docs/hwprobe-results-agb.md`, "Session 5".
+in `docs/dev/hwprobe-results-agb.md`, "Session 5".
 
 ## Page 39 DMAOPENBUS (hex)
 
@@ -180,7 +180,7 @@ DMA's word on the bus. dingbat read the page byte for byte as the console
 did (CRC **2CB2**) from `55c79b9f` (a DMA's word is open bus only for the
 CPU's first access after the burst; see
 `expected/predicted-2026-09-17/README.md`). Recorded in
-`docs/hwprobe-results-agb.md`, "Session 5". dingbat's pre-run prediction
+`docs/dev/hwprobe-results-agb.md`, "Session 5". dingbat's pre-run prediction
 was CRC **8A4F** (`expected/predicted-2026-09/`).
 
 ---
@@ -285,14 +285,14 @@ All ten pages were run on the AGB SP in session 5 (2026-09-04); each has a
 **Result** line below.
 
 Ten `gbaedge.gba` pages (40-49) for nine GBA questions in
-`docs/hwprobe-questions.md` (the timer/PSG question needs two pages), plus
+`docs/dev/hwprobe-questions.md` (the timer/PSG question needs two pages), plus
 two "Assumed" comments in the emulator that no ROM pinned. All ten are hex
 pages: photograph the 32-byte slot.
 
 dingbat's pre-run captures of these pages are in
 `expected/predicted-2026-09/`; the hardware column is
 `expected/agb-sp-5.txt`, and the per-page verdicts are in
-`docs/hwprobe-results-agb.md`, "Session 5 (2026-09-04): pages 37–49".
+`docs/dev/hwprobe-results-agb.md`, "Session 5 (2026-09-04): pages 37–49".
 
 ## Build
 
@@ -397,10 +397,10 @@ timer, V-blank and DMA3 rows matched dingbat; the "halted" H-blank row read
 989 against dingbat's 970, and the running-CPU rows differed by +4 to +30
 cycles (sub-instruction attribution). The H-blank row was never a halt: a
 HALTCNT write from cartridge code is ignored on hardware, only BIOS code can
-halt (`docs/playtest-bugs.md` §18, §79), so none of the four "halted" rows
+halt (`docs/dev/playtest-bugs.md` §18, §79), so none of the four "halted" rows
 measures a halt-exit cost. dingbat read the whole page as the console
 did, 32/32 bytes, as of `7875eaf9` (an interrupt taken in gamepak code pays for its in-flight
-fetch as N or S, less a cycle). Recorded in `docs/hwprobe-results-agb.md`,
+fetch as N or S, less a cycle). Recorded in `docs/dev/hwprobe-results-agb.md`,
 "Session 5"; in dbsuite as `irq/irqlat-*` and `irq/if-ack-race-*`.
 dingbat's pre-run prediction was CRC **953C**.
 
@@ -455,7 +455,7 @@ read 230 on every data row). Since `47d0907f` an access to palette RAM, VRAM
 or OAM waits for the dots the renderer holds, and dingbat passes the page's
 sixteen readings as dbsuite tests (`bus/contend-*`; two of them take the
 console's values from a parked run, `c2040909`). Recorded in
-`docs/hwprobe-results-agb.md`, "Session 5".
+`docs/dev/hwprobe-results-agb.md`, "Session 5".
 
 ## Page 42 MULTIME (hex)
 
@@ -519,7 +519,7 @@ presets, SMULLS, SMLALS) and `2812` (UMULLS, UMLALS), the C preset changing
 nothing, and the sweep 220 / 236 / 252 / 268 cycles for the positive classes
 and the same four for the negatives (leading ones terminate too). This
 closed the MULFLAGS (page 7) question. Recorded in
-`docs/hwprobe-results-agb.md`, "Session 5"; in dbsuite as `cpu/muls-*`.
+`docs/dev/hwprobe-results-agb.md`, "Session 5"; in dbsuite as `cpu/muls-*`.
 
 ## Page 43 TIMPHASE (hex)
 
@@ -566,7 +566,7 @@ all timers, a reload write does not realign it, and a freshly enabled timer
 inherits a running one's phase (the "TM3 already running" pair `06` / `19`
 exact). The staircase shapes are dingbat's; the base phase differs by 1-7
 cycles, which is accumulated boot drift. No change followed. Recorded in
-`docs/hwprobe-results-agb.md`, "Session 5". dingbat's pre-run capture was
+`docs/dev/hwprobe-results-agb.md`, "Session 5". dingbat's pre-run capture was
 CRC **93F4**.
 
 **These staircases and PSGPHASE's counts move with the run's absolute
@@ -634,7 +634,7 @@ while ch2 triggered two stores later lives 486 polls. Pages 51 PSGFIRST and
 frequency `0x400`, where ch1's trigger-time sweep check computes f + f =
 `0x800` and kills the channel. dingbat models that check since the PSG
 changes of 2026-09-25 (`60219abb`, `2f1024d3`); this page itself has not
-been re-scored. Recorded in `docs/hwprobe-results-agb.md`, "Session 5".
+been re-scored. Recorded in `docs/dev/hwprobe-results-agb.md`, "Session 5".
 dingbat's pre-run capture was CRC **1376**.
 
 ## Page 45 MEMCTL (hex)
@@ -682,7 +682,7 @@ word reads cost 321 / 289 / 609 cycles at WS 13 / 14 / 4, i.e.
 64K mirrors all work. dingbat had the field as readback only (321 for every
 setting; pre-run prediction CRC **5EC2**). Since `0ace19db`
 `update_waitcnt` applies it and the page matches byte for byte. Recorded in
-`docs/hwprobe-results-agb.md`, "Session 5"; in dbsuite as `bus/memctl-*`.
+`docs/dev/hwprobe-results-agb.md`, "Session 5"; in dbsuite as `bus/memctl-*`.
 
 ## Page 46 DMATIME (hex)
 
@@ -728,7 +728,7 @@ on hardware (renderer contention), and the completion interrupt reaches a
 Both have since been modelled — renderer contention in `47d0907f`, and
 `7875eaf9` turned the completion-interrupt test green — and dingbat passes
 the page's dbsuite tests (`dma/dmatime-*`). Recorded in
-`docs/hwprobe-results-agb.md`, "Session 5". dingbat's pre-run prediction
+`docs/dev/hwprobe-results-agb.md`, "Session 5". dingbat's pre-run prediction
 was CRC **A154**.
 
 ## Page 47 IWCYCLE (hex)
@@ -788,7 +788,7 @@ dingbat's 262; moving `INTRWAIT_TUNE` from 44 to 41 fixes them but costs 70
 Timer count-up tests, so the residual sits before the handler, not
 after it, and no later re-check of these two rows is on record. `+10` moves
 by one anchor iteration between builds (poll-anchor phase, not a cost;
-`docs/playtest-bugs.md` §79). Recorded in `docs/hwprobe-results-agb.md`,
+`docs/dev/playtest-bugs.md` §79). Recorded in `docs/dev/hwprobe-results-agb.md`,
 "Session 5". dingbat's pre-run captures were CRC **06BC** (HLE BIOS) and
 **8E6F** (real BIOS).
 
@@ -854,7 +854,7 @@ are read off the bus, not off the interrupt.
 latched behind — which confirms the `run_pending` guard. Each
 timer-triggered burst costs about 1 cycle more on hardware than in dingbat,
 and FIFO B on DMA2 costs exactly what FIFO A does, where dingbat had it one
-burst cheaper. Recorded in `docs/hwprobe-results-agb.md`, "Session 5"; no
+burst cheaper. Recorded in `docs/dev/hwprobe-results-agb.md`, "Session 5"; no
 later re-check of this page is on record. dingbat's pre-run prediction was
 CRC **7897**.
 
@@ -912,7 +912,7 @@ as written, and the system-mode r13 survives the round trip. dingbat had
 sent the patterns to the user bank (`51515151`, leaking user r14; pre-run
 prediction CRC **25D2**). Since `670a34a4` they select an empty bank
 (`UNDEF_BANK`, zeroed on entry) and the page matches byte for byte.
-Recorded in `docs/hwprobe-results-agb.md`, "Session 5"; in dbsuite as
+Recorded in `docs/dev/hwprobe-results-agb.md`, "Session 5"; in dbsuite as
 `cpu/mode-*`.
 
 ---
@@ -1048,13 +1048,13 @@ lines with zero spread: the grant follows the latched flag (cycle
 1008-1009), not the cycle-960 edge and not the suite-fit 1012. With the
 CPU loading from ROM the write moved +5, at 8 waits +2 (`+22`/`+26`), and
 an immediate DMA wrote one cycle earlier than dingbat (`+10 - +8` = 7, not
-8). Full table: `docs/hwprobe-results-agb.md`, "32 HDMAPHASE".
+8). Full table: `docs/dev/hwprobe-results-agb.md`, "32 HDMAPHASE".
 
 dingbat's pre-run prediction was CRC **D459** (answer -62, the cycle-960
 edge). `78d2a5631` moved the H-blank request to flag + 2, after which
 `+0`, `+4`, `+18` and `+28` matched exactly (CRC **E217**). Later the
 bus-cycle deferral was modelled (`DMA_ACCESS_WINDOW`,
-`docs/playtest-bugs.md` §26) and the flag moved to cycle 1007 with both DMA
+`docs/dev/playtest-bugs.md` §26) and the flag moved to cycle 1007 with both DMA
 requests at flag + 2 (§25). The last recorded comparison of this page
 against the console had 3 bytes off (`671d1162`).
 
@@ -1076,7 +1076,7 @@ Page 44 PSGPHASE found that every ch1 trigger which is the **first trigger
 after a SOUNDCNT_X 0→1** dies at once — for lengths 1, 2 and 4 ticks alike,
 with SOUNDCNT_X reading `80` right after — while a ch2 trigger two stores
 later lived its full 486 polls. That rules out a length-unit effect and
-leaves two candidates, which `docs/hwprobe-results-agb.md` recorded as "one
+leaves two candidates, which `docs/dev/hwprobe-results-agb.md` recorded as "one
 follow-up page decides": is it **ch1 specific** (the sweep unit is what ch1
 has and ch2 has not), or does the **first trigger of any channel** after a
 master-on die?
@@ -1139,14 +1139,14 @@ cycles later lives (`+18` = 18804), as does ch1 after ch2's whole tone
 (`+12`). ch1 lives with the sweep running (`+10`, NR10 = 0x11, until the
 sweep overflows) and with the length enable clear (`+24` = `FFFF`).
 SOUNDCNT_X reads `80` right after the `+0` trigger. Full table:
-`docs/hwprobe-results-agb.md`, "33 PSGFIRST".
+`docs/dev/hwprobe-results-agb.md`, "33 PSGFIRST".
 
 dingbat then had no such effect (pre-run prediction CRC **FC8E**, every
 channel alive). Page 52 PSGWHY found the cause, and dingbat now passes this
 page's readings as dbsuite tests run from the cartridge (`apu/psg-*`,
 `tests/results_dbsuite.md`); `+8`, `+12` and `+16` accept either answer
 there, because the console's depends on phase (`c2040909`,
-`docs/playtest-bugs.md` §79).
+`docs/dev/playtest-bugs.md` §79).
 
 Every row is a 16-bit poll count sized for the cartridge-resident loop; off
 the cartridge see "Reading a page's counts off the link rig" above.
@@ -1219,8 +1219,8 @@ never enabled the channel.
 polls from IWRAM faster than this cartridge-resident loop was calibrated
 for, so only the repeatable rows are reported, and the rest want a
 cartridge run or a rate-matched delay. Recorded in
-`docs/hwprobe-questions.md` (the timer/PSG question) and
-`docs/playtest-bugs.md` §12 (`4c763b25`). dingbat's pre-run prediction was
+`docs/dev/hwprobe-questions.md` (the timer/PSG question) and
+`docs/dev/playtest-bugs.md` §12 (`4c763b25`). dingbat's pre-run prediction was
 CRC **F0A4** (every row alive except `+10` and `+14`); the PSG changes of
 2026-09-25 (`60219abb`, `2f1024d3`) model ch1's shift-0 check against the
 console's link-rig tables, and this page has not been re-scored since.
@@ -1269,12 +1269,12 @@ the grant does wait on the CPU's bus access at some phases. dingbat read
 variation: the grant waits for a bus cycle and never for an internal one.
 `hdmastamp.s` later showed the deferral's shape — one cycle more per cycle
 the request lands earlier inside the access in flight, up to 15
-(`docs/playtest-bugs.md` §15). dingbat's undeferred rows reached 227 in
+(`docs/dev/playtest-bugs.md` §15). dingbat's undeferred rows reached 227 in
 `bac61767`, and "grant at the end of the bus access in flight" is modelled
 since §26 (`DMA_ACCESS_WINDOW`, measured with `dmaphase.s`). This page's
 rows move between runs, so it is not in dbsuite and has not been re-scored
-since. Recorded in `docs/hwprobe-questions.md` (the H-blank DMA question)
-and `docs/playtest-bugs.md` §10, §12.
+since. Recorded in `docs/dev/hwprobe-questions.md` (the H-blank DMA question)
+and `docs/dev/playtest-bugs.md` §10, §12.
 
 Pages 0-51 are byte-identical to the v9b ROM under the same emulator
 build; `ALL` at the 2026-09-17 capture was **1CA7** (`-auto`, HLE BIOS).
@@ -1328,7 +1328,7 @@ changed both in `ppu.nim` `blend_colors`, and `blendprobe_read` now shows
 dingbat flat on the hardware patch in every row. Open: on the four brighten
 rows whose exact result has a fraction ≥ 0.8125 (EVY 7 t=4, t=6; EVY 3
 t=10; EVY 11 t=2) red and blue null at the truncated value but green does
-not (`f6c4930e`; "Brighten green anomaly" in `docs/hwprobe-questions.md`).
+not (`f6c4930e`; "Brighten green anomaly" in `docs/dev/hwprobe-questions.md`).
 A photo shows which 5-bit candidate matches, not the pixel value itself, so
 an exact capture of the video signal is still wanted.
 

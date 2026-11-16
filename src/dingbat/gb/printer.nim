@@ -20,7 +20,7 @@
 #
 # $04 stays until INIT, BREAK or a DATA with payload. Camera Gold polls about
 # every six frames after PRINT and stays on "Printing..." while bit 1 is set;
-# without it, it leaves after the sixth poll (docs/gb-derivations.md, "Game
+# without it, it leaves after the sixth poll (docs/dev/gb-derivations.md, "Game
 # Boy Printer status").
 #
 # $04 outlasts the 100 ms idle timeout (PRN_DONE_HOLD): the timeout resets the

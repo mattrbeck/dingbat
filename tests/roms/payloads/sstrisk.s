@@ -1,5 +1,5 @@
 @ payload: the SingleStepTests cells that may take an undefined-instruction
-@ exception or jump into the BIOS (sst.s has the rest; docs/hwprobe-sst.md).
+@ exception or jump into the BIOS (sst.s has the rest; docs/dev/hwprobe-sst.md).
 @ Uploaded on its own and run after everything else: if one of these
 @ wedges the console, the other answers are already in.
 @
@@ -199,7 +199,7 @@ mr_out:
     b   finish
 
 @ ---------------------------------------------------------------- more CP14
-@ The CRn values the first run left out (docs/hwprobe-sst.md, section 7)
+@ The CRn values the first run left out (docs/dev/hwprobe-sst.md, section 7)
     CPMRC x_mrc14_c3, 0xEE130E10, 0xC0DE1403  @ mrc p14, 0, r0, c3, c0, 0
     CPMRC x_mrc14_c5, 0xEE150E10, 0xC0DE1405
     CPMRC x_mrc14_c8, 0xEE180E10, 0xC0DE1408

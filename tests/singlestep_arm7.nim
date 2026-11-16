@@ -420,8 +420,8 @@ proc run_case*(gba: GBA; c: var ArmCase): CaseResult =
 # Every failing case is put in one of these buckets or reported as
 # unexplained. Each bucket is a place where dingbat follows the console and
 # the vectors' model does something else -- measured on an AGB SP, cited by
-# the cell in docs/hwprobe-sst.md (the probe made for these divergences,
-# tests/roms/payloads/sst.s and sstrisk.s) or docs/hwprobe-results-agb.md --
+# the cell in docs/dev/hwprobe-sst.md (the probe made for these divergences,
+# tests/roms/payloads/sst.s and sstrisk.s) or docs/dev/hwprobe-results-agb.md --
 # or an encoding the ARM7TDMI leaves UNPREDICTABLE that the probe did not
 # reach. tests/README.md ("SingleStepTests") has the table.
 

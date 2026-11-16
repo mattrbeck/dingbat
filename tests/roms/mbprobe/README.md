@@ -1,6 +1,6 @@
 # mbprobe — retail-cart probes delivered by multiboot
 
-Closes the three "multiboot probe" rows of `docs/hwprobe-questions.md`. A
+Closes the three "multiboot probe" rows of `docs/dev/hwprobe-questions.md`. A
 retail cartridge cannot be flashed, so the probe code reaches the GBA that
 holds it over the link cable: a SENDER ROM on the flashcart GBA (#1) runs
 the master half of the multiboot handshake and SWI 25h, the slave GBA (#2)

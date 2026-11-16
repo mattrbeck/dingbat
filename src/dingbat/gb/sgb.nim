@@ -6,7 +6,7 @@
 # Pan Docs, "SGB Functions". SNES-side commands (SOUND/SOU_TRN, OBJ_TRN,
 # DATA_SND/DATA_TRN/JUMP, ATRC_EN/TEST_EN/ICON_EN/PAL_PRI) are accepted and
 # dropped; none feeds back to the Game Boy. The SGB's 2.4% faster master
-# clock is not modelled (docs/sgb.md).
+# clock is not modelled (docs/dev/sgb.md).
 
 const SGB_ATTR_W* = 20
 const SGB_ATTR_H* = 18

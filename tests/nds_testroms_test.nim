@@ -4,7 +4,7 @@
 ## are in the ROM cache (`$DINGBAT_NDS_ROMS`, default
 ## ~/.cache/dingbat-nds/roms; a missing ROM is skipped, not failed).
 ## Expected values cite GBATEK, the test ROM's own pass/fail, or the
-## reference runs recorded in docs/oracles.md.
+## reference runs recorded in docs/dev/oracles.md.
 ##
 ## Run with: nimble test_ndstestroms
 
@@ -63,7 +63,7 @@ proc t3d_text(n: NDS): seq[string] =
 # ---------------------------------------------------------------------------
 # POWCNT1 gating (GBATEK "DS Power Control": a disabled unit's ports are
 # read-only and its palette reads zero; OAM and the kept contents from the
-# reference runs of disp_powcnt, docs/oracles.md)
+# reference runs of disp_powcnt, docs/dev/oracles.md)
 
 block powcnt_gating:
   echo "POWCNT1 gating"
@@ -112,7 +112,7 @@ block disp_powcnt_rom:
   if ok:
     for f in 0 ..< 40: n.run_frame()
     let t = n.t3d_text()
-    # the reference's rows (docs/oracles.md); RDR's RDLINES_COUNT is timing
+    # the reference's rows (docs/dev/oracles.md); RDR's RDLINES_COUNT is timing
     let want = [
       "PALA 11112222 00000000 00000000", "     11112222",
       "OAMA 11112222 00000000 00000000", "     11112222",
@@ -669,7 +669,7 @@ block icache_stale_rom:
     for f in 0 ..< 20: n.run_frame()
     let t = n.t3d_text()
     # GBATEK's semantics (the file's header); the reference runs model no
-    # cache contents (docs/oracles.md)
+    # cache contents (docs/dev/oracles.md)
     let want = ["STR   1 1 2", "MIR   1 1 2", "DMA   1 1 2", "THM   1 1 2",
                 "OFF   1 2 1 2", "PRE   1 2", "WB    1 1 2", "EVI   1 2"]
     for i, w in want:

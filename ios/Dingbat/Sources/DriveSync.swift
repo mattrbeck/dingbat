@@ -18,7 +18,7 @@ import UIKit
 // and at most 10 s after the first; pulls run at sign-in, app start, return
 // to the foreground, a regained network, every 3 minutes and Sync now. ROMs
 // are never bulk-downloaded: a game only on Drive downloads when tapped.
-// docs/ios-app.md and the web code's comments say why each rule is so; the
+// docs/dev/ios-app.md and the web code's comments say why each rule is so; the
 // comments here keep the web's reasoning where it decides an edge.
 
 /// A tombstone: a game deleted at `ts`, of generation `gen`.

@@ -135,7 +135,7 @@ type ArmAluOp* = enum
 # MULS/MLAS/UMULLS/UMLALS/SMULLS/SMLALS is deterministic: radix-4 Booth
 # recoding + carry-save adders with early termination. Port of
 # zaydlang/multiplication-algorithm (zlib license, fuzzed against ARM7TDMI
-# silicon); pinned by the gbaedge MULFLAGS rows on AGB SP (docs/hwprobe.md).
+# silicon); pinned by the gbaedge MULFLAGS rows on AGB SP (docs/dev/hwprobe.md).
 # Only the carry is computed here, so the original's final full-adder stage
 # is omitted: an altered version of the original, per clause 2 below.
 #
@@ -393,7 +393,7 @@ proc arm_single_data_transfer*[imm_flag, pre_addressing, add_offset, byte_quanti
   # Base writeback with rn=15 (UNPREDICTABLE): `str r1, [r15], #4` writes
   # PC := base+4; `ldr r1, [r15], #4` writes PC := base+8 and drops the load
   # though the bus read happens (AGB SP, gbaedge THUMBPC2, offset 4 only;
-  # docs/hwprobe-results-agb.md).
+  # docs/dev/hwprobe-results-agb.md).
   const pc_writeback = write_back or not pre_addressing
   when load:
     let value =
@@ -581,7 +581,7 @@ proc arm_block_data_transfer*[pre_address, add, s_bit, write_back, load: static 
       saved_mode = cpu.cpsr.mode
   # The base is read from the CURRENT bank before the user-bank switch; the
   # transfers and any writeback then use the user bank (AGB SP, gbaedge
-  # LDMUSER, `stmia r13!, {r13}^` from IRQ mode; docs/hwprobe-results-agb.md).
+  # LDMUSER, `stmia r13!, {r13}^` from IRQ mode; docs/dev/hwprobe-results-agb.md).
   var address  = cpu.r[rn]
   var bits_set = count_set_bits(list)
   if bits_set == 0:
@@ -611,7 +611,7 @@ proc arm_block_data_transfer*[pre_address, add, s_bit, write_back, load: static 
       address += 4
       when write_back:
         # Block transfers with base r15 do no writeback (AGB SP, gbaedge
-        # THUMBPC2 and PCWB2, docs/hwprobe-results-agb.md).
+        # THUMBPC2 and PCWB2, docs/dev/hwprobe-results-agb.md).
         if not first_transfer and not (load and bit(list, rn)) and
            rn != 15:
           discard cpu.set_reg(rn, final_addr)
@@ -702,7 +702,7 @@ proc arm_psr_transfer*[imm_flag, spsr, msr: static bool](cpu: CPU; instr: uint32
         # MSR writes the T bit on ARM7TDMI (Pokemon Pinball R/S relies on it).
         # Of the two words prefetched as ARM, A+4 executes as a Thumb nop, then
         # the low halfword of A+8; fetching resumes at A+12 (AGB SP, gbaedge
-        # MSRTBIT/MSRTBIT2, docs/hwprobe-results-agb.md).
+        # MSRTBIT/MSRTBIT2, docs/dev/hwprobe-results-agb.md).
         cpu.pipeline.clear()
         cpu.pipeline.push(0x46C0'u32)  # Thumb nop (mov r8, r8)
         cpu.pipeline.push(cpu.gba.bus.read_word_internal(cpu.r[15]) and 0xFFFF'u32)
@@ -771,7 +771,7 @@ proc arm_data_processing*[imm_flag: static bool, opcode: static ArmAluOp,
   when pc_reads_12_ahead:
     # Rs is read first, while r15 is still PC+8; Rn and Rm read PC+12
     # (GBATEK). AGB SP: `mov r0, r1, lsr pc` at an address ending 00 shifts
-    # by 8 (docs/hwprobe-sst.md, u.rs15_lsr).
+    # by 8 (docs/dev/hwprobe-sst.md, u.rs15_lsr).
     let rs_amount = cpu.r[int(bits_range(instr, 8, 11))] and 0xFF'u32
     cpu.r[15] += 4
     cpu.idle(1)  # register-specified shift costs one internal cycle

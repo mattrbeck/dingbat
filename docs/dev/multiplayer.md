@@ -12,7 +12,7 @@ is the reference for the link layers and the network wire format.
 | `src/dingbat/gba/link.nim` | in-process lockstep coordinator, 2–4 cores |
 | `src/dingbat/gb/serial.nim`, `src/dingbat/gb/link.nim` | the GB equivalents (`GbSerialDriver`, two-core coordinator) |
 | `src/dingbat/common/linkproto.nim` | wire encode/decode, wasm-safe |
-| `src/dingbat/gba/netcore.nim` | transport-independent protocol state machine (handshake, bounded lead, speculation — `docs/speculative-rollback-handoff.md`) |
+| `src/dingbat/gba/netcore.nim` | transport-independent protocol state machine (handshake, bounded lead, speculation — `docs/dev/speculative-rollback-handoff.md`) |
 | `src/dingbat/gba/netlink.nim` | native TCP pump over `netcore` |
 | `web/netplay.js`, `web/signaling/` | WebRTC DataChannel bridge and the rendezvous server |
 

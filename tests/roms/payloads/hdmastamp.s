@@ -4,7 +4,7 @@
 @ and answered yes, but it answers with `TM1 - TM0` -- the V-blank DMA's write
 @ minus the H-blank DMA's. A difference pins neither term, and that cost us: a
 @ constant offset in the V-blank DMA read as though it were the H-blank one
-@ (docs/playtest-bugs.md section 14). So stamp the two DMAs separately and
+@ (docs/dev/playtest-bugs.md section 14). So stamp the two DMAs separately and
 @ report both raw.
 @
 @ TM0 is started at a fixed point just after the line-159 boundary and frozen

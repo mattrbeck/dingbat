@@ -251,7 +251,7 @@ iPhone Duo ones and AddPicturesSkipsBlank, which needs its knobs)
 The interruptions and route change are the notifications AVAudioSession
 posts, sent by the `-debug-events` hook, so iOS's own delivery of them, the
 sound stopping, haptics, VoiceOver's reading and a real pad's battery dying
-still need the phone (docs/ios-app.md, Native differences).
+still need the phone (docs/dev/ios-app.md, Native differences).
 
 - [ ] **Stops when the app is not in front.** In a game, pull down Control
       Center: the game (and its sound) stops under it, and plays on when it

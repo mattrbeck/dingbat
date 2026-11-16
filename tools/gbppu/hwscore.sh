@@ -5,7 +5,7 @@
 #   objtab      GBMicrotest ppu_spritex_vs_scx: 153 cells of OBJ penalty in
 #               dots (mode 3 length), transcribed from the ROM's `cp` operands.
 #   probe (e)   tools/gbprobe probe_e_objgrid: 136 cells of fetch-grid position
-#               (docs/hwprobe.md).
+#               (docs/dev/hwprobe.md).
 #   acid-hell   cgb-acid-hell against its reference PNG.
 #
 # mealybug's references are hardware captures too, but only the full runner

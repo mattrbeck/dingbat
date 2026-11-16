@@ -1,7 +1,7 @@
 @ payload: wakeirq.s with an H-blank source (bit 7) -- the halted and the
 @ running CPU's H-blank interrupt timed from a controlled cycle.
 @
-@ gbaedge IRQDECOMP's "halted H-blank wake +19" (docs/hwprobe-results-agb.md
+@ gbaedge IRQDECOMP's "halted H-blank wake +19" (docs/dev/hwprobe-results-agb.md
 @ session 5) was a row whose HALTCNT write came from cartridge code, which
 @ the console ignores (haltprobe.s): it never halted, and its anchor is a
 @ poll of the H-blank flag's fall, a quantiser one ROM loop wide. halthb.s

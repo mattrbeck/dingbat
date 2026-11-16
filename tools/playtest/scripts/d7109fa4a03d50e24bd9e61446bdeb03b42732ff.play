@@ -18,7 +18,7 @@
 # (f6-f21) costs dingbat ~71 cycles a block more (gamepak-load prefetch
 # rule, hardware-verified; both references fail it), so [load] runs a frame
 # behind from f34 and OCR reads the globe one step apart. Not the save:
-# docs/playtest-bugs.md, "Lunar Legend: the load screen reads differently".
+# docs/dev/playtest-bugs.md, "Lunar Legend: the load screen reads differently".
 [new]
 wait 600
 press START

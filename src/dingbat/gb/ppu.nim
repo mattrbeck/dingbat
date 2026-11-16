@@ -206,7 +206,7 @@ const DOTS_PER_FRAME* = 70224   # 154 lines x 456 dots
 # Frontend pacing. An LCD enable restarts at line 0, 65664 dots from the
 # next vblank, and the panel stays white until then (Pan Docs, LCDC.7), so
 # the only choice is when the frontend gets a frame. 37392 is where waiting
-# and pushing miss the 70224-dot period equally: docs/gb-derivations.md,
+# and pushing miss the 70224-dot period equally: docs/dev/gb-derivations.md,
 # "LCD-on frame push"; tests/gb_lcd_on_pacing_test.nim sweeps it. No test
 # ROM scores it.
 const LCD_ON_FRAME_DOTS* {.intdefine.} = 37392
@@ -274,7 +274,7 @@ proc fifo_recompose_at*(ppu: GbFifoPpu; gb: GB; back: int32): bool {.noinline.}
 when defined(test_harness):
   # Test harness only: every DMG palette transition pixel (MIXER_PALETTE_OR)
   # since the last clear, with its two clean colours. The pixel is a race on
-  # hardware (docs/gb-failure-triage.md C7), so the gambatte scorer accepts
+  # hardware (docs/dev/gb-failure-triage.md C7), so the gambatte scorer accepts
   # either clean value.
   type GbRacePx* = object
     idx*:       int32    # framebuffer index
@@ -324,7 +324,7 @@ proc bg_display*(ppu: GbPpu): bool {.inline.} = (ppu.lcd_control and 0x01) != 0
 # VRAM is the PPU's for mode 3, OAM for modes 2 and 3; a blocked read answers
 # $FF, a blocked write is dropped. Locks CLOSE on the live mode, one M-cycle
 # before STAT reads the new mode, and OPEN with the `read_mode` latch
-# (docs/gb-derivations.md, "CPU VRAM/OAM locks close on the live mode and
+# (docs/dev/gb-derivations.md, "CPU VRAM/OAM locks close on the live mode and
 # open with the STAT bits"). A write asks with the mode at the start of its
 # M-cycle (mem_write applies it before the dots); a read asks both the
 # latched and the live mode. On the first line after LCD-on every edge
@@ -339,7 +339,7 @@ const LCD_ON_LINE0_LOCK_LEAD* {.intdefine.} = 2'i32
   ## Pinned by AGE vram/vram-read-* and oam/oam-read-*, which sample the same
   ## instant on lines 0 and 1. Spent in the locks only: moving the geometry
   ## (LCD_ON_LINE0_TRIM, gb.nim) fails the STAT-read, interrupt and pixel
-  ## tests (docs/gb-failure-triage.md B1).
+  ## tests (docs/dev/gb-failure-triage.md B1).
 
 const VRAM_READ_M0_OPEN_DOTS* {.intdefine.} = 2
 const VRAM_READ_M0_OPEN_DOTS_DS* {.intdefine.} = 3
@@ -458,7 +458,7 @@ const CRAM_LOCK_DOTS* {.booldefine.} = true
   ## until CRAM_LOCK_OFF_LAT{,_DS} dots after the mode-0 edge; the LCD-on
   ## line locks CRAM_LOCK_LINE0_EXTRA{,_DS} dots later. A write is asked at
   ## its commit, a read at the start of its M-cycle. Values and evidence:
-  ## docs/gb-derivations.md, "The CGB palette RAM lock around the mode-3
+  ## docs/dev/gb-derivations.md, "The CGB palette RAM lock around the mode-3
   ## edges" (gambatte cgbpal_m3/*, enable_display/ly0_late_cgbp*).
 const CRAM_LOCK_ON_LAT*    {.intdefine.} = 1
 const CRAM_LOCK_ON_LAT_DS* {.intdefine.} = 2
@@ -555,7 +555,7 @@ const OAM_WRITE_M2_LAG_DOTS_DMG* {.intdefine.} = 4
   ## The OAM WRITE lock's edges, in dots after the PPU's own mode edges, asked
   ## at the write's sample point (OAM_WRITE_SAMPLE_END, gb.nim: after the
   ## M-cycle's dots, so the dot named is one past the CPU's write strobe).
-  ## Evidence: docs/gb-failure-triage.md B1, "The OAM write lock".
+  ## Evidence: docs/dev/gb-failure-triage.md B1, "The OAM write lock".
   ##
   ## Every console: the lock OPENs OAM_WRITE_OPEN_LAG_DOTS after the 3 -> 0
   ## flag (the read side's values), plus LCD_ON_LINE0_LOCK_LEAD on the LCD-on
@@ -708,7 +708,7 @@ proc cpu_oam_open*(ppu: GbPpu; is_write: bool; mcycle_dots: int32 = 0;
 #
 # maj is Pan Docs' write formula `((a ^ c) & (b ^ c)) ^ c`, the bitwise
 # majority. The rules not from Pan Docs are DocBoy's measured dmg/oam_bug
-# tables (docs/gb-failure-triage.md I5). IDU steps at rows 0 and 20 do
+# tables (docs/dev/gb-failure-triage.md I5). IDU steps at rows 0 and 20 do
 # nothing (DocBoy `oam_bug_inc_round3/23`). PC in OAM is not modelled:
 # instruction fetches go through mem_read, unhooked.
 type OamBugKind* = enum
@@ -918,7 +918,7 @@ static:
 # two dots further back than on every other line (AGE stat-mode/*,
 # stat-mode-ds). A read-path rule: moving mode 3 itself instead fails the
 # line-0 access windows (mooneye lcdon_*_timing-GS) and the line-0 mode-0
-# source (GBMicrotest int_hblank_*). docs/gb-failure-triage.md B1.
+# source (GBMicrotest int_hblank_*). docs/dev/gb-failure-triage.md B1.
 const LCD_ON_STAT_READ_LAG* {.intdefine.}: int32 = 2
   ## Dots of extra STAT-read lag on the LCD-enable line; 0 compiles it out.
 
@@ -1313,7 +1313,7 @@ const LYC_SRC_RELATCH_ADJ* {.intdefine.} = 1
   ## (9 - 4 + 1) and dot 8 at double (9 - 2 + 1). Two-sided on both devices
   ## and speeds (gambatte `ly0/lycint152_lyc0irq_*`, `lycEnable/lyc0_*`).
   ## Fitted with IF_WRITE_LAND_DOTS (memory.nim), whose `_ifw_` tests cross
-  ## this dot: docs/gb-derivations.md, "An IF write replaces the register on
+  ## this dot: docs/dev/gb-derivations.md, "An IF write replaces the register on
   ## its M-cycle's second dot".
   ## Clean-room: derived from test ROM sources/outputs and dingbat's own
   ## trace runs; no emulator source consulted.
@@ -1342,7 +1342,7 @@ proc lyc_settle_halt_skip(gb: GB): bool {.inline.} =
 # STAT_M0_LEAD_T = 2 (the mode-0 SOURCE 2 dots ahead of the flag): mooneye
 # hblank_ly_scx_timing-GS is halted and lives where the two cancel, while
 # GBMicrotest hblank_int_scx* READ STAT and fail any move of the readable
-# 3 -> 0 edge (M3_END_EARLY). docs/gb-failure-triage.md A5.
+# 3 -> 0 edge (M3_END_EARLY). docs/dev/gb-failure-triage.md A5.
 #
 # The window is measured from the source's own `irq_chg_dot`, not the field's
 # `stat_chg_dot`: from the field it lands two dots late and fails
@@ -1445,7 +1445,7 @@ const LYC_DROP_LATENCY_DMG* {.intdefine.} = 1
   ## comparator's sample (lyc_sample_land). Default 1: the DMG comparator sees
   ## the new LYC one dot into the write's M-cycle. Two-sided on gambatte
   ## `m0enable/lycdisable_ff45_*` [dmg], which break a match ahead of the
-  ## mode-0 source's rise (docs/gb-derivations.md, "A STAT write's cleared
+  ## mode-0 source's rise (docs/dev/gb-derivations.md, "A STAT write's cleared
   ## enables let the line fall at the commit").
 const LYC_DROP_BOUNDARY_SKIP* {.intdefine.} = 1
   ## 1: an LYC write whose M-cycle holds the line boundary does not drop the
@@ -1472,7 +1472,7 @@ proc stat_drop_arm*(ppu: GbPpu; gb: GB; en, lyc: uint8; lat_dots: int32) =
   ## boundary where the parked byte lands. Without this the edge detector
   ## still holds the old level when another source rises inside the same
   ## M-cycle, and the handover is not an edge (gambatte
-  ## m2enable/m2_late_m0disable_1; docs/gb-derivations.md, "A STAT write's
+  ## m2enable/m2_late_m0disable_1; docs/dev/gb-derivations.md, "A STAT write's
   ## cleared enables let the line fall at the commit"). The level is sampled
   ## now and refreshed by every source change until the latency expires
   ## (ppu_handle_stat_interrupt), so a rise inside the latency window is seen
@@ -1594,7 +1594,7 @@ proc ppu_handle_stat_interrupt*(ppu: GbPpu; gb: GB) =
 # through the step (GB.lyc_bridge: fifo_cgb_line_end then has no match to
 # let go of and the boundary's window stays shut). The readable register and
 # coincidence bit keep their own timing (CGB_LYC_WRITE_DEFER,
-# CGB_LYC_EDGE_DEFER). docs/gb-derivations.md, "CGB LYC write: a sampled
+# CGB_LYC_EDGE_DEFER). docs/dev/gb-derivations.md, "CGB LYC write: a sampled
 # comparator".
 when CGB_LYC_CMP_LATCH:
   proc lyc_sample_step_dot(ppu: GbPpu; gb: GB): int32 {.inline.} =
@@ -2065,7 +2065,7 @@ proc `mode_flag=`*(ppu: GbPpu; mode: uint8; gb: GB) =
   # not at the 2 -> 3 edge: gambatte window/arg/late_wy_1 vs late_wy_2. The
   # match counts only with LCDC.5 set: enabling the window on a later line
   # of the frame draws nothing (hardware: gbprobe probe_g_wy1 on AGB SP,
-  # docs/hwprobe-questions.md row 19).
+  # docs/dev/hwprobe-questions.md row 19).
   elif mode == 2 and WIN_LINE0_CHECK_DOT_CGB != 0 and ppu.ly == 0'u8 and
        gb.cgb_enabled:
     # Line 0's check runs WIN_LINE0_CHECK_DOT_CGB dots in (gb.nim), queued
@@ -2319,7 +2319,7 @@ const HDMA_START_REQ_LAG* {.intdefine.} = 1
   ## waits for the next HBlank. One dot at both speeds, measured at the
   ## hand-over: a cutoff counted back from the line end to the write would
   ## need 2 dots at single speed and has no value at double. Pinned by
-  ## gambatte `dma/hdma_late_enable_*`; docs/gb-derivations.md, "An FF55
+  ## gambatte `dma/hdma_late_enable_*`; docs/dev/gb-derivations.md, "An FF55
   ## write arming an HBlank transfer inside HBlank".
 const HDMA_M2_DMA_HBLANK* {.intdefine.} = 1
   ## The OAM scan reads as mode 0 in STAT while an OAM DMA holds OAM
@@ -2551,7 +2551,7 @@ proc ppu_store_lcdc*(ppu: GbPpu; gb: GB; val: uint8) {.inline.} =
   # WY == LY comparator sample, exactly as a WY store does: with WY equal to
   # the line being drawn the window is latched for the frame. Queued above
   # where the device defers the sample (WIN_CHECK_DEFER_*), taken here where
-  # it does not. docs/gb-derivations.md, "The window's WY comparator: when it
+  # it does not. docs/dev/gb-derivations.md, "The window's WY comparator: when it
   # samples". GBMicrotest `win*_a` (LCD on with WY = 0 and the bit set),
   # mealybug `m2_win_en_toggle`, gambatte `window/late_enable_afterVblank_*`.
   if (moved and 0xA0'u8) != 0 and (val and 0xA0'u8) == 0xA0'u8:
@@ -2792,7 +2792,7 @@ proc ppu_write*(ppu: GbPpu; gb: GB; idx: int; val: uint8) =
       # The re-enabled PPU is already part-way into line 0 when the LCDC write
       # retires; as every line is a multiple of 4 dots this seed is also the
       # PPU's dot phase against the CPU's M-cycle grid for the run
-      # (docs/gb-derivations.md, "The LCD-on first line starts 5 dots before
+      # (docs/dev/gb-derivations.md, "The LCD-on first line starts 5 dots before
       # the LCDC write retires"). The M-cycle is backed out because the
       # counter has to read 5 once this M-cycle's dots have run (mem_write
       # applies the byte before the dots); seeding flat restarts the PPU a

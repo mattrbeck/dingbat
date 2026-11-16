@@ -207,7 +207,7 @@ proc direct_boot*(n: NDS) =
   # LCDs, both 2D engines, 3D rendering + geometry, engine A on top: what
   # the real firmware leaves at the cart's entry (disp_powcnt booted
   # through the dumps, --boot firmware) and the reference's direct boot
-  # (docs/oracles.md)
+  # (docs/dev/oracles.md)
   n.gpu.write_powcnt1(0x820F)
   n.powcnt2 = 1
   n.wifiwaitcnt = 0x30               # the firmware's (GBATEK; the reference's direct boot too)
@@ -227,7 +227,7 @@ proc direct_boot*(n: NDS) =
   # and old homebrew crt0s that enable the PU after adding only their own
   # regions rely on that (the 4K intro sd4k defines just its ITCM region,
   # then runs from main RAM under the firmware's region 1). Assumed: these
-  # values are a reference core's direct boot (docs/oracles.md, NDS core,
+  # values are a reference core's direct boot (docs/dev/oracles.md, NDS core,
   # tests/nds/src/boot_cp15); GBATEK lists none. ITCM size 32 MB likewise.
   for (cm, v) in [(0'u32, 0x0400_0033'u32), (1, 0x0200_002B'u32), (2, 0'u32),
                   (3, 0x0800_0035'u32), (4, 0x0300_001B'u32), (5, 0'u32),

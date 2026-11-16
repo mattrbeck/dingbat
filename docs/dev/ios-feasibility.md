@@ -1,6 +1,6 @@
 # iOS: what is proven and how to build it
 
-`docs/ios-experiment/build-ios-core.sh` reproduces every build below;
+`docs/dev/ios-experiment/build-ios-core.sh` reproduces every build below;
 `ios_core_api.nim` is the C API wrapper; `driver.c` a minimal consumer.
 `src/dingbat_ios.nim` is the in-tree entry point.
 
@@ -37,7 +37,7 @@ in the two `apu.nim`, gated `test_harness` / `emscripten` / SDL. Widen the
 `emscripten` branch to an `ios_shell` define to reuse the float32 stereo
 ring at 32768 Hz. HLE BIOS means no BIOS ships; battery saves are plain
 files next to the ROM; save states are a byte buffer
-(`docs/savestate_compat.md`).
+(`docs/dev/savestate_compat.md`).
 
 ## Architecture
 
@@ -77,6 +77,6 @@ downloader, which triggers 4.7.1–4.7.5), no Nintendo imagery in store assets
   Nim's page allocator under memory pressure (`-d:nimAllocPagesViaMalloc` is
   the fallback) are untested on device.
 * Real iPhone throughput; the oldest-supported-device floor
-  (`docs/performance.md`, "Old and constrained devices").
+  (`docs/dev/performance.md`, "Old and constrained devices").
 * Audio latency against CoreAudio buffer sizes; the 32768 Hz → hardware-rate
-  conversion is where pacing drift would recur (`docs/web_audio_pacing.md`).
+  conversion is where pacing drift would recur (`docs/dev/web_audio_pacing.md`).

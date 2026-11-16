@@ -8,7 +8,7 @@
 ## leaves the recognition to the burst's end (dma.nim run_pending). For a
 ## raise from before the burst that end booked nothing, so the interrupt
 ## sat pending with IME, CPSR.I and IE open and every later raise rode with
-## it (docs/playtest-bugs.md §100, Famicom Mini Nazo no Murasamejou). The ROM
+## it (docs/dev/playtest-bugs.md §100, Famicom Mini Nazo no Murasamejou). The ROM
 ## walks a timer 0 overflow one cycle a line across an H-blank DMA3 burst
 ## made preemptible by an armed DMA0, and counts the interrupts it takes.
 ## Every overflow must be taken, each soon after it: the latency bound is

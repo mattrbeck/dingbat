@@ -865,7 +865,7 @@ proc test_uniform_window_frames(emu: GBA) =
 # compositor with itself under two configurations that must agree, so a rule
 # encoded wrongly in both passes them all; this guards against that, e.g. a
 # semi-transparent OBJ pixel drawn opaque under a window whose colour-effect
-# bit is clear (docs/playtest-bugs.md, "Semi-transparent OBJ under an
+# bit is clear (docs/dev/playtest-bugs.md, "Semi-transparent OBJ under an
 # effects-off window"). The model recomputes each pixel from the line's layer
 # buffers with none of the span machinery: window by priority (WIN0, WIN1,
 # OBJ window, outside), layers sorted by priority with OBJ in front of an

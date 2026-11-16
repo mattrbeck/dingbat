@@ -27,7 +27,7 @@
 ##   reads FFFFh and ignores writes; it starts unlocked; byte stores do
 ##   nothing; the rest of the ROM region reads FFFFh except an ID in header
 ##   bytes B0h-BFh. GBATEK leaves all of that open: it is what the reference
-##   runs show (docs/oracles.md, NDS core), and GBATEK's detection (a write
+##   runs show (docs/dev/oracles.md, NDS core), and GBATEK's detection (a write
 ##   that sticks only while unlocked) works on it.
 
 import ../../gba/storage_chip

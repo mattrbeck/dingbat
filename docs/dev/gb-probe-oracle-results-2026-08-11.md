@@ -5,7 +5,7 @@ expectation; each renders its result on screen and to WRAM, and
 `tools/gbprobe/readout.py` / `arbread.py` / `read_probe_e.py` read the
 photograph. This is the table of probe → dingbat prediction → hardware. Rows
 pinned only by comparison with another emulator are kept to one line each and
-listed in [`docs/oracles.md`](oracles.md); the hardware column is the evidence.
+listed in [`docs/dev/oracles.md`](oracles.md); the hardware column is the evidence.
 
 ## Summary
 
@@ -15,7 +15,7 @@ listed in [`docs/oracles.md`](oracles.md); the hardware column is the evidence.
 | (b) `probe_b_scxm3.gb` | how a mid-line SCX store lengthens mode 3 | +8 dots in a single one-M-cycle window at store dot 95 (DMG) / 91 (CGB); the `$07→$07` control never extends | photographed on GBA SP (IMG_3807), **not machine-read** — `photowarp.py` registration too coarse for a 4-dot reading |
 | (c) `probe_c_arbitrate.gb` (+`_scx3`, `_scx7`) | emission phase (BGP band edge) vs fetch-grid phase (LCDC.4 glitch column) on one frame | band edge and glitch column on one grid (table below) | photographed on GBA SP (IMG_3804–3806), **cannot be registered**: black background, no frame edge; needs corner marks in the ROM and a re-shoot |
 | (d) `probe_d_tdsel_*.gb` | CGB TILE_SEL arrival (`CGB_TDSEL_LATENCY`) | — | unrun |
-| (e) `g1_scx0.gb`, `g1_scx4.gb` | halt-wake PPU phase (`CGB_HALT_PPU_LEAD`), anchor line 16 | SCX 0 `32 40 40 48 …` (lead 0) / `40 40 48 48 …` (lead 1); SCX 4 `28 36 …` / `36 36 …` | **GBA SP: SCX 0 `24 32 32 40 40 48 48 56 56 64 64 71 71 79`; SCX 4 `20 28 28 36 36 45 45 53 53 61 61 69 69 77`** — dingbat 2 M out at lead 0, 4 M at lead 1 (docs/hwprobe-questions.md, g1) |
+| (e) `g1_scx0.gb`, `g1_scx4.gb` | halt-wake PPU phase (`CGB_HALT_PPU_LEAD`), anchor line 16 | SCX 0 `32 40 40 48 …` (lead 0) / `40 40 48 48 …` (lead 1); SCX 4 `28 36 …` / `36 36 …` | **GBA SP: SCX 0 `24 32 32 40 40 48 48 56 56 64 64 71 71 79`; SCX 4 `20 28 28 36 36 45 45 53 53 61 61 69 69 77`** — dingbat 2 M out at lead 0, 4 M at lead 1 (docs/dev/hwprobe-questions.md, g1) |
 
 ## (a) STAT read idiom
 
@@ -31,7 +31,7 @@ dingbat: DMG `0A / 09 / 09 / 09` (`LD A,(C)`@3, `LDH`@3, `LD A,(C)`@0,
 both columns flip at the same step deletes `STAT_M0_FIELD_TAIL` and
 `STAT_M0_TAIL_MAX_MC` and reopens the ~60 rows they reconcile. A CGB mode-0
 boundary one M-cycle earlier than the DMG's is a refuted model in
-`docs/gb-failure-triage.md` (40 device-equal gambatte families; dingbat: same
+`docs/dev/gb-failure-triage.md` (40 device-equal gambatte families; dingbat: same
 dot); the photo is the hardware word on it.
 
 ## (b) SCX mode-3 extension

@@ -19,7 +19,7 @@
 # reference, f2174 on dingbat-bios, and Sia's blink and the ring's pulse run on a phase that
 # never shares a frame afterwards; the village scene's glow keeps the
 # phase until the rooftop, where all three are identical again. Both
-# references pricing this kind of load cheaper is docs/playtest-bugs.md §63.
+# references pricing this kind of load cheaper is docs/dev/playtest-bugs.md §63.
 # The audio's two flagged windows: f1845 is the menu music's fade tail
 # (-30 dB in both references) that dingbat's dump, ~33 dB lower, quantizes
 # to digital silence; f3060 is a dialogue sound one frame after mgba's.

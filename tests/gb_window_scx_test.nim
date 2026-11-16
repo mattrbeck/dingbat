@@ -1,5 +1,5 @@
 ## Where a window that starts left of the screen sits, across WX x SCX & 7
-## (WIN_FINE_PAD, WIN_WX0_PHASE; docs/gb-failure-triage.md I6). Run standalone:
+## (WIN_FINE_PAD, WIN_WX0_PHASE; docs/dev/gb-failure-triage.md I6). Run standalone:
 ##   nimble test_gbwindowscx
 ##
 ## No ROM on disk: one program, assembled here from bytes, draws a window of
@@ -105,7 +105,7 @@ for cgb in [false, true]:
   for wx in 0 .. 8:
     for s in 0 .. 7:
       # WX = 0 with SCX & 7 in 1..6 (1..7 on a CGB) is a hardware question:
-      # DocBoy and SameBoy drop one more pixel there (docs/gb-failure-triage.md
+      # DocBoy and SameBoy drop one more pixel there (docs/dev/gb-failure-triage.md
       # I6, I8); Pan Docs and dingbat do not. Not asserted.
       if wx == 0 and s > 0 and (s < 7 or cgb): continue
       let got = black_run(wx, s, cgb)

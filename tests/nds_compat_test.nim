@@ -251,7 +251,7 @@ block hle_swi_cost:
 # tests/nds/tools/build_arm7_timing.sh): 256 passes of each loop, in bus
 # cycles. Main-RAM data accesses follow GBATEK's "DS Memory Timings" NDS7/DATA
 # row (N16 9, N32 10, S32 2: the reference runs are 3 cycles cheaper per
-# nonsequential access, docs/oracles.md); branches cost 3 cycles where
+# nonsequential access, docs/dev/oracles.md); branches cost 3 cycles where
 # GBATEK's WaitByLoop table implies 4 (docs/nds/accuracy.md, open).
 
 block arm7_timing:
@@ -363,7 +363,7 @@ block power_off:
 # ARM9 DMA timing (tests/nds/src/disp_dmatime, build_3d.sh): page 2 lists,
 # for 1..20 units, the bus cycles an immediate DMA holds the CPU. The cost
 # per unit (the step from n to n+1, averaged over n = 2..20) is the
-# reference runs' (docs/oracles.md): main RAM -> main RAM 18, -> VRAM 3,
+# reference runs' (docs/dev/oracles.md): main RAM -> main RAM 18, -> VRAM 3,
 # -> shared WRAM 2, -> I/O 2, VRAM -> main RAM 4, 16-bit units 2. Golden
 # Sun: Dark Dawn's title ran at 40 fps with the earlier estimate
 # (docs/nds/commercial.md).

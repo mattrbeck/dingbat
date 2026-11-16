@@ -1,4 +1,4 @@
-fifolog.s predictions, written 2026-10-14 before any console run (docs/playtest-bugs.md, the section on FIFO refills at timer periods 1-4).
+fifolog.s predictions, written 2026-10-14 before any console run (docs/dev/playtest-bugs.md, the section on FIFO refills at timer periods 1-4).
 s0 = TM1 at sample 0 (fifoffff.s's own read), extra0 = s0 - n - 6, gaps = the nine differences between consecutive samples (3 = no burst, 3 + L = an L-cycle burst before that read).
 toy: the four-rule model that fits fifoffff's k = 1, 2, 4 and tm/ob cells. k3data: k = 3 as the recorded timeline gives it (11-cycle stall, one CPU cycle, 8-cycle burst, 10-cycle burst at t = 56).
 dingbat / mgba: what the emulators answer today.

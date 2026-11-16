@@ -2,7 +2,7 @@
 ## GB core keeping the CGB's. Run standalone:
 ##   nimble test_psgagb
 ##
-## Every expected value here was read off the console (docs/gbatek-upstream.md
+## Every expected value here was read off the console (docs/dev/gbatek-upstream.md
 ## §1.14), so a change to `common/psg_channels.nim` that moves one is a
 ## regression on hardware, not a refit:
 ##

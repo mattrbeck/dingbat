@@ -352,7 +352,7 @@ class Relevance(unittest.TestCase):
         self.assertTrue(train.relevant(['src/dingbat/gba/ppu.nim']))
         self.assertTrue(train.relevant(['tools/playtest/scripts/abc.play']))
         self.assertTrue(train.relevant(['docs/x.md', 'nim.cfg']))
-        self.assertFalse(train.relevant(['docs/playtest-bugs.md', 'web/index.html', 'tools/romdiff.py']))
+        self.assertFalse(train.relevant(['docs/dev/playtest-bugs.md', 'web/index.html', 'tools/romdiff.py']))
         self.assertFalse(train.relevant(['tools/playtest/README.md', 'tools/playtest/tests/test_train.py']))
         # the driver is built from the GBA core and common/ only
         self.assertFalse(train.relevant(['src/dingbat/nds/arm9.nim', 'src/dingbat/frontend/ui.nim',

@@ -3,7 +3,7 @@
 @ tests/singlestep_arm7.nim excuses a known divergence by its encoding: one
 @ or two cells of sst.s / sstrisk.s settled each rule, and the rule then
 @ covers every vector case of that shape. These cells ask the console about
-@ the forms those cells left out (docs/hwprobe-sst.md, section 7): TSTP in
+@ the forms those cells left out (docs/dev/hwprobe-sst.md, section 7): TSTP in
 @ User mode, the other ALU ops writing r15 with S set, the byte, T,
 @ register-offset and Rd = r15 forms of an r15 base with writeback, the
 @ other LDM/STM addressing modes with `^` and with r15 in the list, the

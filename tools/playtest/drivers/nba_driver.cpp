@@ -36,7 +36,7 @@
 // do with --rtc; without --rtc it answers the host clock as before. Left on
 // the host clock, Shin Bokura no Taiyou's boot (a date-dependent soft-float
 // computation) took 53 frames instead of 60 and its first screens ran 7
-// frames ahead of dingbat's (docs/playtest-bugs.md, "Shin Bokura no Taiyou:
+// frames ahead of dingbat's (docs/dev/playtest-bugs.md, "Shin Bokura no Taiyou:
 // the sensor notice").
 static long long g_rtc_epoch = -1;
 extern "C" time_t time(time_t* out) {
@@ -90,7 +90,7 @@ struct CaptureVideo final : nba::VideoDevice {
 // the right stream with its last 0.24% missing, and the audio check, which
 // spreads each dump over the run's frames, read this emulator's audio
 // progressively early: 4 frames by f1750, 25 by Driv3r's end, more on longer
-// scripts (docs/playtest-bugs.md, "Driv3r's audio: the second reference's
+// scripts (docs/dev/playtest-bugs.md, "Driv3r's audio: the second reference's
 // capture ran 0.24% short").
 struct CaptureAudio final : nba::AudioDevice {
   void* userdata = nullptr;
@@ -214,7 +214,7 @@ int main(int argc, char** argv) {
     // (CPSR 0x1F); the core's skipped boot enters with both masked (0xDF).
     // A game that never writes the I bit itself then waits for its first
     // interrupt forever: V-Rally 3 spun at a timer flag from f100 and showed
-    // no picture, as did Driv3r and Asterix XXL (docs/playtest-bugs.md §94)
+    // no picture, as did Driv3r and Asterix XXL (docs/dev/playtest-bugs.md §94)
     static nba::SaveState st;
     core->CopyState(st);
     st.arm.regs.cpsr &= ~0xC0u;
@@ -228,12 +228,12 @@ int main(int argc, char** argv) {
   // handler at the same point, RAM is read at the same point, and the picture
   // is the frame just drawn. Running kCyclesPerFrame a call instead stopped
   // at a drifting line before 160 (142-159), so the picture shown was the
-  // previous frame's (docs/playtest-bugs.md, "The second reference's pictures
+  // previous frame's (docs/dev/playtest-bugs.md, "The second reference's pictures
   // are a frame stale"). Whole lines to line 159, then 4-cycle steps until
   // VCOUNT reaches the V-blank lines. Not until it reads 160: a DMA that
   // starts on line 159 runs as one step past 160 (Mega Man Battle Network
   // 2's boot: 16k cycles, to line 172), and waiting for 160 ran a second
-  // frame into the first (docs/playtest-bugs.md §83, "Mega Man Battle Network
+  // frame into the first (docs/dev/playtest-bugs.md §83, "Mega Man Battle Network
   // 2"). dingbat and mGBA end such a frame at the DMA's end too.
   //
   // The core runs a DMA burst whole: a Run that starts one runs to its end,
@@ -243,7 +243,7 @@ int main(int argc, char** argv) {
   // to the next line 160, and the one harness frame held three V-blank
   // starts. Every later frame was then two frames ahead of dingbat's and
   // mGBA's, whose frames end at the V-blank start inside the burst
-  // (docs/playtest-bugs.md §82, "Super Mario Advance 3: 1-1 after a soft
+  // (docs/dev/playtest-bugs.md §82, "Super Mario Advance 3: 1-1 after a soft
   // reset"). The V-blank ends a frame covered are counted (one presentation
   // each); the starts it swallowed are owed, and the next harness frames end
   // at once, one per start, so frame n is the n-th V-blank start again.

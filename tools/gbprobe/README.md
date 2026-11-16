@@ -1,11 +1,11 @@
 # tools/gbprobe — hardware probe ROMs and the harness that runs them
 
-Probe ROMs for the open GB PPU questions in `docs/gb-failure-triage.md` and
-`docs/hwprobe-questions.md`, plus a harness that runs any GB ROM through dingbat and two
+Probe ROMs for the open GB PPU questions in `docs/dev/gb-failure-triage.md` and
+`docs/dev/hwprobe-questions.md`, plus a harness that runs any GB ROM through dingbat and two
 black-box oracle engines (SameBoy via `sameboy_shot.c`, DocBoy via `docboy_shot.cpp`) and
 reads the answer off the screen. No constant from either engine is copied into dingbat,
 and three engines agreeing is a comparison, not evidence: a mechanism built on it ships
-behind a flag and is listed in [`docs/oracles.md`](../../docs/oracles.md) until a
+behind a flag and is listed in [`docs/dev/oracles.md`](../../docs/dev/oracles.md) until a
 hardware photo settles it.
 
 The ROMs are the permanent artifact: they report raw values, contain no expectation,
@@ -203,8 +203,8 @@ Constants are overridable at assembly: `-DBASE= -DLEAD= -DOBJX0= -DWXON=` (probe
 
 ## Results
 
-`docs/gb-probe-oracle-results-2026-08-11.md`; hardware runs in `docs/hwprobe.md` and
-`docs/flashcart-runbook.md`.
+`docs/dev/gb-probe-oracle-results-2026-08-11.md`; hardware runs in `docs/dev/hwprobe.md` and
+`docs/dev/flashcart-runbook.md`.
 
 ## One ROM for the flashcart: `probes_all.gb`
 

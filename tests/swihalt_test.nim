@@ -8,7 +8,7 @@
 ## With Nintendo's image mapped and the HLE taking SWIs (hle_after_bios, or
 ## use_hle with a BIOS file given) a Halt from ROM went into the HLE, which
 ## parked in the image's code over its own three-word SVC frame: the
-## image's return pops four (docs/playtest-bugs.md, "Metroid Fusion hung at
+## image's return pops four (docs/dev/playtest-bugs.md, "Metroid Fusion hung at
 ## boot over Nintendo's BIOS"). Runs under the HLE BIOS always; over a
 ## stand-in image made here (no Nintendo code in it) in all three modes,
 ## which is enough to see where a cartridge Halt goes: to the image's own

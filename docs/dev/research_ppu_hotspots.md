@@ -67,4 +67,4 @@ workloads are not a proxy: FireRed measures +20 % from boot and +32 % in game.
 3. Uniform-window fast path — ~+2 % on the two best-selling titles.
 4. Compositor rewrite — +9.4 % ceiling but three inner loops and the
    renderer's most correctness-sensitive code; do 1–3 first
-   (`docs/performance.md`).
+   (`docs/dev/performance.md`).

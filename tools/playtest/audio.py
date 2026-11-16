@@ -31,7 +31,7 @@ RATE = 32768
 # runs at this rate; one that does not was not pulled in step with its core
 # (the second reference's capture counted the cycles it asked for, not those
 # run, and lost 0.24%: its windows read audio progressively early;
-# docs/playtest-bugs.md, "Driv3r's audio: the second reference's capture")
+# docs/dev/playtest-bugs.md, "Driv3r's audio: the second reference's capture")
 NOMINAL_PER_FRAME = RATE * 280896 / 16777216
 RATE_TOLERANCE = 0.0005     # 0.05%: 5 frames over a 10000-frame run
 WINDOW_FRAMES = 15          # quarter of a second

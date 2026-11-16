@@ -14,7 +14,7 @@
 # after scene loads at f3829-f10335. 06 is the same battle. The second
 # reference takes those loads as dingbat does (its count is dingbat's +1 from
 # a boot V-blank lead), and +1 draws the pose mGBA's +5 does (§71).
-# docs/playtest-bugs.md, "Mario & Luigi". A still screen would be a steadier
+# docs/dev/playtest-bugs.md, "Mario & Luigi". A still screen would be a steadier
 # checkpoint.
 [new]
 wait 1102

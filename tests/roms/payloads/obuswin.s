@@ -5,7 +5,7 @@
 @ run), the next one sees the DMA's word, the one after that is back to an
 @ opcode. dingbat holds it one instruction too long. But "one instruction" is
 @ a description of three samples, not a mechanism, and the mGBA suite's last
-@ red row turns on the mechanism: docs/mgba-suite-verdicts.md reasons that on
+@ red row turns on the mechanism: docs/dev/mgba-suite-verdicts.md reasons that on
 @ hardware "the DMA's word survives on the data bus only until the next
 @ gamepak fetch", so in a ROM-resident loop the window is a few cycles in the
 @ middle of an instruction rather than a whole instruction, and concludes

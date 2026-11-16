@@ -310,7 +310,7 @@ jobs:
         # higher-priority channel could preempt is booked again at the
         # burst's end; for a raise from before the burst it was not, and the
         # interrupt waited with IME, CPSR.I and IE open (Famicom Mini Nazo
-        # no Murasamejou, docs/playtest-bugs.md §100). Committed ROM.
+        # no Murasamejou, docs/dev/playtest-bugs.md §100). Committed ROM.
         shell: bash
         run: ./dingbat_irqburst_test
       - name: GB HBlank-DMA re-entrancy (Pokemon Crystal boot crash)

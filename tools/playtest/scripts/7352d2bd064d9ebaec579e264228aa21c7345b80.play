@@ -10,7 +10,7 @@
 # DOWN for eggs), over the bush hill, onto the white rock, jump + flutter onto
 # the first bush column (column_top), flutter right.
 # The soft reset (A+B+SELECT+START at f150, after the first boot's EEPROM
-# format) is there for docs/playtest-bugs.md "Super Mario Advance 3: 1-1
+# format) is there for docs/dev/playtest-bugs.md "Super Mario Advance 3: 1-1
 # after a soft reset" (and §36): on a blank cart the boot formats the EEPROM
 # with 196 polled block writes, so the frame the boot ends on is the chip's
 # programming time (dingbat GBATEK's 108368 cycles, mgba ~115000, the second

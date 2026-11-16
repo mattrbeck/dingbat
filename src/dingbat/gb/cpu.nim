@@ -238,7 +238,7 @@ proc cpu_lock*(cpu: GbCpu) =
 # (mooneye acceptance/interrupts/ie_push); the taken IF bit clears inside the
 # fifth M-cycle, PC's low byte on the bus (IRQ_SAMPLE_T).
 # Clean-room: derived from test ROM sources/outputs and dingbat's own trace
-# runs; no emulator source consulted. docs/gb-derivations.md, "The dispatch
+# runs; no emulator source consulted. docs/dev/gb-derivations.md, "The dispatch
 # pushes in its fourth and fifth M-cycles".
 const DISPATCH_PUSH_MCYCLE* {.intdefine.} = 4
   ## Which of the dispatch's five M-cycles writes PC's high byte (low byte
@@ -490,7 +490,7 @@ const STOP_WAKE_PPU_DOTS* {.intdefine.} = 0
   ## exit delay and hardware is unasked. DocBoy's DMG STOP-and-wake
   ## `interactive/*` tests pass at 131076 only (a fixed restart, which a ROM
   ## for a hand on a key can encode). Open question:
-  ## tools/gbprobe/probe_l_stopwake.gb (docs/gb-failure-triage.md I13).
+  ## tools/gbprobe/probe_l_stopwake.gb (docs/dev/gb-failure-triage.md I13).
 
 proc cpu_stop_tick(cpu: GbCpu; gb: GB) {.noinline.} =
   ## One step of STOP mode (stop_instr, memory.nim). Pan Docs: "STOP is

@@ -2,7 +2,7 @@
 
 `src/dingbat/gb/fifo_ppu.nim`. Spec:
 [Pan Docs, Pixel FIFO](https://gbdev.io/pandocs/pixel_fifo.html). The
-per-dot derivations and every knob are in `docs/gb-derivations.md`; this
+per-dot derivations and every knob are in `docs/dev/gb-derivations.md`; this
 file lists where the renderer follows the page and where it departs.
 
 ## Background fetcher

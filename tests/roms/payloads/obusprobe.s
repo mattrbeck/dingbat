@@ -1,6 +1,6 @@
 @ obusprobe.s — what does a read of unmapped memory actually return?
 @
-@ Two rows of docs/hwprobe-questions.md that need no cartridge and no camera,
+@ Two rows of docs/dev/hwprobe-questions.md that need no cartridge and no camera,
 @ and are pure reads, so nothing here can leave the console anywhere but
 @ where it started.
 @

@@ -76,7 +76,7 @@ const
   #        (IRQ_PIPE_PER_SOURCE: pipe2_raised, pipe2_new, pipe2_at)
   # GB:  1 initial · 2 serial port section · 3 PPU dots_since_frame
   #      · 4 CPU undefined-opcode lockup flag · 5 Super Game Boy section
-  #      · 6 the batched carry (docs/savestate_compat.md): STOP mode, the
+  #      · 6 the batched carry (docs/dev/savestate_compat.md): STOP mode, the
   #        machine section (revision, STOP operand latch, parked LYC, APU
   #        power-on stamp), $FEA0-$FEFF / RP / SVBK readback, the APU tick
   #        grids and per-channel latches, the PPU's LCD-on frame flag and

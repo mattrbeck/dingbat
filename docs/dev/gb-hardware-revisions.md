@@ -16,7 +16,7 @@ at its declaration in `GbQuirks`.
   revision: a flag names the behaviour at the site, two revisions that share
   a behaviour share a flag instead of a set literal that breaks when a
   revision is inserted, and a flag is a load where a range check in a hot
-  path can move clang's inline decision (`docs/gb_oam_dma_cost.md`).
+  path can move clang's inline decision (`docs/dev/gb_oam_dma_cost.md`).
 - **`GbBootModel` is derived**, not parallel: it selects a boot-handoff
   register table, and mooneye's filenames show that table is coarser than
   the silicon (one `boot_regs-dmgABC`, one `boot_regs-cgbABCDE`).
@@ -64,7 +64,7 @@ ran on the default, and the pixel references above are C.
 
 Resolution happens once at construction. The flag reads sit in register-write
 paths (NRx2, NRx4, PCM reads, LY/STAT edges), none per dot. Measured at the
-retired-instruction floor (`docs/gb_oam_dma_cost.md` method).
+retired-instruction floor (`docs/dev/gb_oam_dma_cost.md` method).
 
 ## 2. The flags
 
@@ -72,7 +72,7 @@ retired-instruction floor (`docs/gb_oam_dma_cost.md` method).
 |---|---|---|
 | `length_clock_any_nrx4` | CGB 0, A/B | SameSuite `channel_{1,2,4}_extra_length_clocking-cgb0B`, `channel_3_extra_length_clocking-cgb0` (§2.1) |
 | `mixer_write_immediate` | CGB D, E | mealybug `m3_bgp_change` `_cgb_c` vs `_cgb_d` (one pixel per write edge = the `CGB_MIXER_LATENCY` dot); LCDC keeps the dot on every revision because the LCDC ROMs' two captures are byte-identical |
-| `scy_fetch_latch` | CGB D, E | mealybug `m3_scy_change`: live-per-read is pixel-exact on `_cgb_c` and 6217 px wrong on `_cgb_d`; a per-fetch latch at the map read is the exact inverse (`docs/gb-mealybug-sources.md` §3.4) |
+| `scy_fetch_latch` | CGB D, E | mealybug `m3_scy_change`: live-per-read is pixel-exact on `_cgb_c` and 6217 px wrong on `_cgb_d`; a per-fetch latch at the map read is the exact inverse (`docs/dev/gb-mealybug-sources.md` §3.4) |
 | `pcm_read_edge_zero` | CGB 0–C | SameSuite `channel_1_freq_change_timing-{A,cgb0BC,cgbDE}`: cells 4 and 15 put a PCM12 read on a rising duty step and read `$0f` only in the `-cgb0BC` table; `apu/README.md` states the scope (§2.3). The one flag true on the default |
 | `square_reload_halftick` | CGB D, E | see declaration |
 | `lyc_compare_hold` | CGB D, E, AGB | see declaration |
@@ -117,7 +117,7 @@ registers PCM12 and PCM34 report a glitched PCM amplitude for channels 1, 2
 and 4 if they're read in the same M-cycle they change." `pcm_read_edge_zero`
 models channel 1's rising-edge case the `freq_change_timing` ladder pins;
 channels 2 and 4 are not pinned by any ROM in the tree (channel 2 is given
-channel 1's arm, `PCM12_CH2_EDGE_ZERO`, docs/gb-derivations.md section 11).
+channel 1's arm, `PCM12_CH2_EDGE_ZERO`, docs/dev/gb-derivations.md section 11).
 
 ## 3. Save states
 
@@ -129,7 +129,7 @@ of `$FEA0–$FEFF`. Reachable today only from the test
 harness, which does not save states. The fix is one byte, `revision`, next to
 `cgb_enabled` in `GB_SEC_MEM`, older states reading back the default, going
 through `gb_set_revision` on load; it rides the batched GB payload bump listed
-in `docs/samesuite-apu.md` "Unserialized state".
+in `docs/dev/samesuite-apu.md` "Unserialized state".
 
 ## 4. What a revision does not fix
 
@@ -160,7 +160,7 @@ in `docs/samesuite-apu.md` "Unserialized state".
 - **GBMicrotest's SCX family** carries two overhead rows (DMG and AGS) in
   its own header while every ROM is built `-DDMG`; the split is not a
   revision axis but the halt-woken versus running reader of one edge —
-  `docs/gb-test-suite-sources.md`, "GBMicrotest".
+  `docs/dev/gb-test-suite-sources.md`, "GBMicrotest".
 - **`channel_1_freq_change_timing-A` and `-cgbDE`** share one expected table;
   both are red on the default, so that is a default-machine bug, ahead of
   any revision work.

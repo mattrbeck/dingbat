@@ -17,7 +17,7 @@
 @ that ignores byte writes to DISPSTAT, or lets one clobber the status
 @ flags, differs.
 @ PROVENANCE: AGB SP, gbaedge page 34 IOBYTE2 (session 4, CRC AF19;
-@ agb-sp-4.txt); docs/hwprobe-results-agb.md "22 IOBYTE2".
+@ agb-sp-4.txt); docs/dev/hwprobe-results-agb.md "22 IOBYTE2".
 run_iobyte2:
     push {r4-r8, lr}
     ldr r8, =SLOT

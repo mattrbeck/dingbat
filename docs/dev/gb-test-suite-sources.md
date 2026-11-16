@@ -39,7 +39,7 @@ license; the column above is from the upstream repositories where one exists.
 
 The verdict mechanism per suite (`TestMode` in `tests/dingbat_test_runner.nim`),
 the device each suite is scored on and the screenshot conventions are in
-[`tests/README.md`](../tests/README.md), "Which suites run, and how each is
+[`tests/README.md`](../../tests/README.md), "Which suites run, and how each is
 scored". One fact about the shootout's own list belongs here: it scores 264
 rows of which three ship no reference PNG and are classed `INFO`
 (`acid/which.gb` on DMG and CGB, `daid/rom_and_ram.gb`), so its denominator is
@@ -90,12 +90,12 @@ DMG/MGB/SGB/SGB2, so not all tests pass on CGB/AGB/AGS."
 ## Rows deliberately not scored
 
 The runner's `NotScored` ledger is the record, printed as "Deliberately not
-scored" at the end of [`tests/results.md`](../tests/results.md); each entry
+scored" at the end of [`tests/results.md`](../../tests/results.md); each entry
 names its reason and its builder. Two things it does not say:
 
 * The SGB rows. `samesuite/sgb/*` are scored (on `--sgb`; the adapter is
-  `docs/sgb.md`). `cpp/sgb-ext-test` is not built as a row: its `NotScored`
-  entry predates the adapter, and `docs/sgb.md` records the adapter passing
+  `docs/dev/sgb.md`). `cpp/sgb-ext-test` is not built as a row: its `NotScored`
+  entry predates the adapter, and `docs/dev/sgb.md` records the adapter passing
   it byte-exact outside the runner. Wiring it in is a runner change.
 * Not a skip, but easy to misread: GBMicrotest's `hblank_int_scx*` and
   `int_hblank_halt_scx*` families encode a different overhead row from their
@@ -107,7 +107,7 @@ Per claim (window enable cleared in mode 3, the 6-dot window startup, WX = 0
 with SCX > 0, the WX 4/5/6 reactivation pixel, SCY sampling per revision, the
 SCX high/low split, the CGB TILE_SEL glitches) and per test, with the dingbat
 mechanism named against each:
-[`docs/gb-mealybug-sources.md`](gb-mealybug-sources.md) ("The suite's PPU
+[`docs/dev/gb-mealybug-sources.md`](gb-mealybug-sources.md) ("The suite's PPU
 documentation" and "Per-test: what the source asserts").
 
 ## Mooneye: header claims that are not in the file name
@@ -151,7 +151,7 @@ a README; `dma/`, `ppu/`, `sgb/` and `interrupt/` are documented solely by
 per-file headers.
 
 The `apu/` sub-suite — its per-revision README, every ROM's stated claim
-and the model built on it — is [`docs/samesuite-apu.md`](samesuite-apu.md).
+and the model built on it — is [`docs/dev/samesuite-apu.md`](samesuite-apu.md).
 The non-APU claims dingbat is built on:
 
 | test | claim, quoted | dingbat |
@@ -163,9 +163,9 @@ The non-APU claims dingbat is built on:
 
 ## SGB
 
-The SGB adapter (`src/dingbat/gb/sgb.nim`, `docs/sgb.md`) implements the
+The SGB adapter (`src/dingbat/gb/sgb.nim`, `docs/dev/sgb.md`) implements the
 packet transport and `MLT_REQ`; the three ROMs below pin what Pan Docs leaves
-open, and `docs/sgb.md` "Transport" and "`MLT_REQ` joypad IDs" carry the
+open, and `docs/dev/sgb.md` "Transport" and "`MLT_REQ` joypad IDs" carry the
 rules read off them:
 
 - `samesuite/sgb/command_mlt_req.asm`: "Initial value always reads out as
@@ -204,7 +204,7 @@ it.** `500-scx-timing.s` / `minimal.s` header:
 in ROMs all assembled `-DDMG`. dingbat implements the DMG row; the AGS-row
 families pass on it because a halt-woken reader meets the mode-0 edge at a
 different point of its M-cycle from a running one (`M0_HALT_BLIND_DOTS`,
-`docs/gb-failure-triage.md` A5), not because half the suite runs as an AGS.
+`docs/dev/gb-failure-triage.md` A5), not because half the suite runs as an AGS.
 
 **Line 153** (`line_153_ly_{a..d}.s`): LY reads 152 at `nops 4`, 153 at
 `nops 5`, and at `nops 6` `.ifdef DMG / RESULT 0 / .else / RESULT 153` — on
@@ -417,7 +417,7 @@ asserts; use them to diagnose a partial failure:
 Not telling"); its source is an uncommented 15,340-line disassembly. The only
 artefacts are `img/reference.png` and `img/photo.jpg`. The reference was
 photographed against an AGS-101 and is hardware-correct
-(docs/flashcart-runbook.md, IMG_3803).
+(docs/dev/flashcart-runbook.md, IMG_3803).
 
 `little-things-gb/firstwhite` README: "This program should display a white
 screen … If you get text, your emulator needs to be fixed and probably shows

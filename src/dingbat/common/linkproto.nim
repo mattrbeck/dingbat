@@ -2,7 +2,7 @@
 # conversion: length-prefixed little-endian frames with fixed field layouts
 # (`u32le payload_length`, then the payload; first payload byte is the message
 # type), so any transport and any language produces the same bytes. Field
-# layout is documented in docs/multiplayer.md; keep the two in sync.
+# layout is documented in docs/dev/multiplayer.md; keep the two in sync.
 #
 # Clock discipline: CLOCK, TRANSFER and REPLY carry the sender's emulated
 # clock (u64le cycles since link start). Each side free-runs but never more

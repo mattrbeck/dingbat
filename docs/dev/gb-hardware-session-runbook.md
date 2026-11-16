@@ -1,9 +1,9 @@
 # GB hardware session runbook (probe carts)
 
 How to run the `tools/gbprobe/` probe carts on real hardware. Questions:
-docs/hwprobe-questions.md; predictions and results per probe:
-docs/gb-probe-oracle-results-2026-08-11.md; the full kit (gbedge, suite ROMs,
-folders): docs/flashcart-runbook.md.
+docs/dev/hwprobe-questions.md; predictions and results per probe:
+docs/dev/gb-probe-oracle-results-2026-08-11.md; the full kit (gbedge, suite ROMs,
+folders): docs/dev/flashcart-runbook.md.
 
 | device | needed for |
 |---|---|
@@ -26,7 +26,7 @@ renders raw hex and bakes no expectation.
    (e) (`find_panel.py` + `photowarp.py` + `read_probe_e.py`; a moire-hit shot
    needs the per-row median read). All lift the font glyphs from the ROM, so
    they read photos and emulator PPMs alike.
-4. Transcribe the values into docs/gb-probe-oracle-results-2026-08-11.md next
+4. Transcribe the values into docs/dev/gb-probe-oracle-results-2026-08-11.md next
    to the prediction.
 
 ## What each outcome decides
@@ -41,4 +41,4 @@ renders raw hex and bakes no expectation.
   read from one anchor; four dots apart → the emission/fetch-grid split is
   real. Needs corner registration marks in the ROM first.
 - **(d)** per-DMG-unit BGP OR pixel: each unit is a data point. **(e)** done
-  on the SP (docs/hwprobe-questions.md, g1); DMG/CGB arms unrun.
+  on the SP (docs/dev/hwprobe-questions.md, g1); DMG/CGB arms unrun.

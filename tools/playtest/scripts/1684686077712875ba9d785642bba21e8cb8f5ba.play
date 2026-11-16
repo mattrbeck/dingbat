@@ -21,7 +21,7 @@
 # Y past 159 only, and the masks blacked out the top 26 lines from the title
 # on (7 MAJOR); now a line is inside an OBJ when (line - Y) & 0xFF < height
 # (ppu.nim obj_row) and every configuration passes, every checkpoint
-# IDENTICAL (docs/playtest-bugs.md §97).
+# IDENTICAL (docs/dev/playtest-bugs.md §97).
 
 [new]
 wait 260

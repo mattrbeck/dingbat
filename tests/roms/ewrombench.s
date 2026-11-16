@@ -1,7 +1,7 @@
 @ ewrombench.s -- EWRAM data accesses from Thumb code fetched FROM the
 @ cartridge, across wait settings with the prefetcher on and off.
 @
-@ The question (docs/playtest-bugs.md §63, §78, §88, §102, Banjo Pilot's
+@ The question (docs/dev/playtest-bugs.md §63, §78, §88, §102, Banjo Pilot's
 @ select_cup): what does an EWRAM load or store cost when the code issuing it
 @ comes from the gamepak with the prefetcher on? slotexec.s answered it on the
 @ console at WS0 4/2 (dingbat right, mGBA charging nothing), but an empty slot

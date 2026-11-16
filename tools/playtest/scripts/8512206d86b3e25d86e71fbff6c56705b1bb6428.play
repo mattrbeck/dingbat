@@ -10,7 +10,7 @@
 # FLASH512. [load]: title > CONTINUE resumes the map, A opens Ryusei's menu.
 # The save ran 120 frames on mgba, 90 on dingbat-bios and the second reference, and the music
 # comes back after it at f5930 in dingbat, f5940 in the second reference and f5960 in mgba:
-# the flash chip's program/erase time (docs/playtest-bugs.md §64, §35:
+# the flash chip's program/erase time (docs/dev/playtest-bugs.md §64, §35:
 # dingbat's flash has no busy state, mgba holds one after an erase, the second reference
 # answers as an SST chip). That is the audio flagged from f5925 on.
 # The three battery files differ in 4 frame-count words (and the checksum):

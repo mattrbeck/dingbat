@@ -1,6 +1,6 @@
 # gbatek-upstream: GBA corrections to send upstream, and what hardware must settle first
 
-The GBA counterpart to `docs/pandocs-upstream.md`. Everything in §1 is
+The GBA counterpart to `docs/dev/pandocs-upstream.md`. Everything in §1 is
 measured on Matt's AGB SP over the GB-Link rig (`tools/hwlink`), with the
 payload that produces it named so anyone can reproduce the table rather than
 take our word for it. §2 is not settled yet.

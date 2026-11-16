@@ -11,7 +11,7 @@
 # 4 KB flash sector byte by byte, polling after each; dingbat's flash has no
 # busy time, so boot ends 3 frames before mgba's and the game's frame counter
 # runs on the other parity. Needs the real chip's program time measured:
-# docs/playtest-bugs.md, "Advance Wars: first-boot flash writes".
+# docs/dev/playtest-bugs.md, "Advance Wars: first-boot flash writes".
 [new]
 wait 664
 press A hold=3

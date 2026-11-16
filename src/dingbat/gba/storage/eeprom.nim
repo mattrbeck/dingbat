@@ -6,7 +6,7 @@ const EEPROM_SETTLE_CYCLES {.intdefine.} = 108368
   ## new data is programmed". The ready poll reads 0 while settling.
   ## A chip's analog time, not a console constant: Super Mario Advance 3
   ## formats a blank cart with 196 block writes and carries the total into
-  ## its frame phase (docs/playtest-bugs.md). The define lets a build try a measured value
+  ## its frame phase (docs/dev/playtest-bugs.md). The define lets a build try a measured value
   ## (tests/roms/payloads/eesettle.s on the cart) without an edit.
 
 proc eeprom_now(ep: EEPROM): CycleCount {.inline.} =
@@ -117,7 +117,7 @@ method `[]=`*(ep: EEPROM; address: uint32; value: uint8) =
     # a read already addressed keeps its data, and a write's stop bit counts
     # as sent; a write cut short keeps the bits it got (Assumed beyond the
     # pin-out). Columns Crown's boot (stray stores before its first command
-    # DMA, docs/playtest-bugs.md §95) pins it; tests/roms/payloads/eestray.s on a cart would settle the
+    # DMA, docs/dev/playtest-bugs.md §95) pins it; tests/roms/payloads/eestray.s on a cart would settle the
     # rest.
     if esAddress in ep.state or esWrite in ep.state:
       ep.state = {esReady}

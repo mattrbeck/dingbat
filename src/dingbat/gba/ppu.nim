@@ -165,8 +165,8 @@ proc start_line*(ppu: PPU) =
 # one DISPSTAT read a swept number of NOPs after a V-count entry; the VCOUNT
 # edge and the flag's fall land on our cycle, the rise (and the H-blank DMA
 # write and interrupt) one later. Seven-cycle polls (linegeo.s) cannot see
-# it. The mGBA suite's "DMA Prefetch Break" fails at 46. docs/gbatek-upstream.md
-# 1.9, docs/playtest-bugs.md section 25.
+# it. The mGBA suite's "DMA Prefetch Break" fails at 46. docs/dev/gbatek-upstream.md
+# 1.9, docs/dev/playtest-bugs.md section 25.
 const HBLANK_FLAG_DELAY {.intdefine.} = 47
 
 # Cycles from a PPU interrupt being raised to the CPU recognising it; one
@@ -184,7 +184,7 @@ const LINE_IRQ_SYNC_DELAY {.intdefine.} = PPU_IRQ_SYNC_DELAY + VCOUNT_MATCH_DELA
 const VBLANK_IRQ_SYNC_DELAY {.intdefine.} = PPU_IRQ_SYNC_DELAY
 
 # An H-blank DMA is requested off the H-blank flag, not the end of drawing:
-# AGB SP, gbaedge HDMAPHASE (docs/hwprobe-results-agb.md 32) puts its write
+# AGB SP, gbaedge HDMAPHASE (docs/dev/hwprobe-results-agb.md 32) puts its write
 # 48 cycles after a request at 960 would. The 2 is measured: breakram.s
 # stamps the write to the cycle at flag + 2 (two lines, two channels).
 const HBLANK_DMA_REQUEST_DELAY {.intdefine.} = 2
@@ -595,7 +595,7 @@ proc obj_row(g: ObjGeometry; line: int): int {.inline.} =
   ## where GBATEK adds "it is then NOT displayed at the bottom". OPEN: gbaedge
   ## page 38's 2026-09-04 photo (a 128-tall OBJ at Y=130) showed lines 130-159
   ## and nothing at the top, which this test contradicts; re-shoot the page
-  ## (docs/hwprobe-questions.md, the 2026-10-16 OBJ row). Any other height never reaches
+  ## (docs/dev/hwprobe-questions.md, the 2026-10-16 OBJ row). Any other height never reaches
   ## both ends, so only that case differs from a plain signed Y.
   (line - g.y) and 0xFF
 
@@ -641,7 +641,7 @@ proc render_sprites_impl(ppu: PPU; force_scan: bool) =
   # (GBATEK "LCD OBJ Overview"). A sprite costs `width` cycles, affine 10 +
   # 2*width over its drawn box; later OAM entries past the budget do not
   # render, but the one that exhausts it draws fully (AGB SP, gbaedge page 37
-  # OBJBUDGET, docs/hwprobe-results-agb.md session 5). Famicom Mini FDS carts
+  # OBJBUDGET, docs/dev/hwprobe-results-agb.md session 5). Famicom Mini FDS carts
   # park masking sprites at the end of OAM that hardware has no time to draw.
   var obj_cycles = if ppu.dispcnt.hblank_interval_free: 954 else: 1210
   let vc = int(ppu.vcount)
@@ -720,7 +720,7 @@ proc render_sprites_impl(ppu: PPU; force_scan: bool) =
         offset += tex_x shr 3
         var pal_idx: uint32
         # OBJ character fetches wrap within the 32K of OBJ VRAM (AGB SP,
-        # gbaedge page 38 OBJGEOM, docs/hwprobe-results-agb.md session 5).
+        # gbaedge page 38 OBJGEOM, docs/dev/hwprobe-results-agb.md session 5).
         if bit(sprite.attr0, 13):  # 8bpp
           # GBATEK "LCD OBJ - OAM Attributes", OBJ Tile Number: in 256-colour
           # mode "the lower bit of the tile number should be zero (in
@@ -959,7 +959,7 @@ proc bgr16_pack*(v: uint64): uint16 {.inline.} =
 # the rounding): alpha min(31, (t*EVA + b*EVB) >> 4), one shift after the
 # sum; darken t*(16-EVY) >> 4; brighten t + ((31-t)*EVY >> 4). Coefficients
 # above 16 act as 16. Truncating each alpha term, or subtracting a truncated
-# t*EVY/16, is a step off. docs/hwprobe-questions.md "Colour special effects".
+# t*EVY/16, is a step off. docs/dev/hwprobe-questions.md "Colour special effects".
 proc blend_colors*(ppu: PPU; top_u16, bot_u16: uint16; blend_mode: int): uint16 =
   case blend_mode
   of 0: top_u16  # None
@@ -1144,7 +1144,7 @@ proc composite_span(ppu: PPU; row_base: uint32; lo, hi: int;
   # blend with a 2nd target below works even where the window's colour-effect
   # bit is clear; everything else needs the bit. So an effects-off span keeps
   # only that blend: its 1st-target selections are cleared (w.sel1 above,
-  # sel1_obj/sel1_bd below). docs/playtest-bugs.md, "Semi-transparent OBJ
+  # sel1_obj/sel1_bd below). docs/dev/playtest-bugs.md, "Semi-transparent OBJ
   # under an effects-off window".
   let semi_obj = obj_enable and ppu.line_sprite_blend
   let can_blend =
@@ -1459,7 +1459,7 @@ proc `[]`*(ppu: PPU; io_addr: uint32): uint8 =
   of 0x004:
     # The V-count match flag is a live compare, VCOUNT_MATCH_DELAY behind
     # VCOUNT; a write to the setting shows at once (AGB SP, breakram.s;
-    # docs/gbatek-upstream.md 1.9).
+    # docs/dev/gbatek-upstream.md 1.9).
     var line = int(ppu.vcount)
     if int64(ppu.gba.scheduler.cycles) - ppu.line_start_cycle < VCOUNT_MATCH_DELAY:
       line = (line + 227) mod 228
@@ -1507,7 +1507,7 @@ proc write_dispstat(ppu: PPU; io_addr: uint32; value: uint8) =
   if io_addr == 0x004:
     # Writable low-byte bits are 3-5 (the IRQ enables): bits 0-2 are live
     # flags and bits 6-7 do not latch (gbaedge IOBYTE/IOBYTE2,
-    # docs/hwprobe-results-agb.md)
+    # docs/dev/hwprobe-results-agb.md)
     let preserved = uint8(toU16(ppu.dispstat)) and 0x07'u8
     write(ppu.dispstat, (value and 0x38'u8) or preserved, 0)
   else:

@@ -144,7 +144,7 @@ class Executor:
         frame = self.emu.frame
         self.emu.shot(path)
         # The first frames after it one at a time, each shot: on a screen
-        # drawn as fields that take turns (docs/playtest-bugs.md §62) they
+        # drawn as fields that take turns (docs/dev/playtest-bugs.md §62) they
         # are the other fields, which classify judges too. Kept only then.
         after, shots = [], []
         for i in range(1, min(window, classify.MAX_FIELDS - 1) + 1):

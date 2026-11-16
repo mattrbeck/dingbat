@@ -3,7 +3,7 @@
 Status of the geometry engine's timing, the render budget, SWAP_BUFFERS,
 the main-memory display FIFO (DMA mode 4) and display capture edge cases.
 Hardware facts are GBATEK unless marked; values settled or contradicted by
-black-box reference runs are in docs/oracles.md ("NDS 3D engine"); the rest
+black-box reference runs are in docs/dev/oracles.md ("NDS 3D engine"); the rest
 is marked Assumed. Cycles are 33.51 MHz bus cycles (the scheduler counts
 master cycles, 2 per bus cycle).
 
@@ -49,7 +49,7 @@ Cost rows are T(144) - T(48) commands = 96 commands' engine time, in hex
 bus cycles (the ROM's writer needs ~4 cycles per word, so commands of a
 few cycles per word read the CPU instead and are left out here).
 
-| Row | GBATEK x 96 | dingbat | reference run (docs/oracles.md) |
+| Row | GBATEK x 96 | dingbat | reference run (docs/dev/oracles.md) |
 |---|---|---|---|
 | MTX_IDENTITY (19) | 0720 | 0725 | 0720 |
 | MTX_PUSH + MTX_POP pairs (17 + 36) | 13E0 | 13DE | 13DE |
@@ -93,7 +93,7 @@ GBATEK's "9..12 for 0..4 lights" mapping.
   lines buffered in the previous frame minus 2 (46 = never behind), and
   DISP3DCNT.12 flags an underflow. It gives no per-polygon or per-dot
   figures, and the reference cores do not model this (they read a constant
-  under any load: 3d_timing_rdlines, docs/oracles.md). The model, all
+  under any load: 3d_timing_rdlines, docs/dev/oracles.md). The model, all
   Assumed: each polygon crossing a line costs `RENDER_POLY_CYCLES` (8)
   plus its span width / `RENDER_DOTS_PER_CYCLE` (2); line k starts when line k-1 is done
   and line k-48 has been displayed; display line j is taken (49 + j) line
@@ -126,7 +126,7 @@ Model:
   repeated pixel too).
 
 The reference cores differ among themselves outside phase A (disp_mmem
-phases B-G; docs/oracles.md): one stops a never-restarted channel after
+phases B-G; docs/dev/oracles.md): one stops a never-restarted channel after
 one frame (the screen holds the last pixel), another restarts it from its
 source, dingbat runs on into the next bitmap; both start a channel enabled
 mid-frame at once. None of these is pinned by GBATEK.
@@ -143,7 +143,7 @@ agree with GBATEK and with dingbat. Changed here:
   (GBATEK's Dest_Intensity = SrcA_Intensity; all three cores: 7C00h for a
   blue rear plane at alpha 0), not 0000h;
 - blending stays truncating, (A x EVA + B x EVB) / 16 as GBATEK writes it:
-  two reference cores agree, one rounds (C010h vs BC0Fh; docs/oracles.md).
+  two reference cores agree, one rounds (C010h vs BC0Fh; docs/dev/oracles.md).
 
 ## Tests
 

@@ -16,7 +16,7 @@ proc cgb_boot_header_t(rom: seq[uint8]): int =
   ## T-cycles the CGB boot ROM's licensee checks add to its run, relative to
   ## an old licensee other than $01/$33 (Pan Docs, "Power Up Sequence": DIV
   ## at hand-off depends on the header). Measured by running the boot ROM
-  ## (docs/gb-failure-triage.md I9); pinned by DocBoy cgb/boot
+  ## (docs/dev/gb-failure-triage.md I9); pinned by DocBoy cgb/boot
   ## `boot_div_title_00_*`. mooneye's header ($33, "ZZ") is the -4 path.
   if rom.len < 0x150: return 0
   case rom[0x14B]
@@ -63,7 +63,7 @@ const TAC_SELECT_LEAD_T* {.intdefine.} = 0
   ## selected divider bit is sampled; the old bit stays the latched
   ## `previous_bit` (Pan Docs "Timer Obscure Behaviour"). Default 0, compiled
   ## out: both taps judged at the end of the M-cycle; 1..4 fail gambatte
-  ## `tima/tc00_late_tc01_*` (docs/gb-derivations.md). A $FF05 read DOES see
+  ## `tima/tc00_late_tc01_*` (docs/dev/gb-derivations.md). A $FF05 read DOES see
   ## an increment or reload in its own M-cycle (unlike SB/SC/IF, see
   ## SERIAL_CPU_SAMPLE_T); a pre-edge TIMA latch fails 18+ tima tests.
   ## Clean-room: derived from test ROM sources/outputs
@@ -87,7 +87,7 @@ const SPEED_SWITCH_LEAF_PPU* {.intdefine.} = 1
   ## new speed) via GbMemory.ppu_mdot_shift = PPU_SIT_OUT, released by
   ## timer_tick_slow at the M-cycle after the hold ends. Net +4 dots into
   ## double speed, -5 into single. Pinned two-sided by DocBoy
-  ## `*stop_key1_joypad0_interrupt1_ime0_*` (docs/gb-failure-triage.md I7).
+  ## `*stop_key1_joypad0_interrupt1_ime0_*` (docs/dev/gb-failure-triage.md I7).
   ## 0 = the PPU runs straight through.
 const PPU_SIT_OUT* = 24
   ## GbMemory.ppu_mdot_shift while the PPU sits out: no tick reaches 2^24.
@@ -119,7 +119,7 @@ proc timer_check_edge(t: GbTimer; gb: GB; on_write = false) =
   ## the one-M-cycle reload window (Pan Docs, "Timer Obscure Behaviour");
   ## arming the countdown fails mooneye timer/rapid_toggle (DMG; CGB
   ## assumed). The window's interior (TIMA reading $00, TIMA-write-ignore) is
-  ## not modelled (docs/pandocs-audit.md A6).
+  ## not modelled (docs/dev/pandocs-audit.md A6).
   let current_bit = t.enabled and ((t.tdiv and (1'u16 shl t.bit_for_tima)) != 0)
   if t.previous_bit and not current_bit:
     t.tima = t.tima + 1

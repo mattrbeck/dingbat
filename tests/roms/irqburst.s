@@ -8,7 +8,7 @@
 @ to book it again. For a raise from before the burst nothing did: the
 @ interrupt stayed pending with IME, CPSR.I and IE open, and every later
 @ raise rode with the one in flight, so none was taken until something else
-@ booked a check (docs/playtest-bugs.md §100, Famicom Mini Nazo no
+@ booked a check (docs/dev/playtest-bugs.md §100, Famicom Mini Nazo no
 @ Murasamejou: 39,272 cycles late, the FIFO DMA playing past its buffer).
 @
 @ The shape: DMA3 moves four words every H-blank (repeat, fixed addresses);

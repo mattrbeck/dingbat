@@ -16,7 +16,7 @@
 @ 0x110 (timer gap) and 0x12C — returns open bus.
 @
 @ PROVENANCE: verified on GBA SP AGS-001 (gbaedge page 16 IORW, slot
-@ CRC 626A); see docs/hwprobe-results-agb.md.
+@ CRC 626A); see docs/dev/hwprobe-results-agb.md.
     .arm
     .text
     .global _start

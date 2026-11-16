@@ -10,7 +10,7 @@
 ## write32), so it sees exactly what that CPU sees -- except TCM, which DMA
 ## cannot reach (bus9 checks `dma_access`).
 ##
-## Bus time. ARM9 (disp_dmatime on the reference runs, docs/oracles.md;
+## Bus time. ARM9 (disp_dmatime on the reference runs, docs/dev/oracles.md;
 ## GBATEK gives no DMA timing beyond "main memory read cycles are performed
 ## simultaneously with write cycles to other memory"): a 32-bit unit costs
 ## its read (main RAM 1, VRAM/palette 2, the 32-bit-bus regions 1) plus its

@@ -1,4 +1,4 @@
-# In-process lockstep link (docs/multiplayer.md).
+# In-process lockstep link (docs/dev/multiplayer.md).
 #
 # A Link steps N cores in interleaved slices so none runs more than
 # ~LINK_SLICE cycles (plus one bounded step) ahead of the laggard. The

@@ -4,7 +4,7 @@
 # A ROM that links the EEPROM library beside the SRAM or a flash library
 # (storage_chip.nim storage_candidates) does not say which chip its board
 # carries. With no battery file to go by, the game's accesses choose. In
-# the 31 such ROMs in the library (docs/playtest-bugs.md §105) most send an EEPROM command DMA to 0x0D
+# the 31 such ROMs in the library (docs/dev/playtest-bugs.md §105) most send an EEPROM command DMA to 0x0D
 # first; some probe 0x0E/0x0F first (write and read back, a flash ID
 # command, a DMA into 0FFFFFFCh) and fall back to EEPROM when nothing
 # answers; Breath of Fire (J) (EEPROM_V121, FLASH_V124, SRAM_V112) reads its

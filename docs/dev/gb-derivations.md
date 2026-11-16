@@ -5,7 +5,7 @@ code. Each entry is the claim, the evidence that pins it, and the constant or
 site that carries it. An entry's "Default" line gives the `{.intdefine.}`
 values in `src/dingbat/gb/*.nim` and `src/dingbat/gba/*.nim`; the sweep tables
 behind them live at the constants. Scores are in `tests/results*.md`; what is
-still red and why is in `docs/gb-failure-triage.md`.
+still red and why is in `docs/dev/gb-failure-triage.md`.
 
 Test-ROM names are evidence: `gambatte x/y` is a test of the gambatte suite,
 `mooneye a/b` of Gekkio's suite (wilbertpol's fork where named), `mealybug m3_*`
@@ -66,11 +66,11 @@ a reference PNG, `mGBA suite <section>` a section of mGBA's test ROM.
   first real cycle runs to its own push slot.
 - Evidence: mealybug `m3_bgp_change` (no objects) pins the 2-dot lead;
   `m3_scy_change` reads the 4 + 8 split off directly
-  (`docs/gb-mealybug-sources.md` §3.4); GBMicrotest `ppu_spritex_vs_scx`
+  (`docs/dev/gb-mealybug-sources.md` §3.4); GBMicrotest `ppu_spritex_vs_scx`
   (read back with `tools/gbppu/objtab.py`) is exact in all 153 cells at this
   phase and a dot over in 79 of them at the next.
 - Cost: the lead is arrangement, not work; the per-dot machinery is
-  `when M3_PIPE_DELAY == 0`-guarded. See `docs/gb_oam_dma_cost.md` for how it
+  `when M3_PIPE_DELAY == 0`-guarded. See `docs/dev/gb_oam_dma_cost.md` for how it
   was measured.
 
 ### Mode 3 ends when the fetcher retires, not when pixel 159 emits
@@ -100,9 +100,9 @@ a reference PNG, `mGBA suite <section>` a section of mGBA's test ROM.
   `hblank_int_scx0..7`) samples one offset at eight residues through it.
 - Refuted at 2: mooneye `hblank_ly_scx_timing-GS`, wilbertpol
   `intr_2_mode0_scx{1,2,5,6}_timing_nops` and 150 gambatte rows measure the
-  same residues from the other side (`docs/gb-failure-triage.md`, "Refuted
+  same residues from the other side (`docs/dev/gb-failure-triage.md`, "Refuted
   models"). GBMicrotest's own header states two overhead rows for the SCX
-  family — `docs/gb-test-suite-sources.md`, "GBMicrotest".
+  family — `docs/dev/gb-test-suite-sources.md`, "GBMicrotest".
 
 ### STAT reads the coincidence bit clear in the M-cycle LY advances
 - Site: bit 7 of the `read_mode` latch (`ppu.nim`).
@@ -292,7 +292,7 @@ a reference PNG, `mGBA suite <section>` a section of mGBA's test ROM.
   it set). The schedule is the next entry.
 - The match counts only with LCDC.5 set at the sample: enabling the window on
   a later line of the frame draws nothing (first-party hardware: gbprobe
-  `probe_g_wy1` on an AGB SP, docs/hwprobe-questions.md row 19).
+  `probe_g_wy1` on an AGB SP, docs/dev/hwprobe-questions.md row 19).
 - Evidence: gambatte `window/arg/late_wy_1` vs `_2` put the per-line sample at
   dot 0, not 80; `late_wy_1toFF_*` show a `ly >= wy` re-test retracting a
   window hardware keeps drawing.
@@ -409,7 +409,7 @@ Dots are dingbat's line dots; W is the first dot of the writing M-cycle
   CGB test; `late_wx_scx2_2`, one dot of slack, cannot tell). DocBoy
   `cgb/ppu/visual/change_wx_glitch_{wx6_nops16,wx6_nops17,wx7_nops17,wx8_nops17}`
   need the same dot (all four fail at 0). The AGB SP photograph of gbprobe
-  `probe_h_wx` (docs/flashcart-runbook.md row 32) is the same dot on a third
+  `probe_h_wx` (docs/dev/flashcart-runbook.md row 32) is the same dot on a third
   console.
 - `CGB_WE_ENABLE_LATE`: an LCDC.5 rise at single speed reaches the WX
   comparator a dot late, so a match on the write's own dot is missed.
@@ -887,7 +887,7 @@ Dots are dingbat's line dots; W is the first dot of the writing M-cycle
   `{.noinline.}` `mem_read_busy`/`mem_write_busy`. Real games busy-wait in
   HRAM, so the cold path sees essentially zero conflicts (Zelda: 8181 DMAs,
   989 901 accesses through it, 0 conflicts). Cost analysis:
-  `docs/gb_oam_dma_cost.md`.
+  `docs/dev/gb_oam_dma_cost.md`.
 
 ### An FF46 write under a running transfer moves the bus at once
 - Default: `OAMDMA_RESTART_HANDOVER = 1` (`gb.nim`); `write_byte` $FF46
@@ -1013,7 +1013,7 @@ Dots are dingbat's line dots; W is the first dot of the writing M-cycle
   reset goes through the FF04 write path so the APU frame sequencer, serial
   and TIMA see it as any DIV write. Pan Docs, "CGB Registers" → "FF4D — KEY1"
   says the CPU stops for 2050 M-cycles (8200 T); hardware stalls for about
-  2^16 dots. Dingbat disagrees with Pan Docs here (`docs/pandocs-upstream.md`).
+  2^16 dots. Dingbat disagrees with Pan Docs here (`docs/dev/pandocs-upstream.md`).
   The CPU-clock domain (timer, serial, OAM DMA) stops; the LCD, HDMA and the
   APU's real-time events run; the DIV-APU frame sequencer is lifted over the
   stall and re-aimed from the reset divider ("some audio events are not
@@ -1662,7 +1662,7 @@ Dots are dingbat's line dots; W is the first dot of the writing M-cycle
   mapped. Outside CGB mode it reads `$FF` and ignores stores (unchanged).
 - Evidence: DocBoy `cgb/boot/boot_regs_cgb` passes at `true` and fails at
   `false` (which reads `$F9`, the mapped bank). Hardware: gbedge p00 on an
-  AGS reads SVBK = `$F8` after the boot ROM (docs/flashcart-runbook.md), and
+  AGS reads SVBK = `$F8` after the boot ROM (docs/dev/flashcart-runbook.md), and
   p18 on the same console shows SVBK 0 and 1 mapping the same bank. Pan Docs,
   "FF70 - SVBK": bits 0-2 read/write, 0 selects bank 1.
 - The save state's SVBK byte is written as the full readback (`$F8` | bits)
@@ -1757,7 +1757,7 @@ Dots are dingbat's line dots; W is the first dot of the writing M-cycle
   runs; no emulator source consulted.
 
 ### Revision-dependent behaviour
-- `docs/gb-hardware-revisions.md`: the `GbRevision` → `GbQuirks` axis, its
+- `docs/dev/gb-hardware-revisions.md`: the `GbRevision` → `GbQuirks` axis, its
   defaults (CGB C / DMG ABC) and the ROM behind each flag.
 
 ## 9. GBA
@@ -1819,10 +1819,10 @@ Dots are dingbat's line dots; W is the first dot of the writing M-cycle
 The trace builds (`-d:gb_m3_trace`, `gb_win_trace`, `gb_stat_read_trace`, …),
 `DINGBAT_GAM_DUMP`, the readers (`objtab.py`, `famflip.py`, `windot.py`) and
 the sweep scripts are catalogued in
-[`tools/gbppu/README.md`](../tools/gbppu/README.md); runner hazards (shared
-`TMPDIR`, one binary pair per world) in [`tests/README.md`](../tests/README.md),
+[`tools/gbppu/README.md`](../../tools/gbppu/README.md); runner hazards (shared
+`TMPDIR`, one binary pair per world) in [`tests/README.md`](../../tests/README.md),
 "Exit code, baselines, hazards"; the retired-instruction A/B rules in
-`docs/gb_oam_dma_cost.md`.
+`docs/dev/gb_oam_dma_cost.md`.
 
 ## 11. GB APU: triggers against the clocks
 

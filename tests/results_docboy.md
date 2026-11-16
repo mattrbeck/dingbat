@@ -9,7 +9,7 @@ ticks, or an exact RGB565 match with the reference PNG at the next
 VBlank (or at `ld b,b` / `ld c,c` when the row names one). DMG rows
 run on a DMG ABC, the three CGB manifests on a CPU CGB E with the
 cart header picking the mode. See tests/README.md for the mechanism
-and docs/gb-failure-triage.md for the failing families.
+and docs/dev/gb-failure-triage.md for the failing families.
 
 **8751/8984 passed.**
 

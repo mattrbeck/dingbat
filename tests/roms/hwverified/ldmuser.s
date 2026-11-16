@@ -23,7 +23,7 @@
 @ by itself falsify the OR theory — it does pin the observable value.)
 @
 @ PROVENANCE: verified on GBA SP AGS-001 (gbaedge page 19 LDMUSER, slot
-@ CRC 856D); see docs/hwprobe-results-agb.md.
+@ CRC 856D); see docs/dev/hwprobe-results-agb.md.
     .arm
     .text
     .global _start

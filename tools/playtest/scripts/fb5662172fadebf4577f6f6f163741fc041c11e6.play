@@ -13,7 +13,7 @@
 # reaches the main loop. On a blank cart the boot first formats the 64 Kbit
 # EEPROM (22 polled block writes, f3-f12), so the checkpoint follows the chip's
 # programming time: dingbat at GBATEK's 108368 cycles is a frame behind both
-# references, at 104800 or less it is on theirs (docs/playtest-bugs.md §87).
+# references, at 104800 or less it is on theirs (docs/dev/playtest-bugs.md §87).
 # Open until the console's `eesettle` cell is recorded with this cart.
 
 [new]

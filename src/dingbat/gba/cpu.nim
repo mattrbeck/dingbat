@@ -44,7 +44,7 @@ proc skip_bios*(cpu: CPU) =
   # The BIOS branches to the entry point, leaving it in LR
   cpu.r[14] = 0x08000000'u32
   # At ROM entry the BIOS leaves DISPCNT force-blanked and POSTFLG set
-  # (AGB SP, gbaedge IDENT, docs/hwprobe-results-agb.md).
+  # (AGB SP, gbaedge IDENT, docs/dev/hwprobe-results-agb.md).
   cpu.gba.ppu.dispcnt = cast[DISPCNT](0x0080'u16)
   cpu.gba.mmio.postflg = 1
   # The boot sound's TM0 (reload 0xFB1A, /1) stops with its count at
@@ -101,7 +101,7 @@ proc switch_mode*(cpu: CPU; new_mode: CpuMode) =
 proc undef_mode_tick*(cpu: CPU) =
   ## An undefined mode selects no r13/r14 bank: both read 0 and writes are
   ## lost. AGB SP: gbaedge UNDMODE (modes 0x15, 0x1A, 0x1E;
-  ## docs/hwprobe-results-agb.md); tools/hwlink, mode 0x0C: writes to r13
+  ## docs/dev/hwprobe-results-agb.md); tools/hwlink, mode 0x0C: writes to r13
   ## and r14 read back 0, r12 and the caller's r13 untouched (png183
   ## psr/psr2). switch_mode books this event on entry; it re-books itself
   ## each instruction to restore the zeros (every 256 cycles while halted).
@@ -539,7 +539,7 @@ proc read_instr*(cpu: CPU): uint32 {.inline.} =
       if bits_range(fetch_addr, 24, 27) == 0 and
          (cpu.gba.bus.sync_bits and SB_SWAP) == 0:   # else swap_fetch_half
         # The BIOS latch is the newest pipeline fetch, two instructions ahead
-        # of execution (AGB SP, gbaedge IDENT, docs/hwprobe-results-agb.md).
+        # of execution (AGB SP, gbaedge IDENT, docs/dev/hwprobe-results-agb.md).
         let ahead = uint32(cpu.gba.bus.read_half_internal((fetch_addr + 4) and 0x3FFF'u32))
         cpu.gba.bus.bios_latch = ahead or (ahead shl 16)
       v
@@ -865,7 +865,7 @@ proc hle_halt_return*(cpu: CPU) =
   ## hle_halt's frame (its first, the caller's CPSR, went to SPSR at 0x17C).
   ## Three reads at the console's addresses (the first where the console has
   ## r11), then the internal cycle, so a DMA burst granted in the return
-  ## waits for each access (Zelda II's sound FIFO, docs/playtest-bugs.md).
+  ## waits for each access (Zelda II's sound FIFO, docs/dev/playtest-bugs.md).
   let bus = cpu.gba.bus
   let sp = cpu.r[13]
   discard bus.read_word(sp - 4)
@@ -1053,7 +1053,7 @@ proc tick*(cpu: CPU) =
       # commit it here or it delays the wake. A wake while a DMA has the bus
       # resumes on the DMA's LAST cycle, not after it (AGB SP,
       # payloads/halthb.s: H-blank wake at 1003 bare, 1004/1006/1010 under a
-      # 1/2/4-word H-blank DMA; docs/playtest-bugs.md §22).
+      # 1/2/4-word H-blank DMA; docs/dev/playtest-bugs.md §22).
       let pending = cpu.gba.bus.cycles
       if pending > 0:
         cpu.gba.bus.cycles = 0

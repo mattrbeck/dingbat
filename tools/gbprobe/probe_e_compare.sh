@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # probe_e_compare -- dingbat against the sameboy_runner on probe (e), setting
-# by setting (docs/hwprobe.md records the runner's validation against the
+# by setting (docs/dev/hwprobe.md records the runner's validation against the
 # GBA SP photographs for this probe).
 #
 #   tools/gbprobe/probe_e_compare.sh [--dmg] [--quiet] [SCX ...]

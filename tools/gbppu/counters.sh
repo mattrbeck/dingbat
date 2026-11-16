@@ -1,6 +1,6 @@
 #!/bin/bash
 # Retired-instruction A/B between two gbgate build slots. See
-# docs/gb_oam_dma_cost.md: fps has a ~1.3% layout noise floor, retired
+# docs/dev/gb_oam_dma_cost.md: fps has a ~1.3% layout noise floor, retired
 # instructions reproduce to 0.002%, and `cycles=` must match between the arms
 # or they did different work.
 #   tools/gbppu/counters.sh <gbgate-workdir> <rom> [frames] [warmup]

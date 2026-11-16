@@ -115,7 +115,7 @@ MP2K_BENCH_EMERALD=... MP2K_BENCH_BEAST=... tools/mp2ksweep/bench_ab.sh $T/bench
 Emerald needs its `.sav` beside the ROM: the script walks from the title
 screen into Littleroot. Compare the minimum retired instructions. Wall-clock
 differences under about 1.3 % are code layout, not the change
-(`docs/performance.md`).
+(`docs/dev/performance.md`).
 
 ## Experiments
 

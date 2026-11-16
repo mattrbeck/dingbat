@@ -20,7 +20,7 @@
 @ destination from DAD, overwriting the ring in place.
 @
 @ PROVENANCE: verified on GBA SP AGS-001 (gbaedge page 22 CAPDMA, slot
-@ CRC F9B7); see docs/hwprobe-results-agb.md.
+@ CRC F9B7); see docs/dev/hwprobe-results-agb.md.
     .arm
     .text
     .global _start

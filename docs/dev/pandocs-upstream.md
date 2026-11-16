@@ -1,6 +1,6 @@
 # pandocs-upstream: corrections to send upstream, and what hardware must settle first
 
-Companion to docs/pandocs-audit.md. §1 is draftable as gbdev/pandocs PRs; §2
+Companion to docs/dev/pandocs-audit.md. §1 is draftable as gbdev/pandocs PRs; §2
 needs hardware first.
 
 ## 1. Upstream corrections (evidence settled)
@@ -34,7 +34,7 @@ needs hardware first.
     mode 2 is silent (GBMicrotest `stat_write_glitch_l0_c/l1_d/l154_c`); only
     the hblank→mode-2 edge fires.
 11. **Post-boot SC on CGB** (Power_Up_Sequence): $7C on AGS hardware, not $7F
-    (gbedge p00, docs/flashcart-runbook.md).
+    (gbedge p00, docs/dev/flashcart-runbook.md).
 12. **SVBK readback** (CGB_Registers): the register reads back the stored
     bits with bits 3–7 set; a stored 0 reads `$F8` (bank 1 mapped), and it
     reads `$F8` after the boot ROM (DocBoy `boot_regs_cgb`; gbedge p00 on

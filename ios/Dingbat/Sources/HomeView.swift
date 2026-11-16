@@ -1,4 +1,4 @@
-// The home screen (web #home; docs/home-screen.md). A fresh visit opens on
+// The home screen (web #home; docs/dev/home-screen.md). A fresh visit opens on
 // the brand with the whole library under it; once a game is played this
 // visit it heads the page as the hero, paused or closed, and its tile
 // stands down from the grid. Scrolling hands the brand to the home bar.

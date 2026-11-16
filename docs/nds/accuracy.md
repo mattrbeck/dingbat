@@ -2,7 +2,7 @@
 
 The open items left by the homebrew sweep (docs/nds/compat.md) and the
 boot/3D/peripheral write-ups, taken one by one. Hardware facts are GBATEK
-unless marked; black-box reference runs are rows in docs/oracles.md ("NDS
+unless marked; black-box reference runs are rows in docs/dev/oracles.md ("NDS
 core", "NDS 3D engine"). Branch `nds-accuracy`.
 
 ## 1. Power-off
@@ -205,7 +205,7 @@ the reference (the title fade 9 frames late, menus ~10, the intro pages
 access costs against the reference, profiles of the games' loads in a
 `-d:ndsdebug` ndsrun (`--prof`, `--trace9/7`, `--iolog`) showed which
 costs mattered, and three changes followed. Evidence levels as in
-docs/oracles.md: **GBATEK** (the spec), **run** (black-box reference
+docs/dev/oracles.md: **GBATEK** (the spec), **run** (black-box reference
 comparison), **Assumed**.
 
 **Probes.**
@@ -276,7 +276,7 @@ comparison), **Assumed**.
 - *Card transfer*: polling late changes nothing on either core: the card
   holds each word until it is read (page 2: identical to within 50 bus
   cycles on 8000h of delay). DMA reads stay 20 bus cycles a word (GBATEK's
-  6.7 MB/s) against the reference's 23 (docs/oracles.md).
+  6.7 MB/s) against the reference's 23 (docs/dev/oracles.md).
 - *DMA and the CPU*: GBATEK says the ARM9 "can be kept running during DMA,
   provided that it is accessing only TCM (or cached memory)". Neither core
   does: a 4000h-word DMA under a SUBS/BGT loop from ITCM or the cache
@@ -286,7 +286,7 @@ comparison), **Assumed**.
 - *ARM9 data-cache misses* (the rest of Golden Sun's gap). Ours fills a
   line in GBATEK's 23 bus cycles; the reference charges every cached access
   ~1.5 bus cycles and never misses (row MM, eight loads to one set: 0F01h
-  there, BA80h here; docs/oracles.md: it keeps no cache contents either).
+  there, BA80h here; docs/dev/oracles.md: it keeps no cache contents either).
   Golden Sun decompresses with LDRB/STRB through the cache from ITCM code
   (01FF86C0h-01FF8900h, about a quarter of its load time). With line fills
   at 3 master cycles the title comes 9 frames *early* and the menus 4-6

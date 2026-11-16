@@ -6,7 +6,7 @@
 @ expensive way: it reads 1006 on hardware and 999 here, and there is no way
 @ to tell from that page whether the H-blank flag, the VCOUNT edge, the
 @ timer's enable latency or the poll's own granularity is responsible
-@ (docs/playtest-bugs.md sections 15 and 16).
+@ (docs/dev/playtest-bugs.md sections 15 and 16).
 @
 @ So: start one timer, once, and never stop it. Read it four times. Report
 @ only DIFFERENCES between those reads. The enable latency is then common to

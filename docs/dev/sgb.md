@@ -150,7 +150,7 @@ The reader **peeks the tag**: a state saved with SGB on loads with SGB off
 (section read into a throwaway) and vice versa, decided by the payload, not
 this machine's configuration. Pinned both directions in `tests/sgb_test.nim`.
 A rev-5 state for an SGB cart is refused by pre-SGB builds; states for other
-carts are byte-identical. See `docs/savestate_compat.md`.
+carts are byte-identical. See `docs/dev/savestate_compat.md`.
 
 ## Settings
 

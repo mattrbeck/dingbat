@@ -38,7 +38,7 @@ const UNDER_BURST_CREDIT {.intdefine.} = 1
 
 # Cycles of continued execution after a register write (IME 0->1, IE unmask,
 # msr clearing CPSR.I) releases an already-parked IF bit. Cycle-based, not
-# instruction-based (AGB SP, gbaedge IRQWIN/IRQWIN2/IRQWIN3, docs/hwprobe.md).
+# instruction-based (AGB SP, gbaedge IRQWIN/IRQWIN2/IRQWIN3, docs/dev/hwprobe.md).
 # The value assumes IRQ_LAST_WAITS. The vector-entry cost is in cpu.irq.
 const
   IRQ_GATE_DELAY* = 7

@@ -6,7 +6,7 @@
 @ hdmasweep.s, which report the V-blank DMA's write MINUS the H-blank DMA's --
 @ a difference, blind to any shift common to both -- together with an absolute
 @ stamp from a page whose anchor later turned out to be worth seven cycles of
-@ nothing (docs/playtest-bugs.md sections 15 and 17). A constant fitted to
+@ nothing (docs/dev/playtest-bugs.md sections 15 and 17). A constant fitted to
 @ those two is exactly the shape of thing that needs re-checking without an
 @ anchor.
 @

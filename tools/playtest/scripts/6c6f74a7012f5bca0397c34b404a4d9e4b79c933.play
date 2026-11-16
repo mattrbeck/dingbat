@@ -11,7 +11,7 @@
 # [load]: the title and the mode menu look the same with or without a save
 # (nothing on screen shows the record), then SOLO and its pause menu.
 # Finding (solo_board on): every emulator is dealt other triangles from the
-# same inputs (see @known; docs/playtest-bugs.md §101, Dial Hex).
+# same inputs (see @known; docs/dev/playtest-bugs.md §101, Dial Hex).
 # With no input mgba's pile happens to complete a green hexagon (f10964) and
 # its GAME OVER comes ~5,300 frames after dingbat-bios's and the second
 # reference's (both by f13964); the best scores saved are 2 (dingbat-bios),

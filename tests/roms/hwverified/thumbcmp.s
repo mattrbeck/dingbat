@@ -20,7 +20,7 @@
 @ and the MOV operand computes to pad+6, so its r7 = 4.
 @
 @ PROVENANCE: verified on GBA SP AGS-001 (gbaedge pages 18 THUMBPC and
-@ 25 THUMBPC2); see docs/hwprobe-results-agb.md.
+@ 25 THUMBPC2); see docs/dev/hwprobe-results-agb.md.
     .arm
     .text
     .global _start

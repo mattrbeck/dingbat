@@ -8,7 +8,7 @@
 # ranking, which is when the game writes its EEPROM. [load]: the attract
 # ranking from the save, then a new game to stage 1.
 # Regression guard: before 2026-10-02 an interrupt return to a Thumb
-# halfword was word-aligned (docs/playtest-bugs.md section 45), and dingbat
+# halfword was word-aligned (docs/dev/playtest-bugs.md section 45), and dingbat
 # ran into the open bus above the BIOS: a black screen or a reset to the
 # Konami logo between the intro and the first stage.
 
@@ -56,7 +56,7 @@ wait 40
 # no checkpoint: this pause freezes a different game frame on dingbat than
 # on the references (which agree). From f3768 dingbat runs one game frame
 # behind both: the stage's load queue is serviced in another order, set by
-# where the loader's slot scan stood at one V-blank (docs/playtest-bugs.md
+# where the loader's slot scan stood at one V-blank (docs/dev/playtest-bugs.md
 # §80, Gradius Galaxies); stage1_enemies and stage1_late are that SLIP(-1)
 wait 60
 press START

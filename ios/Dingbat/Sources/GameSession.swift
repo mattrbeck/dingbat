@@ -287,7 +287,7 @@ final class GameSession: NSObject, ObservableObject {
     /// a CADisplayLink's show 37-48 ms after (a DS present waits for a
     /// drawable). GB/GBA keep the CADisplayLink: their light frames make
     /// its 20 ms handover, and its longer fast-forward budget runs ~13% more
-    /// frames (docs/ios-display-link.md).
+    /// frames (docs/dev/ios-display-link.md).
     private func startLink() {
         var metal = false
         if #available(iOS 17, *) { metal = isNDS }

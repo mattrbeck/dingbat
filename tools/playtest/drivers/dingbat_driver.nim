@@ -12,7 +12,7 @@
 ##   emits the raw FIFO latches instead of the apps' default cubic
 ##   reconstruction (apu.set_fifo_interp). --hle with a BIOS file runs the
 ##   HLE BIOS with that image mapped, as every frontend does when a BIOS file
-##   is installed and the HLE is on (docs/playtest-bugs.md §55).
+##   is installed and the HLE is on (docs/dev/playtest-bugs.md §55).
 ##   The battery save is <rom minus extension>.sav, exactly as the desktop
 ##   app places it; run the driver on a ROM symlink inside a private
 ##   directory so saves never touch the library.

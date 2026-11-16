@@ -128,7 +128,7 @@ proc io9_read(n: NDS; a: uint32): uint32 =
 proc io9_write(n: NDS; a: uint32; v, mask: uint32) =
   let o = a and 0x00FF_FFFC'u32
   # A unit switched off in POWCNT1 leaves its ports read-only (GBATEK "DS
-  # Power Control"; disp_powcnt on the reference runs, docs/oracles.md): 2D A
+  # Power Control"; disp_powcnt on the reference runs, docs/dev/oracles.md): 2D A
   # 008h-05Fh (bit 1), 3D rendering 320h-3FFh (bit 2), geometry 400h-6FFh
   # (bit 3, commands included), 2D B 1008h-105Fh (bit 9).
   let pw = n.gpu.powcnt1
@@ -168,7 +168,7 @@ proc io9_write(n: NDS; a: uint32; v, mask: uint32) =
     if (mask and 0xFFFF) != 0:
       # bits 8-10 and 12 read zero, bit 13 reads set (GBATEK); writes to
       # bit 14 are ignored (GBATEK "appear to be ignored?"; slot2_probe on the
-      # reference runs, docs/oracles.md) and it stays set from boot
+      # reference runs, docs/dev/oracles.md) and it stays set from boot
       let m = uint16(mask) and 0x88FF'u16
       n.exmemcnt = (n.exmemcnt and not m) or (uint16(v) and m) or 0x2000
       n.cart.owner_arm7 = (n.exmemcnt and 0x800) != 0
@@ -204,7 +204,7 @@ proc pal_oam_on(n: NDS; a: uint32): bool {.inline.} =
   ## 07000400h) read zero and ignore writes while POWCNT1 has it off, keeping
   ## their contents (GBATEK "DS Power Control": "(palette-) memory becomes
   ## read-only-zero-filled"; OAM and the kept contents: disp_powcnt on the
-  ## reference runs, docs/oracles.md).
+  ## reference runs, docs/dev/oracles.md).
   (n.gpu.powcnt1 and (if (a and 0x400) == 0: 2'u16 else: 0x200'u16)) != 0
 
 proc in_itcm(n: NDS; a: uint32; write: bool): bool {.inline, codegenDecl: "static inline __attribute__((always_inline)) $# $#$#".} =

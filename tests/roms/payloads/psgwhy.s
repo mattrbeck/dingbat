@@ -6,7 +6,7 @@
 @ against this one directly; only the plumbing differs -- it writes its 32
 @ bytes to 0x02008000 for the host to read back rather than to a screen slot.
 @
-@ p44 and p51 (docs/hwprobe-results-agb.md session 6) agree that a ch1
+@ p44 and p51 (docs/dev/hwprobe-results-agb.md session 6) agree that a ch1
 @ trigger shortly after a SOUNDCNT_X master-on dies while ch2/3/4 live, that
 @ NR10 = 0x11 saves it, and that the first two ch1 triggers die while a third
 @ lives. Every ch1 row that died triggered at frequency 0x400 -- exactly half

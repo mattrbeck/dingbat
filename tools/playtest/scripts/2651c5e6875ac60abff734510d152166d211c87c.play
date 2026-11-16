@@ -24,7 +24,7 @@
 #   and EWRAM loading code from ROM is cheaper in mgba than the bus allows.
 #   The second reference used to look identical to mgba there only because it ran on the host
 #   clock, which shortens the boot's clock-dependent work; with its driver
-#   honouring --rtc it matches dingbat frame for frame (docs/playtest-bugs.md,
+#   honouring --rtc it matches dingbat frame for frame (docs/dev/playtest-bugs.md,
 #   "Shin Bokura no Taiyou: the sensor notice"). All converge on the
 #   sensor-setting screen.
 # - Saves: the dingbat configurations write identical files; against the second reference

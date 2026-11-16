@@ -91,7 +91,7 @@ the selected baud rate (the ARM7 bus delivers its reply and IRQ at the end:
 docs/nds/peripherals.md). GBA-slot accesses take their times from the
 accessing CPU's own EXMEMCNT bits 0-4 (the table's rows are the default
 setting). With these, SoulSilver runs frame-locked with the reference core
-(docs/oracles.md, "NDS core"). `arm7_timing` pins the ARM7's costs; the
+(docs/dev/oracles.md, "NDS core"). `arm7_timing` pins the ARM7's costs; the
 reference core is 3 cycles cheaper on ARM7 main-RAM data than GBATEK, and
 both charge an ARM7 SUB/BGT loop 3 cycles where GBATEK's WaitByLoop table
 gives 4 (docs/nds/accuracy.md). An ARM9 single load or store costs
@@ -120,7 +120,7 @@ abort (lr = opcode + 4), as libnds's exception handler expects. For speed,
 fetches are checked on branches and page crossings and data accesses to
 main RAM and DTCM are not checked at all (`bus9.nim` pu_check9). Direct
 boot leaves the regions as the firmware does, with the unit off
-(`boot.nim`; docs/oracles.md).
+(`boot.nim`; docs/dev/oracles.md).
 
 ## Layout
 
@@ -230,7 +230,7 @@ the later finds and their results: docs/nds/test-roms.md).
 | IRQ / timers / DMA / IPC / maths | gbeplus irq/math/dma, rockwrestler system tests, `pxi`, `timercallback` |
 | Input / touch / SPI / RTC | `touch_test` tracks the mouse; periph_suite (RTC interrupts, SPI timing, power manager, TSC channels, mic, sleep/lid: docs/nds/peripherals.md) |
 | 3D | `Simple_Tri`, `Simple_Quad` |
-| Sound | maxmod examples and Pokemon SoulSilver play (tests/nds_spu_test.nim, `snd_suite.nds` against the reference cores: docs/oracles.md NDS core) |
+| Sound | maxmod examples and Pokemon SoulSilver play (tests/nds_spu_test.nim, `snd_suite.nds` against the reference cores: docs/dev/oracles.md NDS core) |
 | GBA slot | `slot2_probe` under each device; SoulSilver's MIGRATE FROM <GBA game> with a Generation 3 cart (docs/nds/slot2.md) |
 | Card + backup | a commercial ROM's B7 reads + save detection; the KEY1/KEY2 boot handshake (docs/nds/boot.md) |
 | Wireless | two machines on one Air: wifi_link's beacon scan, data frames and multiplay rounds (tests/nds_wifi_test.nim); network play is a plan (docs/nds/wifi.md) |
@@ -294,7 +294,7 @@ FLASH behind the IR controller) and continues from that save, with the real
 BIOS or the HLE BIOS (identical frames). Driven by `ndsrun --press` scripts
 (`TOUCH:x:y` for the touch-screen buttons) with `--rtc 2004-01-01`, the same
 script gives the same frames as the reference core at most checkpoints
-(`tools/ndsref`, docs/oracles.md). Open: the 3D bedroom is 44 dots
+(`tools/ndsref`, docs/dev/oracles.md). Open: the 3D bedroom is 44 dots
 (0.09 %) off the reference and the title's 3D Lugia 1.4 % (one-step
 shading, 2D bubbles) since the edge/anti-aliasing work
 (docs/nds/3d-edges.md); fades are exact since the colour effects work on

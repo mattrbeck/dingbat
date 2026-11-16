@@ -60,7 +60,7 @@ BLANK = {'mgba': {'cp': 'blank'}, 'nba': {'cp': 'blank'}}
 
 
 class BlankCart(unittest.TestCase):
-    # Columns Crown (docs/playtest-bugs.md §95): mgba reads every save that
+    # Columns Crown (docs/dev/playtest-bugs.md §95): mgba reads every save that
     # holds data, the second reference and dingbat read none of them
     COLUMNS = matrix(dingbat_in_dingbat='blank', dingbat_in_mgba='blank', dingbat_in_nba='blank',
                      mgba_in_dingbat='blank', mgba_in_mgba='loaded', mgba_in_nba='blank',

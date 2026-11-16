@@ -37,7 +37,7 @@ class Rate(unittest.TestCase):
     def test_a_dump_off_the_nominal_rate_is_named(self):
         # Driv3r: the second reference's capture pulled 547.28 samples a
         # frame, not 548.58, and its windows read audio 25 frames early by
-        # the end (docs/playtest-bugs.md, "Driv3r's audio")
+        # the end (docs/dev/playtest-bugs.md, "Driv3r's audio")
         ok, short = feats(1), feats(1)
         ok['per_frame'] = audio.NOMINAL_PER_FRAME
         short['per_frame'] = 547.278

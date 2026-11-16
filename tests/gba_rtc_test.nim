@@ -275,7 +275,7 @@ block:  # set the clock, it runs from there
 
 block:  # RESET strobes on write AND read (GBATEK), and does not hang the bus
   # The chip would load 2000-01-01; dingbat returns to the host clock (the
-  # epoch here) so a new game shows today's date (docs/gba-rtc.md)
+  # epoch here) so a new game shows today's date (docs/dev/gba-rtc.md)
   removeFile(sav_path(rtc_rom))
   let g = boot(rtc_rom, E)
   g.rtc_write_bytes(CMD_DATETIME_W, regs(2031, 7, 14, 1, 21, 5, 9))
@@ -549,7 +549,7 @@ echo "=== EEPROM: serial frames (CPU stores vs DMA bursts) ==="
 # The chip is driven the way a game's save library drives it: bitstreams in
 # IWRAM, one halfword per bit, moved by DMA3 (GBATEK "GBA Cart Backup
 # EEPROM"). A store outside a DMA is a frame of its own and carries no
-# command (eeprom.nim). Columns Crown's boot (docs/playtest-bugs.md §95)
+# command (eeprom.nim). Columns Crown's boot (docs/dev/playtest-bugs.md §95)
 # probes for a flash chip with strh 0xFF, 0x90, 0xFF to 0x0DFFFFFE, and a
 # word read of 0x09FFE000, before its first command DMA.
 

@@ -1,7 +1,7 @@
 ; probe_i_oamdma -- does the OAM scan see an object whose entry an OAM DMA is
 ; covering, and is entry 39 special?
 ;
-; docs/hwprobe-questions.md row 17: strikethrough's LY-68 frame draws OAM
+; docs/dev/hwprobe-questions.md row 17: strikethrough's LY-68 frame draws OAM
 ; entry 39 although an OAM DMA covers that line's mode 2, and dingbat's
 ; OAM_SCAN_DMA_LOCK / CGB_HALT_PPU_LEAD (fifo_ppu.nim) each break it.
 ;

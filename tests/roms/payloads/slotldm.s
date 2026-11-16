@@ -36,13 +36,13 @@
 @ with S = 3 cycles (WAITCNT 0x4000) that is a load whose data + internal
 @ cycles d satisfy d mod 3 == 1, and never for d < 3. mGBA charges no such
 @ cycle. Final Fight One's LZ decompressor pays it on every other byte at
-@ WAITCNT 0x4314 (docs/playtest-bugs.md, "Final Fight One").
+@ WAITCNT 0x4314 (docs/dev/playtest-bugs.md, "Final Fight One").
 @
 @ Display is forced blank for the trials, so palette/VRAM loads see no
 @ renderer contention (DISPCNT is restored afterwards).
 @
 @ r0 on entry = the WAITCNT value to run under. 0x4000 is the only
-@ prefetch-on setting known safe on an empty slot (docs/playtest-bugs.md
+@ prefetch-on setting known safe on an empty slot (docs/dev/playtest-bugs.md
 @ section 22).
 @ +0 + 8*i (h) TM0 at the landing pad for trial i, 0xFFFF = watchdog fired
 @    +2     (h) 0

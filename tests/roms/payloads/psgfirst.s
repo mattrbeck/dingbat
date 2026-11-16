@@ -3,7 +3,7 @@
 @ This is gbaedge slot 51 (PSGFIRST), re-hosted as a link-cable payload. Rows,
 @ macros and byte layout are the probe page's, unchanged.
 @
-@ It was already run on the console from a cartridge (docs/hwprobe-results-agb.md
+@ It was already run on the console from a cartridge (docs/dev/hwprobe-results-agb.md
 @ session 6, transcribed in tests/roms/expected/agb-sp-6.txt), so it is not
 @ here for its own answer -- it is the baseline that makes psgwhy.s readable.
 @ Every row's poll count depends on the gap between the two stores that set a

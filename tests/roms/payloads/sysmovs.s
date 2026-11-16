@@ -2,7 +2,7 @@
 @
 @ WHY: Colin McRae Rally 2.0, TOCA World Touring Cars and Starsky & Hutch
 @ link an ARM run-time library whose routines return with `movs pc, lr`,
-@ called from System mode (docs/playtest-bugs.md, "movs pc, lr in System
+@ called from System mode (docs/dev/playtest-bugs.md, "movs pc, lr in System
 @ mode"). The ARM ARM calls the form UNPREDICTABLE outside an exception
 @ mode. dingbat restored a stale copy of another mode's SPSR there (a Thumb
 @ one: the games then ran their ARM library as Thumb); it now restores the

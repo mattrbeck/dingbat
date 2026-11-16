@@ -16,7 +16,7 @@
 @ so the row is deterministic and matches the gbaedge transcription).
 @
 @ PROVENANCE: verified on GBA SP AGS-001 (gbaedge page 17 CPSRBITS, slot
-@ CRC F153); see docs/hwprobe-results-agb.md.
+@ CRC F153); see docs/dev/hwprobe-results-agb.md.
     .arm
     .text
     .global _start

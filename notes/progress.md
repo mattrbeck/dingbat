@@ -23,8 +23,8 @@ Dated work logs live in git history. This is where each subsystem stands.
 | Subsystem | State |
 |---|---|
 | CPU | SM83, all 512 opcodes |
-| PPU | Pixel-FIFO renderer; CGB palettes, HDMA, compat mode, SGB; revision axis (`docs/gb-hardware-revisions.md`) |
-| APU | Channels 1–4 with closed-form lazy catch-up; DC-blocked output; SameSuite APU and blargg sound suites (`docs/samesuite-apu.md`) |
+| PPU | Pixel-FIFO renderer; CGB palettes, HDMA, compat mode, SGB; revision axis (`docs/dev/gb-hardware-revisions.md`) |
+| APU | Channels 1–4 with closed-form lazy catch-up; DC-blocked output; SameSuite APU and blargg sound suites (`docs/dev/samesuite-apu.md`) |
 | Timer / serial / joypad | Complete; closed-form TIMA between events |
 | MBC | ROM, MBC1/1M, MBC2, MBC3+RTC, MBC5+rumble, MBC6, MBC7, MMM01, HuC1, HuC3, TAMA5, Camera; flat-ROM window devirtualised (`-d:mbc_map_check` verifies) |
 | Link | In-process, printer, online via rollback |

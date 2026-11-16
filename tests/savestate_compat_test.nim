@@ -10,7 +10,7 @@
 ##
 ## When this fails after an INTENTIONAL format change: bump only the changed
 ## core's payload revision (GBA_PAYLOAD_VERSION / GB_PAYLOAD_VERSION) and add
-## the matching `if rev >= N` to its loader (docs/savestate_compat.md); if a
+## the matching `if rev >= N` to its loader (docs/dev/savestate_compat.md); if a
 ## field genuinely cannot be reconstructed, refuse THAT case with a message
 ## naming it. Never delete a corpus entry.
 ##

@@ -3,7 +3,7 @@
 @ Everything measured so far says WHEN the grant happens. Nothing says how
 @ long the DMA then holds the bus, and that is the other half of what moves
 @ the mGBA suite's `DMA Prefetch Break`: the burst's theft shifts the phase of
-@ the loop the row is counting (docs/playtest-bugs.md section 16).
+@ the loop the row is counting (docs/dev/playtest-bugs.md section 16).
 @
 @ Entry is fixed by a V-count match halt on line 100, so the loop below starts
 @ at a cycle the PPU chose. TM0 then free-runs while the CPU executes a loop

@@ -3,7 +3,7 @@
 What happens when freely distributable DS homebrew -- games, demoscene
 productions, emulator ports, tech demos, tools -- runs on dingbat's DS core,
 compared run for run with the reference core (`tools/ndsref`, the core
-docs/oracles.md names for current libnds builds). Sweep of 2026-10-01 on
+docs/dev/oracles.md names for current libnds builds). Sweep of 2026-10-01 on
 branch `nds-compat`.
 
 ## The harness: `tools/ndssweep.nim`
@@ -107,7 +107,7 @@ Each in its own commit, and each core fix with a check in
    ITCM region and runs from main RAM under the firmware's region 1; with
    the regions zeroed it sat in a prefetch-abort loop (with the old core it
    only worked because nothing aborted). Values read from the reference's
-   direct boot by our `tests/nds/src/boot_cp15` ROM (docs/oracles.md, NDS
+   direct boot by our `tests/nds/src/boot_cp15` ROM (docs/dev/oracles.md, NDS
    core); control (12078h) and DTCM (0080000Ah) stay as the BIOS hand-off
    writes them. sd4k now renders its tunnel like the reference.
 3. **CP15 writes no longer rebuild the tables needlessly** (`aa0f3ed4`;

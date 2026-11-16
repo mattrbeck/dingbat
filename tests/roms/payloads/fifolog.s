@@ -3,7 +3,7 @@
 @ window and how long each held the CPU
 @
 @ WHY: fifoffff.s (AGB SP, 2026-09-25; tools/hwlink/open-agb.json 'fifo')
-@ fits a toy rule at k = 1, 2 and 4 (docs/playtest-bugs.md, "FIFO refills
+@ fits a toy rule at k = 1, 2 and 4 (docs/dev/playtest-bugs.md, "FIFO refills
 @ at periods 1-3"): a refill request lands 4 cycles after its overflow; the
 @ FIFO's level is counted as the burst's words land; a request landing in
 @ the burst's last cycle chains the next burst (8 cycles, no lead / trail),
@@ -23,7 +23,7 @@
 @ SAFETY: fifoffff.s's exit path unchanged (TM0 stopped, ~160 cycles, DMA1
 @ off, the V-blank DMA0 guard). Keep to k = 1..4 and the IWRAM source: those
 @ fifoffff cells went through 632 runs; the console wedged in its k = 6..20
-@ set (docs/hwprobe-questions.md, "Rig hazard"), and an EWRAM source at
+@ set (docs/dev/hwprobe-questions.md, "Rig hazard"), and an EWRAM source at
 @ k <= 3 would starve the CPU (a 30-cycle burst brings 16 bytes).
 @
 @ r0 bits 0..7   n  NOPs (0..63)

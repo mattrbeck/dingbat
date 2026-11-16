@@ -7,7 +7,7 @@ session 1 = 16-page at 5b0db6b (`ALL F54C`, `1512` after MSRTBIT); session 2 =
 25-page at c1c5d8f (`ALL 4B70`); session 3 = 28-page at 9b0ffc2 (`ALL FDE5`);
 session 4 = 37-page at aaaa0eb (`ALL B473`); session 5 = 50-page at ad6af27a
 (`ALL 05C6`, pages 37–49, transcription `agb-sp-5.txt`). Open follow-ups are in
-docs/hwprobe-questions.md, "GBA".
+docs/dev/hwprobe-questions.md, "GBA".
 
 ## Pages hardware confirmed byte-perfect
 

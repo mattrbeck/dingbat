@@ -1,7 +1,7 @@
 import XCTest
 import notify
 
-/// The native touches (docs/manual-verification.md, "iOS: native touches")
+/// The native touches (docs/dev/manual-verification.md, "iOS: native touches")
 /// driven in the simulator: the system pauses, the deferred edge gestures,
 /// the 44 pt targets and the switches as VoiceOver sees them. The app runs
 /// with `-debug-events` (DebugEvents.swift): this test posts the system's

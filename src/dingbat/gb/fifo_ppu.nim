@@ -237,7 +237,7 @@ const OAM_SCAN_DMA_HOLD* {.intdefine.} = 1
   ## and gambatte oamdma/late_sp39y_2; 0 also fails strikethrough and mooneye
   ## madness/mgb_oam_dma_halt_sprites (OAMDMA_FREEZE_BUS reaches the
   ## comparator through this path). Tile byte, X latch left alone and the
-  ## stop at ten are unpinned choices. docs/gb-derivations.md §6, "The mode-2
+  ## stop at ten are unpinned choices. docs/dev/gb-derivations.md §6, "The mode-2
   ## scan under an OAM DMA compares what its latches last held".
 
 const OAM_SCAN_DMA_EDGE_DS* {.intdefine.} = 1
@@ -251,20 +251,20 @@ const SCX_LATCH_LCDON_EXTRA_CGB* {.intdefine.} = 2
   ## Dots the LCD-on line's fine-scroll discard keeps taking an SCX store past
   ## its own length (SCX_FINE_LATCH_LIVE's window), DMG / CGB. Default 1 and 2,
   ## each a strict optimum on gambatte enable_display/ly0_late_scx7_m3stat_*
-  ## (docs/gb-derivations.md §4, "The LCD-on line takes an SCX store for
+  ## (docs/dev/gb-derivations.md §4, "The LCD-on line takes an SCX store for
   ## longer").
 const CGB_OBJ_LAST_PX_YIELDS* {.intdefine.} = 1
   ## Whether, on a CGB, an object on the line's last pixel (OAM X = 167) waits
   ## for a window start on that pixel (WX = 166) as it does on every other
   ## column (obj_yields_to_window), 1, or is fetched in front of it as on the
-  ## DMG, 0. docs/gb-derivations.md, "The last pixel: object against window".
+  ## DMG, 0. docs/dev/gb-derivations.md, "The last pixel: object against window".
 
 const CGB_OBJ_FETCH_OFF* {.intdefine.} = 1
   ## Whether a CGB's fetcher still stops for this line's objects with LCDC.1
   ## clear (1, default) or, like the DMG's, does not (0). LCDC.1 only keeps the
   ## object pixels out of the mixer there (sprite_wins). The DMG stops
   ## fetching with the bit. Pinned by gambatte sprites/late_disable_ds_* and
-  ## oamdma/late_sp*_ds [cgb]. docs/gb-derivations.md §3, "A CGB fetches
+  ## oamdma/late_sp*_ds [cgb]. docs/dev/gb-derivations.md §3, "A CGB fetches
   ## objects with LCDC.1 clear".
 
 const LCD_ON_LINE_NO_SCAN* {.intdefine.} = 1
@@ -272,7 +272,7 @@ const LCD_ON_LINE_NO_SCAN* {.intdefine.} = 1
   ## until mode 3 begins) and no OAM scan runs on it: it has no objects (1,
   ## default). 0 scans it like any other line. Pinned by DocBoy
   ## `turn_on_ly0_sprites_round*` and gambatte enable_display_ly0_sprites_*;
-  ## docs/gb-derivations.md §3, "The line the LCD is switched on with has no
+  ## docs/dev/gb-derivations.md §3, "The line the LCD is switched on with has no
   ## objects".
 
 template obj_fetch_on(ppu: GbFifoPpu): bool =
@@ -532,7 +532,7 @@ const SCX_FINE_BORROW* {.intdefine.} = 1
   ## the control. Pinned by gambatte scx_during_m3 (tools/gbscx reads it as a
   ## displacement ruler: always exactly 8). Not applied to the window fetch,
   ## which has no SCX term. An `ord` term, not an `if`: this is the mode 3
-  ## dot loop. docs/gb-derivations.md §4, "The map column's borrow is
+  ## dot loop. docs/dev/gb-derivations.md §4, "The map column's borrow is
   ## measured against the pixels the discard threw away".
 
 # SCX_LIVE_BORROW_LATCHED (gb.nim): the borrow above has its own reference
@@ -1121,7 +1121,7 @@ proc tick_bg_fetcher*(ppu: GbFifoPpu; gb: GB) =
 # charged to. That is `6 + max(0, 5 - ((X + SCX) mod 8))` for X >= 1 and Pan
 # Docs' flat 11 at X = 0, a real special case. Pinned by gambatte sprites and
 # GBMicrotest ppu_spritex_vs_scx (tools/gbppu/objtab.py);
-# docs/gb-derivations.md §3, "An object costs 6 dots plus a per-tile wait".
+# docs/dev/gb-derivations.md §3, "An object costs 6 dots plus a per-tile wait".
 # Cancelling the fetch by clearing LCDC.1 is a separate rule (fifo_obj_abort).
 const OBJ_FETCH_DOTS {.intdefine.} = 6'i32
 const OBJ_WAIT_SUB {.intdefine.} = 3'i32
@@ -1376,7 +1376,7 @@ proc win_react_last_park(ppu: GbFifoPpu): bool {.inline.} =
 # bgtiledata/bgtilemap measure is the CPU write's commit point (mem_write).
 # M3_PIPE_DELAY: the additional speed-independent lead in dots. Default 2,
 # pinned by mealybug m3_bgp_change and GBMicrotest ppu_spritex_vs_scx
-# (docs/gb-derivations.md §1, "The BG fetch restarts on the dot it pushes").
+# (docs/dev/gb-derivations.md §1, "The BG fetch restarts on the dot it pushes").
 # The tail burst's accounting is approximate in the last m3_lead pixels (a
 # few gambatte bgtilemap/sprites tests).
 # Cost (~+0.2%): fetcher_retired folds the lead to an immediate with the
@@ -1390,7 +1390,7 @@ const M3_PIPE_DELAY {.intdefine.} = 2
 # Dots the mode 3 -> 0 edge comes early with the pipeline left alone: mode 3
 # gets shorter, no pixel moves. Default 0, an instrument: 2 fits GBMicrotest
 # hblank_int_scx* but fails mooneye hblank_ly_scx_timing-GS, wilbertpol
-# intr_2_mode0_scx*_timing_nops and ~150 gambatte tests (docs/gb-derivations.md
+# intr_2_mode0_scx*_timing_nops and ~150 gambatte tests (docs/dev/gb-derivations.md
 # §1, "`M3_END_EARLY` is an instrument, not a fix"; LCD_ON_LINE0_TRIM, gb.nim).
 const M3_END_EARLY {.intdefine.} = 0
 
@@ -1415,7 +1415,7 @@ const LY0_PIPE_MCYCLES {.intdefine.} = 0
 # (LYC_SETTLE_HALT_SKIP, gb.nim). Assumed; no ROM pins the re-anchored
 # reading. Not the DMG BGP selector (MIXER_PALETTE_OR); LYC_SETTLE_DOTS = 0
 # (ppu.nim) also moves the wake for a running CPU and fails gambatte
-# ly0/lycEnable. docs/gb-derivations.md §1, "The pipeline runs one M-cycle
+# ly0/lycEnable. docs/dev/gb-derivations.md §1, "The pipeline runs one M-cycle
 # ahead of the STAT/mode machinery".
 const LY0_PIPE_ANY = LY0_PIPE_MCYCLES != 0 or M3_PIPE_AHEAD != 0 or
                      CGB_PIPE_MCYCLES != 0

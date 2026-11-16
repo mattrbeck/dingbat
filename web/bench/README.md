@@ -39,7 +39,7 @@ build's flags for Node: the emulation core's web codegen, measured and profiled 
 scene) measures every user-facing setting through the shipping per-frame path:
 `settingsCore()`, `settingsGpu()`, `settingsGlow()`, `settingsLowpass()`,
 `settingsBios()` (needs `bios.bin` here). `glowtrace.mjs` traces the GPU
-process for the ambient glow's compositor cost. Results: `docs/settings-cost.md`.
+process for the ambient glow's compositor cost. Results: `docs/dev/settings-cost.md`.
 
 ## Measure in a real window, not headless
 

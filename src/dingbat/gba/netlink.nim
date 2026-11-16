@@ -1,4 +1,4 @@
-# TCP transport for the network link (docs/multiplayer.md): a socket pump
+# TCP transport for the network link (docs/dev/multiplayer.md): a socket pump
 # around gba/netcore.nim, which holds all sync/stall/transfer logic. This
 # module moves bytes, waits with timeouts, simulates latency
 # (--netlink-delay-ms) and closes gracefully.

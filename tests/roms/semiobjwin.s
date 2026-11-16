@@ -28,7 +28,7 @@
 @ WHY: the semi-transparent OBJ under an effects-off window is the cell
 @ under test (overworld fog in FireRed-engine games); the normal OBJ with
 @ OBJ as a 1st target is the control that an effects-off window does stop
-@ 1st-target colour math.  docs/playtest-bugs.md, "Semi-transparent OBJ
+@ 1st-target colour math.  docs/dev/playtest-bugs.md, "Semi-transparent OBJ
 @ under an effects-off window", records what the two reference emulators
 @ draw for every cell; they agree with each other on every pixel, and
 @ semiobjwin_expected.png is that frame (the test runner's

@@ -8,7 +8,7 @@
 # the intro, Alis in Camineet, walk right, B opens the command menu, SAVE >
 # slot 1 (the first YES/NO answer lands on the default NO and backs out, so
 # the save is entered again), YES, name "A", END, "NOW SAVING".
-# Finding (FIXED 2026-10-02, docs/playtest-bugs.md section 28): dingbat
+# Finding (FIXED 2026-10-02, docs/dev/playtest-bugs.md section 28): dingbat
 # drew every SMS window garbled in the first-person town view and on the
 # save/continue screens: from ~f3800 (B opens the command menu) the menu,
 # status and message windows showed repeated or shifted scanlines,

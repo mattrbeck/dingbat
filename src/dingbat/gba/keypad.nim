@@ -9,7 +9,7 @@ proc new_keypad*(gba: GBA): Keypad =
 
 # The KEYCNT condition reaches IF only once it has held for KEYPAD_IRQ_HOLD
 # cycles, and only on its rising edge (AGB SP, tests/roms/payloads/keyirq2.s;
-# docs/playtest-bugs.md §61):
+# docs/dev/playtest-bugs.md §61):
 # after an acknowledge it never comes again while the condition holds; a
 # true condition of up to ~40 cycles is never caught, ~68 always is. So a
 # byte-wise KEYCNT rewrite passing through a matching value raises nothing.

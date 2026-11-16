@@ -2,7 +2,7 @@
 
 Scores: `tests/results.md`. Rows whose filename names a revision (`-cgb0B`, `-cgbDE`, `-A`, …) are scored on that
 revision via `--model`; the rest on CGB E, the revision the suite's README says passes
-everything (`tests/README.md`, device axis; `docs/gb-hardware-revisions.md`).
+everything (`tests/README.md`, device axis; `docs/dev/gb-hardware-revisions.md`).
 
 ```
 ./dingbat_test <rom> --mode=mooneye --color --model=cgbE --timeout=3000
@@ -70,8 +70,8 @@ every test here.
 | `channel_1_freq_change` | a frequency change takes effect after the current sample | `next_step` is absolute. Exception: a write on the reload cycle (below) |
 | `channel_1_stop_restart` | stopping keeps the phase; only NR52 off resets it | `ch1_catchup_at` parks `next_step` while disabled |
 | `channel_1_volume_div` | envelope ticks after 8 × (NR12 & 7) DIV-APU ticks | matches |
-| `channel_1_nrx2_speed_change` | envelope speed changes apply after the next tick; enabling the envelope triggers an extra envelope tick on the next **even** DIV-APU tick | `env_extra_tick`. "Even" is this test's alignment: the tick lands on the first DIV-APU step after the tap bit next rises (tests 6 and 7 write 5 M-cycles after a rise and after a fall, and both tick on the second step); DocBoy's `ch1_change_volume_sweep_pace_*` rows and SameBoy probes move it with the rise (`psg_write_nrx2`, docs/gb-failure-triage.md I8) |
-| `channel_1_nrx2_glitch`, `channel_1_volume`, `channel_1_restart_nrx2_glitch` | the NRx2 write ("zombie mode") glitch | one three-column table keyed on the value written, at `write_NRx2`; the table and its derivation are in `docs/gb-hardware-revisions.md` §4 |
+| `channel_1_nrx2_speed_change` | envelope speed changes apply after the next tick; enabling the envelope triggers an extra envelope tick on the next **even** DIV-APU tick | `env_extra_tick`. "Even" is this test's alignment: the tick lands on the first DIV-APU step after the tap bit next rises (tests 6 and 7 write 5 M-cycles after a rise and after a fall, and both tick on the second step); DocBoy's `ch1_change_volume_sweep_pace_*` rows and SameBoy probes move it with the rise (`psg_write_nrx2`, docs/dev/gb-failure-triage.md I8) |
+| `channel_1_nrx2_glitch`, `channel_1_volume`, `channel_1_restart_nrx2_glitch` | the NRx2 write ("zombie mode") glitch | one three-column table keyed on the value written, at `write_NRx2`; the table and its derivation are in `docs/dev/gb-hardware-revisions.md` §4 |
 | `channel_1_stop_div` | like channel 3 with a smaller length range | follows from the DIV-APU work |
 | `channel_1_sweep`, `_sweep_restart`, `_sweep_restart_2` | sweep overflow timing, restarts during sweep | below |
 | `channel_1_extra_length_clocking-cgb0B` | on CGB ≤ B the extra length clock needs only a previously-disabled counter; fixed on CGB C | `GbQuirks.length_clock_any_nrx4`, on `--model=cgb0B` only |
@@ -130,7 +130,7 @@ it sits one M-cycle early. `sq_reload_is_now` is the discriminator.
 | `channel_3_wave_ram_locked_write` | written at the offset CH3 is reading; ignored on AGB | CGB case modelled; AGB case not, no row asks |
 | `channel_3_wave_ram_sync`, `_wave_ram_dac_on_rw` | PCM34 and wave RAM agree; RW while DAC on and channel off | match |
 | `channel_3_and_glitch` | CH3 is not affected by the PCM34 AND glitch | dingbat has no AND glitch; this row fails silently if one is added |
-| `channel_3_extra_length_clocking-cgb0/-cgbB` | CGB 0 needs ONE write to disable at length 1, CGB B TWO | per `--model`; see `docs/gb-hardware-revisions.md` §3.2 |
+| `channel_3_extra_length_clocking-cgb0/-cgbB` | CGB 0 needs ONE write to disable at length 1, CGB B TWO | per `--model`; see `docs/dev/gb-hardware-revisions.md` §3.2 |
 
 Pan Docs, "Power Control": a power-on resets the frame sequencer, the duty units, and
 the wave channel's sample buffer to 0. Without the last, every CH3 subtest after the first
@@ -207,4 +207,4 @@ reason, add all of them:
 `div_next` (re-derived from the restored `next_step` by `ch4_resync_divisor`),
 `GB.revision`, and `GbMemory.unusable` (the 96 bytes of `$FEA0-$FEFF` a CGB 0–D answers
 reads from; plain RAM, the weakest member on principle, but only test ROMs are known to
-seed it). See `docs/gb-hardware-revisions.md` §2.5.
+seed it). See `docs/dev/gb-hardware-revisions.md` §2.5.

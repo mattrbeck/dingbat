@@ -5,7 +5,7 @@
 ## and laws.json says how to read each word and what the console answered.
 ##
 ## The mGBA suite cannot stand in for this: its rows are sums, and two terms a
-## cycle out in opposite directions pass it (docs/cycle-hunt-method.md). These
+## cycle out in opposite directions pass it (docs/dev/cycle-hunt-method.md). These
 ## cells are the terms.
 ##
 ##   nimble test_cyclelaws

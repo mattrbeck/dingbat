@@ -1474,7 +1474,7 @@ theorem bug_quit_ends_peer_link_without_bye :
   Quit and Disconnect act while `blocked`.
 * While paused the loop still pumps the socket (`service_netlink`:
   `NetLink.idle`), and CLOCK carries bit 2 "paused" (`LINK_CLOCK_PAUSED`,
-  docs/multiplayer.md) from `NetLink.set_paused`; the peer's stall deadline
+  docs/dev/multiplayer.md) from `NetLink.set_paused`; the peer's stall deadline
   is re-armed while that bit is set. Builds without the bit ignore it
   (only SO is read from CLOCK's flags), so they time out as before.
 * Part A fix 6: a quit sends BYE. -/

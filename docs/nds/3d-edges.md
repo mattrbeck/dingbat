@@ -5,7 +5,7 @@ the artifacts that come with it; what dingbat did before, what it does now,
 the evidence, and what is still open. Hardware facts are GBATEK ("DS 3D
 Rendering", "Toon, Edge, Fog, Alpha-Blending, Anti-Aliasing", "Polygon
 Attributes", "DISP_1DOT_DEPTH") unless marked; values settled by black-box
-reference runs are rows in docs/oracles.md ("### NDS 3D engine"); the rest
+reference runs are rows in docs/dev/oracles.md ("### NDS 3D engine"); the rest
 is marked Assumed. Code: `src/dingbat/nds/gpu3d/render.nim` (rasteriser,
 post passes), `gpu3d/geometry.nim` (1-dot culling, clipping).
 
@@ -23,7 +23,7 @@ post passes), `gpu3d/geometry.nim` (1-dot culling, clipping).
   reference cores disagree, the captures decide.
 - **Probe ROMs** (`tests/nds/src/3d_probe_*`, built by
   `tests/nds/tools/build_3d.sh`, hashed in `tests/nds_3d_test.nim`) run
-  through `tools/ndsref` (the two reference cores, docs/oracles.md) and compared at
+  through `tools/ndsref` (the two reference cores, docs/dev/oracles.md) and compared at
   18-bit colour with our 3D buffer. New this round: `_aa3` / `_aa3_edge` /
   `_aa3_em` (what an AA edge mixes with), `_aa4` (long shallow x-major
   edges), `_degen` / `_degen_aa` / `_degen_edge` (zero-width polygons),

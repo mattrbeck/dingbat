@@ -137,7 +137,7 @@ one.
   restored, fully encrypted; made in scratch, never committed) all
   firmware-boot to the same frame 1600, and direct-boot to the same frame
   3000 as before.
-- Reference: the reference core's firmware boot (docs/oracles.md, "NDS
+- Reference: the reference core's firmware boot (docs/dev/oracles.md, "NDS
   core") with the same dumps and inputs: identical frames, ours 2 frames
   later through the BIOS/logo phase, identical again from the menu on.
 - Homebrew: a libnds ROM (16bit_color_bmp: devkit-style zeroed secure

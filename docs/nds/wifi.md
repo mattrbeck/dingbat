@@ -10,7 +10,7 @@ Sources: GBATEK "DS Wifi" chapters (I/O map, control, interrupts, power,
 RX/TX buffers and control, timers, Multiplay Master/Slave, hardware
 headers, Nintendo beacons, DS Download Play), the BlocksDS dswifi library
 (MIT; `source/arm7/ntr/*`, read as a library), black-box runs of
-SoulSilver and of the reference core (docs/oracles.md, "NDS core").
+SoulSilver and of the reference core (docs/dev/oracles.md, "NDS core").
 
 ## The hardware in numbers
 
@@ -119,7 +119,7 @@ path; save states of the new state (rx queue, transmitter stage, Air).
 - `tests/nds_wifi_test.nim`: the wifi blocks alone too (beacon delivery,
   RXFILTER bit 0, channels, ACK and 8 tries = 8 x 578 us, ring full and
   RD_DATA wrap). Passes with dumps and with HLE BIOS + synthesized firmware.
-- Reference runs (one console; docs/oracles.md, "NDS core"): host
+- Reference runs (one console; docs/dev/oracles.md, "NDS core"): host
   alone identical on beacon W_TXSTAT/TX header, IRQ07 spacing and beacon
   data time, the 8 failed CMD rounds and their flags; CMD round 830 vs 832
   us. Client alone differs: the core reports a frame to an absent station

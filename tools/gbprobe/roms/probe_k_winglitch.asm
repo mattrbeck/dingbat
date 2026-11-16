@@ -1,5 +1,5 @@
 ; probe_k_winglitch -- the window insertion glitch (Pan Docs "Window", the
-; Star Trek 25th Anniversary glitch): docs/hwprobe-questions.md row 18.
+; Star Trek 25th Anniversary glitch): docs/dev/hwprobe-questions.md row 18.
 ;
 ; When the WX comparator matches on a line with LCDC.5 LOW, dingbat puts one
 ; colour-0 pixel on the front of the BG FIFO (gb.nim WIN_EN_HOLD_ZERO = 1),

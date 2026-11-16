@@ -31,7 +31,7 @@
 @
 @ PROVENANCE: verified on GBA SP AGS-001 (gbaedge page 25 THUMBPC2
 @ writeback rows; page 29 PCWB2 — the functional-form discriminators and
-@ the stm row); see docs/hwprobe-results-agb.md.
+@ the stm row); see docs/dev/hwprobe-results-agb.md.
     .arm
     .text
     .global _start

@@ -20,7 +20,7 @@
 @ (exception entry masks IRQs) and needs a power cycle.
 @
 @ PROVENANCE: verified on GBA SP AGS-001 (gbaedge page 24 BXDECODE,
-@ one-candidate-per-press flow); see docs/hwprobe-results-agb.md.
+@ one-candidate-per-press flow); see docs/dev/hwprobe-results-agb.md.
     .arm
     .text
     .global _start

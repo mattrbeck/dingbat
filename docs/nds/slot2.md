@@ -5,7 +5,7 @@ evidence for each value. Code: `src/dingbat/nds/io/slot2.nim` (devices),
 `nds.nim` `slot2_read`/`slot2_write` (ownership, bus widths), `timing.nim`
 (access times). Tests: `tests/nds_slot2_test.nim` (`nimble test_ndsslot2`)
 and our probe ROM `tests/nds/src/slot2_probe` (`tests/nds/tools/build_slot2.sh`).
-Reference runs: docs/oracles.md, "NDS core".
+Reference runs: docs/dev/oracles.md, "NDS core".
 
 ## The hardware (GBATEK)
 
@@ -108,7 +108,7 @@ Migrating itself (choosing the option, the transfer) has not been run.
   boot-info flags byte.
 - Timing: the slot deltas match the reference, but its absolute loop counts
   differ by a per-CPU constant that the main-RAM control shows is CPU fetch
-  timing, not the slot (docs/oracles.md).
+  timing, not the slot (docs/dev/oracles.md).
 - Save states (another agent's topic) must add the slot: kind, ROM identity,
   chip bytes and FLASH/EEPROM state, GPIO, the Expansion Pak's RAM and lock.
 - The web page does not insert a slot-2 device or call `nds_rumble` yet.

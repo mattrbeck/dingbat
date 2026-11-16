@@ -9,7 +9,7 @@ A real BIOS avoids all of these.
 - **Sound-driver / music-player SWIs (0x1A–0x1E, 0x20–0x24, 0x28, 0x29)** are stubs;
   games ship their own sound engine.
 
-See `docs/hle-bios-shortcomings.md`.
+See `docs/dev/hle-bios-shortcomings.md`.
 
 ## Cart peripherals
 
@@ -24,4 +24,4 @@ never produces. They are cheap invariant asserts and stay.
 
 - GBA save-type database for carts that misreport their type (Classic NES series).
 - Debugger with breakpoints and stepping.
-- Web audio dropouts under main-thread hitches (`docs/web_audio_pacing.md`).
+- Web audio dropouts under main-thread hitches (`docs/dev/web_audio_pacing.md`).

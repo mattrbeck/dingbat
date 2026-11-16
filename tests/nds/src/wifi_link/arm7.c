@@ -12,7 +12,7 @@
 
    Alone, each role still finishes (timeouts): the host's beacons and the
    CMD rounds without replies, the client's unanswered PINGs, all timed with
-   W_US_COUNT -- the single-console behaviour docs/oracles.md compares.
+   W_US_COUNT -- the single-console behaviour docs/dev/oracles.md compares.
 
    Results (wl.h RES), common:
      [0] 'WIFI' when done   [1] role: 1 host, 2 client

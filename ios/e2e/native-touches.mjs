@@ -1,4 +1,4 @@
-// The native touches (docs/manual-verification.md, "iOS: native touches")
+// The native touches (docs/dev/manual-verification.md, "iOS: native touches")
 // in the simulator: ios/e2e/uitest/NativeTouchesUITests.swift, with the app
 // installed and tests/roms/linktest.gba in its library, and a fake Drive
 // (web/e2e/fakedrive.mjs) for the pull to refresh. The test posts the system
