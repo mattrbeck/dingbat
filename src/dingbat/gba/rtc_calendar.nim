@@ -2,13 +2,11 @@
 ## trailer. Pure procs, imported by gba.nim (rtc.nim, storage.nim) and tested
 ## directly by tests/gba_rtc_test.nim.
 ##
-## Clock representation. The RTC's date and time are held as "calendar
-## seconds": the chip's year/month/day/hour/minute/second read as a UTC civil
-## time and counted in seconds since 1970-01-01. They carry no time zone; the
-## chip has none. Year register 00..99 is 2000..2099 (S-3511A datasheet
-## Rev. 1.4, "Year data (00 to 99) ... links together with the auto calender
-## feature till 2,099"), so a calendar second before 2000 or from 2100 on is
-## shown as `year mod 100`, as the chip's two-digit counter would.
+## Clock representation: "calendar seconds", the chip's date and time read
+## as a UTC civil time and counted from 1970-01-01 (the chip has no time
+## zone). Year register 00..99 is 2000..2099 (S-3511A datasheet Rev. 1.4,
+## "Year data (00 to 99) ... links together with the auto calender feature
+## till 2,099"); other years show as `year mod 100`.
 ##
 ## ---------------------------------------------------------------------------
 ## Battery-save RTC trailer
@@ -19,9 +17,7 @@
 ## appends the 7 bytes of the cart's date/time read, the status register
 ## (`RTCReadStatus`, "24h mode = 0x40, reset flag = 0x80") and
 ## `struct.pack("<Q", int(time.time()))`; Mapper.py `AGB_GPIO.ReadRTC`).
-## Lesserkuma proposed it for emulators in mGBA issue #2431 and mGBA adopted
-## it in 0.10 (commit bb711d311f, "Store RTC data in savegames", closes #240);
-## FlashGBX 3.19's changelog notes the format adjustments made for that.
+## Proposed for emulators in mGBA issue #2431; mGBA uses it since 0.10.
 ##
 ##   off  len  field
 ##   0    1    year     BCD 00..99
@@ -40,20 +36,16 @@
 ##
 ## Hour byte, read: FlashGBX stores the chip register as read, and the chip
 ## sets bit 7 for 12..23 o'clock even in 24-hour mode (datasheet Table 11
-## note *1; GBATEK "GBA Cart Real-Time Clock": AM/PM is hour bit 7 on the
-## GBA). Its own restore path decodes `hour & 0x7F` as a 24-hour value, and
-## emulators write the 24-hour value without the flag. Both decode with
-## `hour & 0x3F`; a flag on a value below 12 is a 12-hour-mode reading and
-## adds 12.
-## Hour byte, written: the 24-hour value WITHOUT bit 7. FlashGBX's restore
-## masks the flag off, and an emulator that decodes the byte as plain BCD
-## (mGBA 0.10.5) reads 0x97 as hour 97, four days out.
+## note *1; GBATEK "GBA Cart Real-Time Clock"); other writers store the
+## 24-hour value without the flag. Decode `hour & 0x3F`; a flag on a value
+## below 12 is a 12-hour-mode reading and adds 12.
+## Hour byte, written: the 24-hour value WITHOUT bit 7: a reader that
+## decodes plain BCD (mGBA 0.10.5) takes 0x97 as hour 97, four days out.
 ##
-## Trailer location: every GBA backup size is a multiple of 512 bytes (EEPROM
-## 512/8192, SRAM 32768, flash 65536/131072), and writers append the trailer
-## to the chip size they use, which for EEPROM is not necessarily the chip's
-## (8192-byte files for 4Kbit games are common). So the trailer is the last
-## 16 bytes exactly when `file length mod 512 == 16`, whatever the chip.
+## Trailer location: every GBA backup size is a multiple of 512 bytes, and
+## writers append the trailer to the size they use, which for EEPROM is not
+## always the chip's (8192-byte files for 4Kbit games are common). So the
+## trailer is the last 16 bytes exactly when `file length mod 512 == 16`.
 
 import std/times
 
@@ -208,10 +200,9 @@ proc trailer_hour(raw: uint8): int =
 
 proc parse_trailer*(t: openArray[byte]; clock: var TrailerClock): bool =
   ## Decode a 16-byte trailer. False (and `clock` untouched) when it cannot be
-  ## a clock reading: a chip only ever reports in-range BCD, so any field out
-  ## of range, a latch of 0 (a writer that never read the clock) or an
-  ## implausibly large latch means the bytes are not a reading. A trailer this
-  ## rejects is still not chip data (the caller has already cut it off).
+  ## a clock reading: a field out of BCD range, a latch of 0 (a writer that
+  ## never read the clock) or an implausibly large latch. A rejected trailer
+  ## is still not chip data (the caller has already cut it off).
   if t.len != RTC_TRAILER_LEN: return false
   let year = from_bcd(t[0])
   let month = from_bcd(t[1])

@@ -4,45 +4,29 @@
 # ArcTan2, CpuSet, CpuFastSet, GetBiosChecksum, BgAffineSet, ObjAffineSet,
 # the decompression and unpack family, SoundBias and MidiKey2Freq (unc_takes).
 #
-# LZ77UnCompWram/Vram, RLUnCompWram/Vram, HuffUnComp, BitUnPack and the Diff
-# filters used to run as one HLE step: their output written up front, a cost
-# model charged as routine time that stopped on the cycle an interrupt line
-# rose, the remainder parked on the halt-resume path. A handler or the
-# renderer saw the finished output mid-call (Top Gun - Combat Zones' fade
-# drew tiles a long LZ77UnCompVram had not written yet on the console), an
-# interrupt was taken up to an instruction early, and a DMA burst inside one
-# stopped the whole model where the console grants it between the routine's
-# own accesses and runs part of it under the routine's internal cycles
-# (Castlevania - Circle of the Moon's sound FIFO bursts inside its
-# cartridge LZ77UnCompWrams moved each call a cycle or two).
-#
-# Now each routine runs as instructions of its own in the stub BIOS. Every
+# Each routine runs as instructions of its own in the stub BIOS. Every
 # instruction is a `swi 0` at an address of its own (bus.nim UNC_ARM_LO ..,
 # ARM, and UNC_THUMB_LO .., Thumb), and the HLE executes it by that address:
 # the CPU fetches it (one BIOS cycle), and its body makes the console
 # instruction's accesses and internal cycles through the same bus calls the
-# core's ARM and Thumb handlers make, in the same order -- a load its
-# access then an internal cycle, a store its access, a taken branch the
-# refill -- and steps or branches to the next. So the CPU's own loop runs
-# them: interrupts are taken at their boundaries (the stub's IRQ vector
-# returns into the routine), DMA requests are granted between their accesses
-# and under their internal cycles, renderer contention meets each access when
-# it is made, the frame loop stops between two of them, and a save state
-# holds a routine in progress in its registers, its stack frames and r15.
+# core's ARM and Thumb handlers make, in the same order (a load its access
+# then an internal cycle, a store its access, a taken branch the refill).
+# So the CPU's own loop runs them: interrupts are taken at their boundaries,
+# DMA is granted between their accesses and under their internal cycles,
+# renderer contention meets each access when it is made, the frame loop
+# stops between two of them, and a save state holds a routine in progress
+# in its registers, stack frames and r15. Do not go back to one HLE step
+# with output written up front: handlers and the renderer then see output
+# the console has not written yet (Top Gun - Combat Zones), and DMA bursts
+# land on the wrong cycles (Castlevania - Circle of the Moon).
 #
-# The instruction sequence of each path is the console's: the playtest
-# driver's per-instruction `trace` and tools/biosdrv/steptrace.nim of the
-# official BIOS in this core give each step's cycles and accesses, and each
-# label below is one such step (a store, a load, a one-cycle operation, a
-# branch). The data each step works on is kept in registers chosen here,
-# within the registers the console's routine is free to use (the ones it
-# pushes, r0-r2 and r12; r3 where it hands it back changed), so the values a
-# routine leaves in r0-r3 are the console's. The SWI's dispatch and return
-# run the same way (the vector, the dispatcher's pushes on the SVC and System
-# stacks, its read of the swi's comment byte in the caller's region, the
-# `msr` into System mode with the caller's I bit, the pops, `movs pc, lr`),
-# so an interrupt arriving between the dispatcher's `msr` and the routine is
-# taken there too.
+# Each path's instruction sequence is the console's (the playtest driver's
+# `trace` and tools/biosdrv/steptrace.nim of the official BIOS in this
+# core); each label below is one step. Step data lives in registers the
+# console's routine is free to use (the ones it pushes, r0-r2 and r12; r3
+# where it hands it back changed), so r0-r3 on return are the console's.
+# The SWI's dispatch and return run the same way, so an interrupt between
+# the dispatcher's `msr` and the routine is taken there too.
 #
 # Labels are this file's own numbering: nothing of the console's code or
 # its addresses is in it, only each step's kind and timing.
@@ -189,7 +173,7 @@ template ut_addr(l: UT): uint32 = UNC_THUMB_LO + 2'u32 * uint32(ord(l)) + 1'u32
 const M2F_TOP = [2147483648'u64, 2275179671'u64, 2410468894'u64, 2553802834'u64,
                  2705659852'u64, 2866546760'u64, 3037000500'u64, 3217589947'u64,
                  3408917802'u64, 3611622603'u64, 3826380858'u64, 4053909304'u64]
-  ## MidiKey2Freq's top-octave multipliers (hle_bios.nim's derivation)
+  ## MidiKey2Freq's top-octave multipliers, about 2^31 * 2^(i/12)
 
 proc unc_takes(swi_num: uint32): bool {.inline.} =
   ## The SWIs that run here (with the stub BIOS mapped)
@@ -401,14 +385,12 @@ proc unc_arm(cpu: CPU; l: UA) =
     if r(2) == 0: cpu.ujump(uaChkRet)
   of uaChk0, uaChk2, uaChk3, uaChk4, uaChk5: discard
   of uaChkRet: cpu.u_jump(r(14))
-  # LZ77UnCompWram. The registers are the console's (an interrupt finds
-  # them as there, and the routine leaves r3 as there): r0 source, r1
-  # destination, r2 bytes still to write (the header's length, less each
-  # token's count as it starts: a back-reference longer than what is left is
-  # copied whole), r3 the reference's bytes left, r4 the tokens left in the
-  # group, r5 the byte between its load and its store, r6 the reference's
-  # distance field, r12 the distance, lr the flag byte, shifted up a bit per
-  # token (its bit 7 the token's)
+  # LZ77UnCompWram. The registers are the console's: r0 source, r1
+  # destination, r2 bytes still to write (less each token's count as it
+  # starts: a back-reference longer than what is left is copied whole), r3
+  # the reference's bytes left, r4 the tokens left in the group, r5 the byte
+  # between load and store, r6 the distance field, r12 the distance, lr the
+  # flag byte, shifted up a bit per token (bit 7 the token's)
   of lwPush: cpu.u_stmfd([4, 5, 6, 14])
   of lwHdr: r(2) = cpu.u_ldr(r(0))
   of lwA1: r(0) += 4
@@ -463,9 +445,9 @@ proc unc_arm(cpu: CPU; l: UA) =
   of lwC3: cpu.ujump(lwG0)
   of lwPop: cpu.u_ldmfd([4, 5, 6, 14])
   of lwRet: cpu.ujump(uaXPop2)
-  # LZ77UnCompVram. As the Wram form, but the bytes pair into halfwords
-  # before their store and a reference reads its byte back out of the
-  # destination with a halfword load. The console's registers: r0 source,
+  # LZ77UnCompVram. As the Wram form, but bytes pair into halfwords before
+  # the store and a reference reads its byte back with a halfword load. r0
+  # source,
   # r1 the next halfword's address, r2 the header's length, then where the
   # next byte goes in the halfword (0 or 8), r3 the halfword being built
   # (what the routine leaves there), r4 the reference's distance, r5 its
@@ -555,20 +537,17 @@ proc unc_arm(cpu: CPU; l: UA) =
   of lvC3: cpu.ujump(lvG0)
   of lvPop: cpu.u_ldmfd([4, 5, 6, 7, 8, 9, 10, 14])
   of lvRet: cpu.ujump(uaXPop2)
-  # HuffUnComp. The source check comes first (with a fixed 0x02000000 as the
-  # length), then the header. Each leaf's symbol is shifted in at the top of
-  # the output word (the word shifts down by the symbol size, the symbol goes
-  # in at 32 less the size: a 4-bit leaf keeps its low four bits), and the
-  # word is stored, and kept shifting, every (size & 7) + 4 leaves -- 4 for
-  # 8-bit symbols, 8 for 4-bit ones; that count is spilled to the stack (two
-  # words below the frame, sp past them) and reloaded at every leaf (tools/biosdrv/huffsz.c, every size nibble). r0
-  # the header, then the next bitstream word's address (off a word boundary
-  # as the tree size puts it: the load rotates, uncedge.c); r1 destination,
-  # r2 bytes still to write, r3 the output word (what the routine leaves
-  # there: the last one stored), r4 the tree's root, r5 the node, r6 the
-  # bitstream word, r7 its bits left, r8 the leaves to the next store, r9 the
-  # symbol size, r10 the node byte, then the reloaded count, r12 the child's
-  # address, then the symbol
+  # HuffUnComp. The source check comes first (length fixed at 0x02000000),
+  # then the header. Each leaf's symbol is shifted in at the top of the
+  # output word (a 4-bit leaf keeps its low four bits), stored every
+  # (size & 7) + 4 leaves; that count is spilled two words below the frame
+  # and reloaded at every leaf (tools/biosdrv/huffsz.c, every size nibble).
+  # r0 the header, then the next bitstream word's address (rotating loads
+  # off a word boundary); r1 destination, r2 bytes still to write, r3 the
+  # output word (the last stored is left there), r4 the tree's root, r5 the
+  # node, r6 the bitstream word, r7 its bits left, r8 the leaves to the next
+  # store, r9 the symbol size, r10 the node byte, then the reloaded count,
+  # r12 the child's address, then the symbol
   of hfPush: cpu.u_stmfd([4, 5, 6, 7, 8, 9, 10, 11, 14])
   of hfA1:
     r(2) = 0x02000000'u32
@@ -743,19 +722,16 @@ proc unc_arm(cpu: CPU; l: UA) =
     if cast[int32](r(10)) >= 0: cpu.ujump(fsC0)
   of fsPop: cpu.u_ldmfd([4, 5, 6, 7, 8, 9, 10, 14])
   of fsRet: cpu.u_ret()
-  # VBlankIntrWait (r0 = r1 = 1) and IntrWait. With old flags to discard the
-  # check runs first and its result is dropped; either way the routine then
-  # halts (a store to HALTCNT through r12) and checks after every wake,
-  # until a flag in r1 is in the BIOS's mirror at 0x03007FF8. The check
-  # clears IME, reads the mirror, acknowledges the bits it finds there and
-  # sets IME again; it sets r12 to the I/O base, so the first halt without
-  # the discard goes through what the dispatcher left in r12 (the routine's
-  # address: a store into the BIOS, no halt -- iwait.c's preset flags, as on
-  # the console). r0 the bits found, r1 the mask, r2 the mirror, r3 = 0 (the
-  # IME clear and the halt store), r4 = 1 (the IME set), r12 the I/O base;
-  # lr the console's own return addresses of the two calls (0x344, 0x34C),
-  # which nested IRQ dispatchers push and a game can read back (Prince of
-  # Tennis 2004)
+  # VBlankIntrWait (r0 = r1 = 1) and IntrWait. With old flags to discard
+  # the check runs first and its result is dropped; then the routine halts
+  # (HALTCNT through r12) and checks after every wake, until a flag in r1
+  # is in the BIOS's mirror at 0x03007FF8. The check sets r12 to the I/O
+  # base, so the first halt without the discard stores through the
+  # dispatcher's r12 (the routine's address: into the BIOS, no halt --
+  # iwait.c's preset flags, as on the console). r0 the bits found, r1 the
+  # mask, r2 the mirror, r3 = 0, r4 = 1 (the IME values); lr the console's
+  # return addresses of the two calls (0x344, 0x34C), which a game can read
+  # back off a nested IRQ dispatcher's stack (Prince of Tennis 2004)
   of iwVbl0: r(0) = 1
   of iwVbl1: r(1) = 1
   of iwPush: cpu.u_stmfd([4, 14])
@@ -784,16 +760,11 @@ proc unc_arm(cpu: CPU; l: UA) =
     if r(0) != 0: cpu.u_strh(r(12) - 8, r(2))
   of icIme1: cpu.u_strb(r(12) + 0x208'u32, r(4))
   of icRet: cpu.ujump(if r(14) == 0x344'u32: iwHalt else: iwLoop)
-  # Div (DivArm swaps its operands first). Nothing but one-cycle steps and
-  # branches: five steps for the signs, an alignment loop doubling the
-  # divisor while it is below half the dividend (two steps and a branch
-  # back per shift, one pass that falls through), the shift-subtract loop
-  # (five steps and a branch back per pass, one more falling through) and
-  # five steps for the result's signs (hle_bios.nim div_body_cycles: the
-  # counts). The results go in at the start; r12 counts the two loops'
-  # passes (alignment in bits 0-15, division above). A zero divisor with a
-  # dividend of 2 or more hangs the console in the alignment loop; here it
-  # ends as for a dividend of 1 (hle_div)
+  # Div (DivArm swaps its operands first): one-cycle steps and branches
+  # only, step counts as hle_bios.nim div_body_cycles. The results go in at
+  # the start; r12 counts the two loops' passes (alignment in bits 0-15,
+  # division above). A zero divisor with a dividend of 2 or more hangs the
+  # console; here it ends as for a dividend of 1 (hle_div)
   of daS0, daS1: discard
   of daS2: swap(cpu.r[0], cpu.r[1])
   of dvA0:
@@ -922,18 +893,12 @@ proc unc_arm(cpu: CPU; l: UA) =
   of muU: cpu.idle(mul_i_cycles(r(12), false) + 1)
   of muA: discard
   of muRet: cpu.u_jump(r(14))
-  # Sqrt: Newton from above with a restoring divide (hle_bios.nim's account
-  # of the algorithm and its results), as the console's steps: the
-  # normalising loop (a compare, two conditional shifts, a branch back), and
-  # per pass four steps, the divisor's alignment loop (a compare, a
-  # conditional doubling, a branch back while it was below half the input)
-  # and the divide loop (a compare, a conditional subtract, the quotient's
-  # shift with the carry, a compare with the estimate, a conditional halving
-  # and a branch back), three steps for the new estimate and a branch back
-  # to another pass while it falls. The flags carry each compare to the steps
-  # that test it. r0 the input, then the remainder, then the root; r1 the
-  # estimate, r2 the divisor, r3 the quotient, r4 the pass's root, r12 the
-  # input
+  # Sqrt: Newton from above with a restoring divide, as the console's
+  # steps: a normalising loop, then per pass the divisor's alignment loop,
+  # the divide loop and the new estimate, while the estimate falls. The
+  # flags carry each compare to the steps that test it. r0 the input, then
+  # the remainder, then the root; r1 the estimate, r2 the divisor, r3 the
+  # quotient, r4 the pass's root, r12 the input
   of sqPush: cpu.u_stmfd([4])
   of sqA0: r(12) = r(0)
   of sqA1: r(1) = 1
@@ -971,15 +936,12 @@ proc unc_arm(cpu: CPU; l: UA) =
   of sqPop: cpu.u_ldmfd([4])
   of sqRet: cpu.u_ret()
   # ArcTan: r1 = -(x^2 >> 14), then Horner's rule over the coefficients
-  # 0xA9, 0x390, 0x91C, 0xFB6, 0x16AA, 0x2081, 0x3651, 0xA2F9 (each product
-  # by r1 shifted down 14, arithmetically, in 32-bit wrapping arithmetic),
-  # the angle the sum times x shifted down 16 -- exact against the console on
-  # 285 inputs before (TM0) and on mathset.c's. A step at a time: the square
-  # and the final scale take the input as the multiplier, the first Horner
-  # step the constant 0xA9, the six others the accumulator after its
-  # coefficient is added (each added in two steps). r0 the input, then the
-  # angle; r1 -(input^2 >> 14), r3 the accumulator (both left as the
-  # routine leaves them)
+  # below (each product by r1 shifted down 14, arithmetically, 32-bit
+  # wrapping), the angle the sum times x shifted down 16; exact against the
+  # console (mathset.c). Multiplier per multiply (internal cycles): the
+  # input for the square and final scale, 0xA9 for the first Horner step,
+  # the accumulator for the rest. r0 the input, then the angle; r1
+  # -(input^2 >> 14), r3 the accumulator (both left as the routine does)
   of atM0:
     cpu.idle(mul_i_cycles(r(0), true))
     r(1) = r(0) * r(0)
@@ -1306,13 +1268,11 @@ proc unc_thumb(cpu: CPU; l: UT) =
   of sbB: cpu.tjump(sbL0)
   of sbRet: cpu.ujump(uaXPop2)
   # MidiKey2Freq. A key above 178 takes two more steps (the clamp); five
-  # loads from the BIOS's tables; two long multiplies: the fine pitch's
-  # interpolation, whose multiplier is the pitch in the top byte (any
-  # nonzero pitch is a slow one), and the WaveData frequency times the
-  # interpolated multiplier M, which is its multiplier (a key in the top
-  # octaves the slowest) -- tools/biosdrv/m2ftime.c. The values are
-  # hle_bios.nim's (midikey.c): r4 M, r5 and r6 the two multipliers, r7
-  # the frequency; the routine leaves r0 the result, r1 M
+  # loads from the BIOS's tables; two long multiplies, the fine pitch's
+  # interpolation (multiplier: the pitch in the top byte) and the WaveData
+  # frequency times the interpolated M (multiplier: M) --
+  # tools/biosdrv/m2ftime.c. r4 M, r5 and r6 the two multipliers, r7 the
+  # frequency; the routine leaves r0 the result, r1 M
   of mkPush: cpu.u_tpush([4, 5, 6, 7])
   of mkA1:
     var key = r(1)
@@ -1352,15 +1312,13 @@ proc unc_thumb(cpu: CPU; l: UT) =
   of mkBx: cpu.ujump(uaXPop2)
   of mvV0: discard
   of mvV1: cpu.ujump(muU)
-  # ArcTan2 (tools/biosdrv/atan2.c: every path). y = 0 and x = 0 end at once
-  # (0 or 0x8000; 0x4000 or 0xC000). Otherwise ten steps, then a branch by
-  # quadrant and, within it, by which coordinate is the larger -- `flat`
-  # as hle_bios.nim has it, ties going to y / x except in the third quadrant
-  # and -2^31 always the smaller -- into one of five tails, each of which
-  # calls Div on the smaller over the larger (shifted up 14) and ArcTan on
-  # the ratio, through their veneers, and turns the angle into the result:
-  # t, 0x4000 - t, t + 0x8000, 0xC000 - t or t + 0x10000. r4 x, r5 y, r6
-  # flat; Div and ArcTan leave r0, r1 and r3 as they leave them
+  # ArcTan2 (tools/biosdrv/atan2.c: every path). y = 0 and x = 0 end at
+  # once (0 or 0x8000; 0x4000 or 0xC000). Otherwise a branch by quadrant
+  # and by which coordinate is larger (`flat`: ties go to y / x except in
+  # the third quadrant; -2^31 is always the smaller) into one of five
+  # tails: Div of the smaller over the larger (shifted up 14), ArcTan of
+  # the ratio, then t, 0x4000 - t, t + 0x8000, 0xC000 - t or t + 0x10000.
+  # r4 x, r5 y, r6 flat; Div and ArcTan leave r0, r1 and r3 as they do
   of a2Push: cpu.u_tpush([4, 5, 6, 7])
   of a2A0:
     r(4) = r(0)
@@ -1456,21 +1414,16 @@ proc unc_thumb(cpu: CPU; l: UT) =
   of a2Bx: cpu.ujump(uaXPop2)
   of avD1: cpu.ujump(dvA0)
   of avA1: cpu.ujump(atM0)
-  # RegisterRamReset (tools/biosdrv/rrr.c, rrr2.c, rrr4.c, rrr5.c,
-  # rrrregs.c, rrrsb.c). A zero word below the frame; DISPCNT forced blank;
-  # then each group in turn: other I/O (bit 7: IE to IME and the rest cleared
-  # by fills, IF acknowledged, a byte to 0x04000410, KEYCNT's word, the
-  # affine PA/PD set to 0x100), SIO (RCNT 0x8000 and JOYCNT 7 at 0x134 and
-  # 0x140 with bit 5, at 0x114 and 0x120 without; the registers cleared with
-  # it), sound (bit 6: the master enable off and on, SOUNDCNT_H 0x880E,
-  # SOUNDBIAS kept to its level bits, both wave RAM banks cleared with the
-  # eight words from 0x90 -- FIFO A and B among them -- the master off), then
-  # EWRAM, VRAM, OAM, palette RAM and IWRAM below 0x03007E00. Each clear is
-  # the helper: a group whose bit is clear returns at once, else it tail
-  # calls CpuFastSet to fill from the zero word. The registers are the
-  # console's: r0 the flags, then the zero word's address (what a clear
-  # leaves; 0x100 if only bit 7 ran), r1 the clear's destination, r2 its
-  # count, r4 the I/O base, r5 0x85000000, r6 the group's bit, r7 the flags
+  # RegisterRamReset (tools/biosdrv/rrr*.c, rrrsb.c). A zero word below
+  # the frame; DISPCNT forced blank; then each group in turn: other I/O
+  # (bit 7), SIO (RCNT 0x8000 and JOYCNT 7 at 0x134 and 0x140 with bit 5,
+  # at 0x114 and 0x120 without), sound (bit 6: SOUNDBIAS kept to its level
+  # bits, both wave RAM banks and FIFO A and B cleared), then EWRAM, VRAM,
+  # OAM, palette RAM and IWRAM below 0x03007E00. Each clear tail calls
+  # CpuFastSet to fill from the zero word unless its bit is clear. r0 the
+  # flags, then the zero word's address (what a clear leaves; 0x100 if only
+  # bit 7 ran), r1 the clear's destination, r2 its count, r4 the I/O base,
+  # r6 the group's bit, r7 the flags
   of rrPush: cpu.u_tpush([4, 5, 6, 7])
   of rrA1: r(13) -= 4
   of rrA2: r(7) = r(0)

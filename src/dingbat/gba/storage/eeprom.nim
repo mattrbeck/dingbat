@@ -4,11 +4,9 @@ const EEPROM_SETTLE_CYCLES {.intdefine.} = 108368
   ## Programming time after a write, GBATEK "GBA Cart Backup EEPROM": "it'll
   ## take ca. 108368 clock cycles (ca. 6.5ms) until the old data is erased and
   ## new data is programmed". The ready poll reads 0 while settling.
-  ## A chip's analog time, not a console constant: a game that formats a
-  ## blank cart (Super Mario Advance 3: 196 block writes at first boot)
-  ## carries it into its frame phase, so the playtest references' outcomes
-  ## follow theirs (one as if 115000, the other ~101000;
-  ## docs/playtest-bugs.md). The define lets a build try a measured value
+  ## A chip's analog time, not a console constant: Super Mario Advance 3
+  ## formats a blank cart with 196 block writes and carries the total into
+  ## its frame phase (docs/playtest-bugs.md). The define lets a build try a measured value
   ## (tests/roms/payloads/eesettle.s on the cart) without an edit.
 
 proc eeprom_now(ep: EEPROM): CycleCount {.inline.} =
@@ -59,12 +57,11 @@ proc set_eeprom_size(ep: EEPROM; sz: Option[EepromSize]) =
       ep.memory[i] = 0xFF
 
 proc new_eeprom*(gba: GBA): EEPROM =
-  ## The chip size is NOT taken from an existing .sav: emulators write 8 KB
-  ## EEPROM saves even for 4Kbit chips, so the file size proves nothing, and
-  ## sizing from it breaks Classic NES Series - Metroid's protection handshake
-  ## ("GAME PAK ERROR"). Detection waits for the first command's DMA count
-  ## (eeprom_size_from_dma_length); the buffer starts at the largest size and
-  ## shrinks on detection, keeping data loaded from the .sav.
+  ## The chip size is NOT taken from an existing .sav: 8 KB files for 4Kbit
+  ## chips are common, and sizing from one breaks Classic NES Series -
+  ## Metroid ("GAME PAK ERROR"). Detection waits for the first command's DMA
+  ## count (eeprom_size_from_dma_length); the buffer starts at the largest
+  ## size and shrinks on detection, keeping data loaded from the .sav.
   result = EEPROM(
     state: {esReady},
     address: 0,
@@ -78,10 +75,9 @@ proc new_eeprom*(gba: GBA): EEPROM =
     result.memory[i] = 0xFF
 
 method `[]`*(ep: EEPROM; address: uint32): uint8 =
-  # The EEPROM answers only in the 0x0D region. The SRAM chip-select region
-  # (0x0E/0x0F) hits no chip on an EEPROM-only cart: reads float high (0xFF
-  # assumed) and must not clock the serial protocol (Classic NES Series carts
-  # probe 0x0E000000 for absent SRAM at boot).
+  # The EEPROM answers only in the 0x0D region. 0x0E/0x0F hits no chip on an
+  # EEPROM-only cart: reads 0xFF (assumed) and must not clock the serial
+  # protocol (Classic NES Series carts probe 0x0E000000 at boot).
   if (address shr 24) != 0x0D'u32:
     return 0xFF'u8
   if esReadIgnore in ep.state:
@@ -115,19 +111,14 @@ method `[]=`*(ep: EEPROM; address: uint32; value: uint8) =
     return
   if not ep.gba_ref.bus.dma_active:
     # A store outside a DMA burst is a frame of its own and ends the one in
-    # progress. The chip sees only the cart's /CS, /RD, /WR, A23 and AD0
-    # (GBATEK "GBA Cart Backup EEPROM", Pin-Outs). The cart latches an
-    # address on /CS falling and counts it up on each /RD or /WR (GBATEK
-    # "AUX GBA Game Pak Bus"), so /CS stays low through a sequential burst
-    # (a DMA's) and falls anew for each nonsequential access (a CPU load or
-    # store); GBATEK puts manual LDRH/STRH transfers failing down to that.
-    # One bit carries no command, so: a command still before its data is
-    # dropped and the chip is ready; a read already addressed keeps its
-    # data, and a write's stop bit counts as sent. A write cut short inside
-    # its data keeps the bits it got (Assumed, as is all of this beyond the
-    # pin-out). Columns Crown's boot (three stray stores before its first
-    # command DMA, docs/playtest-bugs.md §95) is the case the game pins;
-    # tests/roms/payloads/eestray.s on a cart would settle the rest.
+    # progress: /CS stays low through a sequential burst and falls anew for
+    # each nonsequential access (GBATEK "GBA Cart Backup EEPROM" pin-outs,
+    # "AUX GBA Game Pak Bus"). A command still before its data is dropped;
+    # a read already addressed keeps its data, and a write's stop bit counts
+    # as sent; a write cut short keeps the bits it got (Assumed beyond the
+    # pin-out). Columns Crown's boot (stray stores before its first command
+    # DMA, docs/playtest-bugs.md §95) pins it; tests/roms/payloads/eestray.s on a cart would settle the
+    # rest.
     if esAddress in ep.state or esWrite in ep.state:
       ep.state = {esReady}
       ep.wrote_bits = 0
@@ -168,10 +159,9 @@ method `[]=`*(ep: EEPROM; address: uint32; value: uint8) =
     ep.dirty = true
     ep.wrote_bits += 1
     if ep.wrote_bits == 64:
-      # The block is complete: programming runs for EEPROM_SETTLE_CYCLES
-      # from its last data bit (GBATEK times the whole write and does not say
-      # where the window starts; no ROM pins it, and a status poll inside a
-      # block's own DMA burst cannot happen).
+      # Programming runs for EEPROM_SETTLE_CYCLES from the last data bit
+      # (Assumed: GBATEK does not say where the window starts; no ROM pins
+      # it).
       ep.busy_until = ep.eeprom_now() + EEPROM_SETTLE_CYCLES
       ep.buffer.clear()
       ep.wrote_bits = 0

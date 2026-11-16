@@ -1,13 +1,10 @@
-# Input-rollback netplay session (GGPO-style) over the local 2-core link.
-#
-# Both peers run both GBA cores locally (link.nim resolves the SIO cable);
-# only button inputs cross the network. Each frame the session feeds the
-# local input plus a prediction of the remote input, and when a late remote
-# input arrives mispredicted it restores that frame's checkpoint and
-# re-simulates. Transport-agnostic: call `tick(localBits)` once per display
-# frame and ship the returned frame's input; call `feed_remote` as peer
-# inputs arrive. Determinism needs identical build + ROM + save on both
-# sides and a deterministic RTC (enable_deterministic_rtc).
+# Input-rollback netplay (GGPO-style) over the local 2-core link. Both
+# peers run both cores (link.nim resolves the cable); only button inputs
+# cross the network. A mispredicted remote input restores that frame's
+# checkpoint and re-simulates. Call `tick(localBits)` once per display
+# frame and ship its input; call `feed_remote` as peer inputs arrive.
+# Determinism needs identical build + ROM + save on both sides and a
+# deterministic RTC (enable_deterministic_rtc).
 
 import ../common/input
 import link
@@ -60,8 +57,7 @@ proc grow(sess: RollbackSession; f: int) =
     sess.usedRemote.setLen(n)
 
 proc apply_inputs(sess: RollbackSession; f: int) =
-  # Remote word: the real input if known, else the last confirmed remote
-  # input (button states change rarely, so the prediction usually holds).
+  # Unknown remote input is predicted as the last confirmed one.
   let lb = sess.localIn[f]
   let rb =
     if sess.remoteKnown[f]: sess.remoteIn[f]
@@ -86,7 +82,6 @@ proc load_ckpt(sess: RollbackSession; f: int) =
   sess.link.restore_state(sess.ring[idx])
 
 proc sim(sess: RollbackSession; f: int) =
-  # Checkpoint the state entering frame f, then apply its inputs and step.
   sess.store_ckpt(f)
   sess.apply_inputs(f)
   sess.link.step_frame()
@@ -133,10 +128,9 @@ proc tick*(sess: RollbackSession; localBits: uint16): RollbackStatus =
   sess.localIn[sess.head] = localBits
   sess.sim(sess.head)
   inc sess.head
-  # Remote inputs that arrived before head reached them extend the confirmed
-  # frontier now (they were simulated as known, so nothing re-runs); left to
-  # the next arrival, a peer that goes quiet would leave this side stalled at
-  # the window with the inputs it needs already in hand.
+  # Extend the frontier over inputs that arrived early now: left to the
+  # next arrival, a quiet peer would leave this side stalled at the window
+  # with the inputs it needs already in hand.
   sess.reconcile()
   rbAdvanced
 

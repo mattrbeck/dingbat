@@ -18,12 +18,10 @@ proc update_waitcnt*(bus: Bus; w: WAITCNT) =
     bus.wait16_s[page] = int8(ACCESS_TIMING_TABLE[0][page])
     bus.wait32_n[page] = int8(ACCESS_TIMING_TABLE[1][page])
     bus.wait32_s[page] = int8(ACCESS_TIMING_TABLE[1][page])
-  # EWRAM waits come from the internal memory control register (0x04000800
-  # bits 24-27, GBATEK "System Control"): waits = 15 - field, one per
-  # halfword, so a word costs twice. Field 13 (the BIOS default) is the
-  # table's 3/6; 14 gives 2/4 and 4 gives 12/24 (hardware: gbaedge MEMCTL
-  # on AGB SP, docs/hwprobe-results-agb.md). Field 15 hangs real hardware;
-  # here it is the fastest setting.
+  # EWRAM waits: 0x04000800 bits 24-27 (GBATEK "System Control"), waits =
+  # 15 - field per halfword, a word twice. Field 13 (BIOS default) = 3/6.
+  # AGB SP, gbaedge MEMCTL (docs/hwprobe-results-agb.md). Field 15 hangs
+  # real hardware; here it is the fastest setting.
   block:
     let ws = int(bits_range(bus.gba.mmio.memctrl, 24, 27))
     let half = int8(1 + 15 - ws)
@@ -31,9 +29,8 @@ proc update_waitcnt*(bus: Bus; w: WAITCNT) =
     bus.wait16_s[2] = half
     bus.wait32_n[2] = 2 * half
     bus.wait32_s[2] = 2 * half
-  # MEMCNT bit 5 clear switches the board WRAM off: its region reads and
-  # writes the chip WRAM, at the chip's timing (png183 memory t104-t106;
-  # tests/roms/payloads/memcnt.s on an AGB SP).
+  # MEMCNT bit 5 clear: the board WRAM region reads and writes the chip
+  # WRAM, at chip timing (AGB SP, payloads/memcnt.s; png183 memory t104-t106).
   # Derived state only: a state load restores the fetch page after this.
   let ewram_off = not bit(bus.gba.mmio.memctrl, 5)
   bus.ewram_off = ewram_off
@@ -90,11 +87,9 @@ proc update_waitcnt*(bus: Bus; w: WAITCNT) =
     bus.pf_commit[page] = m
 
 when defined(fetchprof):
-  # -d:fetchprof: where the ROM access path goes on a real workload. Indices:
-  #   0 fetch_half hot   1 fetch_half slow   2 fetch_word hot   3 fetch_word slow
-  #   4 rac fetch calls  5 rac data calls
-  #   6 rac prefetch-hit 7 rac plain-seq     8 rac nonseq
-  #   9 rac went hot after
+  # -d:fetchprof (off by default): ROM access path counters. Indices:
+  #   0/1 fetch_half hot/slow, 2/3 fetch_word hot/slow, 4/5 rac fetch/data,
+  #   6 rac prefetch-hit, 7 plain-seq, 8 nonseq, 9 went hot after
   var fetchprof*: array[16, uint64]
 
 proc bus_now(bus: Bus): CycleCount {.inline.} =
@@ -116,13 +111,10 @@ proc add_cycles*(bus: Bus; n: int) {.inline.} =
 
 proc write_waitcnt*(bus: Bus; w: WAITCNT) =
   ## A CPU write to WAITCNT, with PREFETCH_TOGGLE_LAW. Switching the
-  ## prefetcher off does not discard the buffer: the halfword in flight
-  ## completes, the CPU uses up what is buffered, and once it is empty its
-  ## next fetch is nonsequential -- the drained pause state. AGBEEG aging
-  ## cartridge toggle_prefetcher, measured on hardware: all 16 disable cells
-  ## (WAITCNT 0x4000/4004/4010/4014 x 1-4 idle cycles) match; counting the
-  ## in-flight halfword as landed at once reads 2/2/1/1 low, dropping it
-  ## 1 high.
+  ## prefetcher off keeps the buffer: the halfword in flight completes, the
+  ## CPU uses up what is buffered, then fetches nonsequentially (the drained
+  ## pause state). Measured: AGBEEG aging cart toggle_prefetcher on hardware;
+  ## landing the in-flight halfword at once reads low, dropping it 1 high.
   if not PREFETCH_TOGGLE_LAW: discard
   elif bus.prefetch_on and not w.gamepack_prefetch_buffer and
      bus.fetch_page - 0x8 <= 5 and not bus.pf_paused:
@@ -141,11 +133,9 @@ proc write_waitcnt*(bus: Bus; w: WAITCNT) =
     bus.rom_hot = false
   elif w.gamepack_prefetch_buffer and not bus.prefetch_on and
        bus.bus_now() > bus.rom_free_since:
-    # Switched on after cycles off the ROM bus with it off: those cycles
-    # broke the burst, so the next fetch is nonsequential, and the
-    # prefetcher starts behind it (toggle_prefetcher's enable half: all 16
-    # cells match; with the write cycle credited to the prefetcher, as
-    # without the law, they read 3/2/4/3 low)
+    # Switched on after cycles off the ROM bus: the burst is broken, the
+    # next fetch is nonsequential and the prefetcher starts behind it
+    # (toggle_prefetcher enable half; crediting the write cycle reads low)
     bus.rom_next_addr = 1
     bus.rom_hot = false
     bus.pf_running = false
@@ -182,12 +172,10 @@ proc pf_serve(bus: Bus; now: CycleCount; page: int; halves: int): int {.pf_inlin
   ## it has (one cycle) or waits out the rest, and leftover credit carries to
   ## the next fetch. rom_free_since can sit ahead of `now` (the waitloop
   ## fast-forward discards a partial instruction's cycles): zero credit.
-  ## Hardware (alyosha prefetcher_full_*, prefetcher_branch_thumb_4): at
-  ## eight halfwords the prefetcher stops and stays stopped until the CPU has
-  ## taken every one; the fetch after that is the CPU's own, nonsequential
-  ## (pf_serve_stopped). Bracketed: stopping at 7 fails prefetcher_full_arm,
-  ## _full_arm_2, _full_thumb and _branch_thumb_4; at 9, _full_arm,
-  ## _full_arm_2 and _branch_thumb_4.
+  ## At eight halfwords the prefetcher stops until the CPU has taken every
+  ## one; the next fetch is the CPU's own, nonsequential (pf_serve_stopped).
+  ## Pinned by alyosha prefetcher_full_* and prefetcher_branch_thumb_4;
+  ## stopping at 7 or 9 fails them.
   if not bus.pf_paused:
     let s = int(bus.wait16_s[page])
     let need = halves * s
@@ -203,18 +191,13 @@ proc pf_serve(bus: Bus; now: CycleCount; page: int; halves: int): int {.pf_inlin
       return max(1, need - int(gap))  # a full buffer serves even a 32-bit fetch in one cycle
   bus.pf_serve_stopped(now, page, halves)
 
-# A CPU data access is a nonsequential bus cycle: in the ARM7TDMI data sheet
-# a single load's or store's data cycle (and an LDM/STM's first transfer) has
-# SEQ low; only the later transfers of an LDM/STM, back to back, are
-# sequential. The prefetch bit does not change that -- GBATEK, "GamePak
-# Prefetch": the feature works only with opcodes fetched from the gamepak,
-# and code in RAM or the BIOS reading data from it is not affected. With
-# -d:ROM_DATA_NONSEQ=false (the rule before), a data access that continued
-# the previous ROM access's address was sequential under the prefetcher
-# however long the CPU had been off the ROM bus: Nintendo's HuffUnComp,
-# walking a tree in the cartridge, took S for a node read after its
-# neighbour, and Klonoa 2's loads ended a frame early (docs/playtest-bugs.md,
-# "Klonoa 2").
+# A CPU data access is nonsequential unless back to back with the previous
+# ROM access: ARM7TDMI data sheet, a load's or store's data cycle (and an
+# LDM/STM's first transfer) has SEQ low. GBATEK "GamePak Prefetch": the
+# prefetcher affects only opcode fetches. -d:ROM_DATA_NONSEQ=false treats an
+# address-continuing data access as sequential under the prefetcher however
+# long the CPU was off the bus; that runs Klonoa 2's HuffUnComp loads a frame
+# early (docs/playtest-bugs.md §58).
 const ROM_DATA_NONSEQ {.booldefine.} = true
 
 proc rom_access_cycles(bus: Bus; address: uint32; is32: bool; fetch: bool): int {.inline.} =
@@ -238,10 +221,9 @@ proc rom_access_cycles(bus: Bus; address: uint32; is32: bool; fetch: bool): int 
       bus.rom_next_addr2 = bus.rom_next_addr
       bus.rom_next_addr = address  # promoted; advanced below
     elif contiguous and bus.rom_next_addr != 1:
-      # ROM bus still hot from the previous DMA access (a ROM-to-ROM
-      # transfer's write after its read) is sequential, except on the DMA's
-      # very first ROM access: rom_next_addr == 1 is the cold sentinel seeded
-      # at DMA start, and a fresh bus master's first access is non-sequential
+      # Bus still hot from the previous DMA access (ROM-to-ROM write after
+      # read) is sequential, except the DMA's first ROM access:
+      # rom_next_addr == 1 is the cold sentinel seeded at DMA start
       seq = true
       bus.rom_next_addr2 = bus.rom_next_addr
       bus.rom_next_addr = address
@@ -281,13 +263,12 @@ proc rom_access_cycles(bus: Bus; address: uint32; is32: bool; fetch: bool): int 
   if not fetch and not contiguous and bus.prefetch_on and not bus.dma_active and
      not was_paused and bus.fetch_page - 0x8 <= 5:
     # Prefetch hand-off: a CPU data access takes the ROM bus from the
-    # prefetcher, which is `elapsed mod s` cycles into a halfword. A halfword
-    # in its address/wait phase is abandoned free; one in its final cycle has
-    # committed and the CPU waits that cycle out. Nothing is in flight once
-    # the buffer is full (8*s cycles). Only while the CPU executes from the
-    # gamepak. mGBA suite Timing "ROM" prefetch columns for LDR/LDM.
-    # `elapsed` is 0 when the waitloop fast-forward pushed rom_free_since
-    # past `now`.
+    # prefetcher, `elapsed mod s` cycles into a halfword. One in its
+    # address/wait phase is abandoned free; one in its final cycle has
+    # committed and the CPU waits that cycle. Nothing is in flight once the
+    # buffer is full (8*s). Only while executing from the gamepak. Pinned by
+    # the mGBA suite Timing "ROM" prefetch columns (LDR/LDM). `elapsed` is 0
+    # when the waitloop fast-forward pushed rom_free_since past `now`.
     let elapsed = if now > bus.rom_free_since: int(now - bus.rom_free_since)
                   else: 0
     let commit =
@@ -299,16 +280,13 @@ proc rom_access_cycles(bus: Bus; address: uint32; is32: bool; fetch: bool): int 
       cost += 1
       new_free_since += 1
   elif not fetch and bus.dma_active and bus.dma_first_rom:
-    # Prefetch hand-off to a DMA burst: the same arbitration, at the one
-    # access where a burst can meet the prefetcher — its FIRST touch of the
-    # ROM bus (the prefetcher is then stopped for the burst). The phase is
-    # counted from the grant, not `now - rom_free_since`: a granted DMA runs
-    # inside an event dispatch where tick_slow has rewound sched.cycles and
-    # still holds back part of the CPU's tick quota, so `now` lags the bus by
-    # 0..3 cycles. A burst asserts its request the cycle before the access,
-    # so the halfword it lands on is k-1 cycles old and "final cycle"
-    # ((k-1) mod s == s-1) is `k mod s == 0`. Pinned by the 32 mGBA suite
-    # DMA/ROM Timing rows (k = 2 for a ROM-read burst, 3 for a ROM-write one).
+    # Prefetch hand-off to a DMA burst: the same arbitration, at the burst's
+    # FIRST ROM access (the prefetcher then stops for the burst). Phase is
+    # counted from the grant, not `now - rom_free_since`: inside an event
+    # dispatch tick_slow has rewound sched.cycles, so `now` lags the bus by
+    # 0..3. The request is asserted the cycle before the access, so "final
+    # cycle" ((k-1) mod s == s-1) is `k mod s == 0`. Pinned by the mGBA suite
+    # DMA/ROM Timing tests (k = 2 for a ROM-read burst, 3 for ROM-write).
     bus.dma_first_rom = false
     if bus.prefetch_on and not was_paused and bus.fetch_page - 0x8 <= 5:
       let s = int(bus.wait16_s[page])
@@ -336,21 +314,16 @@ proc rom_fetch_unbuffered(bus: Bus; now: CycleCount; page: int; halves: int): in
   ## cpu.clear_pipeline). The prefetcher's bus phase runs on regardless.
   ## Two cases, both rare, so out of line:
   ##
-  ## * The first halfword of a 128 KiB block. The prefetcher behaves as
-  ##   though full at a 0x20000 boundary (alyosha prefetcher/readme.txt) and
-  ##   GBATEK has the block start nonsequential. alyosha bounday_test_1 (six
-  ##   Thumb `adds` across 0x08020000 behind two EWRAM loads) reads 8 cycles
-  ##   short served from the buffer, 1 short without the final-cycle wait;
-  ##   prefetcher_boundary_1-4, which branch to the boundary one cycle apart
-  ##   and read in pairs, show the same phase.
-  ## * An ARM fetch with address bit 1 set. Only a `bx` to such an address
-  ##   puts the ARM PC there (cpu.read_instr keeps the bit, as the console
-  ##   does: alyosha prefetcher_branch_thumb_arm_3 is written for `adr`
-  ##   results two bytes past the label). The gamepak returns the aligned
-  ##   word, but the prefetcher's halfwords never match the CPU's address.
-  ##   prefetcher_branch_thumb_arm_3's second check: the ARM fetch after an
-  ##   I/O load, 2 cycles from the buffer, is N (6) there. A fetch that
-  ##   continues an unbroken burst (no cycle off the gamepak) is plain S.
+  ## * The first halfword of a 128 KiB block: the prefetcher acts full at a
+  ##   0x20000 boundary (alyosha prefetcher/readme.txt; GBATEK has the block
+  ##   start nonsequential). Pinned by alyosha bounday_test_1 and
+  ##   prefetcher_boundary_1-4; buffer-served reads 8 short, no final-cycle
+  ##   wait 1 short.
+  ## * An ARM fetch with address bit 1 set (only via `bx`; cpu.read_instr
+  ##   keeps the bit, as the console does). The gamepak returns the aligned
+  ##   word, so the prefetcher's halfwords never match. Pinned by alyosha
+  ##   prefetcher_branch_thumb_arm_3 (after an I/O load: N, not 2 from the
+  ##   buffer). A fetch continuing an unbroken burst is plain S.
   let s = int(bus.wait16_s[page])
   var wait = 0
   if bus.rom_free_since >= now:
@@ -366,11 +339,9 @@ proc rom_fetch_unbuffered(bus: Bus; now: CycleCount; page: int; halves: int): in
 
 proc rom_fetch_cycles(bus: Bus; address: uint32; page: int;
                       is32: static bool): int {.inline.} =
-  ## Fetch-only specialisation of `rom_access_cycles` for the instruction
-  ## fetch path: the general proc is too large for clang to inline, and the
-  ## DMA trackers and prefetch hand-off are dead on a fetch. A duplicate of
-  ## the fetch-relevant half, kept in step by hand; the framebuffer-hash A/B
-  ## and the mGBA Timing suite catch drift.
+  ## Fetch-only copy of `rom_access_cycles` (too large for clang to inline;
+  ## DMA trackers and hand-off are dead on a fetch). Kept in step by hand;
+  ## the framebuffer-hash A/B and the mGBA Timing suite catch drift.
   let now = bus.bus_now()
   var cost: int
   when defined(pftrace):
@@ -505,28 +476,19 @@ proc new_bus*(gba: GBA; bios_path: string): Bus =
     #   0x134: ldr   pc, [r0, #-4]            E510F004
     #   0x138: ldmfd sp!, {r0-r3, r12, lr}    E8BD500F
     #   0x13C: subs  pc, lr, #4               E25EF004
-    # UND vector (same word as the real BIOS at 0x04: `b 0x1C`). The real
-    # handler at 0x1C, hand-decoded from the BIOS image: ldr sp, =0x03007FF0;
-    # push {r12, lr}; mrs r12, spsr; mrs lr, cpsr; push {r12, lr}; then it
-    # tests the cartridge header's debug flag (ldrb [0x0800009C] == 0xA5,
-    # GBATEK "Cartridge Header" entry 09Ch) and, only if set, calls the
-    # ROM's debug handler at 0x09FE2000 / 0x09FFC000 (header byte 0B4h bit 7
-    # picks one). Otherwise: ldr sp, =0x03007FE0; pop {r12, lr}; msr spsr,
-    # r12; pop {r12, lr}; subs pc, lr, #4. Since lr_und is the undefined
-    # instruction + 4, the return lands on the faulting instruction again
-    # (ARM) or one halfword before it (Thumb) and the exception loops for
-    # ever; the `subs pc` restores CPSR from SPSR either way, so IRQs still
-    # break in at the boundary. Games without the debug flag (all retail
-    # ROMs) observe only that loop. Left out of the stub: the push/pop
-    # scribble at 0x03007FE0-0x03007FEF (between the SVC stack top and the
-    # BIOS variables, written by nothing else) and sp_und, neither of which a
-    # game can see while it hangs — the stub keeps only subs pc, lr, #4.
+    # UND: the real handler at 0x1C (hand-decoded from the BIOS image) saves
+    # SPSR/CPSR on a stack at 0x03007FF0, calls the ROM's debug handler at
+    # 0x09FE2000 / 0x09FFC000 only if header byte 09Ch == 0xA5 (0B4h bit 7
+    # picks one), else restores and returns with subs pc, lr, #4. lr_und is
+    # the instruction + 4, so it re-executes the faulting instruction (ARM)
+    # or one halfword before it (Thumb) for ever, IRQs still breaking in.
+    # Retail ROMs see only that loop, so the stub keeps only the `subs`; the
+    # push/pop scribble at 0x03007FE0-0x03007FEF and sp_und are invisible.
     write_stub_u32(result.bios, 0x004, 0xEA000004'u32)
     # The prefetch-abort, data-abort and reserved vectors branch to the same
-    # handler, as in the real BIOS. Nothing on a GBA raises those; a write
-    # of 0x10 to r15 reaches one (docs/hwprobe-sst.md, x.mrs_r15: the AGB SP
-    # comes back through the handler, where the stub without these words ran
-    # on into the IRQ vector)
+    # handler, as in the real BIOS. Only a jump there reaches one (a write of
+    # 0x10 to r15: AGB SP returns through the handler; docs/hwprobe-sst.md,
+    # x.mrs_r15)
     write_stub_u32(result.bios, 0x00C, 0xEA000002'u32)  # b 0x1C
     write_stub_u32(result.bios, 0x010, 0xEA000001'u32)  # b 0x1C
     write_stub_u32(result.bios, 0x014, 0xEA000000'u32)  # b 0x1C
@@ -539,12 +501,11 @@ proc new_bus*(gba: GBA; bios_path: string): Bus =
     write_stub_u32(result.bios, 0x138, 0xE8BD500F'u32)
     write_stub_u32(result.bios, 0x13C, 0xE25EF004'u32)
     # Halt parks on the `bx lr` after its HALTCNT write (hle_halt), which
-    # goes to the dispatcher's return at 0x170, run as instructions so a DMA
-    # burst or an interrupt meets it between the same accesses as the
-    # console's. The SVC-stack pops are of the HLE's three-word frame
-    # {caller CPSR, r12, return} (hle_bios push_halt_svc_frame): the
-    # console's pops {r11, r12, lr} after the SPSR, so 0x184 is a trap that
-    # makes its three reads (cpu.hle_halt_return).
+    # returns to the dispatcher at 0x170, run as instructions so a DMA or an
+    # interrupt meets it between the same accesses as on the console. The
+    # pops read the HLE's frame {caller CPSR, r12, return} (hle_bios
+    # push_halt_svc_frame); the console pops {r11, r12, lr} after the SPSR,
+    # so 0x184 is a trap that makes its three reads (cpu.hle_halt_return).
     write_stub_u32(result.bios, 0x1B4, 0xE12FFF1E'u32)  # bx lr
     write_stub_u32(result.bios, 0x170, 0xE8BD4004'u32)  # pop  {r2, lr}
     write_stub_u32(result.bios, 0x174, 0xE3A0C0D3'u32)  # mov  ip, #0xD3
@@ -566,13 +527,13 @@ proc new_bus*(gba: GBA; bios_path: string): Bus =
     write_stub_u32(result.bios, 0x1A4, 0xEA000000'u32)  # b    0x1AC
     write_stub_u32(result.bios, 0x1AC, 0xE3A0C301'u32)  # mov  ip, #0x04000000
     write_stub_u32(result.bios, 0x1B0, 0xE5CC2301'u32)  # strb r2, [ip, #0x301]
-    # Never executed: the words after the `bx lr` the halt parks on, the
-    # default user and IRQ stack tops (GBATEK, BIOS RAM usage) as literals.
-    # A halted CPU's last fetch is the second, and a DMA granted under the
-    # halt reads its upper half (hdmaobus.s 0x300 on an AGB SP: 0300).
-    # A CpuSet / CpuFastSet an interrupt preempted parks here, in BIOS code
-    # as the console's routine is, and the interrupt returns to it: a trap
-    # into the HLE (hle_copy.nim, COPY_TRAP)
+    # Never executed: the words after the halt's `bx lr`, the default user
+    # and IRQ stack tops (GBATEK, BIOS RAM usage). A halted CPU's last fetch
+    # is the second; a DMA granted under the halt reads its upper half (AGB
+    # SP, payloads/hdmaobus.s 0x300: 0300).
+    # A CpuSet / CpuFastSet preempted by an interrupt parks here, in BIOS
+    # code as on the console; the interrupt returns to this trap into the
+    # HLE (hle_copy.nim, COPY_TRAP)
     write_stub_u32(result.bios, 0xBC8, 0xEF000000'u32)  # swi 0 (copy resume)
     # The decompression and unpack routines run as BIOS code here, one
     # instruction per address, each an ARM or a Thumb `swi 0` the HLE
@@ -583,9 +544,8 @@ proc new_bus*(gba: GBA; bios_path: string): Bus =
       result.bios[a] = 0x00'u8
       result.bios[a + 1] = 0xDF'u8
     # Below the IRQ handler, where the console has code, a `b .`: a routine
-    # handed a source there reads it as BIOS code and finds a header of
-    # nonzero length, as on the console (tools/biosdrv/swisp2.c's skips,
-    # source 0x100: a zero length would end the source check early)
+    # handed a source there finds a header of nonzero length, as on the
+    # console (tools/biosdrv/swisp2.c, source 0x100)
     for a in countup(0x100, 0x124, 4):
       write_stub_u32(result.bios, a, 0xEAFFFFFE'u32)
     write_stub_u32(result.bios, 0x1B8, 0x03007F00'u32)
@@ -615,10 +575,8 @@ proc new_bus*(gba: GBA; bios_path: string): Bus =
     write_stub_u32(result.bios, 0x224, 0xE351007E'u32)  # cmp  r1, #126
     write_stub_u32(result.bios, 0x228, 0x1AFFFFFC'u32)  # bne  0x220
     write_stub_u32(result.bios, 0x22C, 0xEF000000'u32)  # swi 0 (boot finish)
-    # SoundGetJumpList (SWI 0x2A): the 36 sound-driver function addresses the
-    # real BIOS copies to [r0] (BIOS 0x3738), same values so games that
-    # compare the pointers see the real thing. Each entry traps into the
-    # HLE.
+    # SoundGetJumpList (SWI 0x2A): the real BIOS's 36 sound-driver addresses
+    # (copied to [r0] from BIOS 0x3738), for games that compare pointers.
     const JUMP_LIST = [0x2665'u32, 0x26CF, 0x26EF, 0x2709, 0x271D, 0x2665,
                        0x2665, 0x2665, 0x2665, 0x274B, 0x2755, 0x2769,
                        0x277B, 0x27A9, 0x27BB, 0x27CF, 0x27E3, 0x27F5,
@@ -633,10 +591,9 @@ proc new_bus*(gba: GBA; bios_path: string): Bus =
       result.bios[t]     = 0x00'u8
       result.bios[t + 1] = 0xDF'u8
     # SoundDriverMain's callback returns (hle_sound.nim sd_main): the real
-    # routine calls SoundInfo +0x20 and +0x28 with lr 0x1DF1 / 0x1DF9, so the
-    # stub puts its `swi 0` traps (Thumb) at those addresses. The BIOS's
-    # default for the SoundInfo function slots Init fills (0x1709) returns
-    # at once.
+    # routine calls SoundInfo +0x20 and +0x28 with lr 0x1DF1 / 0x1DF9, so
+    # Thumb `swi 0` traps sit there. 0x1709, the default Init puts in the
+    # SoundInfo function slots, returns at once.
     for a in [0x1DF0, 0x1DF8]:
       result.bios[a] = 0x00'u8
       result.bios[a + 1] = 0xDF'u8
@@ -661,9 +618,8 @@ proc new_bus*(gba: GBA; bios_path: string): Bus =
   result.gpio = new_gpio(gba)
   # Tilt carts cannot be probed at runtime, so detection is by game code:
   # KYG* = Yoshi's Universal Gravitation / Topsy-Turvy, KHPJ = Koro Koro
-  # Puzzle (game codes from the ROM headers; GBATEK names the titles). The
-  # tilt window is intercepted before storage regardless of the save
-  # heuristic.
+  # Puzzle (GBATEK names the titles). The tilt window is intercepted before
+  # storage regardless of the save heuristic.
   result.tilt_present = gba.cartridge != nil and
     gba.cartridge.game_code() in ["KYGE", "KYGJ", "KYGP", "KHPJ"]
   result.update_waitcnt(WAITCNT())  # reset-state waitstates
@@ -675,14 +631,11 @@ proc bus_page(address: uint32): int {.inline.} =
 
 # Tilt sensor (0x0E008000-0x0E008500, GBATEK "GBA Cart Tilt Sensor"): write
 # 0x55 to 0x8000 to arm, 0xAA to 0x8100 to latch a 12-bit sample per axis.
-# Reads deliver low byte / high nibble. GBATEK's register table:
-#   "E008300h (R) Upper 4 bits of X axis, and Bit7: ADC Status (0=Busy,
-#    1=Ready)"
-# and its sampling procedure begins "wait until [E008300h].Bit7=1 or until
-# timeout". The conversion time is not documented and the ready bit is
-# always set here: Assumed (no cart on the rig). Everything else in the
-# window reads 0xFF. Centres per GBATEK's calibration ("X ranged between
-# 0x2AF to 0x477, center at 0x392", "Y ... 0x2C3 to 0x480, center at 0x3A0").
+# Reads deliver low byte / high nibble; E008300h bit 7 is "ADC Status
+# (0=Busy, 1=Ready)". Conversion time is undocumented, so ready is always
+# set: assumed (no cart on the rig). The rest of the window reads 0xFF.
+# Centres per GBATEK's calibration ("X ranged between 0x2AF to 0x477, center
+# at 0x392", "Y ... 0x2C3 to 0x480, center at 0x3A0").
 
 const
   TILT_X_CENTER = 0x392
@@ -747,13 +700,11 @@ proc vid_store32(ppu: PPU; buf: var seq[byte]; offset: uint32; val: uint32) {.in
     ppu.render_dirty = true
     write_u32_ptr(buf, offset, val)
 
-# The OBJ layer's contention map (contention.nim cont_build_obj) reads only
-# where each entry sits vertically and how big it is: attr0's Y, affine,
-# double-size/disable and shape bits and attr1's size bits. A store that
-# leaves those alone -- attr1's X and flips, attr2, the affine parameters --
-# keeps the map, which a game rewriting OAM from H-blank DMA every line
-# would otherwise rebuild on every access; one that moves an entry keeps it
-# too unless the entry is on the map's line (cont_obj_entry_moved).
+# The OBJ contention map (contention.nim cont_build_obj) reads only attr0's
+# Y, affine, double-size/disable and shape bits and attr1's size bits. A
+# store that leaves those alone keeps the map (else H-blank DMA rewriting
+# OAM every line rebuilds it on every access); one that moves an entry keeps
+# it unless the entry is on the map's line (cont_obj_entry_moved).
 const OAM_CONT_MASK16 = [0xC3FF'u16, 0xC000'u16, 0'u16, 0'u16]
 
 proc oam_store16(ppu: PPU; offset: uint32; val: uint16) {.inline.} =
@@ -804,22 +755,20 @@ proc read_byte_internal*(bus: Bus; address: uint32): uint8 {.inline.} =
   when defined(cpu_testbus): return uint8(gba_testbus_peek(1, address))
   if bits_range(address, 28, 31) > 0:
     # 10000000-FFFFFFFF is not decoded: open bus, never a mirror. Minish Cap
-    # walks an animation script through a NULL entry into the BIOS open-bus
-    # latch and escapes only because the bytes there are the non-zero
-    # prefetched opcode.
+    # reads an animation script through a NULL entry and escapes only
+    # because the BIOS latch holds a non-zero prefetched opcode.
     return bus.read_open_bus_value(address)
   case bits_range(address, 24, 27)
   of 0x0:
     if bits_range(bus.gba.cpu.r[15], 24, 27) == 0:
       bus.bios[address and 0x3FFF'u32]
     elif (address and 0x00FFFFFF'u32) >= 0x4000'u32 and not bus.dma_active:
-      # Page-0 out-of-bounds (00004000-00FFFFFF) is unused memory: a CPU read
-      # returns open bus, not the BIOS latch (GBATEK "Reading from Unused
-      # Memory")
+      # 00004000-00FFFFFF is unused memory: a CPU read gets open bus, not
+      # the BIOS latch (GBATEK "Reading from Unused Memory")
       bus.read_open_bus_value(address)
     else:
-      # BIOS reads are latched to last successful read
-      # https://rust-console.github.io/gbatek-gbaonly/#reading-from-bios-memory-00000000-00003fff
+      # Outside the BIOS, BIOS reads return the last fetched BIOS opcode
+      # (GBATEK "Reading from BIOS Memory")
       let shift = (address and 3) * 8
       uint8(bus.bios_latch shr shift)
   of 0x1: bus.read_open_bus_value(address)
@@ -953,10 +902,9 @@ else:
 
 proc write_byte_internal*(bus: Bus; address: uint32; value: uint8) =
   if bits_range(address, 28, 31) > 0: return
-  # Self-modifying-code pipeline capture: a write landing on the two opcodes
-  # already fetched must not affect execution, so snapshot them first. Stands
-  # down while a refill is pending: nothing has been fetched at the new PC yet
-  # and the refill must observe the write (Golden Sun TLA's stack trampoline)
+  # Self-modifying code: a write to the two opcodes already fetched must not
+  # affect execution, so snapshot them first. Not while a refill is pending:
+  # the refill must see the write (Golden Sun TLA's stack trampoline)
   if not bus.gba.cpu.refill_pending and
      address <= bus.gba.cpu.r[15] and address >= bus.gba.cpu.r[15] - 4:
     bus.gba.cpu.fill_pipeline()
@@ -984,10 +932,8 @@ proc write_byte_internal*(bus: Bus; address: uint32; value: uint8) =
     if address_in_gpio(address):
       bus.gpio[address] = value
     elif bus.gba.storage.eeprom_at(address):
-      # A store, not a read: STRB pulses /WR, and the ARM7TDMI drives a
-      # stored byte on every lane of the data bus, so AD0 carries its bit 0.
-      # No DMA moves bytes, so it is a CPU store, a frame of its own
-      # (storage/eeprom.nim)
+      # STRB pulses /WR with the byte on every lane, so AD0 carries its bit
+      # 0. Only the CPU stores bytes: a frame of its own (storage/eeprom.nim)
       bus.gba.storage[address] = value
   of 0xE, 0xF:
     if bus.tilt_hit(address): bus.tilt_write(address, value)
@@ -1013,8 +959,7 @@ proc write_half_internal*(bus: Bus; address: uint32; value: uint16) =
     wcWatch(bus, address, 2)
   of 0x4:
     if (address and 0xFFFFFF'u32) == 0x132'u32:
-      # KEYCNT: atomic 16-bit store so the keypad IRQ check never sees a
-      # half-written transient (write_keycnt16)
+      # KEYCNT: one 16-bit store, so the keypad IRQ check never sees half
       bus.gba.keypad.write_keycnt16(value)
     else:
       bus.write_byte_internal(address, uint8(value))
@@ -1033,11 +978,9 @@ proc write_half_internal*(bus: Bus; address: uint32; value: uint16) =
     elif bus.gba.storage.eeprom_at(address):
       bus.gba.storage[address] = uint8(value)
   of 0xE, 0xF:
-    # The backup chip is on an 8-bit bus: STRH drives the halfword onto both
-    # halves of the data bus and the chip latches the lane A0 selects, so the
-    # byte at `orig` is value >> (8 * (orig and 1)) — an odd address stores
-    # the high byte (GBATEK "GBA Cart Backup SRAM/FLASH"; jsmolka
-    # save/{sram,flash64,flash128} test 6). Applies to the tilt sensor too.
+    # 8-bit backup bus: STRH drives the halfword on both halves and the chip
+    # latches the lane A0 selects, so an odd address stores the high byte
+    # (GBATEK "GBA Cart Backup SRAM/FLASH"; jsmolka save/* test 6). Tilt too.
     let b = uint8(value shr (8'u32 * (orig and 1'u32)))
     if bus.tilt_hit(orig): bus.tilt_write(orig, b)
     else: bus.gba.storage[orig] = b
@@ -1062,8 +1005,7 @@ proc write_word_internal*(bus: Bus; address: uint32; value: uint32) =
     wcWatch(bus, address, 4)
   of 0x4:
     if (address and 0xFFFFFF'u32) == 0x130'u32:
-      # Word store covering KEYINPUT (read-only) + KEYCNT: commit KEYCNT
-      # atomically (write_keycnt16)
+      # Word store over KEYINPUT (read-only) + KEYCNT: KEYCNT in one store
       bus.write_byte_internal(address,     uint8(value))
       bus.write_byte_internal(address + 1, uint8(value shr 8))
       bus.gba.keypad.write_keycnt16(uint16(value shr 16))
@@ -1095,22 +1037,17 @@ proc write_word_internal*(bus: Bus; address: uint32; value: uint32) =
 
 # ---- MEMCNT bit 0: the swap ----
 #
-# With MEMCNT (0x04000800) bit 0 set the address decoder swaps the low
-# regions in pairs: 00xxxxxx is the board WRAM, 01xxxxxx the chip WRAM,
-# 02xxxxxx the BIOS, still read-protected, and 03xxxxxx unused memory (an AGB
-# SP, tests/roms/payloads/memcnt.s cells 8-12: 00016000 reads what was
-# written to 02016000, 01006000 what was written to 03006000, 02000000 the
-# BIOS latch as 00000000 does unswapped, and 03006000 the prefetched opcode).
-# update_waitcnt sets SB_SWAP in bus.sync_bits, so accesses leave the fast
-# path through its one test and nothing is added to the hot path; fetches
-# from pages 0-3 are kept off the fetch cache.
+# With MEMCNT (0x04000800) bit 0 set the decoder swaps the low regions in
+# pairs: 00xxxxxx board WRAM, 01xxxxxx chip WRAM, 02xxxxxx the BIOS (still
+# read-protected), 03xxxxxx unused memory (AGB SP, payloads/memcnt.s cells
+# 8-12). update_waitcnt sets SB_SWAP in bus.sync_bits, so accesses leave the
+# fast path through its one test; pages 0-3 stay off the fetch cache.
 
 proc swap_privileged(bus: Bus): bool {.inline.} =
-  ## Whether the BIOS answers a read with its contents: when the newest
-  ## fetch (r15) is its own, at its swapped home, as at 00000000 unswapped.
-  ## Not by address, as HALTCNT is (mmio.nim): on an AGB SP code in the
-  ## chip WRAM at 01xxxxxx or the board WRAM at 00xxxxxx reads the latch
-  ## (memcnt.s cells 14, 15). A fetch always gets them.
+  ## Whether the BIOS answers a read with its contents: when r15 is in the
+  ## BIOS at its swapped home. Not by address, unlike HALTCNT (mmio.nim):
+  ## on an AGB SP code in chip WRAM at 01xxxxxx or board WRAM at 00xxxxxx
+  ## reads the latch (memcnt.s cells 14, 15). A fetch always gets them.
   (bus.swap_fetching and not bus.dma_active) or
     bits_range(bus.gba.cpu.r[15], 24, 31) == 0x02'u32
 
@@ -1222,9 +1159,8 @@ proc install_fetch_cache(bus: Bus; page: uint32): bool =
     if (bus.sync_bits and 16) != 0 and imm_fetch_page(page): return false
   when IRQ_LAST_WAITS:
     if (bus.sync_bits and 8) != 0: return false
-  # Only pages whose fetches are plain masked reads are cacheable; BIOS,
-  # MMIO, open bus and 0xD (possible EEPROM) take the generic path, and so
-  # do pages 0-3 while MEMCNT's swap is on (swap_fetch_word)
+  # Only plain masked-read pages are cacheable: not BIOS, MMIO, open bus,
+  # 0xD (possible EEPROM), or pages 0-3 under MEMCNT's swap
   case page
   of 0x2:
     if (bus.sync_bits and SB_SWAP) != 0: return false
@@ -1241,8 +1177,7 @@ proc install_fetch_cache(bus: Bus; page: uint32): bool =
     return false
   bus.fetch_page = page
   bus.fetch_key = page
-  # Via the bus tables, which carry the MEMCNT EWRAM waits and region swap;
-  # only consumed on the non-ROM (pages 2/3) fetch path
+  # Read only on the pages 2/3 fetch path
   bus.fetch_c16 = int(bus.wait16_n[int(page)])
   bus.fetch_c32 = int(bus.wait32_n[int(page)])
   true
@@ -1252,15 +1187,13 @@ const OBUS_BOUNDARY_HALF {.booldefine.} = true
   ## Thumb code in IWRAM/BIOS reading open bus right after a burst that won
   ## the bus from its own fetch sees half DMA word, half opcode
   ## (read_open_bus_word).
-  ## -d:OBUS_LEAD=N: the pipeline issues the NEXT fetch while this
-  ## instruction executes, so the last thing to drive the bus before a load's
-  ## data cycle is a fetch dingbat has not charged yet. N cycles of lead
-  ## model that; the exit of the mGBA suite's Break row is quantised in whole
-  ## scanlines, so this moves it in steps of 34 reads or not at all.
+  ## -d:OBUS_LEAD=N (default 0, -d:obuslatch only): stamp latch halves N
+  ## cycles ahead, for the next fetch the pipeline issues before dingbat
+  ## charges it. The mGBA suite's Break test moves only in 34-read steps.
 
 when defined(obuslatchdbg):
-  # The driver's stdout is the harness protocol and the python runner
-  # captures its stderr, so a debug line only survives in a file.
+  # -d:obuslatchdbg (off by default): logs to OLAT_LOG, since the harness
+  # owns stdout and stderr.
   var olat_file: File
   var olat_ready = false
   proc olat_log(msg: string) =
@@ -1271,16 +1204,13 @@ when defined(obuslatchdbg):
       olat_file.flushFile()
 
 when defined(obuslatch):
-  # How much of the latch one access fills is a property of the memory, not
-  # of the instruction set: obusbus.s runs the identical Thumb block from
-  # four memories and gets three different answers. IWRAM and BIOS place a
-  # halfword into the half its own address bit 1 selects; OAM drives the
-  # whole aligned word from one access; the 16-bit memories -- EWRAM, VRAM
-  # and the gamepak -- cannot fill both halves at once, and mirror.
+  # -d:obuslatch (off by default): a real per-halfword open-bus latch
+  # (docs/playtest-bugs.md §13). How much one access fills depends on the
+  # memory (obusbus.s): IWRAM and BIOS fill the half address bit 1 selects,
+  # OAM the aligned word, 16-bit memories (EWRAM, VRAM, gamepak) mirror.
   proc obus_stamp(bus: Bus): CycleCount {.inline.} =
-    # The live bus clock, not the window's `sched.cycles - synced`: that one
-    # is pinned until something calls catch_up, so a run of NOPs would stamp
-    # every fetch with the same cycle and the halves could never disagree.
+    # The live bus clock: `sched.cycles - synced` is pinned until catch_up,
+    # so every fetch in a run of NOPs would get the same stamp.
     when defined(obusahead): bus.obus_prev_at
     else: bus.sched.cycles + CycleCount(bus.cycles) + CycleCount(OBUS_LEAD)
 
@@ -1399,11 +1329,10 @@ proc catch_up_slow(bus: Bus) =
   bus.in_catch_up = false
 
 proc catch_up(bus: Bus) {.inline.} =
-  # Advance the scheduler to the current mid-instruction cycle so MMIO
-  # accesses observe timers, IF flags etc. exactly. Skipped while an event
-  # handler runs (handlers stay pure; the post-dispatch DMA pump arbitrates
-  # deferred work) and, in the accessors below, while a DMA burst runs (a
-  # transfer must not be preempted between its read and write; the DMA loop
+  # Advance the scheduler to the current mid-instruction cycle so MMIO sees
+  # timers and IF exactly. Skipped while an event handler runs (handlers stay
+  # pure; the post-dispatch DMA pump arbitrates) and, in the accessors, while
+  # a DMA burst runs (no preemption between its read and write; the DMA loop
   # drains due events at transfer boundaries).
   let s = bus.sched
   if s.dispatching: return
@@ -1469,11 +1398,10 @@ proc window_fetch_sync(bus: Bus; cost: int) =
 
 proc idle_window*(bus: Bus; n: int) =
   ## Internal cycles with the access window open. The CPU does not need the
-  ## bus for them, so a DMA that has it costs them nothing: on an AGB SP a
-  ## one-halfword H-blank DMA (4 cycles) costs a run of multiplies 4, 3, 2, 1
-  ## or 0 cycles as its request moves from the multiply's last internal cycle
-  ## back to its fetch, and a load 3 rather than 4 when the grant falls just
-  ## before its internal cycle (tests/roms/payloads/dmaphase.s).
+  ## bus for them, so a DMA overlapping them costs nothing: AGB SP,
+  ## payloads/dmaphase.s, a 4-cycle H-blank DMA costs a multiply 4..0 as its
+  ## request moves from the last internal cycle back to the fetch, and a load
+  ## 3 not 4 when granted just before its internal cycle.
   bus.rom_cool()
   # FIFO_DMA_WINDOW: the internal cycles after a refill's grant close its window
   let closing = (bus.sync_bits and 32) != 0
@@ -1491,14 +1419,13 @@ proc idle_window*(bus: Bus; n: int) =
   bus.catch_up()
   if closing and (bus.sync_bits and 32) != 0: bus.sync_bits = bus.sync_bits and not 48'u8
 
-# The sync_bits leg (identical in all six accessors): an immediate DMA
-# fires DMA_START_DELAY cycles after arming while the CPU keeps executing; an
-# accessor's data effect happens when it runs but its cycles reach the
-# scheduler only at instruction end, so an access positioned after the
-# burst's start would otherwise land before it. Forcing catch-up during the
-# armed window keeps the CPU-vs-DMA memory order cycle-exact.
+# The sync_bits leg (all six accessors): an immediate DMA fires
+# DMA_START_DELAY cycles after arming while the CPU runs on, and an access's
+# cycles reach the scheduler only at instruction end, so an access after the
+# burst's start would land before it. Catch-up during the armed window keeps
+# the CPU-vs-DMA memory order cycle-exact.
 when defined(biosdrvtrace):
-  # tests/biosdrv_probe.nim: every CPU/DMA store (address, width, value)
+  # -d:biosdrvtrace, for tests/biosdrv_probe.nim: every CPU/DMA access
   var bdMemHook*: proc(address: uint32; width: int; value: uint32) {.closure.}
   var bdReadHook*: proc(address: uint32; width: int) {.closure.}
   template bdWatch(a: uint32; w: int; v: uint32) =
@@ -1536,9 +1463,9 @@ template store_sync(bus: Bus; address: uint32; cost: int; access: untyped) =
   when IRQ_LAST_WAITS:
     if (bus.sync_bits and 8) != 0: bus.note_waits(cost)
   if not IRQ_LAST_WAITS or bus_page(address) == 0x4 or (bus.sync_bits and 23) != 0:
-    # A store ends the load's claim on the bus (Bus.dma_bus_word): the
-    # console shows a burst the fetched opcode after one, not the load
-    # before it or the store's own data (dmaobus2.s variant 7)
+    # A store ends the load's claim on the bus (dma_bus_word): a burst after
+    # it sees the fetched opcode, not the load or the store's data
+    # (dmaobus2.s variant 7)
     when DMA_READS_CPU_BUS: bus.load_size = 0
     when IMM_ACCESS_WAIT:
       bus.access_rom = bus_page(address) >= 0x8
@@ -1551,10 +1478,8 @@ template store_sync(bus: Bus; address: uint32; cost: int; access: untyped) =
         bus.imm_post_grant()
         return
 
-# Each timed access takes its sync leg for an MMIO address or while a
-# sync_bits window is open. MMIO has its own copy of the leg, so the swap's
-# test (SB_SWAP, swap_read_word) sits only where MEMCNT's swap can reach and
-# costs an MMIO access nothing.
+# Each timed access takes its sync leg for MMIO or while a sync_bits window
+# is open. MMIO has its own copy, so the SB_SWAP test costs it nothing.
 
 proc io_loaded[T: uint8 | uint16 | uint32](bus: Bus; address: uint32; v: T): T {.inline.} =
   ## The value a CPU load read from an I/O register, in its byte lanes, kept
@@ -1668,13 +1593,10 @@ proc read_word*(bus: Bus; address: uint32): uint32 =
   bus.read_word_internal(address)
 
 proc swap_fetch_half(bus: Bus; address: uint32): uint16 {.noinline.} =
-  ## A fetch from pages 0-3 under MEMCNT's swap: priced and synced as the
-  ## miss path prices any fetch it cannot cache (read_half), read through the
-  ## swapped map, where the BIOS answers a fetch with its contents; and the
-  ## BIOS latch follows the newest fetch (r15) when that is the BIOS, as
-  ## read_instr has it at home -- which here includes code in the chip WRAM
-  ## just below it (01FFFFF8, r15 02000000: png183 memory t108, memcnt.s
-  ## cell 17).
+  ## A fetch from pages 0-3 under MEMCNT's swap: priced as an uncached fetch
+  ## (read_half), read through the swapped map. The BIOS latch follows r15
+  ## when r15 is in the BIOS, including code in chip WRAM just below it
+  ## (01FFFFF8, r15 02000000: png183 memory t108, memcnt.s cell 17).
   bus.swap_fetching = true
   result = bus.read_half(address)
   bus.swap_fetching = false
@@ -1972,19 +1894,13 @@ proc code_word(bus: Bus; a: uint32): uint32 =
   else: bus.read_word_internal(a)
 
 proc read_open_bus_word*(bus: Bus; address: uint32): uint32 =
-  ## The whole 32-bit latch, decided ONCE for an access. The verdict turns on
-  ## when this read began, and working that out runs catch-up, which can run
-  ## a DMA and move the clock -- so a word assembled from four byte-wide
-  ## verdicts could tear: tests/roms/payloads/slotdma.s hop 2 read `000000FF`
-  ## where an AGB SP reads `FFFFFFFF`, the DMA having landed after the first
-  ## byte's verdict and before the second's.
+  ## The whole 32-bit latch, decided ONCE per access: the verdict runs
+  ## catch-up, which can run a DMA, so per-byte verdicts tear (AGB SP,
+  ## payloads/slotdma.s hop 2: FFFFFFFF, not 000000FF).
   log("Reading open bus at " & hex_str(address))
   when defined(obuslatch):
-    # Each half answers for itself: it shows the DMA's word if the burst was
-    # requested after that half was last fetch-driven and no later than this
-    # read began. Both halves agreeing reproduces the old all-or-nothing
-    # answer; them disagreeing is DEAD6019, which no single predicate can
-    # produce (docs/playtest-bugs.md section 13).
+    # Each half shows the DMA's word if the burst was requested after that
+    # half was last fetch-driven and no later than this read began.
     if bus.dma_active:
       return bus.dma_open_bus
     let acc = if bits_range(address, 28, 31) > 0: 1
@@ -2007,17 +1923,14 @@ proc read_open_bus_word*(bus: Bus; address: uint32): uint32 =
         seen = (seen and 0x0000FFFF'u32) or
                (bus.dma_open_bus and 0xFFFF0000'u32)
     return seen
-  # GBATEK "GBA Unpredictable Things", Reading from Unused Memory: unused
-  # memory "returns the recently pre-fetched opcode", which "might also
-  # change if a DMA transfer occurs". The DMA's own unmapped reads see its
-  # latch. Otherwise the last word a DMA moved is still on the bus only for
-  # the CPU's first access after the burst: a DMA is granted when the CPU
-  # access in flight ends, and any later access, the opcode fetch included,
-  # replaces the value (gbaedge DMAOPENBUS on AGB SP, docs/hwprobe-results-
-  # agb.md session 5: "an opcode fetch also refreshes open bus"). So this
-  # read sees the word when the request came after this instruction's fetch
-  # began and no later than this read began; bursts due by now are run
-  # first so a request inside this instruction is known.
+  # GBATEK "Reading from Unused Memory": "returns the recently pre-fetched
+  # opcode", which "might also change if a DMA transfer occurs". The DMA's
+  # own unmapped reads see its latch. Otherwise the DMA's last word is seen
+  # only by the CPU's first access after the burst; any later access, opcode
+  # fetch included, replaces it (AGB SP, gbaedge DMAOPENBUS,
+  # docs/hwprobe-results-agb.md session 5). So the word is seen when the
+  # request came after this instruction's fetch began and no later than this
+  # read began; due bursts run first so such a request is known.
   if bus.dma_active:
     when DMA_READS_CPU_BUS:
       if bus.dma_bus_fresh: return bus.dma_bus_word()
@@ -2034,22 +1947,14 @@ proc read_open_bus_word*(bus: Bus; address: uint32): uint32 =
   let read_start = read_end - CycleCount(access)
   if not bus.sched.dispatching:
     bus.catch_up()
-  # This all-or-nothing window is known to be the wrong SHAPE, not merely
-  # the wrong width, and tests/roms/payloads/obuswint.s is the measurement
-  # that says so: from Thumb code, two NOPs after a burst, an AGB SP returns
-  # DEAD6019 -- the DMA word's high half beside a freshly fetched opcode
-  # halfword. The latch is per-halfword, a DMA fills both halves, and later
-  # halfword fetches overwrite them one at a time into the half each one's
-  # own address bit 1 selects (the same placement rule as the Thumb
-  # composition below). A predicate that can only answer "the whole DMA word"
-  # or "no DMA word" cannot produce that, so no lower bound is right: moving
-  # this one to fetch_start + 1, which is what obuswin.s measures for ARM
-  # code in IWRAM, costs `DMA Prefetch Read` and drives `DMA Prefetch Break`
-  # to zero. Both left as they are until the latch itself is modelled
-  # (docs/playtest-bugs.md section 13).
+  # KNOWN WRONG SHAPE: the latch is per halfword (AGB SP, payloads/obuswint.s,
+  # Thumb, two NOPs after a burst: DEAD6019, half DMA word, half opcode), so
+  # no all-or-nothing bound is right. fetch_start + 1 (obuswin.s, ARM in
+  # IWRAM) fails mGBA suite `DMA Prefetch Read` and zeroes `DMA Prefetch
+  # Break`. Left until the latch is modelled (docs/playtest-bugs.md §13).
   when defined(obusdbg):
-    # -d:obusdbg: the cycle stamps this window turns on, one line per unmapped
-    # word read. obuswin.s and obuswint.s are the hardware column.
+    # -d:obusdbg (off by default): this window's cycle stamps per unmapped
+    # word read, to compare with obuswin.s / obuswint.s.
     if bus.dma_has_run and (address and 3) == 0:
       echo "obus ", hex_str(address), " req=", bus.dma_request_at,
            " fetch=", fetch_start, " read=", read_start,
@@ -2060,12 +1965,9 @@ proc read_open_bus_word*(bus: Bus; address: uint32): uint32 =
     return bus.dma_open_bus
   when OBUS_BOUNDARY_HALF:
     # A burst requested exactly as this instruction began won the bus from
-    # its opcode fetch (IMM_BOUNDARY_GRANT): that fetch came after the burst,
-    # the previous one before it. Where one Thumb fetch drives only its own
-    # half of the latch (IWRAM, BIOS) the other half still holds the DMA's
-    # word. tests/roms/payloads/obuswint.s on an AGB SP, Thumb in IWRAM, two
-    # NOPs after the burst: DEAD6019 -- the DMA word's high half beside the
-    # opcode this load fetched (docs/playtest-bugs.md section 13).
+    # its opcode fetch (IMM_BOUNDARY_GRANT). Where a Thumb fetch drives only
+    # its own half (IWRAM, BIOS) the other half keeps the DMA's word: the
+    # obuswint.s DEAD6019 case above.
     if bus.dma_has_run and bus.dma_request_at == fetch_start and
        bus.gba.cpu.cpsr.thumb:
       let pc = bus.gba.cpu.r[15]
@@ -2087,40 +1989,16 @@ proc fetch_bus_word(bus: Bus; pc: uint32): uint32 =
     return 0'u32
   let word: uint32 =
     if bus.gba.cpu.cpsr.thumb:
-      # A Thumb fetch is a halfword, so what the 32-bit bus holds has to be
-      # made of two of them -- but only where the bus the code is fetched
-      # over is 32 bits wide. There the two most recent fetches ($+2 and $+4,
-      # and r15 reads $+4) each land in the half of the latch its own address
-      # bit 1 selects, not in fetch order, so the halves come from two
-      # different words and no single aligned read reproduces them.
-      #
-      # Measured on the AGB SP over the link rig (tests/roms/payloads/
-      # obusprobe.s, code in IWRAM): the same load at 0x030000F0 reads
-      # 3E0260A8 and at 0x030000FA reads 61283E02, where [$+2] = 3E02 in
-      # both, [$+4] = 60A8 and 6128. dingbat duplicated [$+4] into both
-      # halves, which is right only when the two happen to be equal.
-      #
-      # There are three cases, and bus width alone does not pick between
-      # them: what matters is how much of the latch one fetch fills.
-      # obusbus.s copies the identical Thumb block into four memories and
-      # runs it from each, so the rows differ in the memory executed from and
-      # in nothing else (same on an AGB SP with the display on and forced
-      # blank, so the OAM row is not the PPU competing for the bus):
-      #
-      #   IWRAM 32-bit  3E026028  60A83E02   the two fetches, placed by bit 1
-      #   EWRAM 16-bit  60286028  60A860A8   [$+4] duplicated into both halves
-      #   VRAM  16-bit  60286028  60A860A8   the same
-      #   OAM   32-bit  606E6028  60A83E02   the aligned WORD holding $+4
-      #
-      # A 16-bit bus cannot fill both halves from one fetch, so it mirrors --
-      # which is also why the mGBA suite, reading its write-only registers
-      # from ROM-resident Thumb code, wants the duplicate: composing there
-      # costs 40 I/O rows and 6 Timing rows. OAM fills the whole latch from
-      # one fetch, so Thumb code there composes exactly as ARM code does; it
-      # was assumed to match IWRAM because both are 32 bits wide, and it does
-      # not. BIOS is the one region left unmeasured -- a payload cannot
-      # execute there -- and stays with IWRAM, the memory it shares a bus
-      # with.
+      # Thumb open bus depends on how much of the latch one fetch fills
+      # (AGB SP, payloads/obusprobe.s and obusbus.s, the same block run from
+      # each memory, display on or forced blank; docs/hwprobe-questions.md):
+      #   IWRAM  the two newest fetches ($+2, $+4) each in the half its own
+      #          address bit 1 selects (3E0260A8 at 0x030000F0, 61283E02 at
+      #          0x030000FA), not in fetch order
+      #   EWRAM, VRAM, gamepak (16-bit)  [$+4] in both halves; the mGBA
+      #          suite's I/O and Timing tests from ROM code fail otherwise
+      #   OAM    the aligned word holding $+4, as ARM code (not as IWRAM)
+      # BIOS cannot run a payload: unmeasured, treated as IWRAM (same bus).
       if pc_region == 0x7:
         bus.read_word_internal(pc and not 3'u32)
       elif pc_region == 0x0 or pc_region == 0x3:
@@ -2141,15 +2019,13 @@ proc fetch_bus_word(bus: Bus; pc: uint32): uint32 =
 
 proc dma_bus_word(bus: Bus): uint32 =
   ## The data bus as a burst's first transfer finds it (DMA_READS_CPU_BUS):
-  ## the CPU's data load if that is the last thing the CPU did on the bus
-  ## (it has fetched nothing since), else its fetched opcode. dmaobus.s on
-  ## an AGB SP, Thumb in IWRAM, the burst granted right after the load:
-  ## EWRAM ldrh / misaligned ldrsh FF24FF24, ldrb FFFFFFFF, ldr 11223344;
-  ## no load 46C046C0. A 16-bit memory puts a halfword on both halves and a
-  ## byte on all four lanes; OAM drives the aligned word (alyosha
-  ## Bus/DMA_OAM_Bus). A load from unused memory drives nothing (alyosha
-  ## Bus/Unused_location_update_bus), and only memories whose reads have no
-  ## side effects are read back here.
+  ## the CPU's data load if nothing was fetched since, else its fetched
+  ## opcode. AGB SP, payloads/dmaobus.s, Thumb in IWRAM, burst right after
+  ## the load: EWRAM ldrh / misaligned ldrsh FF24FF24, ldrb FFFFFFFF, ldr
+  ## 11223344; no load 46C046C0. A 16-bit memory mirrors halfword/byte; OAM
+  ## drives the aligned word (alyosha Bus/DMA_OAM_Bus); unused memory drives
+  ## nothing (Bus/Unused_location_update_bus). Only side-effect-free memories
+  ## are read back here.
   if bus.load_size != 0 and bus.load_pc == bus.gba.cpu.r[15] and
      bus.load_start < bus.dma_bus_req:
     let a = bus.load_addr
@@ -2168,11 +2044,10 @@ proc dma_bus_word(bus: Bus): uint32 =
         return bus.read_word_internal(a and not 3'u32)
     of 0x4:
       when DMA_READS_IO_LOAD:
-        # The I/O bus is 32 bits wide and a load of any width drives the
-        # whole word: hdmaphase.s on an AGB SP, an `ldrh` or `ldrb` of VCOUNT
-        # (04000006) leaves DISPSTAT (2E26) on the lower half as well. The
-        # loaded lanes are the value the CPU read; the others are read now,
-        # with the burst's own word for any that would read the bus back.
+        # The 32-bit I/O bus: a load of any width drives the whole word (AGB
+        # SP, payloads/hdmaphase.s: ldrh/ldrb of VCOUNT leaves DISPSTAT 2E26
+        # on the low half). Loaded lanes are the value read; the others are
+        # read now, the burst's own word for any that read the bus back.
         if bits_range(a, 28, 31) == 0:
           # A burst granted as the load's access ends runs before the core
           # performs the read: the load's lanes as they read now.
@@ -2195,12 +2070,10 @@ proc dma_bus_word(bus: Bus): uint32 =
       if bits_range(a, 28, 31) == 0:
         let w = bus.read_word_internal(a and not 3'u32)
         if bus.load_size == 4: return w
-        # IWRAM's bus is 32 bits wide and keeps what it last carried: a
-        # narrower load drives only its own lanes (alyosha Bus/DMA_IWRAM_Bus,
-        # ROM code: the other half is the word the previous DMA wrote there).
-        # With the code itself in IWRAM that is its fetched opcodes; else the
-        # last word a DMA moved through IWRAM, as CPU accesses are not
-        # tracked.
+        # IWRAM's 32-bit bus keeps what it last carried: a narrower load
+        # drives only its lanes (alyosha Bus/DMA_IWRAM_Bus). The rest: the
+        # fetched opcodes if code is in IWRAM, else the last DMA word through
+        # IWRAM (CPU accesses are not tracked).
         let other = if bits_range(bus.gba.cpu.r[15], 24, 27) == 3:
                       bus.fetch_bus_word(bus.gba.cpu.r[15])
                     else: bus.iwram_latch

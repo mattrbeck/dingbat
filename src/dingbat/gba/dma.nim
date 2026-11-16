@@ -2,56 +2,44 @@
 
 const DMA_PREEMPT_AFTER_READ {.booldefine.} = false
   ## True: a higher-priority request preempts a burst only between a
-  ## transfer's read and its write. False: only between two transfers. True
-  ## was fitted to alyosha DMA_pause_timing_mid_1/_mid_2 while an immediate
-  ## DMA armed from ROM started a cycle early (the one-cycle retry inside
-  ## the gamepak fetch); with that fetch waited out (IMM_FETCH_WAIT, AGB SP)
-  ## both rows are green between transfers and red after the read.
+  ## transfer's read and its write. False: only between two transfers.
+  ## With IMM_FETCH_WAIT, alyosha DMA_pause_timing_mid_1/_mid_2 pass
+  ## between transfers and fail after the read.
 const DMA_STALL_FROM_CPU_STOP {.booldefine.} = true
 const DMA_IRQ_FROM_BUS_END {.booldefine.} = true
   ## A burst's end-of-transfer interrupt is recognised IRQ_SYNC_DELAY cycles
   ## after the burst lets go of the bus, even when the CPU ran internal
-  ## cycles under it (tests/roms/payloads/dmairq.s on an AGB SP: DMA3, 1 to
-  ## 64 words, the CPU polling a flag -- the load's internal cycle under the
-  ## burst -- takes the interrupt one cycle and one instruction later than
-  ## a check booked from the CPU's clock gives; with NOPs, where nothing
-  ## overlaps, the two agree).
+  ## cycles under it. AGB SP, payloads/dmairq.s (DMA3, 1-64 words): a CPU
+  ## polling with a load takes it one cycle and one instruction later than
+  ## the CPU's clock gives; with NOPs the two agree.
 const FIFO_IRQ_CREDIT {.intdefine.} = 1
-  ## A sound-FIFO burst's completion interrupt is recognised this much sooner
-  ## after the CPU gets the bus back than an immediate burst's
-  ## (DMA_IRQ_FROM_BUS_END's IRQ_SYNC_DELAY): tests/roms/payloads/dmairqv.s
-  ## on an AGB SP (2026-11-04), the CPU in an IWRAM NOP sled, DMA1 or DMA2,
-  ## EWRAM or IWRAM source, every phase: a cycle sooner, where immediate
-  ## DMA0/1/3 bursts (to FIFO A, EWRAM, IWRAM) match the immediate rule.
+  ## Cycles sooner a sound-FIFO burst's completion interrupt is recognised
+  ## after the CPU gets the bus back, than an immediate burst's
+  ## (DMA_IRQ_FROM_BUS_END). AGB SP, payloads/dmairqv.s (IWRAM NOP sled,
+  ## DMA1/2, EWRAM or IWRAM source, every phase): one sooner; immediate
+  ## DMA0/1/3 match the immediate rule. docs/hwprobe-questions.md.
 const DMA_ROM_BOUNDARY_HOLD {.booldefine.} = true
-  ## A gamepak ROM source whose address does not move (fixed or decrement
-  ## control; the data still comes from successive addresses) and sits on
-  ## the last unit before a 0x20000 boundary is read nonsequentially on
-  ## every transfer: the burst decides N or S from its own address, and
-  ## that address is always next to the boundary (alyosha DMA/readme.txt).
-  ## DMA_ROM_Fixed, 32 words from 0x0801FFFC, reads 62 cycles long without
-  ## it (31 S reads that are N); applied to every non-moving ROM source,
-  ## DMA_pause_timing_ROM_to_IWRAM goes red.
+  ## A ROM source with fixed or decrement control (the data still comes
+  ## from successive addresses) on the last unit before a 0x20000 boundary
+  ## is read N on every transfer: the burst picks N or S from its own
+  ## address, which stays at the boundary (alyosha DMA/readme.txt; pinned
+  ## by alyosha DMA_ROM_Fixed). Applied to every non-moving ROM source,
+  ## DMA_pause_timing_ROM_to_IWRAM fails.
 const DMA_START_DELAY {.intdefine.} = (if IMM_IDLE_GRANT: 2 else: 3)
 const IMM_NEEDS_EDGE {.booldefine.} = true
   ## An immediate transfer starts only on the enable bit's 0 -> 1 edge
   ## (GBATEK, "DMA Transfers": "the transfer starts ... after changing the
   ## Enable bit from 0 to 1"). A CNT_H store that switches a channel already
   ## running in another timing to immediate, enable kept set, arms nothing.
-  ## Famicom Mini Xevious restarts its sound DMA from the timer 1 interrupt
-  ## with DMA1CNT = 0x84400004, then CNT_H 0x0400 and 0xB200: for the 24
-  ## cycles between the first two stores DMA1 reads "enabled, immediate",
-  ## and any other burst that ended in them (chain_next) or immediate
-  ## request (request_immediate) used to request it on its stale imm_due.
-  ## It then ran 4 words from the old read pointer, the first one past the
-  ## buffer, and wrapped the FIFO (FIFO_WORD_WRAP): a click about every 67
-  ## frames, which neither reference plays (docs/playtest-bugs.md §97 and §99).
+  ## Famicom Mini Xevious restarts its sound DMA with DMA1CNT = 0x84400004,
+  ## then CNT_H 0x0400 and 0xB200; without this, a burst ending between the
+  ## first two stores ran DMA1 past its buffer: clicks (docs/playtest-bugs.md
+  ## §97, §99).
 const HDMA_DROP_BUSY {.booldefine.} = true
   ## An H-blank request that arrives while the same channel's burst still
-  ## holds the bus is dropped, not latched (trigger_hdma). False latches it
-  ## like any other; a burst's requests then reach the pump after it on the
-  ## lagging clock, each is granted a burst, and at more than a line a burst
-  ## the CPU never runs again (the state soak's seed 0xA903).
+  ## holds the bus is dropped, not latched (trigger_hdma). False latches it:
+  ## with bursts longer than a line the CPU then never runs again (state
+  ## soak seed 0xA903).
 const
   DMA_SRC_MASK = [0x07FFFFFF'u32, 0x0FFFFFFF'u32, 0x0FFFFFFF'u32, 0x0FFFFFFF'u32]
   # DAD keeps 28 bits on every channel; channels 0-2 DROP gamepak-bus
@@ -116,10 +104,9 @@ proc `[]=`*(dma: DMA; io_addr: uint32; value: uint8) =
     write_reg_byte16(dma.dmacnt_l[channel], reg - 8, value, DMA_LEN_MASK[channel])
   of 10, 11:  # dmacnt_h
     let enabled = dma.dmacnt_h[channel].enable
-    # Byte stores to CNT_H: an upper-byte store also copies its bit7 into
-    # the low byte's bit7, and a low-byte store drops bit7. Halfword/word
-    # writes are normal (hardware: gbaedge DMAEDGE/IOBYTE on AGB SP, measured
-    # on DMA3, modelled for all channels; docs/hwprobe.md).
+    # Byte stores to CNT_H: an upper-byte store also copies its bit 7 into
+    # the low byte's bit 7; a low-byte store drops bit 7. AGB SP, gbaedge
+    # DMAEDGE/IOBYTE, measured on DMA3 (docs/hwprobe-results-agb.md).
     if dma.gba.bus.byte_io_write:
       if (io_addr and 1) == 1:
         let lo = read(dma.dmacnt_h[channel], 0)
@@ -144,10 +131,9 @@ proc `[]=`*(dma: DMA; io_addr: uint32; value: uint8) =
       dma.count[channel] = dma.dmacnt_l[channel]
       if dma.dmacnt_h[channel].start_timing == 0:  # Immediate
         # Requests the bus DMA_START_DELAY cycles after the enable write; the
-        # CPU keeps executing until then, and until the third cycle unless it
-        # is idle (IMM_IDLE_GRANT; mGBA suite "Trivial DMA"), or later while
-        # a CPU access it lands in finishes (IMM_ACCESS_WAIT). Each channel
-        # requests at its own time (imm_due, request_immediate).
+        # CPU runs to the third cycle unless idle (IMM_IDLE_GRANT; mGBA suite
+        # "Trivial DMA"), or longer while a CPU access it lands in finishes
+        # (IMM_ACCESS_WAIT). Each channel requests at its own imm_due.
         let due = dma.gba.scheduler.cycles + CycleCount(dma.gba.bus.cycles) +
                   CycleCount(DMA_START_DELAY)
         dma.imm_due[channel] = due
@@ -164,10 +150,10 @@ proc `[]=`*(dma: DMA; io_addr: uint32; value: uint8) =
     echo "Unmapped DMA write addr: ", hex_str(uint8(io_addr)), " val: ", value
 
 proc request_immediate*(dma: DMA; reschedule = false) =
-  ## Requests the armed immediate channels whose DMA_START_DELAY is up: one
-  ## armed after them requests at its own time (tests/roms/payloads/tmrdma.s
-  ## on an AGB SP: DMA1 armed, DMA0 armed by the next store, and DMA1 still
-  ## runs first). `reschedule`: the caller cleared the pending etDMA events.
+  ## Requests the armed immediate channels whose DMA_START_DELAY is up; one
+  ## armed later waits for its own (AGB SP, payloads/tmrdma.s: DMA1 armed,
+  ## DMA0 by the next store, DMA1 runs first). `reschedule`: the caller
+  ## cleared the pending etDMA events.
   let now = dma.gba.scheduler.cycles + CycleCount(dma.gba.bus.cycles)
   var later = CycleCount(0)
   var waiting = false
@@ -217,9 +203,9 @@ proc chain_next(dma: DMA; channel: int): bool =
 proc grant_follows(dma: DMA; channel: int): bool =
   ## DMA_PENDING_CHAIN: at the end of `channel`'s burst, whether run_pending
   ## grants next another request that was already latched when this burst
-  ## was granted (its own tests, in its order). A request that arrived
-  ## during the burst is not chained: unmeasured, and Pokemon Mystery
-  ## Dungeon's quiz (official BIOS) moved when its FIFO refills were.
+  ## was granted (its own tests, in its order). One that arrived during the
+  ## burst is not chained: unmeasured, and chaining it moved Pokemon Mystery
+  ## Dungeon's quiz (official BIOS).
   var p = dma.pending and dma.pending_at_grant and not uint8(1 shl channel)
   while p != 0:
     let ch = countTrailingZeroBits(p)
@@ -245,13 +231,11 @@ proc trigger_hdma*(dma: DMA) =
   for channel in 0..3:
     if dma.dmacnt_h[channel].enable and dma.dmacnt_h[channel].start_timing == 2:  # HBlank
       # HDMA_DROP_BUSY: a request that finds the channel's own burst still
-      # running is lost; the next burst waits for the next H-blank after it
-      # (tests/roms/payloads/hdmalag.s on an AGB SP: bursts of 1.1 to 3.5
-      # lines start only on H-blanks, every 2nd, 3rd or 4th line). One that
-      # finds another channel's burst running stays latched and runs after
-      # it. This event runs at the request's own cycle, which is behind the
-      # bus while a burst's cycles are still to be ticked (the burst was
-      # granted in this catch-up); busy_until covers that as well.
+      # running is lost (AGB SP, payloads/hdmalag.s: bursts of 1.1-3.5 lines
+      # start only on H-blanks). One that finds another channel's burst
+      # stays latched. This event runs at the request's cycle, behind the
+      # bus while a burst granted in this catch-up is unticked; busy_until
+      # covers that too.
       if HDMA_DROP_BUSY and dma.gba.scheduler.cycles < dma.busy_until[channel]:
         continue
       dma.request(channel)
@@ -264,18 +248,18 @@ proc trigger_vdma*(dma: DMA) =
 
 proc trigger_video_capture*(dma: DMA; vcount: uint16) =
   ## DMA3 special timing = video capture: one transfer per line for VCOUNT
-  ## 2..161 of the frame in which line 2 found the channel armed, then the
-  ## enable bit self-clears at line 162. A channel armed mid-frame waits for
-  ## the next frame's line 2 (hardware: gbaedge CAPDMA on AGB SP,
-  ## docs/hwprobe.md; the AGS aging cartridge pins the per-line cadence).
+  ## 2..161 of the frame in which line 2 found the channel armed; the enable
+  ## bit self-clears at line 162. Armed mid-frame, it waits for the next
+  ## frame's line 2 (AGB SP, gbaedge CAPDMA, docs/hwprobe-results-agb.md;
+  ## the AGS aging cartridge pins the per-line cadence).
   if dma.dmacnt_h[3].enable and dma.dmacnt_h[3].start_timing == 3:
     if vcount == 2:
       dma.video_active = true
     if dma.video_active:
       if vcount >= 2 and vcount < 162:
-        # Each line's trigger reloads the internal src from SAD; the
-        # gamepak always-increment rule still applies within a line's burst
-        # (CAPDMA: a fixed ROM source yields 160 lines of nonzero words).
+        # Each line reloads src from SAD; the gamepak always-increment rule
+        # applies within a line's burst (CAPDMA: a fixed ROM source gives
+        # 160 lines of nonzero words).
         let align = if dma.dmacnt_h[3].xfer_type != 0: not 3'u32 else: not 1'u32
         dma.src[3] = dma.dmasad[3] and align
         dma.request(3)
@@ -289,9 +273,8 @@ proc trigger_fifo*(dma: DMA; fifo_channel: int) =
   let ch = fifo_channel + 1
   if dma.dmacnt_h[ch].enable and dma.dmacnt_h[ch].start_timing == 3:  # Special
     # FIFO_DROP_BUSY (apu/dma_channels.nim): a refill request that finds the
-    # channel's own burst still holding the bus is lost. This runs at the
-    # request's own cycle, which can be behind a burst granted in the same
-    # catch-up; busy_until covers that, as for trigger_hdma.
+    # channel's own burst still holding the bus is lost. busy_until as in
+    # trigger_hdma.
     when FIFO_DROP_BUSY:
       let now = dma.gba.scheduler.cycles
       when FIFO_CART_CHAIN_LATE:
@@ -355,8 +338,6 @@ proc run_channel(dma: DMA; channel: int; nested: bool) =
         " hot=" & $dma.gba.bus.rom_hot & " src=" & toHex(dma.src[channel], 8) &
         " dst=" & toHex(dma.dst[channel], 8) & " len=" & $len & " ws=" & $word_size)
 
-  # The cycle the ROM bus changes hands, before any burst cycles are charged;
-  # the prefetch hand-off (bus.rom_access_cycles) counts forward from here.
   when defined(dmacount):
     if start_timing == 2: hdma_grants[channel] += 1
   when defined(hdmalog):
@@ -385,18 +366,17 @@ proc run_channel(dma: DMA; channel: int; nested: bool) =
     if not nested and dma.gba.bus.load_size != 0 and
        dma.gba.bus.sched.cycles + CycleCount(dma.gba.bus.cycles) > dma.gba.bus.load_end + 1:
       dma.gba.bus.load_size = 0
-  # The prefetch hand-off phase (bus.rom_access_cycles) was pinned with two
-  # lead cycles; keep its origin where those rows put it.
+  # The cycle the ROM bus changes hands, before burst cycles are charged;
+  # the prefetch hand-off (bus.rom_access_cycles) counts from here. Its
+  # phase was pinned with two lead cycles; keep that origin.
   dma.gba.bus.dma_grant_now =
     dma.gba.bus.sched.cycles + CycleCount(dma.gba.bus.cycles) - CycleCount(2 - DMA_LEAD_CYCLES)
   dma.gba.bus.dma_first_rom = true
 
-  # CPU->DMA bus hand-off cost (mGBA suite DMA timing rows). A channel that
+  # CPU->DMA bus hand-off cost (mGBA suite DMA timing tests). A channel that
   # preempts another mid-burst pays nothing: the bus never returns to the
-  # CPU (AGS aging cartridge DMA priority test).
-  # FIFO_HANDBACK_CHAIN: the read taken in the last burst's hand-back cycle,
-  # and the rest of that burst at the next request, start with the bus
-  # already the DMA's
+  # CPU (AGS aging cartridge DMA priority test). FIFO_HANDBACK_CHAIN's read
+  # and the rest of its burst start with the bus already the DMA's.
   let fifo_burst = start_timing == 3 and (channel == 1 or channel == 2)
   let chain_read = FIFO_HANDBACK_CHAIN and fifo_burst and
                    dma.fifo_chain[channel - 1] in {1'u8, 3'u8}
@@ -423,9 +403,9 @@ proc run_channel(dma: DMA; channel: int; nested: bool) =
     dma.gba.bus.rom_next_addr = 1
     dma.gba.bus.rom_next_addr2 = 1
 
-  # Mid-burst event drains only when a higher-priority channel is armed on a
-  # hardware trigger; otherwise events dispatch after the whole burst (the
-  # timing the mGBA suite rows are calibrated against).
+  # Drain events mid-burst only when a higher-priority channel is armed on
+  # a hardware trigger; otherwise they dispatch after the burst (mGBA suite
+  # timing depends on it).
   var preemptible = false
   for ch2 in 0 ..< channel:
     if dma.dmacnt_h[ch2].enable and dma.dmacnt_h[ch2].start_timing != 0:
@@ -433,10 +413,9 @@ proc run_channel(dma: DMA; channel: int; nested: bool) =
       break
 
   template preempt_point() =
-    # Draining here dispatches events that came due during the burst;
-    # handlers only latch requests, so a higher-priority channel is granted
-    # at this drained boundary and runs nested via run_pending while this
-    # loop's locals hold our progress.
+    # Handlers only latch requests, so a higher-priority channel is granted
+    # here and runs nested via run_pending while this loop's locals hold our
+    # progress.
     if preemptible:
       let bus = dma.gba.bus
       # The PSG waveform deadlines are not in evbuf (gba/apu.nim) but must
@@ -495,9 +474,8 @@ proc run_channel(dma: DMA; channel: int; nested: bool) =
       # (no bus access, no redirect). See DMA_DST_MASK.
       let dst_writable = channel == 3 or dma.dst[channel] < 0x08000000'u32
       # A source the DMA cannot read (BIOS, unmapped) still costs its read
-      # cycle; the latch just keeps its value. alyosha Interactions: with 0,
-      # Internal_Cycle_DMA_Mul, _IRQ_br1_IWRAM and _IRQ_nop_IWRAM fail; with 2,
-      # _DMA_Mul and _IRQ_Br_pre_tim.
+      # cycle; the latch keeps its value. 0 or 2 cycles fail alyosha
+      # Interactions (Internal_Cycle_DMA_Mul).
       if not src_accessible: dma.gba.bus.add_cycles(1)
       if word_size == 4:
         if src_accessible:
@@ -575,8 +553,8 @@ proc run_pending*(dma: DMA) =
   ## event dispatch (no burst running) or from a burst's transfer loop after
   ## its drain (nested preemption). A request for a channel >= the burst in
   ## progress waits for the level that granted that burst.
-  # DMA_BUS_BACK_TO_BACK: a burst this loop has already run kept the CPU
-  # off the bus until the next grant here
+  # DMA_BUS_BACK_TO_BACK: a burst this loop ran kept the CPU off the bus
+  # until the next grant here
   var bus_driven = false
   while dma.pending != 0:
     let ch = countTrailingZeroBits(dma.pending)
@@ -591,11 +569,10 @@ proc run_pending*(dma: DMA) =
     if fifo_window: dma.gba.bus.sync_bits = dma.gba.bus.sync_bits or 32
     # A burst between request and grant may have rewritten this channel's CNT_H.
     if not dma.dmacnt_h[ch].enable: continue
-    # FIFO requests are level-conditioned on the FIFO, not edge-latched: a
-    # timer overflow inside this channel's own burst would otherwise latch a
-    # second grant that overfills the FIFO and skips the stream forward
-    # (Densetsu no Sutafi 3 lost ~4% of its stream bytes). Assumed; no ROM
-    # pins this.
+    # FIFO requests are level-conditioned on the FIFO, not edge-latched: else
+    # a timer overflow inside the channel's own burst latches a second grant
+    # that overfills the FIFO (Densetsu no Sutafi 3 lost ~4% of its stream).
+    # Assumed; no ROM pins this.
     if (ch == 1 or ch == 2) and dma.dmacnt_h[ch].start_timing == 3:
       if dma.gba.apu.dma_channels.sizes[ch - 1] >= 16:
         # a hand-back read not granted at once is not taken later
@@ -638,15 +615,15 @@ proc run_pending*(dma: DMA) =
     dma.current_priority = saved
     # PF_WAIT_UNDER_BURST: the CPU was waiting on the prefetcher for an
     # opcode when the burst took the bus. A wait begun the cycle before the
-    # grant or later ran under the burst (pf_left takes the rest of it
-    # back), and one begun that cycle before also gives the CPU the cycle
-    # back. One begun earlier was FIFO_FETCH_WINDOW's: the grant waited for it.
+    # grant or later ran under the burst (pf_left gives the rest back); one
+    # begun that cycle before also gives the cycle back. One begun earlier
+    # was FIFO_FETCH_WINDOW's: the grant waited for it.
     var pf_left = 0
     var pf_early = 0      # the stopped cycle the CPU has back
     when PF_WAIT_UNDER_BURST:
-      # Measured for a sound-FIFO burst that never touches the gamepak (the
-      # prefetcher runs under it: DMA_KEEPS_PREFETCH); an immediate burst
-      # the CPU's own store started is IMM_FETCH_WAIT's.
+      # Measured for a sound-FIFO burst that never touches the gamepak
+      # (DMA_KEEPS_PREFETCH); an immediate burst from the CPU's own store is
+      # IMM_FETCH_WAIT's.
       if saved == 4 and not dma.gba.cpu.halted and bus.prefetch_on and
          fifo_irq_credit_kind and bus.dma_first_rom and
          bus.pf_wait_from <= granted_at and bus.pf_wait_to >= granted_at and
@@ -672,17 +649,15 @@ proc run_pending*(dma: DMA) =
           itl("PFWAIT from=" & $bus.pf_wait_from & " to=" & $bus.pf_wait_to &
               " granted=" & $granted_at & " rest=" & $rest & " adjust=" & $pf_left)
     when DMA_STALLS_IRQ_SYNC:
-      # The CPU's interrupt synchroniser runs on the CPU's clock, and that
+      # The CPU's interrupt synchroniser runs on the CPU's clock, which
       # stops while a DMA has the bus: an interrupt raised but not yet
       # recognised when the burst began is recognised that much later.
-      # tests/roms/payloads/breakram.s, AGB SP: a running CPU takes an H-blank
-      # interrupt exactly four cycles later when a one-word H-blank DMA
-      # (requested two cycles after the same flag) is armed than when it is
-      # not. A wall-clock delay loses one cycle to it, not four.
-      # A halted CPU has no clock to stop; its wake is cpu.nim's business.
+      # AGB SP, payloads/breakram.s: a one-word H-blank DMA (requested 2
+      # cycles after the flag) delays a running CPU's H-blank IRQ by 4
+      # cycles; a wall-clock delay gives 1. A halted CPU's wake is cpu.nim's.
       if saved == 4 and not dma.gba.cpu.halted:
-        # where the burst let go of the bus, before any cycles the CPU ran
-        # under it are taken back out of the clock below
+        # where the burst let go of the bus, before cycles the CPU ran under
+        # it are taken back out below
         let burst_end = bus.sched.cycles + CycleCount(bus.cycles)
         var held = burst_end - granted_at
         # When the CPU stopped and started again, if not as the burst did
@@ -712,30 +687,25 @@ proc run_pending*(dma: DMA) =
             bus.cycles -= int(free)
             held -= free
         let intr = dma.gba.interrupts
-        # And one raised under the burst counts from its end (raise_synced).
-        # (the CPU's interrupt synchroniser starts again with the CPU)
+        # One raised under the burst counts from its end (raise_synced): the
+        # synchroniser starts again with the CPU.
         intr.stall_to = if cpu_ran: cpu_back
                         else: bus.sched.cycles + CycleCount(bus.cycles) - CycleCount(pf_early)
         intr.stall_from = intr.stall_to - held
-        # A recognition due before the CPU stopped -- inside internal cycles
-        # it ran under the burst -- is not held back
-        # (tests/roms/payloads/dmamulirq.s on an AGB SP: a timer interrupt
-        # raised in the multiply the burst was granted in, due before its
-        # last internal cycle, is taken after that multiply).
+        # A recognition due before the CPU stopped (inside internal cycles it
+        # ran under the burst) is not held back (AGB SP, payloads/dmamulirq.s:
+        # a timer IRQ due inside the multiply the burst was granted in is
+        # taken after that multiply).
         let stall_start = if DMA_STALL_FROM_CPU_STOP: intr.stall_from else: granted_at
         intr.stall_pushed = bus.sched.delay_pending(etInterrupts, stall_start, held)
         if intr.pipe_raised != 0 and intr.pipe_at >= stall_start:
-          # Raised under this burst: the burst's transfer loop drains due
-          # events at transfer boundaries, so the raise ran before this span
-          # was known and raise_synced booked a plain IRQ_SYNC_DELAY. Like a
-          # raise it does see under a burst, it counts from the burst's end.
-          # Pushing it back by the whole burst instead held a stale IE & IF
-          # sample in the synchroniser for as long as the burst had run
-          # before the raise. Any other interrupt the CPU took meanwhile
-          # acknowledged the bits, and the late sample then delivered an IRQ
-          # with IE & IF zero (Boktai 2 - Solar Boy Django: its solar-sensor
-          # timer overflowing inside a DMA3 copy, then an H-blank IRQ; its
-          # handler, finding no source, called a null vector).
+          # Raised under this burst and drained at a transfer boundary before
+          # this span was known, so raise_synced booked a plain
+          # IRQ_SYNC_DELAY; count it from the burst's end instead. Pushing it
+          # back by the whole burst holds a stale IE & IF sample: if another
+          # interrupt acknowledged the bits meanwhile, an IRQ arrives with
+          # IE & IF zero (Boktai 2: solar-sensor timer overflow inside a DMA3
+          # copy, then an H-blank IRQ; the handler called a null vector).
           let due = max(intr.pipe_at + CycleCount(IRQ_SYNC_DELAY),
                         intr.stall_to + CycleCount(IRQ_SYNC_DELAY - UNDER_BURST_CREDIT))
           intr.pipe_due = due
@@ -744,16 +714,13 @@ proc run_pending*(dma: DMA) =
         elif intr.pipe_raised != 0 and intr.pipe_due > stall_start:
           intr.pipe_due += held
         if intr.pipe_raised != 0 and bus.sched.pending_at(etInterrupts) > intr.pipe_due:
-          # The raise's own check came due inside the burst and was drained
-          # there (preempt_point), where check_interrupts leaves what the
-          # synchroniser carries to this end; delay_pending found nothing
-          # left to move. Without a check at pipe_due nothing recognises it
-          # until some other source books one, and every later raise rides
-          # with it: Famicom Mini Nazo no Murasamejou's timer 1 interrupt,
-          # raised a cycle before an H-blank DMA0/DMA3 pair whose DMA3 the
-          # FIFO DMAs preempted, waited 39,272 cycles with IME, CPSR.I and
-          # IE open (docs/playtest-bugs.md §100). Due before the CPU
-          # stopped, it is taken at the first boundary after the burst.
+          # The raise's own check was drained inside the burst
+          # (preempt_point), leaving delay_pending nothing to move. Without a
+          # check at pipe_due nothing recognises it until another source books
+          # one (Famicom Mini Nazo no Murasamejou: a timer 1 IRQ waited 39,272
+          # cycles with IME, CPSR.I and IE open; docs/playtest-bugs.md §100).
+          # Due before the CPU stopped, it is taken at the first boundary
+          # after the burst.
           intr.schedule_interrupt_check(
             if intr.pipe_due > bus.sched.cycles: int(intr.pipe_due - bus.sched.cycles) else: 0)
         when DMA_IRQ_FROM_BUS_END:

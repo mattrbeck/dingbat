@@ -67,10 +67,9 @@ const
   MP2K_IDENT_IDLE         = 0x68736D53'u32   # SoundInfo.ident = ID_NUMBER ("Smsh")
   MP2K_IDENT_LOCK         = 0x68736D54'u32   # ID_NUMBER+1: lock held while SoundMain mixes
   # VSyncOff parks ident at +10 (VSyncOn subtracts it back). A stock driver's
-  # SoundMain refuses to run in that state, but modified vintages (Mother 3)
-  # do their own V-blank DMA maintenance and run the whole engine parked, so
-  # their lock dance is +10 <-> +11. Both forms are accepted everywhere; a
-  # stock driver never mixes at +10, so the widening cannot mislearn from it.
+  # SoundMain does not run then, but modified vintages (Mother 3) run the
+  # whole engine parked, locking +10 <-> +11. Both forms are accepted
+  # everywhere; a stock driver never mixes at +10, so this cannot mislearn.
   MP2K_IDENT_IDLE_VOFF    = 0x68736D5D'u32   # ID_NUMBER+10: idle, VSync off
   MP2K_IDENT_LOCK_VOFF    = 0x68736D5E'u32   # ID_NUMBER+11: locked, VSync off
   MP2K_MAX_CHANNELS       = 12
@@ -192,17 +191,14 @@ const
   # settle window (render_frame); -d:mp2kwav builds take DINGBAT_MP2K_BAND.
   MP2K_FIFO_BAND = 1.5'f32
   MP2K_FIFO_GUARD = 16
-  # Used only until a pass's slot has been heard (slot_timing), and fitted
-  # against a real-stream capture that sat one output sample late.
-  # From a byte's FIFO transfer to its sample at the DAC, beyond its place
-  # in the queue (the DMA refills 16 bytes when 15 remain, so a transfer's
-  # first byte plays 15 samples later), in DMA-rate samples. Fitted on the
-  # library sweep (lag-0 waveform correlation against the emulator's cubic
-  # FIFO reconstruction, 780 music titles): 3.5 is best at every engine rate
-  # from 5.7 to 21 kHz against 3 and 4 (the eleven 26.8 kHz titles prefer 4
-  # by 0.01). Above 35 kHz (Castlevania's 42 kHz configuration and two
-  # 40 kHz titles) 2 wins: the two differ by 1.6 output samples there, which
-  # content reaching 16 kHz still resolves.
+  # Used only until a pass's slot has been heard (slot_timing). From a
+  # byte's FIFO transfer to its sample at the DAC, beyond its place in the
+  # queue (the DMA refills 16 bytes when 15 remain, so a transfer's first
+  # byte plays 15 samples later), in DMA-rate samples. Fitted on the library
+  # sweep (lag-0 correlation against the emulator's cubic FIFO
+  # reconstruction): 3.5 beats 3 and 4 from 5.7 to 21 kHz; above 35 kHz
+  # (Castlevania's 42 kHz configuration) 2 wins. Probably a sample off:
+  # tools/mp2kprobe/README.md "Known limitations".
   MP2K_FIFO_PIPELINE      = 3.5'f32
   MP2K_FIFO_PIPELINE_FAST = 2.0'f32
   MP2K_FIFO_FAST_RATE     = 35000.0'f32
@@ -229,21 +225,17 @@ const
 # x in [0, MP2K_SINC_HALF] (symmetric). At playback step s <= 1 a voice is
 # reconstructed with the prototype as is: the sample's own band, none of
 # the images the driver's linear interpolation and the DAC's hold leave
-# above the sample's Nyquist. At s > 1 (Breath of Fire plays every voice
-# at up to three source samples per output sample; Beast Shooter a fifth
-# of its) the kernel is stretched by s — cutoff at the OUTPUT Nyquist — so
-# the decimation is band-limited instead of folding the sample's top
-# octaves back into the music as the driver's does. Weights are
-# normalised per output sample, so DC gain is exact at every phase and
+# above the sample's Nyquist. At s > 1 (Breath of Fire plays voices at up
+# to three source samples per output sample) the kernel is stretched by s —
+# cutoff at the OUTPUT Nyquist — so the decimation is band-limited instead
+# of folding the sample's top octaves back as the driver's does. Weights
+# are normalised per output sample, so DC gain is exact at every phase and
 # step.
 #
-# At step <= 1 every voice uses the prototype as is, so its kernel at each
-# of the MP2K_SINC_RES fractional phases is tabulated once, normalised
-# (mp2kSincPhase: one row of the 2 * MP2K_SINC_HALF taps the kernel spans
-# per phase), and a voice's sample is one dot product with the row of its
-# phase — the same weights the prototype lookup gives at that phase, to
-# the table's resolution. Above step 1 the kernel is stretched per voice
-# and looked up tap by tap (sinc_sample).
+# At step <= 1 the kernel at each of the MP2K_SINC_RES phases is tabulated
+# once, normalised (mp2kSincPhase: one row of 2 * MP2K_SINC_HALF taps per
+# phase), so a voice's sample is one dot product. Above step 1 the kernel
+# is stretched per voice and looked up tap by tap (sinc_sample).
 const MP2K_SINC_PHASE_TAPS = 2 * int(MP2K_SINC_HALF)
 var mp2kSincProto: array[int(MP2K_SINC_HALF) * MP2K_SINC_RES + 2, float32]
 var mp2kSincPhase: array[MP2K_SINC_RES * MP2K_SINC_PHASE_TAPS, float32]
@@ -583,10 +575,9 @@ proc timer_play_rate(m: Mp2kHle): float32 =
   ## frame long (18157 Hz: 924 cycles a byte, 304 bytes = 280896 cycles), so
   ## the hardware plays each voice a few parts in 10^5 sharper than pcmFreq
   ## says and a frame of the driver's output lasts 548.625 output samples,
-  ## not spv * 32768 / pcmFreq. Rendering at pcmFreq left every frame that
-  ## much long and the level control trimming a sample every 100 to 300
-  ## frames, each trim a sample of phase against the stream. A timer that is
-  ## off, cascaded, or disagrees with pcmFreq by more than 1 % gives pcmFreq.
+  ## not spv * 32768 / pcmFreq (rendering at pcmFreq makes the level control
+  ## trim a sample of phase every 100 to 300 frames). A timer that is off,
+  ## cascaded, or disagrees with pcmFreq by more than 1 % gives pcmFreq.
   let nominal = float32(max(m.pcm_sample_rate, 1))
   let t = int(if m.mono_mode == 2: m.gba.apu.soundcnt_h.dma_sound_b_timer
               else: m.gba.apu.soundcnt_h.dma_sound_a_timer)
@@ -745,9 +736,9 @@ proc apply_pending(m: Mp2kHle; sound_info: uint32) =
     m.reverb_ring = newSeq[float32](m.rev_period * MP2K_REV_SLOT_LEN * 2)
   # Slot cursor, derived from pcmDmaCounter the way SoundMain derives its
   # pcmBuffer frame cursor: slot = pcmDmaPeriod - (pcmDmaCounter - 1) when
-  # pcmDmaCounter >= 2, else 0. This tracks the real ring phase verbatim,
-  # including across skipped mixer passes (probe harness: 0 mismatches
-  # against the slot whose bytes changed, over 386 Emerald passes).
+  # pcmDmaCounter >= 2, else 0. This tracks the real ring phase, including
+  # across skipped mixer passes (probe harness, Emerald: no mismatch against
+  # the slot whose bytes changed).
   block:
     let cnt = m.pend_cnt
     m.rev_slot = (if cnt <= 1: 0 else: m.rev_period - (cnt - 1))
@@ -836,13 +827,11 @@ proc apply_pending(m: Mp2kHle; sound_info: uint32) =
     if retrig:
       if m.resync_pending and not started:
         # First applied snapshot after a state/rollback load: the channel is
-        # already mid-note in the engine (CH_ON without START) and must not
-        # restart from the sample start — an audible burst hardware doesn't
-        # produce. Resume at the engine's own position: the mixer sets ct =
-        # size - offset at note-on and decrements it per source sample
-        # consumed, so size - ct is the forward cursor AND, for a reversed
-        # channel (whose start offset is unrecoverable post-hoc — assume 0),
-        # the consumed count that reversed src_index tracks.
+        # mid-note (CH_ON without START) and must not restart (an audible
+        # burst). Resume at the engine's position: ct counts down from size
+        # per source sample consumed, so size - ct is the forward cursor and,
+        # for a reversed channel (start offset unrecoverable: assume 0), the
+        # consumed count reversed src_index tracks.
         s.phase_frac = 0
         s.tap_i = 0xFFFFFFFF'u32
         s.start_off = 0
@@ -857,11 +846,11 @@ proc apply_pending(m: Mp2kHle; sound_info: uint32) =
           else: 0'u32
       else:
         # (re)trigger: reset the resampler + decode state to the note's start.
-        # SoundChannel.count at note-on is whatever the channel's previous
-        # note left there, not a start offset: the driver starts every note
-        # at sample 0 (Minish Cap carries such counts on most note-ons and the
-        # engine ignored all of them; Emerald's are always 0). The census in
-        # tests/mp2k_sweep.nim (start_honoured / start_ignored) keeps watch.
+        # SoundChannel.count at note-on is whatever the previous note left,
+        # not a start offset: the driver starts every note at sample 0
+        # (Minish Cap carries such counts and the engine ignores them). The
+        # census in tests/mp2k_sweep.nim (start_honoured / start_ignored)
+        # keeps watch.
         when defined(mp2kwav):
           s.chk_off = (if started and p.ct < m.rd32(wave + 12): p.ct else: 0'u32)
         s.start_off = 0
@@ -890,14 +879,9 @@ proc apply_pending(m: Mp2kHle; sound_info: uint32) =
             elif d_ign <= 4 and d_hon > 4: inc dbgStartIgnored
             else: inc dbgStartUnclear
           s.chk_off = 0
-      # Continuous position resync against the engine's cursor: a note-on
-      # latched from a stale SoundChannel.count (a start the snapshot saw a
-      # pass late) would leave the sampler thousands of samples off. ct is
-      # ground truth on every later pass:
-      # consumed = size - ct (same coordinate across the loop reload). Snap
-      # only on gross divergence (> 1024 source samples) so resampler jitter
-      # and loop-wrap transients never trigger it; a stale note-on is then
-      # corrected within one frame, keyed purely on engine state.
+      # Continuous position resync against the engine's cursor: ct is ground
+      # truth on every pass after the note-on (consumed = size - ct, the same
+      # coordinate across the loop reload).
       let ctv = p.ct
       let total_sz = m.rd32(wave + 12)
       if ctv >= 1'u32 and ctv <= total_sz:
@@ -912,9 +896,9 @@ proc apply_pending(m: Mp2kHle; sound_info: uint32) =
             dbgRetrigLog.inc
         let diff = (if engine_pos > our_pos: engine_pos - our_pos
                     else: our_pos - engine_pos)
-        # Snap on a divergence of at least half a pass (a note latched a
-        # pass late stays a pass behind for its whole life otherwise);
-        # resampler jitter is a sample or two.
+        # Snap on a divergence of half a pass (at least 32 samples): a note
+        # latched a pass late stays a pass behind for its whole life
+        # otherwise; resampler jitter is a sample or two.
         let adv = uint32(float32(m.pend_spv) * float32(p.freq) / float32(max(m.pcm_sample_rate, 1)))
         if diff > max(adv div 2, 32'u32):
           if s.reversed:
@@ -1110,12 +1094,10 @@ proc measure_latency(m: Mp2kHle) =
       # refill of timer periods apart. That byte then sits queue-deep in the
       # FIFO behind the 15 the refill found there.
       # A vintage that reprograms the DMA every V-blank (Estopolis, Metal
-      # Max, Beast Shooter, Super Dodgeball) is seen with the cursor AT the
-      # slot start: the transfer carrying it is the NEXT one (n = -1). The
-      # transfers keep their cadence across the restart — the FIFO's refill
-      # requests are the timer's, not the DMA's. (Until 2026-09-14 that
-      # case computed n = ring/16 - 1, a negative latency, and was dropped,
-      # so those titles never measured and stayed on the seed.)
+      # Max, Beast Shooter) is seen with the cursor AT the slot start: the
+      # transfer carrying it is the NEXT one (n = -1). The transfers keep
+      # their cadence across the restart — the FIFO's refill requests are
+      # the timer's, not the DMA's.
       let xoff = start - (start mod MP2K_FIFO_REFILL)
       let past = (curoff + ring - xoff) mod ring
       let n = (if past == 0'u32: -1 else: int((past - MP2K_FIFO_REFILL) div MP2K_FIFO_REFILL))
@@ -1210,12 +1192,10 @@ proc on_frame(m: Mp2kHle; sound_info: uint32) =
       m.snapshot_pass(sound_info)
       m.learn_slot_offset()
       # A DMA the game re-times moves the phase estimate by more than a
-      # FIFO refill's jitter; the latencies measured under the old timing no
-      # longer apply, so they are dropped and the target takes the estimate
-      # until four crossings are in again (Tarzan: Return to the Jungle
-      # re-times at its ninth pass, and an average walking down from the old
-      # latency left its start 35 samples late for two seconds; keeping the
-      # old measurement until new crossings arrive instead measured worse).
+      # FIFO refill's jitter: the old latencies are dropped and the target
+      # takes the estimate until four crossings are in again (Tarzan: Return
+      # to the Jungle re-times at its ninth pass; averaging down from the old
+      # latency, or keeping it, left its start late for seconds).
       let hw = m.hw_latency()
       if hw > 0 and m.lat_hw_ref > 0 and abs(hw - m.lat_hw_ref) > 96:
         m.lat_count = 0
@@ -1255,23 +1235,21 @@ proc on_frame(m: Mp2kHle; sound_info: uint32) =
   #     every mirrored channel is idle, and if the shadow were wrongly silent
   #     for another reason the game's own audio is the right fallback anyway.
   # Foreign audio is BURSTY, so a consecutive-streak rule never accumulates:
-  # evidence = provenance hit or real-audible-while-shadow-silent; refutation
-  # = the shadow producing audio with no provenance hit (reset); neutral =
-  # both silent (hold the count).
+  # evidence = a feeder hit or real-audible-while-shadow-silent; refutation
+  # = the shadow producing audio with no feeder hit (reset); neutral = both
+  # silent (hold the count).
   block:
     if m.fifo_foreign:
       # --- Latched: earn the way back ---------------------------------------
-      # For many games the latch was ONE boot-time streamed voice clip played
-      # while an ordinary m4a engine idled (Rockman EXE 3 at its title).
-      # Losing enhancement for the session over that is the wrong trade, but
-      # only provably so once the engine DEMONSTRABLY owns the stream: while
-      # latched with any m4a channel active, apu.get_sample keeps the shadow
-      # rendering un-emitted (unlatch_watch); sustained agreement with the
-      # real stream (each side within 2x, real audible, channels active, 60
-      # CONSECUTIVE passes = one second) re-arms substitution. A true-foreign
-      # game never keys an m4a channel, so it never qualifies; a hybrid
-      # mid-clip has real >> shadow on a side and resets the counter; a wrong
-      # unlatch is covered by the overlay passthrough and re-latched.
+      # Often the latch was ONE boot-time streamed voice clip played while an
+      # ordinary m4a engine idled (Rockman EXE 3 at its title). While latched
+      # with any m4a channel active, apu.get_sample keeps the shadow
+      # rendering un-emitted (unlatch_watch); agreement with the real stream
+      # (each side within 2x, real audible, channels active) for 60
+      # CONSECUTIVE passes re-arms substitution. A true-foreign game never
+      # keys an m4a channel, so never qualifies; a hybrid mid-clip has real
+      # >> shadow on a side and resets the counter; a wrong unlatch is
+      # covered by the overlay passthrough and re-latched.
       var any_active = false
       for i in 0 ..< MP2K_MAX_CHANNELS:
         if m.samplers[i].active: any_active = true
@@ -1326,15 +1304,13 @@ proc on_frame(m: Mp2kHle; sound_info: uint32) =
         # --- Transient foreign-overlay passthrough ---------------------------
         # Hybrid games overlay their OWN stream on the engine's output
         # (Kinniku Banzuke 2 streams announcer speech into the pcmBuffer B
-        # half while m4a music plays). The shadow cannot render audio that
-        # never passes through the SoundChannels. Per-side test: a real FIFO
-        # side carrying more than TWICE the shadow's same side plus an
-        # audibility floor cannot be the engine's own mix (both halves come
-        # from the same channel loop with byte-bounded volumes we mirror).
+        # half while m4a music plays), which the shadow cannot render.
+        # Per-side test: a real FIFO side carrying three times the shadow's
+        # same side plus an audibility floor cannot be the engine's own mix
+        # (both halves come from the same channel loop).
         # While held, apu.get_sample emits the REAL stream and the shadow
         # keeps rendering underneath — reversible per pass, unlike
-        # fifo_foreign; the 30-pass hold spans sentence-cadence gaps so it
-        # cannot flap mid-speech.
+        # fifo_foreign; the 30-pass hold spans gaps between sentences.
         let over_l = m.real_abs_a >= m.hle_abs_l * 3 + int64(m.ab_n) * 4
         let over_r = m.real_abs_b >= m.hle_abs_r * 3 + int64(m.ab_n) * 4
         if over_l or over_r:
@@ -1350,23 +1326,19 @@ proc on_frame(m: Mp2kHle; sound_info: uint32) =
         m.ab_n = 0
       if shadow_loud: m.shadow_quiet_age = 0
       elif m.shadow_quiet_age < 1000: inc m.shadow_quiet_age
-      # Energy evidence requires ALL engine channels idle: with one active
-      # the engine owns whatever is sounding, and any shadow silence is our
-      # own problem (e.g. a note-on envelope lag), never foreignness. It also
-      # only counts once the shadow has been silent longer than the real ring
-      # could still be draining engine-mixed audio (pcmBuffer holds up to
-      # pcmDmaPeriod <= 16 frames; our FIFO holds about 1): a song-stop drain
-      # tail is not foreign.
+      # Energy evidence requires ALL engine channels idle (with one active
+      # the engine owns whatever is sounding), and the shadow silent longer
+      # than the real ring could still be draining engine-mixed audio
+      # (pcmDmaPeriod <= 16 frames): a song-stop drain tail is not foreign.
       var any_active = false
       for i in 0 ..< MP2K_MAX_CHANNELS:
         if m.samplers[i].active: any_active = true
       if provenance or
          (real_loud and not any_active and m.shadow_quiet_age > 16):
         inc m.foreign_streak
-        # 3 evidence passes suffice: a full frame of clearly audible audio
-        # while the shadow (voices AND reverb tail) is bit-silent outside any
-        # drain-tail window is essentially impossible for an engine-owned
-        # stream, and sparse stingers still latch within seconds.
+        # 3 evidence passes suffice: clearly audible audio while the shadow
+        # (voices AND reverb tail) is silent outside a drain tail is not an
+        # engine-owned stream, and sparse stingers still latch within seconds.
         if m.foreign_streak >= 3:
           m.fifo_foreign = true
       elif shadow_loud:
@@ -1497,9 +1469,7 @@ proc mixer_pass(m: Mp2kHle; sip: uint32) =
   # same ring slot again, and the hardware plays the later mix: its frame
   # replaces the unplayed part of the previous one (GT Championship does
   # this every twenty frames or so). A pass after the counter moved is a
-  # frame of its own. (Until 2026-09-14 only the first pass of each emulated
-  # frame was rendered, a guard the PC hook needed against helpers inside
-  # the mixer.)
+  # frame of its own.
   let cnt = int(m.rd8(sip + SI_DMA_COUNTER))
   let nominal = int64(float32(m.rev_spv) * float32(APU_SAMPLE_RATE) /
                       float32(max(m.pcm_sample_rate, 1)))
@@ -1657,11 +1627,11 @@ proc render_voices(m: Mp2kHle; n: int) =
   ## frame (the voices are independent, so everything a voice decides once
   ## per frame is decided once; the sums take the voices in channel order,
   ## as a sample-at-a-time loop would). render_one then turns each sample
-  ## into a (FIFO A, FIFO B) pair, in the FIFO
-  ## latch range (twice the driver's s8 byte) so the APU's DirectSound
-  ## scaling applies. Per channel: four source samples around a fractional
-  ## cursor, interpolated (cubic by default; the driver itself is linear —
-  ## P2 — and `resample_mode` 1/2 select linear/hold for parity checks).
+  ## into a (FIFO A, FIFO B) pair, in the FIFO latch range (twice the
+  ## driver's s8 byte) so the APU's DirectSound scaling applies. Per channel:
+  ## source taps around a fractional cursor, interpolated (windowed sinc in
+  ## the quality tier, else Catmull-Rom; the driver itself is linear — P2 —
+  ## and `resample_mode` 1/2 select linear/hold for parity checks).
   ##
   ## Quality tier (m.quality, the default; off for parity checks): the
   ## render matches the driver's envelopes, gains and timing but not its
@@ -1793,9 +1763,9 @@ proc render_one(m: Mp2kHle; accl, accr: float32): tuple[a: float32, b: float32] 
   # output is point-sampled into the cell, then the seed is held across the
   # cell's remaining output samples — the zero-order hold the DMA/DAC replay
   # applies. The ring MUST run at pcmFreq: the seed sums two consecutive
-  # frames, so the buffer's band-limited self-correlation is the loop gain,
-  # and a 32768 Hz ring under-echoes (FireRed forced-reverb A/B against the
-  # real FIFO). Floats are on the s8-buffer scale (a voice contributes
+  # frames, so the buffer's band-limited self-correlation is the loop gain;
+  # a 32768 Hz ring under-echoes (FireRed A/B against the real FIFO).
+  # Floats are on the s8-buffer scale (a voice contributes
   # sample * side/256, the driver's byte), so the seed is sum * reverb/512.
   # Omitted, each sub-LSB on the s8 scale: the negative nudge and the s8
   # store quantization/wrap. MONO vintages keep the same formula: both sides
@@ -2028,11 +1998,9 @@ proc render_frame(m: Mp2kHle) =
     # stepped at once. An error of half a frame or more is stepped only when
     # the previous pass saw it too, so a pass whose frame count came out
     # wrong cannot move the stream by a frame. A smaller error is averaged
-    # first (1/8 per pass: a stamp is a whole output sample, so one reading
-    # carries half a sample of noise either way) and trimmed by a sample
-    # when the average passes 0.6. Frames move in whole samples, so up to
-    # half a sample stays and a lower threshold dithers: trimming every
-    # reading dropped or duplicated a sample every other frame.
+    # first (1/8 per pass: a stamp carries half a sample of noise) and
+    # trimmed by a sample when the average passes 0.6; trimming every
+    # reading dithers (tools/mp2kprobe/README.md "Known limitations").
     let e = int(round(place_err))
     let half = max(int(nominal) div 2, 1)
     var go = e
@@ -2081,27 +2049,17 @@ proc render_frame(m: Mp2kHle) =
       m.dbg_pass_note(level, "S", go)
     m.render_frame_samples(level)
     return
-  # Level control. The frame length is never trimmed: it is what advances
-  # every cursor by exactly the driver's spv source-rate samples, and the
-  # V-blank jitter is zero-mean, so shortening frames whenever the level
-  # runs high (and never lengthening them, an underrun merely holds) would
-  # walk the cursors behind the engine one sample per late hook. Instead a
-  # slow average of the level error drives one dropped or duplicated
-  # OUTPUT sample per frame — a 30 µs slide, only when the offset persists
-  # (the pcmFreq-vs-frame-rate drift is about a sample a second). The
-  # average is the 1/32 EMA, so the V-blank jitter (±20 samples) leaves a
-  # few samples of noise in it; the trim engages past MP2K_FIFO_BAND and, once engaged,
-  # runs on until the average is back within half a sample (hysteresis:
-  # fifo_trimming). A plain band (24, until 2026-09-14) left every title
-  # parked up to 24 samples off its target on the side it approached from
-  # — the whole residual the A/B listening set measured (Emerald 11 early,
-  # Minish Cap 20, Metal Max 28, Castlevania 24 late). A 6-sample band
-  # still parked a title wherever it settled inside it (Advance GTA +3,
-  # Emerald -2 on the same build, depending only on the frame it engaged),
-  # so for MP2K_FIFO_SETTLE frames after priming, and after the target moves
-  # by two samples or more, the trim converges from any error; outside it
-  # the band is 1.5 (a sweep of 6, 3 and 1.5 changed only titles long
-  # parked inside the wider bands, Steel Empire 0.55 -> 0.64).
+  # Level control. The frame length is never trimmed: it advances every
+  # cursor by exactly the driver's spv source-rate samples, and shortening
+  # frames when the level runs high would walk the cursors behind the
+  # engine one sample per late hook. Instead a slow average of the level
+  # error (1/32 EMA; the V-blank jitter is ±20 samples) drops or duplicates
+  # one OUTPUT sample per frame, only when the offset persists. The trim
+  # engages past MP2K_FIFO_BAND and, once engaged, runs until the average is
+  # within half a sample (hysteresis: fifo_trimming). A wide band parks a
+  # title wherever it settled inside it, so for MP2K_FIFO_SETTLE frames
+  # after priming, and after the target moves by two samples or more, the
+  # trim converges from any error.
   if abs(m.fifo_target - m.fifo_settle_ref) >= 2:
     m.fifo_settle = MP2K_FIFO_SETTLE
     m.fifo_settle_ref = m.fifo_target
@@ -2120,10 +2078,9 @@ proc render_frame(m: Mp2kHle) =
   # slots) or passes that came in a burst, so it is corrected in whole
   # frames once it is half a frame or more: the part of the error that is
   # this pass being late within its V-blank stays, as it does on hardware,
-  # and the next on-time pass lands on the target. A smaller jump is taken
-  # up exactly, as before. (Filling to the target left Santa Claus Saves the Earth
-  # 36 samples late for two seconds after the V-blank its song start
-  # skipped.)
+  # and the next on-time pass lands on the target (filling to the target
+  # left Santa Claus Saves the Earth late for seconds after a skipped
+  # V-blank). A smaller jump is taken up exactly.
   let level_in = level
   var step_err = level - m.fifo_target
   let target_moved = abs(m.fifo_target - m.fifo_step_ref) > 96

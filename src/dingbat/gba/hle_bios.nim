@@ -1,18 +1,17 @@
 # HLE BIOS implementation (included by gba.nim)
 
 proc hle_busy(cpu: CPU; n: int) {.inline.} =
-  ## Routine time: BIOS instructions, every one a bus access (a 1-cycle
-  ## BIOS fetch at least). Not cpu.idle: internal cycles let a DMA burst
-  ## run under them for free (Bus.idle_window), which the routine's
-  ## fetches never do.
+  ## Routine time, as bus accesses (every BIOS instruction fetches). Not
+  ## cpu.idle: a DMA burst runs free under internal cycles
+  ## (Bus.idle_window) but never under the routine's fetches.
   cpu.gba.bus.add_cycles(n)
 
-# The affine SWIs' sine table: 256 steps per turn in 1.14 fixed point,
+# The affine SWIs' sine table: 256 steps per turn, 1.14 fixed point,
 # truncated toward zero. Derived, not copied: trunc(sin(i * pi / 128) *
 # 0x4000) reproduces the real BIOS's pa/pb/pc/pd for all 256 angles at
-# scale 0x4000 (ObjAffineSet under LLE), and cos is the table a quarter
-# turn on. The closest a non-quadrant entry comes to an integer is 0.003,
-# so no libm rounding can flip one.
+# scale 0x4000 (ObjAffineSet under LLE); cos is a quarter turn on. No
+# non-quadrant entry is within 0.003 of an integer, so libm rounding
+# cannot flip one.
 const AFFINE_SINE = block:
   var t: array[256, int32]
   for i in 0 ..< 256:
@@ -20,13 +19,11 @@ const AFFINE_SINE = block:
   t
 
 proc affine_params(sx, sy: int32; angle: uint16): (int16, int16, int16, int16) =
-  ## BgAffineSet/ObjAffineSet matrix: only the angle's high byte is used
-  ## (the low byte never moves the result), each product is shifted down
-  ## arithmetically, and pb negates the shifted product. Exact against the
-  ## real BIOS on 1024 ObjAffineSet entries (scales 0x100, 0x7FFF/-0x8000,
-  ## 0x1234/-1, -0x100/3) and 144 BgAffineSet entries (random scales,
-  ## centres, offsets). The float version this replaces was off by one in
-  ## most entries (PeterLemon BIOSBGAFFINESET/BIOSOBJAFFINESET data).
+  ## BgAffineSet/ObjAffineSet matrix: only the angle's high byte counts,
+  ## each product is shifted down arithmetically, and pb negates the
+  ## shifted product. Exact against the real BIOS on 1024 ObjAffineSet
+  ## entries (scales 0x100, 0x7FFF/-0x8000, 0x1234/-1, -0x100/3) and 144
+  ## BgAffineSet entries (PeterLemon BIOSBGAFFINESET/BIOSOBJAFFINESET data).
   let a = int(angle shr 8)
   let s = AFFINE_SINE[a]
   let c = AFFINE_SINE[(a + 64) and 255]
@@ -36,22 +33,21 @@ proc affine_params(sx, sy: int32; angle: uint16): (int16, int16, int16, int16) =
 proc div_align_shifts(n, d: uint32): int {.inline.} =
   ## Taken-branch count of the BIOS divide's alignment loop (0x3C8): r2
   ## starts at |denom| and doubles while r2 < |numer| >> 1; the unwind loop
-  ## runs one more pass, so the input-dependent cost is 13 cycles per shift.
-  ## Closed form hb(n)-hb(d), minus one when d << (s-1) >= n >> 1 stops the
-  ## loop early.
+  ## runs one more pass, so each shift costs 13 cycles. Closed form
+  ## hb(n)-hb(d), minus one when d << (s-1) >= n >> 1 stops the loop early.
   if n shr 1 <= d: return 0
   let s = countLeadingZeroBits(d) - countLeadingZeroBits(n)  # >= 1 here
   if (d shl (s - 1)) >= (n shr 1): s - 1 else: s
 
 proc div_body_cycles(n, d: uint32): int {.inline.} =
-  ## Cycles of the BIOS divide body (0x3B4) for |numer| n, |denom| d, beyond
-  ## the fixed dispatch. 19 + 13 per alignment shift; +8 when the last
-  ## alignment compare lands exactly equal (the loop's `lslls` doubles r2
-  ## once more without branching back, so the unwind runs one extra pass).
-  ## d = 0 exits the alignment loop at once (only reachable for |n| <= 1;
-  ## see hle_div). Measured against the real BIOS with TM0 around the swi:
-  ## Div(2,1) 106, Div(-2^31,-1) 496, Div(2^31,2^30) 483 vs 98/488/475 for
-  ## the neighbouring inputs; 33 more pairs cycle-exact.
+  ## Cycles of the BIOS divide body (0x3B4) beyond the fixed dispatch, for
+  ## |numer| n, |denom| d: 19 + 13 per alignment shift, +8 when the last
+  ## alignment compare is exactly equal (`lslls` doubles r2 once more
+  ## without branching back, so the unwind runs one extra pass). d = 0
+  ## exits the loop at once (reachable only for |n| <= 1; see hle_div).
+  ## Real BIOS, TM0 around the swi: Div(2,1) 106, Div(-2^31,-1) 496,
+  ## Div(2^31,2^30) 483 vs 98/488/475 for the neighbouring inputs; 33 more
+  ## pairs cycle-exact.
   if d == 0: return 19
   let t = div_align_shifts(n, d)
   result = 19 + t * 13
@@ -59,21 +55,18 @@ proc div_body_cycles(n, d: uint32): int {.inline.} =
 
 proc hle_div(cpu: CPU; numer_reg, denom_reg: int): int =
   ## Sets the results; returns the body cost (div_body_cycles) on top of the
-  ## dispatch: mGBA suite "BIOS Division" timing rows plus the real-BIOS TM0
-  ## measurements noted there.
+  ## dispatch: mGBA suite "BIOS Division" timing tests plus the TM0
+  ## measurements at div_body_cycles.
   let numer = int64(cast[int32](cpu.r[numer_reg]))
   let denom = int64(cast[int32](cpu.r[denom_reg]))
   result = div_body_cycles(uint32(abs(numer) and 0xFFFFFFFF),
                            uint32(abs(denom) and 0xFFFFFFFF))
   if denom == 0:
-    # Div by zero. The real BIOS's alignment loop (0x3C8: r2 = |denom| = 0
-    # doubles "while r2 < |numer| >> 1") exits at once when |numer| <= 1 and
-    # never when |numer| >= 2. When it exits, the unwind pass with r2 = 0
-    # yields quotient 1 (signed like the numerator), remainder = numerator,
-    # |quotient| = 1 — measured under the real BIOS for numerators 0, 1, -1
-    # (Div and DivArm): r0 = +1/+1/-1, r1 = 0/1/-1, r3 = 1, 98 cycles. For
-    # |numer| >= 2 the real BIOS hangs; the HLE returns the same
-    # (+-1, numerator, 1) so the game keeps running (Assumed).
+    # Div by zero: the alignment loop (r2 = 0) exits at once for |numer| <=
+    # 1 and never for |numer| >= 2. On exit: r0 = +-1 (the numerator's
+    # sign), r1 = numerator, r3 = 1, 98 cycles (real BIOS, numerators 0, 1,
+    # -1, Div and DivArm). For |numer| >= 2 the real BIOS hangs; the HLE
+    # returns the same so the game keeps running (Assumed).
     cpu.r[0] = if numer < 0: 0xFFFFFFFF'u32 else: 1'u32
     cpu.r[1] = uint32(numer and 0xFFFFFFFF)
     cpu.r[3] = 1'u32
@@ -115,18 +108,12 @@ proc set_sys_lr(cpu: CPU; v: uint32) {.inline.} =
 
 # --- System-stack wait states ---
 #
-# The routine-cost models below were fitted with the System stack in IWRAM,
-# where a stack word costs one cycle like any BIOS access. The real BIOS
-# pays the stack's region for every word: the dispatcher's push {r2, lr}
-# and its pop, each routine's own frame, and the few routines that spill to
-# the stack inside their loops. Games that run tasks on EWRAM stacks (Mario
-# Party Advance) pay 5 more cycles a word there; the HLE charged none of it,
-# so its copies ran 50-100 cycles short and the game's timer-seeded random
-# numbers came out different. tools/biosdrv/swisp.c and swisp2.c: every
-# timed SWI from both stacks, against the official BIOS in this core: the
-# BIOS's stack accesses (BD_MEMTRACE/BD_MEMREAD) times the EWRAM premium
-# account for every cycle of the difference, and the counts below are those
-# accesses.
+# The routine-cost models were fitted with the System stack in IWRAM (one
+# cycle a word). The real BIOS pays the stack's region for every stack word
+# (dispatcher push/pop, routine frames, in-loop spills): an EWRAM stack
+# costs 5 more a word (Mario Party Advance's timer-seeded random numbers
+# depend on it). The counts below are the official BIOS's stack accesses,
+# from tools/biosdrv/swisp.c and swisp2.c.
 
 proc sys_stack_waits(cpu: CPU): (int, int) {.inline.} =
   ## What a nonsequential and a sequential System-stack word cost beyond the
@@ -142,10 +129,10 @@ proc stack_block(waits: (int, int); words: int): int {.inline.} =
 
 proc swi_frame(swi_num: uint32): (int, int, int) =
   ## A routine's own System-stack frame below the dispatcher's {r2, lr}:
-  ## words pushed, then the pop as one or two ldm/pop blocks. Only what the
-  ## HLE still prices this way needs it: an IntrWait, a CpuSet or a
-  ## CpuFastSet an earlier build left parked (check_intr_wait, hle_copy.nim).
-  ## The routines hle_unc.nim runs push and pop their frames as steps.
+  ## words pushed, then the pop as one or two ldm/pop blocks. Needed only
+  ## for an IntrWait, CpuSet or CpuFastSet an earlier build left parked
+  ## (check_intr_wait, hle_copy.nim); hle_unc.nim's routines push and pop
+  ## their frames as steps.
   case swi_num
   of 0x04, 0x05: (2, 2, 0)                  # IntrWait: push {r4, lr}
   of 0x0B: (3, 2, 1)                        # CpuSet: push {r4, r5, lr}
@@ -196,16 +183,10 @@ proc check_intr_wait*(cpu: CPU) =
     # The IntrWait exit path leaves this opcode in the BIOS open-bus latch
     cpu.gba.bus.bios_latch = 0xE3A02004'u32
     # Wake-path cost: the check/acknowledge subroutine, its return, the
-    # routine's frame pop and the dispatcher's restore, instruction-counted
-    # from the real BIOS. Keeps code after IntrWait phase-aligned with the
-    # timer prescaler (mGBA suite Timer count-up rows).
-    # Checked against Nintendo's BIOS on an AGB SP (tests/roms/payloads/
-    # vbwait.s): with this the return lands on the console's cycle for a
-    # V-blank wait and a V-count wait alike, behind a minimal handler and a
-    # table-walking one. A one-cycle miss that page first showed here was
-    # HALT_RETURN_COST's (below), which moved the page's own clocks.
-    # The two frame pops are System-stack loads: an EWRAM stack makes the
-    # return later (tools/biosdrv/swisp.c: 20 cycles, 4 words).
+    # frame pops and the dispatcher's restore, instruction-counted from the
+    # real BIOS. Pinned by mGBA suite Timer count-up tests and, on an AGB SP,
+    # tests/roms/payloads/vbwait.s. The frame pops pay the System stack's
+    # region (swisp.c: EWRAM 20 cycles later, 4 words).
     cpu.gba.bus.add_cycles(INTRWAIT_TUNE + cpu.swi_stack_exit(0x04) -
                            (when HALT_WAKE_RUNS_ONE: HALT_WAKE_INSTR_COST else: 0))
   else:
@@ -217,58 +198,46 @@ proc check_intr_wait*(cpu: CPU) =
     cpu.r[4] = 1
     cpu.set_sys_lr(0x34C'u32)
     if cpu.cpsr.irq_disable:
-      # Waiting with IRQs masked in CPSR: the halt wakes at once on any
-      # pending source, no handler can run to set the flags, and the BIOS
-      # spins round its check loop for ever. That loop takes time; without
-      # it the HLE re-halted and woke on the same cycle and never returned
-      # from the frame (the state soak's random GBA program, once a stray DMA
-      # had switched board WRAM off and the stack had gone astray).
+      # IRQs masked in CPSR: the BIOS spins its check loop for ever. Charge
+      # the loop's time, else the re-halt wakes on the same cycle and the
+      # frame never ends.
       cpu.gba.bus.add_cycles(INTRWAIT_TUNE)
     cpu.halted = true
     cpu.gba.interrupts.schedule_interrupt_check()
 
 # SWI entry/dispatch/return cost, excluding the caller-side pipeline refill
-# charged per region in hle_swi. mGBA suite BIOS timing rows (IWRAM column).
+# charged per region in hle_swi. mGBA suite BIOS timing tests (IWRAM column).
 const SWI_HLE_BASE = 48
 # The part of it after the routine: the return path from 0x170, refill
 # excluded (official BIOS in this core: the code Halt's return runs, bus.nim)
 const SWI_HLE_EXIT = 16
-# SoftReset's body over the base: Nintendo's BIOS in this core, swi 0 to the
-# end of the ROM's first instruction (895), less what the HLE charged
-# without it (85)
+# SoftReset's body over the base, mostly the 0x200-byte clear: swi 0 to the
+# end of the ROM's first instruction takes 895 under Nintendo's BIOS in
+# this core and 85 under the HLE without it (Super Mario Advance 3's swi 0,
+# docs/playtest-bugs.md §82)
 const SOFTRESET_BODY {.intdefine.} = 810
 
-# The part of a Halt/Stop SWI the BIOS executes after the wake IRQ is
-# serviced (bx lr, pop {r2, lr}, mode restore, pop {fp, ip, lr}, movs pc, lr
-# with refill = 21), less the cycle the IRQ exception return charges on the
-# vector side. A deferral, not an extra cost: post-wake measurements see it
-# (mGBA suite SIO timing rows).
-# 21, not the 20 instruction-counted above: vbwait.s stamps IntrWait's return
-# against a Halt wake, and at 20 every stamp on the page sat one cycle from
-# the real BIOS in our own core -- which is itself on the console's cycle.
-# halthb.s could not see it: a Halt return cancels out of that page's
-# difference. The mGBA suite does not constrain it either.
+# The part of the Stop routine the BIOS runs after the wake IRQ is serviced
+# (bx lr, pop {r2, lr}, mode restore, pop {fp, ip, lr}, movs pc, lr with
+# refill), deferred to after the wake (mGBA suite SIO timing tests). Halt
+# runs that return as stub-BIOS code (hle_halt). 21, not the 20 counted:
+# vbwait.s stamps sit one cycle off at 20.
 const HALT_RETURN_COST {.intdefine.} = 21
 
 # --- Routine-body cost models ---
 #
-# The copy/decompression SWIs top up what the HLE's own bus accesses charged
-# to the instruction-counted cost of the BIOS routine, verified cycle-exact
-# against real-BIOS execution on calibration streams at two waitstate
-# settings. Fixed constants are the body cost beyond SWI_HLE_BASE and the
-# caller refill. Per-unit terms use nonsequential waitstates: the BIOS loops
-# interleave instruction fetches with the data accesses, so no burst survives.
+# A routine tops up what its own bus accesses charged to the BIOS routine's
+# instruction-counted cost. Fixed constants are the body cost beyond
+# SWI_HLE_BASE and the caller refill. Per-unit terms use nonsequential
+# waits: the BIOS loops interleave fetches with data accesses.
 
 proc hle_body_start(cpu: CPU): int64 {.inline.} =
   int64(cpu.gba.scheduler.cycles) + int64(cpu.gba.bus.cycles)
 
 proc hle_body_now(cpu: CPU): int64 {.inline.} =
-  ## The routine-body clock: hle_body_start net of the time DMA bursts
-  ## stopped the CPU. The real routine's instruction fetches and data
-  ## accesses all need the bus, so a burst inside it delays it by the
-  ## burst's full length; a model topped up against the plain clock let
-  ## the burst eat into the routine instead (Top Gun - Combat Zones'
-  ## LZ77UnCompWram returned ~58 cycles early when one landed in it).
+  ## The routine-body clock: hle_body_start net of DMA stall time. Every
+  ## access of the real routine needs the bus, so a DMA burst delays it by
+  ## its full length rather than eating into it.
   cpu.hle_body_start() - cpu.gba.bus.dma_stall_total
 
 proc hle_charge_body(cpu: CPU; t0: int64; model: int) {.inline.} =
@@ -279,20 +248,17 @@ proc hle_charge_body(cpu: CPU; t0: int64; model: int) {.inline.} =
 
 proc bios_addr_check(address, length: uint32): bool {.inline.} =
   ## The BIOS source-region check (0xBA4) every copy/decompression SWI runs
-  ## first. False = the BIOS silently skips the operation: zero length,
-  ## source below 0x02000000, or source+length (length masked to 25 bits)
-  ## leaving the 0x02000000-0x0FFFFFFF address bits. Games rely on the skip:
-  ## Riviera's decompression queue ends with a src=0xFFFFFFFF entry.
+  ## first. False = the BIOS silently skips the operation. Games rely on
+  ## the skip: Riviera's decompression queue ends with a src=0xFFFFFFFF
+  ## entry.
   if length == 0: return false
   if (address and 0x0E000000'u32) == 0: return false
   ((address + (length and 0x01FFFFFF'u32)) and 0x0E000000'u32) != 0
 
-# The copy, decompression and unpack SWIs run with the caller's IRQ mask, so
-# any deliverable interrupt preempts them mid-loop. Card E-Reader boot-loads
-# a 22 KB IWRAM program over its own live IRQ handler with one CpuSet and
-# needs the vblank serviced through the old handler first. hle_unc.nim runs
-# them as stub-BIOS code, so an interrupt is taken between two of their
-# instructions as on the console.
+# The copy, decompression and unpack SWIs run with the caller's IRQ mask,
+# so an interrupt preempts them mid-loop (Card E-Reader overwrites its live
+# IRQ handler with one CpuSet and needs the vblank serviced through the old
+# one first). hle_unc.nim runs them as stub-BIOS code.
 
 
 proc hle_irq_now(cpu: CPU): bool {.inline.} =
@@ -316,21 +282,11 @@ proc hle_frame_ended(cpu: CPU): bool {.inline.} =
   cpu.gba.ppu.frame != 0
 
 proc hle_charge_units_interruptible(cpu: CPU; n: int): int =
-  ## Charge `n` cycles of routine time with the scheduler caught up, up to
-  ## each event in turn (only an event can raise the interrupt line), so the
-  ## routine stops on the cycle the line rises, where the real routine,
-  ## running with the caller's IRQ mask, is preempted at its next
-  ## instruction. Returns the un-charged remainder when that happens, else
-  ## 0. At least one cycle is charged per call, so a parked remainder always
-  ## makes progress. (64-cycle chunks took an interrupt up to 78 cycles
-  ## late: Castlevania - Circle of the Moon's timer handler then found its
-  ## busy-wait loop at another phase every frame after f324's LZ77UnCompWram.)
-  ## It stops at the end of a video frame too: run as one instruction, a
-  ## routine longer than the time left in the frame carried the frame loop
-  ## past its end, so the frame's last lines were drawn after the routine
-  ## (and the next frame's first lines into the frame shown, when it ran on
-  ## past them) and the keys for the next frame came in late. The remainder
-  ## is the same parked charge an interrupt leaves (hle_park_frame_extra).
+  ## Charge `n` cycles of routine time up to each scheduler event in turn
+  ## (only an event can raise the interrupt line), stopping on the cycle the
+  ## line rises or the video frame ends; returns the uncharged remainder
+  ## then, else 0. At least one cycle per call, so a parked remainder always
+  ## progresses. Only for remainders an earlier build parked (cpu.tick).
   var remain = n
   var first = true
   while remain > 0:
@@ -345,12 +301,10 @@ proc hle_charge_units_interruptible(cpu: CPU; n: int): int =
   0
 
 proc hle_handler_refill_extra*(cpu: CPU; cur: uint32): int =
-  ## A routine remainder an earlier build parked at `cur` (the old
-  ## interruptible charge of the decompressors and math routines) is
-  ## resumed after the preempting handler returns there, refilling the
-  ## pipeline in the caller's region, where the real routine's handler
-  ## returns into BIOS code (two 1-cycle fetches): the resume takes the
-  ## difference back out of the remainder (cpu.tick).
+  ## A routine remainder an earlier build parked at `cur` resumes after the
+  ## handler returns there, refilling in the caller's region where the real
+  ## handler returns into BIOS code (two 1-cycle fetches): the resume takes
+  ## the difference out of the remainder (cpu.tick).
   let bus = cpu.gba.bus
   let page = int(bits_range(cur, 24, 27))
   let refill = if cpu.cpsr.thumb: int(bus.wait16_n[page]) + int(bus.wait16_s[page])
@@ -358,18 +312,15 @@ proc hle_handler_refill_extra*(cpu: CPU; cur: uint32): int =
   max(0, refill - (int(bus.wait32_n[0]) + int(bus.wait32_s[0])))
 
 proc hle_park_frame_extra*(cpu: CPU; cur: uint32): int {.inline.} =
-  ## What a remainder parked at a frame's end, with no interrupt to take,
-  ## carries on top: no handler returns there, so nothing is to be taken
-  ## back, and the resume's deduction must net out.
+  ## What a remainder parked at a frame's end (no interrupt) carries on
+  ## top, so the resume's deduction nets out.
   if cpu.hle_irq_now(): 0 else: cpu.hle_handler_refill_extra(cur)
 
 type HleCont = object
   ## Renderer contention for a routine body whose accesses are uncharged:
-  ## each access to palette RAM, VRAM or OAM is priced by contention.nim for
-  ## the cycle the real routine makes it at, which the body's model clock
-  ## `clk` tracks, read with the display registers as they stand. The copies
-  ## asked unit by unit as their time ran (hle_copy.nim, for a copy an
-  ## earlier build parked).
+  ## each palette RAM/VRAM/OAM access is priced by contention.nim at the
+  ## cycle the real routine makes it (model clock `clk`). Used by a copy an
+  ## earlier build parked (hle_copy.nim).
   on: bool     # the routine touches palette RAM, VRAM or OAM
   t0: int64    # the body's start (hle_body_now), where `clk` counts from
   extra: int   # renderer waits so far
@@ -385,45 +336,31 @@ proc hle_cont_ahead(cpu: CPU; c: var HleCont; clk: int; address: uint32;
     c.extra += cpu.gba.bus.contend_wait_ahead(address, is32,
                                               int(c.t0 - cpu.hle_body_now()) + clk + c.extra)
 
-# Halt (SWI 2) runs where Nintendo's does: parked on the `bx lr` after the
-# routine's HALTCNT write (stub 0x1B4) in System mode, so a wake runs that
-# instruction to the dispatcher's return at 0x170 and an interrupt is taken
-# with the BIOS address the console's handlers find on the IRQ stack
-# (alyosha irq/halt_pc, Interactions/Halt_IRQ, Halt_DMA_IRQ read it: lr 0x174
-# after a sleep, 0x1B8 when the interrupt was recognised by the write). The
-# return is the dispatcher's, run as stub-BIOS instructions that pop what
-# this pushed (bus.nim; one of them the trap cpu.hle_halt_return): every
-# piece of the halt is architectural, nothing rides in HLE fields.
+# Halt (SWI 2) parks where Nintendo's does: on the `bx lr` after the
+# HALTCNT write (stub 0x1B4) in System mode, so an interrupt finds the
+# console's BIOS address on the IRQ stack (lr 0x174 after a sleep, 0x1B8
+# when the write recognised it; alyosha irq/halt_pc, Interactions/Halt_IRQ).
+# The return is the dispatcher's, as stub-BIOS instructions that pop what
+# this pushed (bus.nim; trap cpu.hle_halt_return): nothing rides in HLE
+# fields.
 #
-# Cycles, measured against Nintendo's BIOS in this core (halt from ROM ARM,
-# ROM Thumb and IWRAM, woken by a timer with and without IME, and ending at
-# once on a pending flag): the dispatcher reads the swi's comment byte in the
-# caller's region HALT_COMMENT_READ_AT cycles after the swi's dispatch
-# starts, and its `msr` (0x160), which hands back the caller's I bit, is
-# fetched HALT_MSR_START cycles after that read. From the `msr` on the Halt
-# runs the stub's copy of the console's code, so the HALTCNT write lands 15
-# cycles after the `msr` starts (with the System stack in IWRAM), an interrupt recognised on the way is taken at the
-# instruction boundary the console takes it at, and the return after the
-# wake is the console's access for access (16 cycles before the refill with
-# both stacks in IWRAM).
+# Cycles, against Nintendo's BIOS in this core: the dispatcher reads the
+# swi's comment byte in the caller's region HALT_COMMENT_READ_AT cycles
+# after dispatch starts, and fetches its `msr` (0x160, restores the caller's
+# I bit) HALT_MSR_START cycles after that. From the `msr` on, the stub runs
+# the console's code access for access.
 #
-# Until 2026-10-12 two pieces of that were modelled instead: the routine
-# went from the `msr` straight to the write, sampling the interrupt line
-# once between (HALT_MSR_AT = 18 cycles after the read, then HALT_WRITE_AT =
-# 25), and the return was a constant charged as internal cycles. Zelda II
-# (Classic NES Series) met both: a sound FIFO burst granted inside the
-# return ran under those internal cycles where the console's pops wait for
-# it (its Halt came back 9 cycles early), and a timer interrupt recognised
-# at the boundary after the routine's `bx ip`, past the one sample, was
-# taken after the write without sleeping where the console takes it first
-# and sleeps after (docs/playtest-bugs.md).
+# Keep both halves architectural: a return charged as internal cycles lets
+# a sound FIFO burst run under it where the console's pops wait (Zelda II
+# (Classic NES Series)); sampling the interrupt line once between `msr` and
+# write misses one recognised after the routine's `bx ip` (docs/playtest-bugs.md).
 const HALT_COMMENT_READ_AT {.intdefine.} = 10
 const HALT_MSR_START {.intdefine.} = 10
 
 proc push_halt_svc_frame(cpu: CPU; ret: uint32) =
-  ## The SWI's own state, on the SVC stack where each halt keeps its own:
-  ## {caller CPSR, r12, return address} (r12 at [sp_svc - 8] as the
-  ## console's dispatcher leaves it); the stub's return pops it. Leaves the
+  ## The SWI's own state on the SVC stack (per halt, so halts nest):
+  ## {caller CPSR, r12, return address}, r12 at [sp_svc - 8] as the
+  ## console's dispatcher leaves it; the stub's return pops it. Leaves the
   ## CPU in the dispatcher's System mode with the caller's I bit.
   let bus = cpu.gba.bus
   let caller = cpu.cpsr
@@ -436,15 +373,11 @@ proc push_halt_svc_frame(cpu: CPU; ret: uint32) =
   cpu.cpsr = cast[PSR](uint32(modeSYS) or (uint32(caller) and 0x80'u32))
 
 proc halt_from_dispatcher(cpu: CPU; ret, isa_step: uint32) =
-  ## The dispatcher's `msr` (0x160), reached at its fetch, then the Halt
-  ## handed over to the stub BIOS at 0x164, the instruction after it: push
-  ## {r2, lr}; lr = 0x170; bx ip (ip = the table's 0x1A0); mov r2, #0; b;
-  ## mov ip, #0x04000000; strb r2, [ip, #0x301] (mmio.nim: the halt); bx lr.
-  ## The {r2, lr} frame is the stub's own push, so sp stays where hle_swi
-  ## left it. The `msr` opens the gate as arm_psr_transfer does, from the
-  ## clock as the CPU's loop leaves it there (its own fetch charged, not yet
-  ## ticked): an interrupt already pending is recognised again
-  ## IRQ_GATE_DELAY cycles out.
+  ## The dispatcher's `msr` (0x160), reached at its fetch; the stub BIOS
+  ## takes over at 0x164 (push {r2, lr}; ...; strb to HALTCNT; bx lr), so
+  ## the push is the stub's and sp stays where hle_swi left it. The `msr`
+  ## opens the gate as arm_psr_transfer does: an interrupt already pending
+  ## is recognised again IRQ_GATE_DELAY cycles out.
   let bus = cpu.gba.bus
   cpu.push_halt_svc_frame(ret)
   cpu.r[12] = 0x1A0'u32
@@ -513,16 +446,11 @@ when defined(switrace):
 include hle_unc
 
 proc hle_takes*(cpu: CPU; swi_num: uint32): bool {.inline.} =
-  ## With a real BIOS image mapped (hle_after_bios, or the HLE with a BIOS
-  ## file given: the frontends pass one when it exists) the sound-driver SWIs run
-  ## the image's own driver: their HLE continues through stub-BIOS code. The
-  ## routines hle_unc.nim runs as stub-BIOS code run as the image's own.
-  ## So does Halt: the HLE's parks in BIOS code at 0x164 over a three-word
-  ## SVC frame that only the stub's return pops (hle_halt), and the image's
-  ## return there pops four -- a Halt from the cartridge came back with r11
-  ## and r12 clobbered and jumped through the word above the frame, to 0
-  ## (Metroid Fusion hung at boot, docs/playtest-bugs.md). Stop keeps
-  ## its model: it parks on the caller's own instruction, in no BIOS code.
+  ## With a real BIOS image mapped (hle_after_bios, or a BIOS file given)
+  ## the image runs the sound-driver SWIs, the routines hle_unc.nim runs,
+  ## and Halt: the HLE's Halt frame is three SVC words and the image's
+  ## return pops four (docs/hle-bios-shortcomings.md). Stop keeps its
+  ## model: it parks on the caller's own instruction, in no BIOS code.
   if cpu.gba.bus.stub_bios: return true
   case swi_num
   of 0x02'u32, 0x1A'u32..0x1E'u32, 0x20'u32..0x24'u32, 0x28'u32, 0x29'u32: false
@@ -531,7 +459,7 @@ proc hle_takes*(cpu: CPU; swi_num: uint32): bool {.inline.} =
 include hle_copy
 
 proc hle_swi*(cpu: CPU; swi_num: uint32) =
-  ## HLE BIOS SWI dispatch; used when no BIOS image is provided.
+  ## HLE BIOS SWI dispatch, for the SWIs hle_takes claims.
   if cpu.r[15] == 0x18C'u32 and swi_num == 0 and not cpu.cpsr.thumb:
     cpu.hle_halt_return()   # the stub's trap at 0x184 (ARM)
     return
@@ -549,9 +477,7 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
   let t_entry = cpu.hle_body_start()
   sd_swi_t0 = t_entry   # the sound driver places its register writes from here
   let rfs_entry = cpu.gba.bus.rom_free_since
-  # (A CpuSet / CpuFastSet an interrupt preempted no longer rewinds onto the
-  # SWI: it parks in BIOS code, hle_copy.nim. The fields that carried the old
-  # continuation stay in save states, cleared.)
+  # Unused continuation field, kept in save states: always cleared
   cpu.copy_cont_pc = 0
   # Init, Mode, VSync and VSyncOff write registers sooner into the SWI than
   # the whole dispatch charge: they pay it themselves (hle_sound.nim sd_owed)
@@ -576,12 +502,9 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
     bus.rom_hot = false
     bus.rom_next_addr = 1  # never matches (halfword-aligned addresses)
     bus.rom_free_since = bus.gba.scheduler.cycles + CycleCount(bus.cycles)
-  # The BIOS's return path -- its code from 0x170 (SWI_HLE_EXIT) and the
-  # caller's refill above -- is charged up front for what is left here (the
-  # routines with timed effects run as stub-BIOS code: hle_unc.nim).
-  # The System stack's wait states (swi_stack_entry): the pushes before the
-  # routine, the pops with the return path. Halt's run as stub-BIOS code
-  # (hle_halt); the sound-driver routines' frames are not modeled.
+  # The return path is charged up front for the routines left here.
+  # System-stack waits: only Stop's here; the sound-driver routines' frames
+  # are not modeled.
   let stk_on = swi_num == 0x03
   let stk_exit = if stk_on: cpu.swi_stack_exit(swi_num) else: 0
   if stk_on:
@@ -603,11 +526,10 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
     if cpu.gba.bus.stub_bios and cpu.sd_trap():
       discard  # a sound-driver routine's stub continuation (hle_sound.nim)
     elif cpu.r[15] == 8'u32:
-      # Boot trap #1: the game jumped to the reset vector. The BIOS re-runs
-      # its boot (display blanked, peripherals silenced, work RAM cleared,
-      # ~271-frame logo, ROM re-entry at scanline 126). The I/O deltas below
-      # were diffed from real-BIOS execution in dingbat (Earthworm Jim 2
-      # relies on this reboot). Not modeled: the logo in VRAM and the jingle.
+      # Boot trap #1: the game jumped to the reset vector, and the BIOS
+      # re-runs its boot (~271-frame logo, ROM re-entry at scanline 126).
+      # I/O deltas diffed from the real BIOS (Earthworm Jim 2 relies on
+      # this reboot). Not modeled: the logo in VRAM and the jingle.
       let bus = cpu.gba.bus
       bus.write_half(0x04000000'u32, 0x0080'u16)  # DISPCNT: forced blank
       bus.write_half(0x04000004'u32, 0x0000'u16)  # DISPSTAT
@@ -669,10 +591,6 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
       let return_flag = cpu.gba.bus.wram_chip[0x7FFA]
       for i in 0x7E00 ..< 0x8000:
         cpu.gba.bus.wram_chip[i] = 0
-      # The routine's own time, mostly the 0x200-byte clear: from the swi to
-      # the ROM's first instruction Nintendo's BIOS takes 875 cycles and the
-      # dispatch and return charges alone 63 (Super Mario Advance 3's swi 0,
-      # docs/playtest-bugs.md §82)
       cpu.hle_busy(SOFTRESET_BODY)
       # switch_mode so the live r13/r14 rebank (a direct CPSR write would not)
       cpu.switch_mode(modeSYS)
@@ -742,11 +660,10 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
       cpu.r[1] = 0
       cpu.r[2] = 0x37C8'u32
       cpu.r[3] = last
-      # Per word: the table ldr, the validation subroutine and the stmia.
-      # Real-BIOS TM0 around the swi, destination in IWRAM, EWRAM and VRAM:
-      # 1257/1437/1293 cycles, the dispatch included (PeterLemon
-      # BIOSSoundGetJumpList). The word count is fixed, so the split between
-      # the fixed and per-word terms is not observable; 3 / 32 is one that fits.
+      # Real-BIOS TM0 around the swi, destination in IWRAM/EWRAM/VRAM:
+      # 1257/1437/1293 cycles, dispatch included (PeterLemon
+      # BIOSSoundGetJumpList). The fixed/per-word split is unobservable;
+      # 3 / 32 fits.
       let dst_page = int(bits_range(cpu.r[0], 24, 27))
       cpu.hle_charge_body(body_t0, 3 + 36 * (32 + int(cpu.gba.bus.wait32_n[dst_page])))
   of 0x25:  # MultiBoot

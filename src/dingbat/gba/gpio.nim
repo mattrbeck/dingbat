@@ -10,9 +10,8 @@ proc new_gpio*(gba: GBA): GPIO =
     allow_reads: false,
     rtc: new_rtc(gba),
   )
-  # Gyro carts (WarioWare: Twisted!, game codes from its ROM headers) have
-  # no RTC; letting gyro clock edges walk the RTC state machine on the
-  # shared pins would fabricate phantom RTC commands.
+  # Gyro carts (WarioWare: Twisted!) have no RTC; gyro clock edges on the
+  # shared pins would fabricate RTC commands.
   result.gyro_present = gba.cartridge != nil and
     gba.cartridge.game_code() in ["RZWE", "RZWJ", "RZWP"]
   result.solar_present = gba.cartridge != nil and
@@ -28,9 +27,8 @@ proc new_gpio*(gba: GBA): GPIO =
 
 proc solar_update(gpio: GPIO; pins: uint8) =
   ## Reset (bit 1) clears the counter; each rising clock (bit 0) counts up,
-  ## saturating. The chip-select bit is not modelled: the game resets the
-  ## counter before every measurement, so RTC traffic on the shared clock
-  ## line cannot reach a reading.
+  ## saturating. Chip select is not modelled: the game resets the counter
+  ## before every measurement, so RTC traffic cannot reach a reading.
   if (pins and 2'u8) != 0:
     gpio.solar_counter = 0
   let clock = (pins and 1'u8) != 0
@@ -45,20 +43,18 @@ proc address_in_gpio*(address: uint32): bool =
   address >= 0x080000C4'u32 and address <= 0x080000C9'u32
 
 proc gpio_rumble*(gpio: GPIO): bool =
-  ## Cart rumble motor state. Rumble carts (Drill Dozer, WarioWare: Twisted!)
-  ## wire the motor to GPIO bit 3: on while the game drives it high as an
-  ## output. RTC uses bits 0-2 and the Boktai solar sensor reads bit 3 as an
-  ## INPUT, so an output-high bit 3 uniquely means a rumble motor running.
+  ## Cart rumble motor state: GPIO bit 3 driven high as an output (Drill
+  ## Dozer, WarioWare: Twisted!). The Boktai solar sensor uses bit 3 as an
+  ## INPUT, so output-high bit 3 means only rumble.
   (gpio.direction and 0x8'u8) != 0 and (gpio.data and 0x8'u8) != 0
 
 proc gyro_update(gpio: GPIO; pins: uint8) =
   ## GBATEK "GBA Cart Gyro Sensor": bit 0 = start conversion, bit 1 = serial
   ## clock, bit 2 = serial data; "4 dummy bits ... followed by 12 data bits".
-  ## Its read loop samples data, drops the clock, then raises it, so it does
-  ## not fix the edge: shifting on the FALLING edge is Assumed (WarioWare
-  ## Twisted plays; rising-edge shifting halves every reading). Neutral 0x6C0,
-  ## ±0x323 ≈ the hard-rotation extremes; 0x000/0xFFF mean "no sensor", hence
-  ## the clamp to [1, 0xFFE].
+  ## Shifting on the FALLING edge is Assumed (the game's read loop does not
+  ## fix the edge; rising-edge shifting halves every reading in WarioWare
+  ## Twisted). Neutral 0x6C0, ±0x323 ≈ the hard-rotation extremes;
+  ## 0x000/0xFFF mean "no sensor", hence the clamp to [1, 0xFFE].
   if (pins and 1'u8) != 0:
     let v = max(1, min(0xFFE, 0x6C0 + int(gpio.gyro_z * float(0x323))))
     gpio.gyro_sample = uint16(v)
@@ -107,12 +103,9 @@ proc `[]=`*(gpio: GPIO; io_addr: uint32; value: uint8) =
   of 0xC4:  # IO Port Data
     # The data register latches every bit written, and a bit drives its pin
     # while its direction is Out. Assumed from Nintendo's RTC library, which
-    # on every transaction writes SCK high, then SCK|CS, and only THEN sets
-    # the direction to output; the first transaction after power-on (the
-    # direction resets to all-In) is its status probe. Masking the write by
-    # the direction loses that probe: Sennen Kazoku's copy of the library
-    # then reads status 00h and resets the clock at every boot, which a
-    # clock game on a real cart cannot be doing.
+    # writes SCK, then SCK|CS, and only THEN sets the direction to output.
+    # Do not mask the write by the direction: Sennen Kazoku then misses its
+    # power-on status probe and resets the clock at every boot.
     let prev = gpio.data and gpio.direction
     gpio.data = value and 0xF'u8
     gpio.drive_pins(prev)

@@ -8,13 +8,11 @@ proc new_keypad*(gba: GBA): Keypad =
   result.keycnt   = cast[KEYCNT](0x0000'u16)
 
 # The KEYCNT condition reaches IF only once it has held for KEYPAD_IRQ_HOLD
-# cycles, and only on its rising edge (tests/roms/payloads/keyirq2.s on the
-# AGB SP, docs/playtest-bugs.md §61): the vacuous AND (0xC000) is seen 0x46
-# or 0x4F timer cycles on where a store-time IF reads 0x10; after an
-# acknowledge it never comes again while the condition holds; a true
-# condition of up to ~40 cycles is never caught, ~68 always is; with the
-# IRQ enable clear (0x8000) it never comes. So a byte-wise KEYCNT rewrite
-# passing through a matching value raises nothing (write_keycnt16 below).
+# cycles, and only on its rising edge (AGB SP, tests/roms/payloads/keyirq2.s;
+# docs/playtest-bugs.md §61):
+# after an acknowledge it never comes again while the condition holds; a
+# true condition of up to ~40 cycles is never caught, ~68 always is. So a
+# byte-wise KEYCNT rewrite passing through a matching value raises nothing.
 const KEYPAD_IRQ_HOLD* {.intdefine.} = 64
 
 proc keypad_condition(kp: Keypad): bool =
@@ -47,14 +45,10 @@ proc keypad_irq_event*(kp: Keypad) =
 proc stop_key_condition(kp: Keypad): bool =
   ## What ends Stop mode from the keypad: KEYCNT's key condition (AND: every
   ## selected key held, vacuously true with none selected; OR: any), with
-  ## its IRQ enable (bit 14) ignored, as a level. Retail sleep routines need
-  ## both halves: Cabbage Patch Kids - The Patch Puppy Rescue, Puyo Pop
-  ## Fever and The Santa Clause 3 sleep with KEYCNT 0x8304 (L+R+SELECT, AND,
-  ## enable clear) and wake on that combination; Ghost Rider, Catwoman and
-  ## Action Man - Robot Atack wake from KEYCNT 0xC304, write 0xC000 (enable,
-  ## AND, no key) and Stop again, which must return although their handler
-  ## acknowledged the first wake's IF and the condition has not changed.
-  ## tests/roms/payloads/keyirq.s asks the console (its Stop cells).
+  ## its IRQ enable (bit 14) ignored, as a level. Puyo Pop Fever sleeps with
+  ## KEYCNT 0x8304 (enable clear) and wakes on the keys; Ghost Rider Stops
+  ## again under 0xC000 (no key) with the first wake's IF acknowledged, and
+  ## must return. Pinned on the console by tests/roms/payloads/keyirq.s.
   let mask    = toU16(kp.keycnt) and 0x03FF'u16
   let pressed = not toU16(kp.keyinput) and 0x03FF'u16
   if kp.keycnt.irq_condition: (pressed and mask) == mask
@@ -78,10 +72,9 @@ proc `[]`*(kp: Keypad; io_addr: uint32): uint8 =
 
 proc write_keycnt16*(kp: Keypad; value: uint16) =
   ## Atomic 16-bit KEYCNT store: commit the whole value, then one IRQ check.
-  ## Two byte writes with a check after each would pass 0xC00F -> 0x0000
-  ## through 0xC000 (IRQ enabled, AND condition, empty mask), which matches
-  ## vacuously and latches a phantom IRQ; GBA Video carts arm 0xC00F as a
-  ## soft-reset combo and boot-loop on it. The bus routes 16/32-bit stores here.
+  ## Two byte writes would pass 0xC00F -> 0x0000 through 0xC000, which
+  ## matches vacuously (GBA Video carts boot-loop on it). The bus routes
+  ## 16/32-bit stores here.
   kp.keycnt = cast[KEYCNT](value)
   kp.keycnt.not_used = 0
   kp.check_keypad_irq()

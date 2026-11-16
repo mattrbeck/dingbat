@@ -44,22 +44,16 @@ proc storage_bytes*(t: StorageType): int =
 
 proc find_storage_type*(content: string): StorageType =
   ## Scan the ROM image for backup type identifiers.
-  # A cart that names every non-EEPROM library carries no chip at all: the
-  # game probes SRAM (write/verify) and two flash ID routines at boot and
-  # disables its own menu if any of them answers -- anti-copier protection on
-  # a password-only game whose retail board has no backup memory (TCRF, "Top
-  # Gun: Combat Zones (Game Boy Advance)"). Measured by tracing its check
-  # value: 0x33 (menu works) with no chip or EEPROM, 0x22 with SRAM, 0x1122 /
-  # 0x1133 with any flash ID it knows. Of the 7,906 ROMs in the compatibility
-  # library only that game (and its patched dumps) has this combination;
-  # pairs of these strings (Rockman EXE 4.5, One Piece) are real chips.
+  # A cart that names every non-EEPROM library carries no chip at all: Top
+  # Gun: Combat Zones (the only such game in the library) probes SRAM and
+  # two flash IDs at boot and disables its menu if any answers (anti-copier
+  # check on a board with no backup memory; TCRF). Pairs of these strings
+  # (Rockman EXE 4.5, One Piece) are real chips.
   if content.contains("SRAM_V") and content.contains("FLASH512_V") and
      content.contains("FLASH1M_V"):
     return stNone
-  # SRAM and one flash library (Rockman EXE 4.5, One Piece - Mezase! King of
-  # Paris): the game sends the flash ID command before anything else. Rockman
-  # waits on a flash answer and never saves to SRAM; One Piece falls back to
-  # SRAM only when no flash answers.
+  # SRAM and one flash library: flash (Rockman EXE 4.5 waits on a flash
+  # answer and never saves to SRAM).
   if content.contains("SRAM_V") and not content.contains("EEPROM_V"):
     for t in [stFLASH512, stFLASH1M, stFLASH]:
       if content.contains(match_str(t)):
@@ -74,10 +68,8 @@ proc find_storage_type*(content: string): StorageType =
 
 proc names_no_save_library*(content: string): bool =
   ## The ROM links none of the backup libraries: a game with its own save
-  ## routine, or with no save. Famicom Mini Vol. 04 Excitebike (J) saves to a
-  ## 64 Kbit EEPROM with no EEPROM_V string (the US Classic NES Series
-  ## Excitebike links EEPROM_V124); 1,573 of the 7,899 ROMs in the
-  ## compatibility library name no library (docs/playtest-bugs.md §105).
+  ## routine, or with no save (Famicom Mini Vol. 04 Excitebike (J) saves to
+  ## a 64 Kbit EEPROM with no EEPROM_V string).
   for s in ["EEPROM_V", "SRAM_V", "SRAM_F_V", "FLASH_V", "FLASH512_V", "FLASH1M_V"]:
     if content.contains(s):
       return false
@@ -87,12 +79,10 @@ proc storage_candidates*(content: string): set[StorageType] =
   ## The chips a ROM could carry when it links the EEPROM library beside
   ## another backup library; empty when the strings leave no choice (one
   ## library, or the SRAM + flash rules above, which name no EEPROM). Such a
-  ## ROM cannot say which chip its board has: Breath of Fire (J) links
-  ## EEPROM_V121, FLASH_V124 and SRAM_V112 and saves to SRAM (the US and
-  ## European releases link SRAM_V112 alone), Super Monkey Ball Jr (U) links
-  ## the same three and saves to EEPROM. So the battery file, or what the
-  ## game does with save memory, chooses (storage/pending.nim;
-  ## docs/playtest-bugs.md §105). FRAM (SRAM_F_V) answers as SRAM does.
+  ## ROM cannot say which chip its board has: Breath of Fire (J) and Super
+  ## Monkey Ball Jr (U) both link EEPROM_V121, FLASH_V124 and SRAM_V112, and
+  ## save to SRAM and EEPROM respectively. So the battery file, or what the game does with save
+  ## memory, chooses (storage/pending.nim; docs/playtest-bugs.md §105). FRAM (SRAM_F_V) answers as SRAM.
   if names_no_save_library(content):
     return {stEEPROM, stSRAM, stFLASH512, stFLASH1M}
   if not content.contains("EEPROM_V"):

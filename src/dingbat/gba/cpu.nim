@@ -44,15 +44,14 @@ proc skip_bios*(cpu: CPU) =
   # The BIOS branches to the entry point, leaving it in LR
   cpu.r[14] = 0x08000000'u32
   # At ROM entry the BIOS leaves DISPCNT force-blanked and POSTFLG set
-  # (hardware: gbaedge IDENT on AGB SP, docs/hwprobe.md).
+  # (AGB SP, gbaedge IDENT, docs/hwprobe-results-agb.md).
   cpu.gba.ppu.dispcnt = cast[DISPCNT](0x0080'u16)
   cpu.gba.mmio.postflg = 1
-  # The boot sound's TM0 (reload 0xFB1A, /1) is stopped with its count at
-  # 0xFF8B, and the BIOS's last write leaves reload and control 0; a timer
-  # read before an enable takes effect still shows it (timer.nim
-  # TIMER_OLD_COUNT). alyosha timer/timer_reset test 1 on hardware; an AGB SP
-  # booted to multiboot reads 0xFF8A-0xFF8C (tools/hwlink, 2026-09-24).
-  # dingbat's own real-BIOS boot stops it at 0xFF89, two cycles short.
+  # The boot sound's TM0 (reload 0xFB1A, /1) stops with its count at
+  # 0xFF8B, reload and control left 0; a read before an enable takes effect
+  # still shows it (timer.nim TIMER_OLD_COUNT). Pinned by alyosha
+  # timer/timer_reset; an AGB SP booted to multiboot reads 0xFF8A-0xFF8C
+  # (tools/hwlink). dingbat's own real-BIOS boot stops it at 0xFF89.
   cpu.gba.timer.tm[0] = 0xFF8B'u16
   cpu.gba.timer.tm_pre[0] = 0xFF8B'u16
   # BIOS open-bus value after boot (GBATEK, "BIOS Memory": 0xE129F000).
@@ -72,9 +71,9 @@ proc switch_mode*(cpu: CPU; new_mode: CpuMode) =
   let old_high  = if old_bank == UNDEF_BANK: 0 else: old_bank
   if new_mode == modeFIQ or old_mode == modeFIQ:
     # r8-r12 have two copies, FIQ's and the one every other mode shares
-    # (GBATEK, "ARM CPU Register Set"), kept in banks 1 and 0. Keyed on the
-    # leaving or entering mode's own bank, FIQ left for a mode other than
-    # the one it was entered from brought back that mode's stale copy.
+    # (GBATEK, "ARM CPU Register Set"), kept in banks 1 and 0. Do not key on
+    # the other mode's own bank: leaving FIQ for a different mode than it
+    # was entered from then restores a stale copy.
     let old_fiq = if old_mode == modeFIQ: 1 else: 0
     let new_fiq = if new_mode == modeFIQ: 1 else: 0
     for idx in 0..4:
@@ -100,14 +99,12 @@ proc switch_mode*(cpu: CPU; new_mode: CpuMode) =
     cpu.gba.scheduler.clear(etUndefMode)
 
 proc undef_mode_tick*(cpu: CPU) =
-  ## An undefined mode selects no r13/r14 bank: both read 0 and a write to
-  ## either is lost. AGB SP: gbaedge UNDMODE reads 0 in modes 0x15, 0x1A and
-  ## 0x1E; tools/hwlink, 2026-09-24, mode 0x0C: `mov r13, #0xFF` and `mov
-  ## r14, #0x77` read back 0, r12 keeps 0x55, and the caller's r13 is
-  ## untouched (png183 psr/psr2 test 13). Zero-cost outside those modes:
-  ## switch_mode books this event on entry and it re-books itself once per
-  ## instruction, putting back the zeros an instruction may have written
-  ## over. A halted CPU writes nothing, so it waits longer then.
+  ## An undefined mode selects no r13/r14 bank: both read 0 and writes are
+  ## lost. AGB SP: gbaedge UNDMODE (modes 0x15, 0x1A, 0x1E;
+  ## docs/hwprobe-results-agb.md); tools/hwlink, mode 0x0C: writes to r13
+  ## and r14 read back 0, r12 and the caller's r13 untouched (png183
+  ## psr/psr2). switch_mode books this event on entry; it re-books itself
+  ## each instruction to restore the zeros (every 256 cycles while halted).
   if mode_bank(cast[CpuMode](cpu.cpsr.mode)) != UNDEF_BANK: return
   cpu.r[13] = 0
   cpu.r[14] = 0
@@ -138,41 +135,24 @@ proc irq_enter*(cpu: CPU) =
     # instruction, and it reads none of the glitched registers.
     if cpu.ldm_glitch != 0: cpu.ldm_glitch_restore(ran = false)
     let lr = cpu.r[15] - (if cpu.cpsr.thumb: 0'u32 else: 4'u32)
-    # Interrupting code that executes from the gamepak also pays for the
-    # in-flight opcode fetch, all of it but the cycle the entry overlaps, as
-    # from EWRAM below -- and with the prefetcher off that fetch is
-    # sequential only if the stream ran unbroken up to the entry
-    # (IRQ_INFLIGHT_SEQ): after a data access or an internal cycle it is
-    # nonsequential. gbaedge IRQDECOMP on an AGB SP (tests/roms/expected/
-    # agb-sp-5.txt, dbsuite irq/irqlat-*), ARM code at WAITCNT 0: a TM2 or
-    # DMA3 interrupt taken after a load or a store (the next fetch N+S, 8
-    # cycles) costs 7, one taken after a `subs` (S+S, 6) costs 5; the flat
-    # 2*S16 = 6 read one cycle short and one long. IRQLAT2 and IRQWIN2 on
-    # the same console agree (their three latencies each and three window
-    # cells, a cycle off before), and alyosha irq/BL_IRQ_2 (Thumb) and
-    # Interactions/Internal_Cycle_DMA_MUL_IRQ turn green. The mGBA suite
-    # Timer IRQ rows run from IWRAM and pin the no-stall case. A halt-wake
-    # entry fetches nothing, so it is exempt. With the prefetcher on and the
-    # interrupted stream going on at the next instruction (lr - 4), that
-    # fetch is the prefetcher's (IRQ_FETCH_VIA_PREFETCH): a halfword (Thumb)
-    # or word (ARM) it already holds costs the entry nothing, one still in
-    # flight its wait less the cycle the entry overlaps. alyosha irq/BL_IRQ,
-    # _3 (a timer interrupting
-    # Thumb code around a `bl`, the buffer full or just flushed by the
-    # branch) and IRQ_sub, _slow (both waitstates); each alternative in the
-    # commit that added this fails some of them.
-    # Code in EWRAM pays for its in-flight fetch too, all of it but the cycle
-    # the entry overlaps: 5 cycles in ARM, 2 in Thumb (tests/roms/payloads/
-    # irqwait.s on an AGB SP, a NOP sled interrupted by TM0, identical from
-    # IWRAM; IWRAM fetches in one cycle and pays nothing).
+    # Interrupting gamepak or EWRAM code also pays for the in-flight opcode
+    # fetch, less the cycle the entry overlaps. A halt-wake entry fetches
+    # nothing. Gamepak, prefetcher off (IRQ_INFLIGHT_SEQ): the fetch is S
+    # only if the stream ran unbroken to the entry. AGB SP, gbaedge
+    # IRQDECOMP (expected/agb-sp-5.txt, dbsuite irq/irqlat-*), ARM at
+    # WAITCNT 0: after a load or store (N+S, 8) it costs 7, after a `subs`
+    # (S+S, 6) 5; a flat 2*S16 is a cycle off both ways. IRQLAT2/IRQWIN2
+    # agree. Prefetcher on, stream going on at lr - 4
+    # (IRQ_FETCH_VIA_PREFETCH): a unit it holds costs nothing, one in flight
+    # its wait less one (pinned by alyosha irq/BL_IRQ*, IRQ_sub*). EWRAM: 5
+    # cycles ARM, 2 Thumb (AGB SP, payloads/irqwait.s, TM0 into a NOP sled);
+    # IWRAM pays nothing (mGBA suite Timer IRQ tests).
     var inflight = 0
-    # An interrupt preempting an HLE BIOS routine whose remainder an earlier
-    # build parked (on the halt-resume charge) is taken at the caller's next
-    # instruction, but the console takes it inside BIOS code, whose
-    # one-cycle fetch the entry overlaps: nothing in flight on the gamepak.
-    # tools/biosdrv/lz77i.c (Thumb caller in the cartridge, WAITCNT 0x4317,
-    # a Timer 1 IRQ every 1000/3000 cycles): 0.85 cycles long per IRQ with
-    # the gamepak's in-flight fetch, within 2 cycles a call without it.
+    # An interrupt preempting a parked HLE BIOS routine (halt-resume charge)
+    # is taken at the caller's next instruction; the console takes it inside
+    # BIOS code: nothing in flight on the gamepak. tools/biosdrv/lz77i.c
+    # (Thumb caller in the cartridge, WAITCNT 0x4317): 0.85 cycles long per
+    # IRQ otherwise.
     let hle_body = cpu.halt_resume_charge != 0 and not cpu.halt_resume_pop and
                    lr - 4 == cpu.halt_resume_addr
     if not cpu.halt_wake and not hle_body:
@@ -187,15 +167,10 @@ proc irq_enter*(cpu: CPU) =
           let now = bus.sched.cycles + CycleCount(bus.cycles)
           inflight = max(0, bus.pf_serve(now, page, if cpu.cpsr.thumb: 1 else: 2) - 1)
         elif IRQ_INFLIGHT_SEQ:
-          # The fetch the stream makes next, less the cycle the entry
-          # overlaps: sequential only if the stream ran unbroken up to here.
-          # A burst that just ended, a data access, an internal cycle or a
-          # gamepak load that stopped the prefetcher all break it (this
-          # replaces IRQ_INFLIGHT_NONSEQ, whose two cases -- right after an
-          # H-blank burst, alyosha Interactions/Internal_Cycle_DMA_MUL_IRQ;
-          # after a Thumb gamepak `ldr` with the prefetcher on, alyosha
-          # irq/BL_IRQ_2 case d and fifo_dma/fifo_3 -- are nonsequential here
-          # too).
+          # Sequential only if the stream ran unbroken up to here: a burst
+          # that just ended, a data access, an internal cycle or a gamepak
+          # load that stopped the prefetcher all break it (alyosha
+          # Internal_Cycle_DMA_MUL_IRQ, irq/BL_IRQ_2, fifo_dma/fifo_3).
           let now = bus.sched.cycles + CycleCount(bus.cycles)
           let seq = bus.rom_next_addr == lr - 4 and now == bus.rom_free_since
           inflight =
@@ -221,15 +196,10 @@ proc irq_enter*(cpu: CPU) =
     discard cpu.set_reg(14, lr)
     discard cpu.set_reg(15, 0x18'u32)
     # Entry/return overhead: the ARM7TDMI data sheet costs exception entry
-    # and the S-bit return at 2S+1N each. Entry is the refill set_reg(15)
-    # charges plus IRQ_ENTRY_EXTRA = 1. It was 2, with the return a cycle
-    # short to match: tests/roms/payloads/wakeirq.s on an AGB SP interrupts a
-    # sled of one-cycle NOPs (V-count and timer sources alike) and the
-    # console interrupts the same NOP, returns on the same cycle, and reads a
-    # clock in the handler one cycle sooner. The mGBA suite's timer rows had
-    # pinned the old split only because they stop a timer inside the handler,
-    # and a stop lands a cycle later than we had it (TIMER_STOP_DELAY): two
-    # errors that cancelled everywhere except in a handler that reads.
+    # and the S-bit return at 2S+1N each. Entry is set_reg(15)'s refill plus
+    # IRQ_ENTRY_EXTRA = 1 (AGB SP, payloads/wakeirq.s: a clock read in the
+    # handler; 2, with a cycle-short return, fails it). mGBA suite timer
+    # tests stop a timer in the handler and depend on TIMER_STOP_DELAY too.
     cpu.gba.bus.add_cycles(IRQ_ENTRY_EXTRA)
     if inflight != 0: cpu.gba.bus.add_cycles(inflight)
 
@@ -278,9 +248,8 @@ proc fill_pipeline*(cpu: CPU) {.inline.} =
 
 proc contend_refill(cpu: CPU; s: int) {.noinline.} =
   ## clear_pipeline's refill in palette RAM / VRAM / OAM while the renderer
-  ## may hold them: each of the two fetches waits for it like any other
-  ## access (contention.nim; tests/roms/payloads/c2code.s, a stub entered in
-  ## VRAM).
+  ## may hold them: each fetch waits for it like any access (contention.nim;
+  ## payloads/c2code.s).
   let bus = cpu.gba.bus
   bus.contended_access = true
   bus.dyn_cont = true
@@ -327,11 +296,10 @@ proc refill_from_head(cpu: CPU; page: int; noting: bool): bool {.noinline.} =
   ## takes the refill from the stream like a sequential fetch. Called from
   ## clear_pipeline's ordered refill, events caught up.
   ## An exception return (`subs pc` / `ldm ^`) sets CPSR after this runs;
-  ## one from an exception mode whose SPSR is Thumb, landing on the head, is
-  ## taken to be returning to Thumb and refills at Thumb width here, which
-  ## exception_return_restore then leaves alone. (A plain branch there that
-  ## hits the head exactly would be misread; the dispatcher's `ldr pc` to a
-  ## handler never lands on the interrupted code's head.)
+  ## one from an exception mode with a Thumb SPSR, landing on the head, is
+  ## taken as a Thumb return and refills at Thumb width here
+  ## (exception_return_restore leaves it). A plain branch hitting the head
+  ## exactly would be misread; the dispatcher's `ldr pc` never does.
   let bus = cpu.gba.bus
   let head = bus.rom_next_addr and not 1'u32
   var thumb = cpu.cpsr.thumb
@@ -342,11 +310,9 @@ proc refill_from_head(cpu: CPU; page: int; noting: bool): bool {.noinline.} =
         thumb = true
       elif (cpu.r[15] and 2'u32) != 0:
         # Not the head, and a halfword only a Thumb return reaches: aligned
-        # to a word it would match a head two bytes below it and refill two
-        # bytes early (Gradius Galaxies, its first stage: an interrupt
-        # taken just after a `bx` to 0x080003DB returned into the second
-        # half of the `bl` before it, and the CPU ran off into unmapped
-        # memory). The ordinary refill takes it.
+        # to a word it would match a head two bytes below and refill early
+        # (Gradius Galaxies stage 1 ran into unmapped memory). The ordinary
+        # refill takes it.
         return false
   let target = cpu.r[15] and (if thumb: not 1'u32 else: not 3'u32)
   if not bus.prefetch_on or bus.pf_paused or head != target:
@@ -373,8 +339,8 @@ proc refill_from_head(cpu: CPU; page: int; noting: bool): bool {.noinline.} =
 
 proc clear_pipeline*(cpu: CPU) =
   when defined(cpu_testbus):
-    # The test bus has no regions, prefetcher or waits to charge: note the
-    # refill where it falls and move r15 as the refill does.
+    # The test bus has no regions, prefetcher or waits: note the refill and
+    # move r15.
     gba_testbus_refill()
     cpu.pipeline.clear()
     cpu.refill_pending = true
@@ -386,20 +352,17 @@ proc clear_pipeline*(cpu: CPU) =
   cpu.refill_pending = true
   # Refill = two sequential fetches at the destination.
   let page = int(bits_range(cpu.r[15], 24, 27))
-  # The console's fetch address runs two instructions ahead of the executing
-  # one, where dingbat fetches; the refill's prefetch check needs the lead
-  # the branch itself ran at.
+  # The console fetches two instructions ahead of execution, dingbat at it;
+  # the refill's prefetch check needs the lead the branch ran at.
   let old_ahead = cpu.gba.bus.rom_ahead
   cpu.gba.bus.rom_ahead = (if cpu.cpsr.thumb: 4'i8 else: 8'i8)
   if page < 0x8 or page > 0xD:
-    # Leaving the gamepak: the CPU stops fetching from it. The mGBA suite's
-    # BIOS timing prefetch columns return behind the prefetcher's head (after
-    # a SWI) and see a flushed stream either way.
+    # Leaving the gamepak: the CPU stops fetching from it.
     let bus = cpu.gba.bus
     when PF_RUNS_OFF_ROM:
       # rom_ahead 0: the CPU is off the gamepak, and a head left in
-      # rom_next_addr survives its branches there. Anything else a load from
-      # the gamepak left behind is forgotten, as before.
+      # rom_next_addr survives its branches there; anything a gamepak load
+      # left is forgotten.
       if old_ahead != 0: bus.leave_rom(old_ahead)
       elif (bus.rom_next_addr and 1) == 0: bus.rom_next_addr = 1
       bus.rom_ahead = 0
@@ -408,21 +371,16 @@ proc clear_pipeline*(cpu: CPU) =
     bus.rom_hot = false
   when ROM_REFILL_ORDERED:
     if page >= 0x8 and page <= 0xD and (ROM_REFILL_ORDERED_PF or not cpu.gba.bus.prefetch_on):
-      # The refill in the order the console makes it: a nonsequential fetch
-      # at the target, a sequential one after it, and then each instruction's
-      # own fetch continues the burst. The sum is what it always was (2S here
-      # and N on the target's own fetch), but the ORDER is observable: a DMA
-      # breaks the burst, and the first gamepak access after it is
-      # nonsequential (tests/roms/payloads/slotdma.s on an AGB SP reads that
-      # straight off an empty slot). With the N charged last, a DMA landing in
-      # the refill cost nothing where the console pays two cycles, and one
-      # landing in the branch's own fetch cost two where the console pays
-      # nothing, because the N that follows absorbs it. Events due by now run
-      # first for the same reason: a DMA requested before the refill starts
-      # has to cool the burst before the N is charged, not after.
+      # The refill in the console's order: N at the target, S after it, then
+      # each instruction's fetch continues the burst. The order matters: a
+      # DMA breaks the burst, and the next gamepak access is N (AGB SP,
+      # payloads/slotdma.s, empty slot). Charging the N last mischarges a DMA
+      # landing in the refill or the branch's fetch by 2 cycles. Events due
+      # by now run first: a DMA requested before the refill must cool the
+      # burst before the N is charged.
       let bus = cpu.gba.bus
-      # IRQ_LAST_WAITS: whether to note the refill is decided before the
-      # catch-up, which can run the check and close the window.
+      # IRQ_LAST_WAITS: decided before the catch-up, which can run the check
+      # and close the window.
       let noting = (bus.sync_bits and 8) != 0
       bus.catch_up()
       bus.rom_cool()
@@ -449,18 +407,12 @@ proc clear_pipeline*(cpu: CPU) =
            (cpu.cpsr.thumb or (target and 2) == 0) and
            (bus.pf_paused or now > bus.rom_free_since or bus.pf_running):
           # A branch to the halfword the prefetcher reads next keeps the
-          # buffer: the target comes out of it, or out of the halfword in
-          # flight, like any sequential fetch (alyosha prefetcher_full_arm
-          # t001c, prefetcher_branch_thumb). With nothing buffered or in
-          # flight, a branch still meets the prefetcher starting on the
-          # target at S if it has been running since the CPU's own last
-          # access (prefetcher_branch_thumb_4; from ARM, the `bx` into Thumb
-          # after ARM fetches that opens prefetcher_branch_thumb_arm_3, N+S
-          # there reads its first check 2 high), and fetches nonsequentially
-          # if it has not (prefetcher_branch_thumb_2; ppu/start_up_vbl's
-          # startup `bx`). Counting it for neither state fails
-          # prefetcher_branch_thumb_3 and _4. An ARM target with bit 1 set
-          # never matches the prefetcher's aligned halfwords.
+          # buffer: the target comes out of it, or of the halfword in flight,
+          # like a sequential fetch. With nothing buffered or in flight it
+          # still meets the prefetcher at S if that has run since the CPU's
+          # last access, else it fetches N. Pinned by alyosha prefetcher_full_arm
+          # and prefetcher_branch_thumb*. An ARM target with bit 1 set never
+          # matches the prefetcher's aligned halfwords.
           let halves = if cpu.cpsr.thumb: 1 else: 2
           let first = bus.pf_serve(now, page, halves)
           last = bus.pf_serve(now + CycleCount(first), page, halves)
@@ -469,9 +421,8 @@ proc clear_pipeline*(cpu: CPU) =
         elif from_rom and not bus.pf_paused and now > bus.rom_free_since:
           # Any other target flushes the buffer. A halfword in its final
           # cycle has committed and the fetch waits it out, as a data access
-          # does (rom_access_cycles' prefetch hand-off). Without the cycle
-          # alyosha prefetcher_full_arm, prefetcher_branch_thumb, _thumb_3,
-          # prefetcher_boundary_1 and _3 fail.
+          # does (rom_access_cycles' prefetch hand-off; pinned by alyosha
+          # prefetcher_full_arm, prefetcher_boundary_*).
           let elapsed = int(now - bus.rom_free_since)
           let commit =
             if elapsed < 64: ((bus.pf_commit[page] shr elapsed) and 1'u64) != 0
@@ -485,12 +436,11 @@ proc clear_pipeline*(cpu: CPU) =
         bus.pf_running = false
       when DMA_ACCESS_WINDOW:
         if windowed:
-          # Two accesses, each with an end a DMA grant can wait for; and a
-          # burst between them breaks the second, which is then nonsequential
-          # (tests/roms/payloads/slotdma.s).
-          # With the prefetcher on, a burst that never touches the gamepak
-          # breaks nothing: the prefetcher works through it, and the cycles
-          # it held the bus are fetch time the CPU does not pay again.
+          # Two accesses, each with an end a DMA grant can wait for; a burst
+          # between them makes the second N (payloads/slotdma.s). With the
+          # prefetcher on, a burst that never touches the gamepak breaks
+          # nothing: the prefetcher works through it, and the CPU does not
+          # pay those cycles again.
           bus.cycles += n
           bus.access_rom = true
           bus.access_write = false
@@ -499,10 +449,9 @@ proc clear_pipeline*(cpu: CPU) =
           let after_first = bus.dma_end_at == bus.sched.cycles + CycleCount(bus.cycles)
           if after_first:
             if DMA_KEEPS_PREFETCH and bus.prefetch_on and bus.dma_first_rom:
-              # Taking a halfword the prefetcher fetched during the burst is
-              # a buffer read, one cycle (bus.pf_serve). alyosha Interactions/
-              # Internal_Cycle_DMA_IRQ_Br_pre_tim, whose H-blank DMA lands
-              # here: 0 cycles reads a cycle short, 2 a cycle long.
+              # A halfword the prefetcher fetched during the burst is a
+              # buffer read, one cycle (bus.pf_serve; 0 or 2 fail alyosha
+              # Internal_Cycle_DMA_IRQ_Br_pre_tim).
               both = max(1, s - bus.dma_held)
               credit = bus.dma_held - (s - both)
             else:
@@ -559,13 +508,10 @@ proc clear_pipeline*(cpu: CPU) =
 
 when defined(obuslatch):
   proc obus_drive_pipeline*(cpu: CPU) {.inline.} =
-    ## What drives the bus is the newest PIPELINE fetch, two instructions
-    ## ahead of the one executing -- r15, exactly. dingbat fetches lazily,
-    ## one per instruction at the executing address, so the fetch itself is
-    ## the wrong place to drive the latch from; the BIOS latch in read_instr
-    ## below already compensates the same way for the same reason (gbaedge
-    ## IDENT on an AGB SP). Without this every out-of-bounds row reads one
-    ## instruction short.
+    ## -d:obuslatch (off by default): the bus is driven by the newest
+    ## pipeline fetch, two instructions ahead (r15), not by dingbat's lazy
+    ## fetch at the executing address, as for the BIOS latch in read_instr.
+    ## Without it out-of-bounds tests read one instruction short.
     let pc = cpu.r[15]
     let region = bits_range(pc, 24, 27)
     if region == 0x1 or region == 0x4 or region > 0xD or
@@ -593,7 +539,7 @@ proc read_instr*(cpu: CPU): uint32 {.inline.} =
       if bits_range(fetch_addr, 24, 27) == 0 and
          (cpu.gba.bus.sync_bits and SB_SWAP) == 0:   # else swap_fetch_half
         # The BIOS latch is the newest pipeline fetch, two instructions ahead
-        # of execution (hardware: gbaedge IDENT on AGB SP, docs/hwprobe.md).
+        # of execution (AGB SP, gbaedge IDENT, docs/hwprobe-results-agb.md).
         let ahead = uint32(cpu.gba.bus.read_half_internal((fetch_addr + 4) and 0x3FFF'u32))
         cpu.gba.bus.bios_latch = ahead or (ahead shl 16)
       v
@@ -793,19 +739,14 @@ when defined(gsprobe):
   var gsProbeIn*: bool
 
 proc wl_crossable(cpu: CPU; land: CycleCount): bool {.inline.} =
-  ## Whether the loop's iteration ending at `land` can be skipped although
-  ## events fall inside it: each must be one whose handler cannot tell
-  ## whether the iteration ran (gba.wl_passable), and the loop must be one
-  ## that cannot see the handler. So the only IO the loop read in the
-  ## iteration its verdict closed is DISPSTAT / VCOUNT, which only the
-  ## H-blank flag and the line's end change, or the keypad, which changes
-  ## between frames (the skip moves the stamps each IO read leaves on the
-  ## bus with the time it skips); it waited on no renderer-contended memory
-  ## (that wait moves with the dot); no access window is open and no
-  ## interrupt pending. Output
-  ## samples book only their next sample, 512 cycles on; anything else
-  ## needs a period short enough that what its handler books lands past
-  ## `land` (WL_CROSS_PERIOD_MAX).
+  ## Whether the iteration ending at `land` can be skipped although events
+  ## fall inside it: each handler must be unable to tell whether it ran
+  ## (gba.wl_passable), and the loop unable to see the handler: it read only
+  ## DISPSTAT / VCOUNT (changed only by the H-blank flag and line end) or
+  ## the keypad; it waited on no renderer-contended memory; no access window
+  ## is open and no interrupt pending. Output samples book only their next
+  ## sample, 512 cycles on; other events need a period short enough that
+  ## their handler's bookings land past `land` (WL_CROSS_PERIOD_MAX).
   if not cpu.wl_cross_events or (cpu.wl_reads_io and IO_OTHER) != 0 or
      cpu.wl_contended or cpu.wl_period >= APU_SAMPLE_PERIOD or cpu.irq_line or
      (cpu.gba.bus.sync_bits and not SB_SWAP) != 0:
@@ -825,37 +766,30 @@ proc wl_crossable(cpu: CPU; land: CycleCount): bool {.inline.} =
 
 proc waitloop_skip(cpu: CPU; remaining: int) {.noinline.} =
   ## Skip whole iterations of the loop's period, stopping at or before the
-  ## next event (waitloop.nim "Transparency"). The loop is back at its first
-  ## instruction at `boundary`; after k more iterations it is there again at
-  ## boundary + k*period with nothing else changed, so time and the
-  ## time-anchored bus state move by that much. An event exactly on the
-  ## landing cycle dispatches there, as a real tick would. An iteration
-  ## whose events cannot tell whether it ran (wl_crossable) is skipped as
-  ## well, each event dispatched at its own cycle on the way. Out of line:
-  ## the per-instruction path in tick sits on the inlining threshold.
+  ## next event (waitloop.nim "Transparency"). After k iterations from
+  ## `boundary` nothing else has changed, so time and the time-anchored bus
+  ## state move by k*period. An event on the landing cycle dispatches there.
+  ## Iterations whose events pass wl_crossable are skipped too, each event
+  ## dispatched at its own cycle. Out of line: tick sits on the inlining
+  ## threshold.
   cpu.entered_waitloop = false
   let s = cpu.gba.scheduler
   let bus = cpu.gba.bus
   let boundary = s.cycles + CycleCount(remaining)
-  # The prefetcher's state as this iteration ends and the next begins, time
-  # made relative. Two equal verdict-to-verdict periods do not prove the
-  # loop is periodic: the verdict is taken inside the branch, and where the
-  # branch falls in its iteration moves with the prefetcher. Iridion II (E)
-  # polls DISPSTAT in a loop that runs 16 cycles, but after a prefetch
-  # disturbance (an iteration of 20, then 14) its verdicts read 17 and 17;
-  # skipped on a 17-cycle grid it left the loop 5 cycles early. An iteration
-  # that began in the state the previous one began in, and took as long,
-  # is the previous one again, and so is every one after it until an event.
+  # The prefetcher's state at the iteration boundary, time made relative.
+  # Two equal verdict-to-verdict periods do not prove periodicity: the
+  # verdict is taken inside the branch, whose place moves with the
+  # prefetcher (Iridion II (E): a 16-cycle loop read 17 and 17 after a
+  # disturbance and left 5 cycles early). An iteration that began in the
+  # previous one's state and took as long repeats until an event.
   let sig_free = int64(bus.rom_free_since) - int64(boundary)
   let sig_bits = uint32(bus.rom_hot) or (uint32(bus.pf_paused) shl 1) or
                  (uint32(bus.pf_running) shl 2) or
                  (uint32(cast[uint8](bus.pf_count)) shl 8) or
                  (uint32(cast[uint8](bus.rom_ahead)) shl 16)
-  # ... and took as long by itself: no DMA held the bus during it, and none
-  # of its accesses waited on the renderer. Famicom Mini Vol. 28 (J) [f_4]
-  # waits on an ARM loop that runs 22 cycles; one iteration 29, the next
-  # 21, then a DMA stalling the load for 6 made three measures agree on 28,
-  # and the skip put the loop on a 28-cycle grid.
+  # ... and took as long by itself: no DMA held the bus and no access
+  # waited on the renderer (Famicom Mini Vol. 28 (J): a DMA stall made a
+  # 22-cycle loop measure 28 three times).
   let repeated = cpu.wl_bound_addr == cpu.wl_addr and
                  int64(boundary) - cpu.wl_bound == cpu.wl_period and
                  cpu.wl_sig_next == bus.rom_next_addr and
@@ -872,19 +806,15 @@ proc waitloop_skip(cpu: CPU; remaining: int) {.noinline.} =
     return
   if (cpu.gba.bus.sync_bits and not SB_SWAP) != 0:
     # An access window is open (a DMA or FIFO grant, or an interrupt, on its
-    # way): every access of a real iteration stamps where it ends
-    # (catch_up_access, note_waits), and the event the window is for reads
-    # the stamp. Skipped, the stamp would be an older iteration's. B-Legend
-    # Battle B-Daman (J) and Tringo (E) differed from DINGBAT_NO_WAITLOOP=1
-    # there.
+    # way): each real access stamps where it ends (catch_up_access,
+    # note_waits) and the event reads the stamp; a skip leaves a stale one
+    # (B-Legend Battle B-Daman (J), Tringo (E)).
     s.tick(remaining)
     return
   if cpu.gba.dispatch_count != cpu.wl_dispatch_mark:
     # The verdict came before the branch's refill, which caught the bus up
-    # (clear_pipeline) and ran the events that fell inside the branch: after
-    # the loop's read. Advance Guardian Heroes (J) polls VCOUNT for line 159
-    # and read 158 a few cycles before the line changed under its branch;
-    # skipped, it went on polling to the next event instead of leaving.
+    # and ran events after the loop's read (Advance Guardian Heroes (J): read
+    # VCOUNT 158 just before line 159 began under its branch).
     var quiet = false
     when WL_QUIET_EVENTS:
       quiet = cpu.wl_quiet and not cpu.gba.wl_unsafe and not cpu.irq_line
@@ -920,8 +850,8 @@ proc waitloop_skip(cpu: CPU; remaining: int) {.noinline.} =
       cpu.dyn_time += int64(adv)
       cpu.gba.bus.dyn_deadline += int64(adv)
     if cpu.wl_reads_io != 0:
-      # Each iteration's IO load stamped where it ran (load_sync,
-      # catch_up_access); the skipped ones would have moved the stamps on
+      # Each IO load stamps where it ran (load_sync, catch_up_access); the
+      # skipped ones would have moved the stamps on
       bus.access_start += adv
       bus.access_end += adv
       bus.load_start += adv
@@ -930,14 +860,12 @@ proc waitloop_skip(cpu: CPU; remaining: int) {.noinline.} =
 
 proc hle_halt_return*(cpu: CPU) =
   ## The stub BIOS's trap at 0x184 (an ARM `swi 0`) in the dispatcher's
-  ## return a Halt goes on through after its `bx lr` (bus.nim): the
-  ## console's `pop {r11, r12, lr}` off the SVC stack, here the last two
-  ## words of the frame hle_halt pushed (its first, the caller's CPSR, went
-  ## to the SPSR at 0x17C). Three reads all the same, at the console's
-  ## addresses: the first the word 0x17C popped, where the console's frame
-  ## has r11 (the console's is a word deeper, with the SPSR below it). Then
-  ## the internal cycle. A DMA burst granted in the return waits for each
-  ## access as on the console (Zelda II's sound FIFO, docs/playtest-bugs.md).
+  ## return after Halt's `bx lr` (bus.nim): the console's
+  ## `pop {r11, r12, lr}` off the SVC stack, here the last two words of
+  ## hle_halt's frame (its first, the caller's CPSR, went to SPSR at 0x17C).
+  ## Three reads at the console's addresses (the first where the console has
+  ## r11), then the internal cycle, so a DMA burst granted in the return
+  ## waits for each access (Zelda II's sound FIFO, docs/playtest-bugs.md).
   let bus = cpu.gba.bus
   let sp = cpu.r[13]
   discard bus.read_word(sp - 4)
@@ -965,20 +893,17 @@ proc tick_checks(cpu: CPU): bool =
   # BIOS mirror flags) or IntrWait re-halts forever.
   if not cpu.halted and cpu.irq_line and not cpu.cpsr.irq_disable and
      not cpu.irq_in_last_waits():
-    # A halted CPU's interrupt input is synchronised on a clock that was
-    # stopped: the wake comes first and the exception an instruction later.
-    # tests/roms/payloads/wakeirq.s on an AGB SP: the handler finds the
-    # BIOS's `bx lr` after its HALTCNT write already executed, where a plain
-    # wake (IME clear) resumes on the same cycle as here.
-    # The HLE's Halt is parked in the stub BIOS and runs its `bx lr` too.
+    # A halted CPU's interrupt input is synchronised on a stopped clock: the
+    # wake comes first, the exception an instruction later (AGB SP,
+    # payloads/wakeirq.s: the BIOS's `bx lr` after HALTCNT has run). The
+    # HLE's Halt is parked in the stub BIOS and runs its `bx lr` too.
     if HALT_WAKE_RUNS_ONE and cpu.halt_wake and
        (not cpu.gba.bus.stub_bios or cpu.r[15] < 0x4000'u32):
       discard
     else:
       if HALT_WAKE_RUNS_ONE and cpu.halt_wake:
-        # The HLE's stand-in for that instruction (a `bx lr` after Halt's
-        # HALTCNT write, a `bl` after IntrWait's: three cycles either way),
-        # taken out of what the return path charges later.
+        # The HLE's stand-in for that instruction (`bx lr` after Halt, `bl`
+        # after IntrWait: 3 cycles), taken out of the later return charge.
         if cpu.intr_wait_active:
           cpu.gba.bus.add_cycles(HALT_WAKE_INSTR_COST)
         elif cpu.halt_resume_charge >= HALT_WAKE_INSTR_COST:
@@ -991,11 +916,10 @@ proc tick_checks(cpu: CPU): bool =
     # Back at the instruction after an IntrWait SWI: re-halt unless satisfied.
     let cur = cpu.r[15] - (if cpu.cpsr.thumb: 4'u32 else: 8'u32)
     if cur == cpu.intr_wait_resume_addr:
-      # The cycles charged here stand in for BIOS code that ran BEFORE the
-      # return's refill, which the handler's exception return has already
-      # paid for in the console's order (clear_pipeline). Charging them must
-      # not cool the burst, or the caller's first fetch pays for a second
-      # nonsequential access the real BIOS never makes.
+      # These cycles stand in for BIOS code that ran BEFORE the return's
+      # refill, already paid in the console's order (clear_pipeline). They
+      # must not cool the burst, or the caller's first fetch pays a second N
+      # the real BIOS never makes.
       let hot = cpu.gba.bus.rom_hot
       cpu.check_intr_wait()
       when ROM_REFILL_ORDERED:
@@ -1006,22 +930,19 @@ proc tick_checks(cpu: CPU): bool =
     let cur = cpu.r[15] - (if cpu.cpsr.thumb: 4'u32 else: 8'u32)
     if cur == cpu.halt_resume_addr:
       # Paid in interruptible chunks: the real BIOS body runs under the
-      # caller's IRQ mask, so further IRQs must preempt the residue. One
-      # atomic lump (~240k cycles for a large LZ77UnComp) starves the Gen-3
-      # link master's per-frame transfer cadence and FireRed/LeafGreen abort
-      # the trade with LAG_MASTER. A remainder stays parked for the next return.
+      # caller's IRQ mask, so further IRQs must preempt the residue. One lump
+      # (~240k cycles for a large LZ77UnComp) starves the Gen-3 link master
+      # and FireRed/LeafGreen abort the trade (LAG_MASTER). A remainder stays
+      # parked for the next return.
       let hot = cpu.gba.bus.rom_hot   # as for IntrWait above
       var owed = int(cpu.halt_resume_charge)
       if not cpu.halt_resume_pop:
-        # A decompression/copy park: the IRQ that preempted the routine
-        # returned here, refilling the pipeline in the caller's region, where
-        # the real routine's handler returns into BIOS code (two 1-cycle
-        # fetches). Take the difference back out of the remainder
-        # (tools/biosdrv/lz77i.c: LZ77UnCompWram under a Timer 1 IRQ every
-        # 1000/3000/12000 cycles, Thumb caller in the cartridge at WAITCNT
-        # 0x4317: 4.3, 4.0 and 4.1 cycles long per IRQ without this, exact
-        # with it; an ARM caller in IWRAM was exact either way). A park at a
-        # frame's end carried this on top (hle_park_frame_extra).
+        # A decompression/copy park: the preempting IRQ returned here,
+        # refilling in the caller's region, where the real handler returns
+        # into BIOS code (two 1-cycle fetches); take the difference out of
+        # the remainder (tools/biosdrv/lz77i.c, Thumb caller in the cartridge
+        # at WAITCNT 0x4317: ~4 cycles long per IRQ otherwise). A park at a
+        # frame's end adds hle_park_frame_extra.
         let extra = cpu.hle_handler_refill_extra(cur)
         if extra > 0: owed -= min(extra, owed)
       let remain = cpu.hle_charge_units_interruptible(owed)
@@ -1034,12 +955,10 @@ proc tick_checks(cpu: CPU): bool =
             int32(cpu.hle_park_frame_extra(cur))
         return true
       if not cpu.halt_resume_pop:
-        # The routine's end is its return to the caller, which flushes the
-        # gamepak fetch stream as the uninterrupted SWI's does (hle_swi); the
-        # stream the preempting handler's return left must not carry on
-        # into the caller's code. tools/biosdrv/lz77i.c, Thumb caller in
-        # the cartridge: 2 cycles short a preempted call without this,
-        # exact with it.
+        # The routine's return to the caller flushes the gamepak stream, as
+        # the uninterrupted SWI's does (hle_swi); the preempting handler's
+        # stream must not carry on (tools/biosdrv/lz77i.c: 2 cycles short
+        # otherwise).
         cpu.gba.bus.rom_hot = false
         cpu.gba.bus.rom_next_addr = 1
       # Dispatcher exit path: pop the caller's r12 from its SVC-stack slot.
@@ -1058,10 +977,8 @@ proc tick*(cpu: CPU) =
   if cpu.cpu_slow and cpu.tick_checks(): return
   if not cpu.halted:
     when defined(gsbon):
-      # Camelot "Bon" (Golden Sun) hook, parked behind -d:gsbon: a PC compare
-      # per instruction, shadow-only, never alters control flow. (The MP2K
-      # HLE needs no PC hook: the driver's own writes mark its passes, see
-      # mp2k.nim "Runtime detection".)
+      # -d:gsbon (off by default): Camelot "Bon" (Golden Sun) hook, a PC
+      # compare per instruction, shadow-only.
       let g = cpu.gba.gs_bon
       if g != nil and g.engaged and cpu.gba.mp2k_hle:
         let cur = cpu.r[15] - (if cpu.cpsr.thumb: 4'u32 else: 8'u32)
@@ -1131,18 +1048,12 @@ proc tick*(cpu: CPU) =
     # Halted: drain events until something wakes the CPU or the frame ends.
     while cpu.halted and cpu.gba.ppu.frame == 0:
       cpu.gba.scheduler.fast_forward()
-      # A DMA dispatched from a handler bills its cycles to bus.cycles, which
-      # a running CPU closes out with scheduler.tick after each instruction.
-      # A halted one never does, so the debt rides until the wake and delays
-      # it by everything the DMAs did while the CPU was asleep. Commit it
-      # here: the time passed, and it belongs to nobody.
-      # If the wake comes while a DMA still has the bus, the CPU resumes on
-      # the DMA's LAST cycle, not after it: tests/roms/payloads/halthb.s on an
-      # AGB SP wakes on the H-blank interrupt at 1003 with no DMA armed and at
-      # 1004 / 1006 / 1010 under an H-blank DMA of one, two and four words,
-      # where waiting the burst out reads 1005 / 1007 / 1011. (The same cycle
-      # a running CPU gets back when its internal cycle meets a DMA,
-      # docs/playtest-bugs.md section 22.)
+      # A DMA dispatched from a handler bills bus.cycles, which a running
+      # CPU closes out after each instruction; a halted one never does, so
+      # commit it here or it delays the wake. A wake while a DMA has the bus
+      # resumes on the DMA's LAST cycle, not after it (AGB SP,
+      # payloads/halthb.s: H-blank wake at 1003 bare, 1004/1006/1010 under a
+      # 1/2/4-word H-blank DMA; docs/playtest-bugs.md §22).
       let pending = cpu.gba.bus.cycles
       if pending > 0:
         cpu.gba.bus.cycles = 0
@@ -1153,9 +1064,8 @@ proc tick*(cpu: CPU) =
 when defined(cpu_testbus):
   proc testbus_step*(cpu: CPU) =
     ## One instruction, nothing else (tests/singlestep_arm7.nim): no
-    ## interrupt, halt or waitloop checks, no scheduler tick. Here because
-    ## the fetches are C `inline` and have no definition another module
-    ## could link to.
+    ## interrupt, halt, waitloop or scheduler. Here because the fetches are
+    ## C `inline` with no linkable definition.
     let instr = cpu.read_instr()
     if cpu.cpsr.thumb: cpu.thumb_execute(instr)
     else: cpu.arm_execute(instr)

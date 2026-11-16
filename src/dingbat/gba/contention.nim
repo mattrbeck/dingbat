@@ -3,13 +3,11 @@
 # During active display the renderer reads palette RAM, VRAM and OAM on
 # fixed dots of the line, and a CPU or DMA access that lands on one of them
 # waits until the renderer lets go. Measured on an AGB SP with
-# tests/roms/payloads/contmap.s: halt on a V-count match, wait k cycles,
-# make ONE access, read a timer -- the wait at every dot of a line, for each
-# memory, BG mode, layer set, fine scroll, blend and OBJ arrangement (the
-# recorded cells are tools/hwlink/r0-agb.json "contmap"; c2seq.s and
-# c2code.s hold whole access sequences and code run from VRAM to it). Dots
-# below are this core's (0 = VCOUNT changes; the H-blank flag rises at
-# 1007):
+# tests/roms/payloads/contmap.s (one access at every dot of a line, for each
+# memory, BG mode, layer set, fine scroll, blend and OBJ arrangement; cells
+# in tools/hwlink/r0-agb.json "contmap"; c2seq.s and c2code.s cover access
+# sequences and code run from VRAM). Dots below are this core's (0 = VCOUNT
+# changes; the H-blank flag rises at 1007):
 #
 #   palette RAM   one read a pixel, dots 46 + 4x (x = 0..239); a second at
 #                 48 + 4x under alpha blending; none in mode 3, and in mode
@@ -38,8 +36,7 @@
 const CONT_DOTS = CONT_WORDS * 32
 
 # Every index below is bounded by construction (dots are range-checked where
-# they are set and scanned), and this is the path every contended access
-# takes: no runtime checks.
+# set and scanned), and every contended access takes this path.
 {.push boundChecks: off, overflowChecks: off, rangeChecks: off.}
 
 proc cont_clear(m: var array[CONT_WORDS, uint32]) {.inline.} =
@@ -62,11 +59,11 @@ proc cont_next_free(m: array[CONT_WORDS, uint32]; t: int): int {.inline.} =
   (i shl 5) + countTrailingZeroBits(w)
 
 proc cont_text_bg(m: var array[CONT_WORDS, uint32]; n: int; bpp8: bool; hofs: int) =
-  # A fine scroll starts the fetch 4 dots a pixel earlier. The blocks run on
+  # A fine scroll starts the fetch 4 dots a pixel earlier. Blocks run on
   # while their map read is due by dot 1003 (BG0's frame); a block's tile
-  # reads happen only if its map read is due by 999. Fine scroll 0-4 fetch
-  # 31 blocks, 5 fetches the 32nd's map entry alone, 6 and 7 all of it
-  # (contmap scenes 06, 15-17, 2C-2F, 38-3B; BG1 and 8bpp alike).
+  # reads happen only if its map read is due by 999. So fine scroll 0-4
+  # fetches 31 blocks, 5 the 32nd's map entry alone, 6 and 7 all of it
+  # (contmap; BG1 and 8bpp alike).
   const TEXT_LAST_MAP = 1003
   const TEXT_LAST_TILES = 999
   let first = 31 + n - 4 * (hofs and 7)
@@ -126,7 +123,7 @@ proc cont_bg_key_now(ppu: PPU): uint32 {.inline.} =
 
 proc cont_pram_key_now(ppu: PPU): uint32 {.inline.} =
   # Alpha blending with a second target reads a second palette entry a
-  # pixel (contmap scene 19; no second read with the effect off, scene 1A)
+  # pixel (contmap; none with the effect off)
   let bld = uint16(ppu.bldcnt)
   let alpha = ((bld shr 6) and 3) == 1 and (bld and 0x3F00'u16) != 0
   uint32(uint16(ppu.dispcnt) and 0x0087'u16) or (if alpha: 0x100'u32 else: 0'u32) or
@@ -137,7 +134,7 @@ proc cont_build_pram(ppu: PPU; key: uint32) =
   ppu.cont_pram_key = key
   if (key and 0x80'u32) != 0: return  # forced blank, or its exit hold
   # Mode 3 reads no palette; mode 5 only for the backdrop right of its
-  # 160-pixel bitmap (contmap scenes 0B, 14)
+  # 160-pixel bitmap
   let mode = int(ppu.dispcnt.bg_mode)
   if mode == 3: return
   for x in (if mode == 5: 160 else: 0) .. 239:
@@ -148,7 +145,7 @@ proc cont_build_pram(ppu: PPU; key: uint32) =
 #
 # During line L the OBJ layer fetches line L+1 (lines 227 and 0-158), from
 # dot 40 until dot 1272 (the next line's 40), or 1000 with H-Blank Interval
-# Free; nothing it would do from there on happens. contmap scenes 1B-2B:
+# Free; nothing it would do from there on happens (contmap):
 #
 #   OAM scan   entry i's first word (attr0/1) at an even dot, 2 dots an
 #              entry, from dot 40; an entry not on the line costs just that
@@ -182,7 +179,7 @@ proc cont_build_obj(ppu: PPU; line: int; key: int64) =
   ppu.cont_obj_key = key
   # Forced blank stops the BG layers and the palette reads, not the OBJ
   # layer: with OBJ on, OBJ VRAM and OAM are held as in a drawn frame
-  # (contmap scene 04, DISPCNT 0x1F80)
+  # (contmap, DISPCNT 0x1F80)
   if not bit(uint16(ppu.dispcnt), 12): return
   if not (line == 227 or line < 159): return
   let target = (line + 1) mod 228
@@ -225,8 +222,7 @@ proc cont_build_obj(ppu: PPU; line: int; key: int64) =
       oam_at(look)
       if sp.cont_obj_on_line(e + 1, target):
         # its second word is read at `last` even when the limit cut this
-        # sprite short (scene 03: OAM at 1002 with H-blank free), and
-        # nothing after it happens
+        # sprite short (OAM at 1002 with H-blank free), and nothing after
         if last >= limit:
           if last < limit + 4: ppu.cont_oam.cont_set(last)
           done = true
@@ -243,9 +239,9 @@ when defined(contObjVerify):
 
 proc cont_obj_entry_moved(ppu: PPU; e: int; old0, old1: uint16) =
   ## OAM entry e's attr0/attr1 just changed in a bit the map reads (bus.nim
-  ## oam_store16/32), from (old0, old1). An entry off the map's target line
-  ## both before and after costs the scan the same two dots, so only one on
-  ## it either way changes the map.
+  ## oam_store16/32), from (old0, old1). Only an entry on the target line
+  ## before or after changes the map (off-line entries cost two dots either
+  ## way).
   if ppu.cont_obj_key < 0: return
   let target = (int(ppu.cont_obj_key shr 8) + 1) mod 228
   let sp = cast[ptr UncheckedArray[Sprite]](addr ppu.oam[0])
@@ -275,8 +271,7 @@ proc cont_obj_free(ppu: PPU; want_oam: bool; line, t: int): int =
     if key != ppu.cont_obj_key: ppu.cont_build_obj(l, key)
     else:
       when defined(contObjVerify):
-        # Self-checking build: a kept map must equal a fresh one, or a
-        # store that changed it left it keyed (cont_obj_entry_moved)
+        # Diagnostic, off by default: a kept map must equal a fresh one
         let (kept_v, kept_o) = (ppu.cont_objv, ppu.cont_oam)
         ppu.cont_build_obj(l, key)
         inc contObjVerifyHits
@@ -310,10 +305,9 @@ proc contend_wait(bus: Bus; address: uint32; is32: bool; cost: int): int =
 
 proc contend_wait_ahead*(bus: Bus; address: uint32; is32: bool; ahead: int): int =
   ## The renderer's wait for an access made `ahead` cycles from now, with
-  ## the display registers as they stand: for the HLE BIOS's routine
-  ## bodies, which make their accesses all at once and price them by when
-  ## the real routine makes them. Gated as Bus.contended is
-  ## (ppu.contend_mask_update), but by the line the access falls on.
+  ## the display registers as they stand: for HLE BIOS routine bodies, which
+  ## price their accesses by when the real routine makes them. Gated as
+  ## Bus.contended is (ppu.contend_mask_update), but by the access's line.
   if not CONTENTION or address >= 0x10000000'u32: return 0
   let page = bits_range(address, 24, 27)
   if page < 5 or page > 7: return 0

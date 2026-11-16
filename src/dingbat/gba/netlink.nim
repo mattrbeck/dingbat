@@ -1,8 +1,7 @@
 # TCP transport for the network link (docs/multiplayer.md): a socket pump
-# around the protocol state machine in gba/netcore.nim. All sync/stall/
-# transfer logic lives there; this module shuttles bytes, provides blocking
-# waits with timeouts, simulates latency (--netlink-delay-ms) and tears the
-# connection down gracefully.
+# around gba/netcore.nim, which holds all sync/stall/transfer logic. This
+# module moves bytes, waits with timeouts, simulates latency
+# (--netlink-delay-ms) and closes gracefully.
 
 when defined(emscripten):
   {.error: "netlink needs std/net; the wasm build talks to a browser " &
@@ -37,8 +36,8 @@ type
     # buffers deadlock the pair.
     wire_out: string
     wire_pos: int
-    # The stall clock: a peer silent this long is gone. Kept across
-    # step_frame_for calls so a stall the UI keeps returning from still ends.
+    # Kept across step_frame_for calls so a stall the UI keeps returning
+    # from still ends.
     stall_timeout_ms*: int
     stalling: bool
     stall_deadline: MonoTime
@@ -204,12 +203,11 @@ proc idle*(nl: NetLink) =
 proc begin_net_link*(gba: GBA; sock: Socket; id: int; rom_crc: uint32;
                      delay_ms = 0; allow_crc_mismatch = false;
                      hello_timeout_ms = HELLO_TIMEOUT_MS): NetLink =
-  ## Start the HELLO handshake over a connected socket without waiting for
-  ## the peer's: our HELLO goes out, and poll_hello (once per main-loop
-  ## iteration) finishes it. The core keeps its own link-cable driver, and
-  ## runs single-player, until then. id 0 = listener = multi-mode unit 0.
-  ## allow_crc_mismatch accepts differing ROM CRCs (cross-version trades such
-  ## as Ruby<->Sapphire). The hello_timeout_ms deadline is wall time.
+  ## Send our HELLO over a connected socket; poll_hello (once per main-loop
+  ## iteration) finishes the handshake. Until then the core keeps its own
+  ## driver and runs single-player. id 0 = listener = multi-mode unit 0.
+  ## allow_crc_mismatch accepts differing ROM CRCs (cross-version trades
+  ## such as Ruby<->Sapphire). hello_timeout_ms is wall time.
   sock.setSockOpt(OptNoDelay, true, level = cint(IPPROTO_TCP))
   # Sends must never block (see wire_out); the HELLO wait is select-polled.
   sock.getFd().setBlocking(false)
@@ -222,11 +220,10 @@ proc begin_net_link*(gba: GBA; sock: Socket; id: int; rom_crc: uint32;
   result.flush_outgoing()  # our HELLO
 
 proc poll_hello*(nl: NetLink; wait_ms = 0): bool =
-  ## Service a handshake begun by begin_net_link, waiting at most wait_ms for
-  ## bytes: true once the peer's HELLO is in and accepted (the core now talks
-  ## through the link), false while it is still awaited. Raises NetLinkError
-  ## on a refusal (ours goes out as a BYE), a hang-up, or no HELLO by the
-  ## deadline.
+  ## Service a handshake begun by begin_net_link, waiting at most wait_ms:
+  ## true once the peer's HELLO is accepted (the core now uses the link).
+  ## Raises NetLinkError on a rejection (ours goes out as a BYE), a hang-up,
+  ## or no HELLO by the deadline.
   if nl.core.hello == hsDone: return true
   nl.flush_outgoing()
   discard nl.poll_socket(wait_ms)
@@ -243,9 +240,8 @@ proc poll_hello*(nl: NetLink; wait_ms = 0): bool =
     false
 
 proc abandon*(nl: NetLink) =
-  ## Give up a handshake still in progress (Cancel, the window closed,
-  ## another game loaded): a BYE if the socket takes it at once, then close.
-  ## Never waits and never raises; the core was never plugged in.
+  ## Give up a handshake in progress: a BYE if the socket takes it at once,
+  ## then close. Never waits or raises; the core was never plugged in.
   try:
     nl.send_bye()
     nl.flush_outgoing()

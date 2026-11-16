@@ -25,13 +25,11 @@ const GBA_OBS_CPU* = PSG_OBS_CPU
 const PSG_POWER_ON_WINDOW* {.intdefine.} = 8
   ## Cycles after a SOUNDCNT_X master-on write during which an NRx4 length
   ## enable is clocked as in the first half of a length period whatever the
-  ## sequencer says. AGB SP (link rig 2026-09-25): payloads/fsfirst.s triggers
-  ## ch2 with counter 1 four cycles after master-on, and in all 31 cells
-  ## (six sessions' runs), at every 512 Hz phase, the extra clock takes it to
-  ## 0 and the trigger reloads it to 63 (the note outlives the 0x20000-poll
-  ## cap); payloads/fsgap.s triggers 8..39 cycles after, and every cell is
-  ## two-valued with the 512 Hz tap -- the cap, or no extra clock and death
-  ## at the first step 16.6k..32.6k cycles on. So 4 < window <= 8.
+  ## sequencer says. AGB SP: payloads/fsfirst.s triggers ch2 with counter 1
+  ## four cycles after master-on, and at every 512 Hz phase the extra clock
+  ## takes it to 0 and the trigger reloads it to 63; payloads/fsgap.s
+  ## triggers 8..39 cycles after, and every cell follows the 512 Hz tap
+  ## instead. So 4 < window <= 8.
 
 proc length_half*(apu: APU): bool {.inline.} =
   ## Whether an NRx4 length enable now gets the extra length clock
@@ -45,9 +43,7 @@ template psg_length_half(h: GBA): bool = h.apu.length_half()
 const PSG_SEQ_GRID* = 4
   ## After a master-on the 512 Hz edges fall PSG_SEQ_GRID cycles past the
   ## restarted dividers' 16-cycle grid (s0_anchor). AGB SP s0time.s's
-  ## step-synced half (160 cells, each a spread over the poll's 10-cycle
-  ## granularity): 127 cells hold dingbat's answer at 4, a single peak
-  ## falling to 93 unaligned and 76 at 13.
+  ## step-synced half: 4 is a single peak (127 of 160 cells agree).
 const PSG_S0_APU_PHASE* = 2'u32
   ## scheduler.cycles mod 4 of the PSG's 4 MHz clock edges: the system clock
   ## divided by four, free-running (the frame is a multiple of 16 cycles, so
@@ -60,36 +56,26 @@ const PSG_S0_AFTER_SHIFT* {.booldefine.} = true
 proc ch1_s0_kill_at(t: CycleCount; slow: bool; anchor: uint8; after: uint8): CycleCount =
   ## When a trigger written at cycle t that failed the shift-0 check stops
   ## the channel, or GBA_NO_STEP when the check never sees the trigger.
-  ## AGB SP (link rig 2026-09-25; SOUNDCNT_X read 3 cycles apart after the
-  ## trigger, 16 phases a row, every cell stable):
+  ## AGB SP (SOUNDCNT_X read 3 cycles apart after the trigger, 16 phases):
   ## - slow (s0_slow: no sweep calculation since a master-on, and no 512 Hz
   ##   step while the CPU was halted -- apu.nim tick_frame_sequencer): the
-  ##   trigger is taken on the next
-  ##   edge of the 2 MHz divider the master-on restarted on 4 MHz edge
-  ##   `anchor` (mod 16); a write landing ON that edge is missed and the note
-  ##   lives; the stop comes on the next of two edges 4 cycles apart in each
-  ##   16 of the 1 MHz divider -- 2 to 12 cycles after the write, one phase
-  ##   in 8 escaping. s0trig.s (master-on 40 cycles before), s0time.s (4 ..
-  ##   32768 cycles before) and s0long.s (to 262144, and across a halt) all
-  ##   agree once the phase is counted from that edge, and s0write.s's
-  ##   SOUNDCNT_X / _H / _L writes leave it slow;
-  ## - otherwise (s0trig.s bit 14: sound switched on, then a halt spanning a
-  ##   step): the first 4 MHz edge at least 3
-  ##   cycles after the write -- the channel reads on once, or twice at every
-  ##   fourth phase.
+  ##   trigger is taken on the next edge of the 2 MHz divider the master-on
+  ##   restarted on 4 MHz edge `anchor` (mod 16); a write landing ON that
+  ##   edge is missed and the note lives; the stop comes on the next of two
+  ##   edges 4 cycles apart in each 16 of the 1 MHz divider -- 2 to 12
+  ##   cycles after the write. Pinned by s0trig.s, s0time.s, s0long.s;
+  ##   s0write.s's SOUNDCNT_X / _H / _L writes leave it slow;
+  ## - otherwise (s0trig.s bit 14: a halt spanning a step): the first 4 MHz
+  ##   edge at least 3 cycles after the write.
   ## - after a trigger with a non-zero shift (s0_after_shift; not slow): by
   ##   the 16-cycle phase u of the write from `anchor`, moved by 10 when
   ##   that earlier trigger fell at phase 2..5 -- u = 2..8: stopped before
   ##   the first read 2 cycles on; 9..11: on cycle 14; 12, 13: missed, the
-  ##   note lives; 14..1: on cycle 26 (10 of the next 16). AGB SP, link rig
-  ##   2026-11-05: tests/roms/payloads/stphase{,2,3,4}.s, sweeptrig.s's
-  ##   rows (f = 1024 then 1400 at shift 1, then shift 0 at f = 0x400)
-  ##   behind a V-count park with 1-cycle sleds at entry, before the 1400
-  ##   row and before the last; 1536 cells, every one single-valued, the
-  ##   fate fixed by the two triggers' phases and the kill pinned to the
-  ##   read by stphase4's eight reads 3 cycles apart. Which phase the
-  ##   earlier trigger needs is only known for 1400 (an overflow at the
-  ##   trigger); "at once" is any of the first 2 cycles.
+  ##   note lives; 14..1: on cycle 26 (10 of the next 16). AGB SP:
+  ##   tests/roms/payloads/stphase{,2,3,4}.s and sweeptrig.s, every cell
+  ##   single-valued. Which phase the earlier trigger needs is only known for
+  ##   f = 1400 (an overflow at the trigger); "at once" is any of the first
+  ##   2 cycles.
   ## All three are fits to those cells, not a derived circuit.
   if not slow and after != 0 and PSG_S0_AFTER_SHIFT:
     var u = uint32(t - CycleCount(anchor)) and 15

@@ -5,17 +5,15 @@ proc new_cartridge*(rom_path: string): Cartridge =
   let sz = int(getFileSize(rom_path))
   # Allocate the next power of two >= the ROM size: the fetch fast path masks
   # with rom_mask, and reads from rom.len upward return the open-bus address
-  # pattern (GBATEK: the unused gamepak area reads Address/2 AND FFFFh; jsmolka
-  # unsafe test 2 checks the first 4 KB past next_pow2(rom size)). The floor
-  # only keeps the header in range: a 1.7 KB test ROM must float from 2 KB.
+  # pattern (GBATEK: unused gamepak area reads Address/2 AND FFFFh; jsmolka
+  # unsafe test 2). The floor only keeps the header in range: a 1.7 KB test
+  # ROM must float from 2 KB.
   var alloc = 0x100
   while alloc < sz: alloc = alloc shl 1
-  # 1 MiB carts (Classic NES Series / Famicom Mini) mirror the image: GBATEK
-  # "GBA Cart Protections" lists "ROM mirrors (instead of the usual increasing
-  # numbers in unused ROM area)" for them, and Classic NES Metroid jumps into
-  # the mirrors ("GAME PAK ERROR" without). 4x in a 4 MiB window, then the
-  # address pattern, is assumed. Materialised at load so the read path stays
-  # branch-free.
+  # 1 MiB carts (Classic NES Series / Famicom Mini) mirror the image (GBATEK
+  # "GBA Cart Protections": "ROM mirrors"; Classic NES Metroid shows "GAME PAK
+  # ERROR" without). 4x in a 4 MiB window, then the address pattern, is
+  # assumed. Materialised at load so the read path stays branch-free.
   if sz == 0x100000: alloc = 0x400000
   result.rom = newSeq[byte](alloc)
   result.rom_mask = uint32(alloc - 1)
@@ -26,11 +24,10 @@ proc new_cartridge*(rom_path: string): Cartridge =
   if sz == 0x100000:
     for i in 1 .. 3:
       copyMem(addr result.rom[i * sz], addr result.rom[0], sz)
-  # Cart identity is hashed once, as loaded, never from the live buffer: the
-  # cheat engine patches `rom` in place, and a changed hash would stop every
-  # save state for the game from loading. One pass gives both: the first
-  # 1 MB (the state header's identity) and, continuing it, the whole file
-  # (the state's whole-ROM trailer), ~70 ms for a 32 MB cart.
+  # Cart identity is hashed once, as loaded: the cheat engine patches `rom`
+  # in place, and a changed hash would stop the game's save states loading.
+  # One pass gives the first 1 MB (the state header's identity) and the
+  # whole file (the whole-ROM trailer), ~70 ms for a 32 MB cart.
   let idn = min(sz, 0x100000)
   result.rom_identity =
     if idn <= 0: fnv1a(toOpenArray(result.rom, 0, -1))

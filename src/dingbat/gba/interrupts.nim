@@ -18,44 +18,35 @@ proc set_interrupt_flag*(intr: Interrupts; bit: int) {.inline.} =
   when WL_QUIET_EVENTS: intr.gba.wl_unsafe = true
 
 # Cycles from a peripheral raising IF to CPU recognition (mGBA suite Timer
-# IRQ rows). Register writes (IE/IF/IME) re-evaluate with no delay.
+# IRQ tests). Register writes (IE/IF/IME) re-evaluate with no delay.
 const IRQ_SYNC_DELAY* {.intdefine.} = 3
 const IRQ_PIPE_STRICT {.intdefine.} = 2
   ## Bit 1 (on): a timer interrupt still in the synchroniser is not seen by a
-  ## check another source booked before it is due. tests/roms/payloads/f6q.s
-  ## on an AGB SP (2026-11-04): TM3's interrupt raised after a FIFO burst
-  ## whose own end check (its source masked in IE) comes a cycle or two later
-  ## is still taken IRQ_SYNC_DELAY after TM3's raise.
-  ## Bit 0 (off, a prototype): a raise does not ride on the check of one in
-  ## flight that IE masks, but waits its own delay -- the same probe's TM3
-  ## against a masked TM0 overflow -- yet with it Earthworm Jim (USA) loses
-  ## most of its sound from frame ~2340 (the playtest train): some interrupt
-  ## its driver needs is lost or late; the console's rule, not yet the way.
+  ## check another source booked before it is due (AGB SP, f6q.s: TM3 raised
+  ## a cycle or two before a masked FIFO burst's end check is still taken
+  ## IRQ_SYNC_DELAY after its raise).
+  ## Bit 0 (off, prototype): a raise does not ride on the check of a masked
+  ## raise in flight but waits its own delay. Matches f6q.s, but Earthworm Jim
+  ## (USA) loses most of its sound from frame ~2340; IRQ_PIPE_PER_SOURCE
+  ## covers the same fact without that.
 const UNDER_BURST_CREDIT {.intdefine.} = 1
   ## A timer interrupt raised while a burst holds the CPU off the bus is
   ## recognised IRQ_SYNC_DELAY - UNDER_BURST_CREDIT cycles after the CPU
   ## gets the bus back, or IRQ_SYNC_DELAY after the raise if that is later:
-  ## one stage of the synchroniser keeps counting while the CPU is stopped.
-  ## tests/roms/payloads/irqstorm.s on an AGB SP, TM0 every 16 cycles under
-  ## a 1..4096-word EWRAM burst: 0 reads the five cells one cycle late, 2 four
-  ## of them one cycle early.
+  ## one synchroniser stage keeps counting while the CPU is stopped
+  ## (AGB SP, irqstorm.s; 0 and 2 both miss by a cycle).
 
 # Cycles of continued execution after a register write (IME 0->1, IE unmask,
-# msr clearing CPSR.I) releases an already-parked IF bit. The window is
-# cycle-based, not instruction-based (hardware: gbaedge IRQWIN/IRQWIN2/
-# IRQWIN3 on AGB SP, docs/hwprobe.md). The vector-entry cost itself is in
-# cpu.irq. Those pages run their sleds from the cartridge at WAITCNT 0, six
-# cycles an instruction, five of them wait states: with IRQ_LAST_WAITS
-# taking an interrupt recognised in them one instruction later, the same
-# counts come from 7 (it was 12 when the last cycle counted).
+# msr clearing CPSR.I) releases an already-parked IF bit. Cycle-based, not
+# instruction-based (AGB SP, gbaedge IRQWIN/IRQWIN2/IRQWIN3, docs/hwprobe.md).
+# The value assumes IRQ_LAST_WAITS. The vector-entry cost is in cpu.irq.
 const
   IRQ_GATE_DELAY* = 7
 
 proc window_open*(intr: Interrupts) =
   ## IRQ_LAST_WAITS: until the next check has run, the CPU's fetches and
   ## stores note their wait states (fetches leave the cache to do it).
-  ## An interrupt on its way is not a quiet event for the waitloop
-  ## detector (WL_QUIET_EVENTS): every raise and check books one of these.
+  ## An interrupt on its way is not a quiet event (WL_QUIET_EVENTS).
   when WL_QUIET_EVENTS: intr.gba.wl_unsafe = true
   when IRQ_LAST_WAITS:
     let bus = intr.gba.bus
@@ -77,10 +68,9 @@ proc window_close_event*(intr: Interrupts) =
 const IRQ_WINDOW_LEAD* = 16
   ## How far ahead of a raise whose cycle is known (a timer overflow, the
   ## PPU's line events) the window opens, so that an instruction spanning
-  ## both the raise and the recognition had its accesses noted: a raise in
-  ## the middle of a six-cycle EWRAM fetch is recognised before it ends.
-  ## Enough for irqwait.s's every cell; each cycle of it costs a little
-  ## (FireRed, same work: +0.06% retired instructions at 16, +0.14% at 32).
+  ## both the raise and the recognition had its accesses noted. Enough for
+  ## irqwait.s; larger costs speed (FireRed: +0.06% instructions at 16,
+  ## +0.14% at 32).
 
 proc window_ahead*(intr: Interrupts; raise_in: int) =
   ## A source will raise an interrupt `raise_in` cycles from now.
@@ -105,34 +95,24 @@ proc window_ahead*(intr: Interrupts; raise_in: int) =
 const IRQ_PIPE_PER_SOURCE {.booldefine.} = true
   ## A raise while another is in flight, due after it, is recognised on its
   ## own cycle (a second slot, pipe2) instead of riding on that one's check.
-  ## tests/roms/payloads/f6q.s on an AGB SP (4/2 and kit3's 3/1, prefetcher
-  ## off and on): TM3 raised a cycle or two after FIFO A's TM0 overflow,
-  ## whose check IE masks, is recognised IRQ_SYNC_DELAY after its own raise,
-  ## so it falls in the next fetch's waits and is taken an instruction later;
-  ## riding on TM0's check took it at once. 13 cells a BIOS, none lost, the
-  ## mGBA suite unmoved. This is the fact IRQ_PIPE_STRICT bit 0 reached by
-  ## restarting the synchroniser, which loses Earthworm Jim (USA)'s sound;
-  ## with this its audio is the baseline's to the sample. A raise under a
-  ## burst (stalled synchroniser) still rides, as measured there.
+  ## AGB SP, f6q.s (prefetcher off and on): TM3 raised a cycle or two after a
+  ## masked TM0 overflow is recognised IRQ_SYNC_DELAY after its own raise.
+  ## Unlike IRQ_PIPE_STRICT bit 0, keeps Earthworm Jim (USA)'s sound. A raise
+  ## under a burst (stalled synchroniser) still rides.
 const IRQ_WINDOW_KEEP {.booldefine.} = true
   ## A check closing the window leaves it open while an IRQ-enabled timer's
-  ## overflow is still IRQ_WINDOW_LEAD or less away, and books a fresh open
-  ## for one further out: the single pending open and close serve the
-  ## soonest raise, so a masked raise's check (FIFO A's TM0, in IE or not)
-  ## shut the window another timer's raise had opened, and a fetch that
-  ## raise landed in went unnoted. tests/roms/payloads/f6q.s on an AGB SP
-  ## (2026-11-04), prefetcher off, 4/2: TM3 raised a cycle into the gamepak
-  ## fetch after TM0's check is taken an instruction later, as one raised
-  ## on the fetch's first cycle is; dingbat took it at once.
+  ## overflow is IRQ_WINDOW_LEAD or less away, and books a fresh open for
+  ## one further out. Otherwise a masked raise's check shuts the window
+  ## another timer's raise opened, and that raise's fetch goes unnoted
+  ## (AGB SP, f6q.s: TM3 raised a cycle into the gamepak fetch after TM0's
+  ## check is taken an instruction later).
 
 const IRQ_LINE_KEEPS_STAMP {.booldefine.} = true
   ## A check that finds the CPU's interrupt line already up leaves the cycle
   ## it rose on: IRQ_LAST_WAITS asks whether the line rose inside the last
-  ## access's waits, and a later check (a masked source's) re-stamping it
-  ## put a line raised under a FIFO burst into the next fetch's waits.
-  ## tests/roms/payloads/f6q.s on an AGB SP (2026-11-04), prefetcher off,
-  ## 4/2, d = 2: TM3's interrupt recognised under the burst is taken one
-  ## instruction after it ends; dingbat took it two, after TM0's check.
+  ## access's waits, and a re-stamp by a later (masked) check would put a
+  ## line raised under a FIFO burst into the next fetch's waits (AGB SP,
+  ## f6q.s: taken one instruction after the burst ends).
 
 proc timer_raise_due(intr: Interrupts): CycleCount =
   ## When the soonest overflow of an IRQ-enabled, counting timer is due.
@@ -165,13 +145,10 @@ proc schedule_interrupt_check*(intr: Interrupts; delay: int = 0) =
 
 proc schedule_raise_check*(intr: Interrupts; was_set: bool; delay: int) =
   ## The check for a raise of an IF bit, `delay` cycles out -- unless the
-  ## raise found the bit already set and a check is booked at or before then:
-  ## IF did not change, and that check re-evaluates the same level first (a
-  ## write that clears the bit books its own), so this one would only repeat
-  ## it. Bookkeeping: back-to-back DMA bursts hold the CPU off the bus and
-  ## push every booked check past their end (DMA_STALLS_IRQ_SYNC), so an
-  ## H-blank DMA longer than a line, raising its interrupt at the end of each
-  ## burst, booked one more check per burst until the event queue overflowed.
+  ## bit was already set and a check is booked at or before then (a write
+  ## clearing the bit books its own). Without this, an H-blank DMA longer
+  ## than a line books a check per burst (DMA_STALLS_IRQ_SYNC pushes them
+  ## all past the burst) until the event queue overflows.
   let s = intr.gba.scheduler
   if was_set and s.pending_at(etInterrupts) <= s.cycles + CycleCount(delay):
     return
@@ -188,8 +165,8 @@ proc schedule_raise_check*(intr: Interrupts; was_set: bool; delay: int) =
 # The synchroniser runs on the CPU's clock, so it stops while a DMA burst
 # holds the CPU off the bus (DMA_STALLS_IRQ_SYNC), but not while the CPU
 # runs internal cycles under the burst (alyosha Interactions ReadMe).
-# Only timers go through here: the other sources' delays were fitted with
-# no synchroniser in front of them (ppu.nim, IRQ_SYNC_DELAY's other users).
+# Only timers go through here: the other sources' delays were fitted
+# without it (ppu.nim, IRQ_SYNC_DELAY's other users).
 
 proc stalled_for(intr: Interrupts; now: CycleCount): int {.inline.} =
   ## Cycles until the CPU runs again when `now` falls inside the span the
@@ -297,12 +274,10 @@ proc check_interrupts*(intr: Interrupts) =
                  intr.gba.keypad.stop_key_condition()
   if DMA_STALLS_IRQ_SYNC and intr.pipe_raised != 0 and intr.gba.bus.dma_active and
      not intr.gba.cpu.halted:
-    # A check dispatched inside a burst (its transfer loop drains due events
-    # when a higher-priority channel is armed): the synchroniser is stopped
-    # with the CPU, so what it carries waits, and the outermost burst's end
-    # books its recognition whenever no check is left at or before pipe_due
-    # (dma.nim run_pending). Arming an idle channel must not move a timer
-    # interrupt.
+    # A check dispatched inside a burst: the synchroniser is stopped with the
+    # CPU, so what it carries waits; the outermost burst's end books its
+    # recognition if no check is left at or before pipe_due (dma.nim
+    # run_pending). Arming an idle channel must not move a timer interrupt.
     pending = pending and not intr.pipe_raised
   elif intr.pipe_raised != 0:
     let now = intr.gba.scheduler.cycles
@@ -355,9 +330,7 @@ proc check_interrupts*(intr: Interrupts) =
             $(int64(intr.gba.scheduler.cycles) - intr.gba.ppu.line_start_cycle) &
             " pend=" & toHex(pending, 4))
   when IRQ_LAST_WAITS:
-    # The instruction this check landed in has noted its last access; the
-    # window closes unless another check is still to run (a pending open
-    # reopens it for the next raise).
+    # The instruction this check landed in has noted its last access.
     intr.window_after_check()
 
 proc `[]`*(intr: Interrupts; io_addr: uint32): uint8 =
@@ -388,7 +361,7 @@ proc `[]=`*(intr: Interrupts; io_addr: uint32; value: uint8) =
      not intr.gba.cpu.cpsr.irq_disable:
     # Gate opened with CPSR.I clear: late recognition. With I set,
     # recognition waits on the exception return, which is fast (mGBA suite
-    # multi-IRQ Timer count-up rows).
+    # multi-IRQ Timer count-up tests).
     intr.gate_opened()
   else:
     # Clears re-evaluate immediately; check_interrupts holds irq_line off

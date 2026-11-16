@@ -59,20 +59,18 @@ const
   SD_FRAME_WORDS = 9      # r4-r9, r12, return address, caller CPSR
   SD_MAIN_FRAME_WORDS = 15  # SoundDriverMain's depth below the dispatcher
 
-# Samples per V-blank for rate indices 1-15 (0 keeps the rate). 1-12 are
-# GBATEK's table; 13 and 14 read 0xFFFF and 15 reads 31 on the real BIOS
-# (mode probe, tools/biosdrv/mode.c and init.c).
-# Index 0 (only SampleFreqSet takes it: Mode keeps the rate) gave 61857
-# samples (jlist_iw.c), the entry before the table.
+# Samples per V-blank for rate indices 1-15. 1-12 are GBATEK's table; 13 and
+# 14 read 0xFFFF and 15 reads 31 on the real BIOS (tools/biosdrv/mode.c,
+# init.c). Index 0 (only SampleFreqSet takes it: Mode keeps the rate) gives
+# 61857 (jlist_iw.c), the entry before the table.
 const SD_SPV = [61857'u32, 96, 132, 176, 224, 264, 304, 352, 448, 528, 608, 672,
                 704, 0xFFFF, 0xFFFF, 31]
 
 # The SWI's start (hle_swi), for register writes placed at the cycle the
-# real routine makes them: from mode.c, init.c and romcall.c (IO stamps from
-# every caller region), a write lands `stamp` cycles after it, plus the
-# caller region's N16 wait (the dispatcher's read of the SWI number) and the
-# SoundArea accesses before it. A write the HLE reaches later than that
-# (the HLE's dispatch is charged whole up front) lands late.
+# real routine makes them (mode.c, init.c, romcall.c): a write lands `stamp`
+# cycles after it, plus the caller region's N16 wait (the dispatcher's read
+# of the SWI number) and the SoundArea accesses before it. A write the HLE
+# reaches later than that lands late.
 var sd_swi_t0*: int64
 # The dispatch charge Init, Mode, VSync and VSyncOff still owe (hle_swi
 # leaves it to them so their first writes can land where the real ones do)
@@ -129,8 +127,8 @@ proc sd_x(cpu: CPU; area: uint32; word: bool): int {.inline.} =
 
 proc sd_div_cost(n, d: uint32): int {.inline.} =
   ## The driver divides with the same loop as SWI 6 (Div): each of its four
-  ## divisions costs div_body_cycles plus a fixed call overhead (rate-sweep
-  ## intervals between the stores, mode.c/init.c, exact on all 15 rates).
+  ## divisions costs div_body_cycles plus a fixed call overhead (mode.c,
+  ## init.c: exact on all 15 rates).
   div_body_cycles(n, d)
 
 type SdRate = object
@@ -143,9 +141,9 @@ proc sd_rate(index: int): SdRate =
   ## freq = (spv * 597275 + 5000) / 10000 in 32-bit arithmetic (index 13's
   ## 48771 is the wrapped product), divfreq = (2^24 / freq + 1) >> 1, and
   ## Timer 0 reloads 0x10000 - 280896 / spv (one frame's cycles per sample).
-  ## Every value matched the real BIOS's stores for all 15 indices.
-  ## The divisions are signed (SampleFreqSet's index 0 makes the product
-  ## negative: freq and divfreq came out -170906 and -49, jlist_iw.c).
+  ## Matches the real BIOS's stores for all 15 indices. The divisions are
+  ## signed (SampleFreqSet's index 0 makes the product negative: freq
+  ## -170906, divfreq -49, jlist_iw.c).
   let spv = SD_SPV[index and 15]
   result.spv = spv
   result.period = (1584'u32 div spv) and 0xFF
@@ -190,8 +188,8 @@ proc sd_clear_buffer(cpu: CPU; area: uint32) =
 
 # Net cost of a trap's own swi: hle_swi charged the dispatch and a refill for
 # it, which the real routine does not run. Fitted with SD_ENTRY_SKEW from the
-# first VCOUNT poll, which Init reaches through one trap and Mode through
-# two: at 45 / 47 Init's poll lands a cycle late / early and Mode's two.
+# first VCOUNT poll (Init reaches it through one trap, Mode through two);
+# exact, a cycle either way moves both polls.
 const SD_TRAP_COST {.intdefine.} = 46
 
 proc sd_stub_goto(cpu: CPU; target: uint32; step: uint32) {.inline.} =
@@ -219,8 +217,7 @@ type SdResid = enum
 
 proc sd_resid(cpu: CPU; usp: uint32; kind: SdResid; area, index: uint32) =
   ## The real routine's pushes below the caller's sp, as it leaves them
-  ## (swistk.c: each SWI with r3-r11 set to known values, the 16 words
-  ## below sp captured after it). Offsets from sp: 12 holds the
+  ## (swistk.c: the 16 words below sp after each SWI). Offsets from sp: 12 holds the
   ## dispatcher's return address 0x170 for all, then the saved registers
   ## and the locals the routine stored. SoundDriverMain's mixing locals
   ## below sp-48 are not modelled.
@@ -257,9 +254,7 @@ proc sd_park(cpu: CPU; words = SD_FRAME_WORDS) =
   # hle_swi charged the return's refill up front (N + S + S16 - 1 in the
   # caller's region); a parked routine pays its refill on the way out
   # instead. What stays is the dispatcher's `ldrb` of the SWI number from the
-  # caller's code, N16 there (romcall.c: ARM and Thumb, ROM at WAITCNT 0,
-  # 0x4317, 0x000C and 0x0018, EWRAM; the IWRAM caller is the calibration's
-  # zero).
+  # caller's code, N16 there (romcall.c; the IWRAM caller is the zero).
   block:
     let bus = cpu.gba.bus
     let page = int(bits_range(ret, 24, 27))
@@ -309,8 +304,8 @@ proc sd_leave(cpu: CPU; exit_cost: int; resid = rsNone; words = SD_FRAME_WORDS) 
   cpu.cpsr = toPSR(caller)
   # The exit path's cost; the refill into the caller's code region is the
   # pipeline's own (set_reg below). Into the cartridge the real return's
-  # refill costs N - S less than that refill charges (romcall.c at WAITCNT
-  # 0, 0x4317, 0x000C and 0x0018: 2, 2, 6 and 1 cycles, ARM and Thumb).
+  # refill costs N - S less than that refill charges (romcall.c, ARM and
+  # Thumb, four WAITCNT settings).
   let page = int(bits_range(v[7], 24, 27))
   var adj = 0
   if page >= 0x8 and page <= 0xD:
@@ -322,14 +317,10 @@ proc sd_leave(cpu: CPU; exit_cost: int; resid = rsNone; words = SD_FRAME_WORDS) 
 proc sd_call(cpu: CPU; target, arg, ret_lr: uint32; step: uint32) =
   ## Call guest code at `target` (bit 0 = Thumb) with r0 = arg, returning to
   ## the stub trap at ret_lr, as the BIOS's `bx` calls do. The real call
-  ## reaches the callee later than this jump's own refill by an amount that
-  ## depends on the callee's region and ISA (callee.c: a store at the
-  ## callee's top, stamped, for ARM and Thumb callees in IWRAM, EWRAM and
-  ## the cartridge at two WAITCNT settings, and the BIOS's own 0x1709):
-  ## 8 in the cartridge, 20 for ARM in EWRAM, 10 otherwise (callee2.c:
-  ## sixteen IWRAM addresses). Deviation: an ARM callee at the very start of
-  ## IWRAM (0x03000000) was reached 10 cycles sooner by the real call in the
-  ## probes, and this does not model that.
+  ## reaches the callee later than this jump's own refill, by the callee's
+  ## region and ISA (callee.c, callee2.c): 8 in the cartridge, 20 for ARM in
+  ## EWRAM, 10 otherwise. Not modelled: an ARM callee at exactly 0x03000000
+  ## is reached 10 cycles sooner by the real call.
   let thumb = (target and 1'u32) != 0
   let page = bits_range(target, 24, 27)
   let late =
@@ -345,22 +336,20 @@ proc sd_call(cpu: CPU; target, arg, ret_lr: uint32; step: uint32) =
 # --- The routines ---
 
 # Cycle model, measured on the real BIOS with an IWRAM SoundArea and an
-# IWRAM ARM caller (the probe wrappers; romcall.c covers the other caller
-# regions, sd_x the other SoundArea regions). Offsets from the wrapper's
-# pre-SWI marker, read off BD_MEMTRACE/BD_IOREAD stamps:
+# IWRAM ARM caller (romcall.c covers other caller regions, sd_x other
+# SoundArea regions). Offsets from the wrapper's pre-SWI marker
+# (BD_MEMTRACE/BD_IOREAD stamps):
 #  - the first VCOUNT poll: Init 7893, Mode with a rate and no other field
 #    6427; both include the four rate divisions (sd_rate.cost; rate 4 = 531),
 #    so the constants hold the rest. Exact for all 15 rate indices and all
 #    16 field subsets (init.c, mode.c).
 #  - the lock stores: Mode's ident drops from +2 back to +1 at 5739, VSyncOff
 #    unlocks at 5672 (both only split a delay: the totals do not move).
-# The HLE-side constants below were fitted against those; each is exact and
-# a cycle either way shows: SD_ENTRY_SKEW 74/76 moves every parked
-# routine's first poll one cycle early/late; SD_POLL_TIMER -4/-2 moves the
-# Timer 0 start (6 cycles after the poll that sees line 159) one cycle
-# early/late; SD_POLL_EXIT 38/40 and SD_VSOFF_EXIT 43/45 move the caller's
-# next instruction (Mode 72, Init 74 cycles after the timer start; VSyncOff
-# 5734 in all) one cycle early/late.
+# The HLE-side constants below are fitted to those; each is exact, a cycle
+# either way moves its stamp: SD_ENTRY_SKEW every parked routine's first
+# poll; SD_POLL_TIMER the Timer 0 start (6 cycles after the poll that sees
+# line 159); SD_POLL_EXIT and SD_VSOFF_EXIT the caller's next instruction
+# (Mode 72, Init 74 cycles after the timer start; VSyncOff 5734 in all).
 const
   SD_MAIN_TO_FUNC {.intdefine.} = 18
   SD_MAIN_TO_CGB {.intdefine.} = 20
@@ -618,8 +607,7 @@ proc sd_channel_clear(cpu: CPU) =
 #  - reverb 0 clears the slot; otherwise each byte pair becomes
 #    (A + B + A' + B') * reverb >> 9 of this slot and the next (slot 0 after
 #    the ring's last), and a result whose byte is negative gets one added
-#    (revfit*: 15k bytes, reverb 127-255, overflowing ones included; a plain
-#    floor misses 40%, truncation toward zero 1%).
+#    (revfit*; a plain floor misses 40%, truncation toward zero 1%).
 #  - channels 0 .. maxChans-1 (SoundInfo +6, at most 12; 0 means 256) are
 #    visited; one with none of START/STOP/IEC/ENV (0xC7) set is skipped.
 #  - envelope per pass: START sets attack (phase 3) and ev 0 and falls into
@@ -634,9 +622,8 @@ proc sd_channel_clear(cpu: CPU) =
 #    pcmFreq take the next sample and subtract; after it add the channel's
 #    frequency (+0x20). The accumulator lives at +0x1C. Their output is
 #    interpolated: s0 + ((s1 - s0) * (acc * divFreq) >> 23), s1 being the
-#    byte after s0 in memory (interp*.c: 0 misses in 45k outputs at rates
-#    1-12; truncating acc * divFreq by up to 3 bits first is
-#    indistinguishable, by 4 or more is not; a true division is not).
+#    byte after s0 in memory (interp*.c, exact at rates 1-12; truncating
+#    acc * divFreq by 4+ bits first, or a true division, misses).
 #  - a sample's end: count (+0x18) reaches 0 after the last byte is taken;
 #    a looping sample (WaveData +2 bit 14, status bit 0x10 from START)
 #    restarts at loopStart with count = size - loopStart; a one-shot one
@@ -654,8 +641,7 @@ proc sd_s8(bus: Bus; a: uint32): int {.inline.} =
 proc sd_adv_cost(n: int): int {.inline.} =
   ## The resampler's cost for taking n source samples before an output,
   ## beyond an output that takes none: 9 per four, 3 for a pair, 6 for a
-  ## single, 9 to enter, 4 more below four (tres/tfast/tfast2: every n from 1
-  ## to 30, three memory settings, exact).
+  ## single, 9 to enter, 4 more below four (tres/tfast/tfast2, exact).
   if n == 0: return 0
   result = 9 + 9 * (n shr 2) + 3 * ((n shr 1) and 1) + 6 * (n and 1)
   if n < 4: result += 4
@@ -663,9 +649,9 @@ proc sd_adv_cost(n: int): int {.inline.} =
 proc sd_wrap_cost(n, k: int): int {.inline.} =
   ## Extra cost of a loop wrap on the k-th (1-based) of n advances. The
   ## advances go in fours, then a pair, then a single; a wrap costs by the
-  ## group it lands in, and every group after it costs more (twrap, twrap2:
-  ## n 1-16, every position): single 7; pair 20; four 34; each later four
-  ## +31, a later pair +17, a later single +4.
+  ## group it lands in, and every group after it costs more (twrap,
+  ## twrap2): single 7; pair 20; four 34; each later four +31, a later pair
+  ## +17, a later single +4.
   let fours = n shr 2
   let pair = (n shr 1) and 1
   let single = n and 1
@@ -988,14 +974,11 @@ proc sd_main(cpu: CPU) =
 # copies out: score-command handlers taking (MusicPlayerInfo r0, track r1)
 # with the track's command pointer (+0x40) at the command's parameters, and
 # a few helpers. Each entry in the stub BIOS is a Thumb `swi 0` the HLE
-# answers here, returning to lr. Behaviour from tools/biosdrv/jlist.c: every
-# function called on patterned structures in eight states (pattern levels,
-# repeat counts, unaligned and zero parameters, channel chains), the stores
-# diffed; jlist2.c: TrackStop, FadeOutBody, TrkVolPitSet, fine, endtie,
-# modt and RealClearChain over hundreds of random states; jlrom.c: the
-# score and tone table in the cartridge. jlcmp.py runs any of them on both
-# BIOSes: all stores match and every call's time does. Track fields named as
-# loveemu's MP2K summary names them.
+# answers here, returning to lr. Behaviour from tools/biosdrv/jlist.c
+# (patterned states), jlist2.c (random states) and jlrom.c (score and tone
+# table in the cartridge); jlcmp.py runs any of them on both BIOSes: all
+# stores and every call's time match. Track fields named as loveemu's MP2K
+# summary names them.
 
 const
   TR_FLAGS = 0x00'u32
@@ -1064,9 +1047,8 @@ proc sd_jl_kind(trap_pc: uint32; kind: var SdJl): bool =
 # makes adds its region's wait over IWRAM's single cycle (sd_xh/sd_xw), so a
 # track in EWRAM or a score in the cartridge costs what it does on the real
 # BIOS. The HLE makes the real routine's accesses -- the same count, widths
-# and addresses, from BD_MEMREAD/BD_MEMTRACE logs of each call (a few
-# re-reads below exist only for that) -- and with them the EWRAM times are
-# the IWRAM ones plus the waits.
+# and addresses (BD_MEMREAD/BD_MEMTRACE logs; a few re-reads below exist
+# only for that).
 const
   SD_JL_COST: array[SdJl, int] = [
     28,   # fine (empty chain)
@@ -1105,10 +1087,10 @@ const
   SD_ET_ON = 16           # a sounding channel endtie looks at, 11 for
   SD_ET_OFF = 11          # another, 3 more for each after the first
   SD_ET_NEXT = 3
-  # TrkVolPitSet by path (jlist2.c, 240 tracks): the volume 63, 66 with the
+  # TrkVolPitSet by path (jlist2.c, exact): the volume 63, 66 with the
   # modulation on volume or pan, a cycle less when the pan clamps at 127 and
   # two less when it clamps at -128; the pitch 42, 46 with the modulation
-  # on pitch. Exact on all 240.
+  # on pitch.
   SD_TVPS_VOL = 63
   SD_TVPS_VOL_MOD = 66
   SD_TVPS_PIT = 42
@@ -1288,7 +1270,6 @@ proc sd_jl_run(cpu: CPU; kind: SdJl): int =
     if b == 0: wb(tr + TR_MODM, 0)
   of jlModt:
     # a new target sets the update flags; the same one changes nothing
-    # (jlist2.c: 20 calls, half each)
     let b = cmd_byte()
     if rb(tr + TR_MODT) != b:
       wb(tr + TR_MODT, b); flags_or(0x0F)
@@ -1323,7 +1304,7 @@ proc sd_jl_run(cpu: CPU; kind: SdJl): int =
       first = false
       # the first sounding channel (status & 0x83) on the key stops, unless
       # it is stopping already; either way the search ends there (jlist2.c:
-      # 90 random chains, the only mask of the 255 that fits all)
+      # the only mask that fits)
       if (st and 0x83'u8) != 0:
         result += SD_ET_ON
         if rb(c + CH_KEY) == key:
@@ -1334,8 +1315,7 @@ proc sd_jl_run(cpu: CPU; kind: SdJl): int =
       c = rw(c + CH_NEXT)
   of jlTrkVolPitSet:
     # The track's volume/pan (flags bit 0) and pitch (bit 2) updates, both
-    # flags then cleared (jlist2.c: 240 random tracks, a third each with the
-    # modulation aimed at pitch, volume and pan, every result byte matched):
+    # flags then cleared (jlist2.c, every result byte matched):
     #   x = vol * volX >> 5, + modM when modT = 1 (added, not scaled);
     #   y = 2 * pan + panX, + modM when modT = 2, clamped to -128..127;
     #   volMR = (y + 128) * x >> 8, volML = (127 - y) * x >> 8;
@@ -1389,8 +1369,7 @@ proc sd_jl_run(cpu: CPU; kind: SdJl): int =
     cpu.cpsr.negative = false
     cpu.cpsr.zero = true
   result += acc
-  # What the real routine leaves below sp (jlist_stk.c: registers set to
-  # known values, the stack captured after each call): fine pushes r4, r5
+  # What the real routine leaves below sp (jlist_stk.c): fine pushes r4, r5
   # and lr (so does patt past level 3, which ends in it); goto, patt and
   # rept lr and, below it, the pointer's top three bytes (<< 8) as their
   # byte reader held them; the one-byte commands r0 (port the register's
@@ -1424,9 +1403,8 @@ proc sd_jl_run(cpu: CPU; kind: SdJl): int =
 # track pointer 0 -- after a call to SoundInfo +0x2C (CgbOscOff) with the
 # channel's type & 7 when that is nonzero (a CGB channel); channels with
 # status 0 are left alone. The track's channel pointer becomes 0; its flags
-# stay. An inactive track is untouched. (jlist2.c: chains of 0-4 channels
-# with random statuses and types, the BIOS's 0x1709 and a logging game
-# function at +0x2C; the log shows the call made before the status store.)
+# stay. An inactive track is untouched. The call comes before the status
+# store (jlist2.c, a logging game function at +0x2C).
 #
 # FadeOutBody (entry 32, r0 = MusicPlayerInfo): nothing when fadeOI (+0x24)
 # is 0; otherwise fadeOC (+0x26) counts down. When it reaches 0, fadeOV
@@ -1434,11 +1412,9 @@ proc sd_jl_run(cpu: CPU; kind: SdJl): int =
 # (count +0x08, from +0x2C, 0x50 apart) is stopped as above and its flags
 # cleared, fadeOC staying 0; else fadeOC reloads from fadeOI and each active
 # track gets volX (+0x13) = fadeOV >> 2 and flags | 3. No fade-in bit, no
-# status change (jlist2.c: 108 players, 0-3 tracks, fadeOV at and around
-# the stop, fadeOI 0).
+# status change (jlist2.c).
 #
-# Stacks as the real routines leave them (jlist_stk.c, jlist2_stk.c: every
-# call with known registers, the words below sp captured after it):
+# Stacks as the real routines leave them (jlist_stk.c, jlist2_stk.c):
 # TrackStop pushes r4, r5, r6 and lr; FadeOutBody r4-r7 and lr, and calls
 # TrackStop for each track (lr 0x1569) with the track in r4, the tracks
 # left in r5 and 0 in r6; CgbOscOff is called with lr 0x2413 and the

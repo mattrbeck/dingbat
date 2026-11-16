@@ -4,29 +4,21 @@ proc exception_return_restore*(cpu: CPU) =
   ## CPSR <- SPSR after an instruction that loaded r15 with the S bit set
   ## (subs pc, lr, #4 / ldmfd sp!, {..., pc}^). Assumes set_reg(15) already
   ## ran, so the pipeline offset is corrected when returning to thumb.
-  # User and System mode have no SPSR, and the CPSR is what reads in its
-  # place (MRS, alyosha psr): restoring it changes nothing, and the S-bit
-  # write is a plain branch (a data-processing one first puts back the flags
-  # it set, arm_data_processing; the AGB SP agrees, payloads/sysmovs.s). `cpu.spsr` in those modes is whatever another
-  # mode's switch left there -- a Thumb CPSR, say -- and restoring that sent
-  # Colin McRae Rally 2.0's `movs pc, lr` returns (ARM library code, System
-  # mode) back into ARM code in Thumb state.
+  # User and System mode have no SPSR; the CPSR reads in its place (MRS,
+  # alyosha psr), so the S-bit write is a plain branch (a data-processing
+  # one first puts back the flags it set: arm_data_processing; AGB SP,
+  # payloads/sysmovs.s). `cpu.spsr` there is stale from another mode;
+  # restoring it sent Colin McRae Rally 2.0's System-mode `movs pc, lr`
+  # into ARM code in Thumb state.
   if mode_bank(cast[CpuMode](cpu.cpsr.mode)) == 0:
     cpu.spsr = cpu.cpsr
-  # An IRQ return costs what the instruction costs. The arithmetic below is
-  # that, written against IRQ_ENTRY_EXTRA so the old uneven split
-  # (-d:IRQ_ENTRY_EXTRA=2: a cycle more going in, a cycle given back here)
-  # can still be built; see cpu.irq for why it was wrong. SWI entry/return
-  # splits evenly (mGBA suite BIOS timing rows).
-  # A return into the gamepak used to pay one cycle more, read off gbaedge
-  # IRQLAT2 (AGB SP) as the cost of restarting the ROM fetch stream. That
-  # cycle is the prefetcher's: it goes on fetching while the handler runs
-  # from the BIOS (PF_RUNS_OFF_ROM), and a refill elsewhere waits out a
-  # halfword in its last cycle (clear_pipeline) -- which it did not, because
-  # leaving the gamepak never stamped when the stream stopped. With the
-  # stamp the cycle comes and goes with the prefetcher's phase: alyosha
-  # irq/IRQ_sub_2 needs it gone where IRQ_sub and IRQ_sub_slow keep it, and
-  # gbaedge IRQLAT2, IRQDECOMP and HDMAPHASE move to the console's numbers.
+  # An IRQ return costs what the instruction costs; this is zero at the
+  # default IRQ_ENTRY_EXTRA = 1 (-d:IRQ_ENTRY_EXTRA=2 gives back the cycle
+  # entry took; see cpu.irq_enter). SWI entry/return splits evenly (mGBA
+  # suite BIOS timing tests). Do not add a cycle for a return into the
+  # gamepak: that cycle is the prefetcher's phase (PF_RUNS_OFF_ROM,
+  # clear_pipeline), pinned by alyosha irq/IRQ_sub* and gbaedge IRQLAT2,
+  # IRQDECOMP, HDMAPHASE on the AGB SP.
   if cast[CpuMode](cpu.cpsr.mode) == modeIRQ:
     cpu.gba.bus.add_cycles(-1 + (2 - IRQ_ENTRY_EXTRA))
   if cpu.ret_refilled_thumb and cpu.r[15] == cpu.ret_refill_at + 4:
@@ -43,9 +35,8 @@ proc exception_return_restore*(cpu: CPU) =
       cpu.gba.bus.rom_ahead = 4  # clear_pipeline set the ARM lead
     when ROM_REFILL_ORDERED:
       if page >= 0x8 and page <= 0xD and (ROM_REFILL_ORDERED_PF or not cpu.gba.bus.prefetch_on):
-        # clear_pipeline left the burst continuing at the ARM-aligned target
-        # and the correction above cooled it; the Thumb refill's burst
-        # continues at the halfword the next instruction fetches.
+        # clear_pipeline left the burst at the ARM-aligned target; the Thumb
+        # refill's burst continues at the next instruction's halfword.
         let bus = cpu.gba.bus
         bus.rom_next_addr = (cpu.r[15] - 4) and not 1'u32
         bus.rom_free_since = bus.sched.cycles + CycleCount(bus.cycles)
@@ -64,11 +55,10 @@ proc exception_return_restore*(cpu: CPU) =
     cpu.gba.interrupts.schedule_interrupt_check()
   when S_BIT_IRQ_LATE:
     if not was_irq_disabled and cpu.cpsr.irq_disable:
-      # The restore sets I too late for an interrupt the CPU has already
-      # recognised by the end of this instruction: it is taken after it and
-      # returns into the restored CPSR, I set (alyosha psr, its readme's
-      # "timing of disabling interrupts when disabling via S bit set").
-      # msr has no such evidence and obeys I at once.
+      # The restore sets I too late for an interrupt already recognised by
+      # the end of this instruction: it is taken, returning into the restored
+      # CPSR with I set (alyosha psr readme, "timing of disabling interrupts
+      # when disabling via S bit set"). msr has no such evidence: I at once.
       cpu.gba.bus.catch_up()
       if cpu.irq_line and not cpu.halted:
         cpu.irq_enter()
@@ -81,7 +71,7 @@ proc arm_unused*(cpu: CPU; instr: uint32) =
   cpu.und()
 
 # MRC past its fetch: an internal cycle and the coprocessor transfer cycle
-# (1S + 1I + 1C). Coprocessor_14's timer read is red at 1 and at 3.
+# (1S + 1I + 1C). 1 or 3 fail alyosha Coprocessor_14's timer read.
 const MRC_CP14_IDLE = 2
 
 proc arm_coprocessor_register_transfer*(cpu: CPU; instr: uint32) =
@@ -400,10 +390,10 @@ proc arm_single_data_transfer*[imm_flag, pre_addressing, add_offset, byte_quanti
   when pre_addressing:
     when add_offset: address += offset
     else:            address -= offset
-  # Base writeback with rn=15 (architecturally UNPREDICTABLE): `str r1,
-  # [r15], #4` writes PC := base+4, `ldr r1, [r15], #4` writes PC := base+8
-  # and suppresses the load while the bus read still happens (hardware:
-  # gbaedge THUMBPC2 on AGB SP, probed at offset 4 only; docs/hwprobe.md).
+  # Base writeback with rn=15 (UNPREDICTABLE): `str r1, [r15], #4` writes
+  # PC := base+4; `ldr r1, [r15], #4` writes PC := base+8 and drops the load
+  # though the bus read happens (AGB SP, gbaedge THUMBPC2, offset 4 only;
+  # docs/hwprobe-results-agb.md).
   const pc_writeback = write_back or not pre_addressing
   when load:
     let value =
@@ -419,9 +409,7 @@ proc arm_single_data_transfer*[imm_flag, pre_addressing, add_offset, byte_quanti
       discard cpu.set_reg(rd, value)
   else:
     # r15 stores its address + 12 (GBATEK, "ARM Opcodes: Memory: Single
-    # Data Transfer"). One store of that value: storing r15 and patching it
-    # with a read and a second word store cost two accesses the console does
-    # not make, and widened STRB to a word.
+    # Data Transfer"), in one store: no read-back or second store.
     let v = if rd == 15: cpu.r[15] + 4 else: cpu.r[rd]
     when byte_quantity:
       cpu.gba.bus[address] = uint8(v)
@@ -447,13 +435,13 @@ proc arm_single_data_transfer*[imm_flag, pre_addressing, add_offset, byte_quanti
 # r9=8421, user r8=2481 r9=4218: `ldm r1,{r8,r9}^; add r2,r8,r9` gives FD02
 # and `mul` the OR'd product; one `mov r0,r0` between them, STM^, or a plain
 # LDM cancels it; `ldm r1,{r2}^` still ORs r8 and r9; `str r8,[r1,#16]`
-# stores 1248. alyosha LDM/* (tested there on a Game Boy Player) pin the
-# multiply, load/store, SWP and BX operand cycles.
+# stores 1248. alyosha LDM/* (Game Boy Player) pin the multiply,
+# load/store, SWP and BX operand cycles.
 #
-# Zero-cost while idle: ldm_user_glitch decodes the next instruction, ORs
-# the registers it reads first into the live file, and books etLdmGlitch for
-# its end; ldm_glitch_restore puts back those it did not write. A mode switch
-# (switch_mode) settles it first, so no bank ever stores an OR'd value.
+# ldm_user_glitch decodes the next instruction, ORs the registers it reads
+# first into the live file, and books etLdmGlitch for its end;
+# ldm_glitch_restore puts back those it did not write. switch_mode settles
+# it first, so no bank ever stores an OR'd value.
 
 proc arm_glitch_regs(instr: uint32): tuple[reads, writes: uint16] =
   ## The registers `instr` reads in its first cycle and those it writes in
@@ -523,8 +511,8 @@ proc arm_glitch_regs(instr: uint32): tuple[reads, writes: uint16] =
   else: (0'u16, 0'u16)                                        # SWI, coprocessor
 
 proc glitch_cond(cpu: CPU; cond: uint32): bool =
-  # check_cond, kept apart: one more caller of that one tips clang into
-  # outlining it from arm_execute (+0.2% retired instructions on FireRed).
+  # check_cond, kept apart: one more caller tips clang into outlining it
+  # from arm_execute (+0.2% retired instructions on FireRed).
   let (n, z, c, v) = (cpu.cpsr.negative, cpu.cpsr.zero, cpu.cpsr.carry,
                       cpu.cpsr.overflow)
   case cond
@@ -592,8 +580,8 @@ proc arm_block_data_transfer*[pre_address, add, s_bit, write_back, load: static 
       user_bank = true
       saved_mode = cpu.cpsr.mode
   # The base is read from the CURRENT bank before the user-bank switch; the
-  # transfers and any writeback then use the user bank (hardware: gbaedge
-  # LDMUSER on AGB SP, `stmia r13!, {r13}^` from IRQ mode; docs/hwprobe.md).
+  # transfers and any writeback then use the user bank (AGB SP, gbaedge
+  # LDMUSER, `stmia r13!, {r13}^` from IRQ mode; docs/hwprobe-results-agb.md).
   var address  = cpu.r[rn]
   var bits_set = count_set_bits(list)
   if bits_set == 0:
@@ -622,8 +610,8 @@ proc arm_block_data_transfer*[pre_address, add, s_bit, write_back, load: static 
           if idx == 15: cpu.r[15] + 4 else: cpu.r[idx])
       address += 4
       when write_back:
-        # Block transfers with base r15 perform no writeback in either direction
-        # (hardware: gbaedge THUMBPC2 and PCWB2 on AGB SP, docs/hwprobe.md).
+        # Block transfers with base r15 do no writeback (AGB SP, gbaedge
+        # THUMBPC2 and PCWB2, docs/hwprobe-results-agb.md).
         if not first_transfer and not (load and bit(list, rn)) and
            rn != 15:
           discard cpu.set_reg(rn, final_addr)
@@ -682,19 +670,18 @@ proc arm_psr_transfer*[imm_flag, spsr, msr: static bool](cpu: CPU; instr: uint32
     if bit(instr, 17): mask = mask or 0x0000FF00'u32
     if bit(instr, 16): mask = mask or 0x000000FF'u32
     when not spsr:
-      # User mode writes the flags and nothing else (GBATEK, "ARM Opcodes:
-      # PSR Transfer (MRS, MSR)": "In non-privileged mode (user mode): only
-      # condition code bits of CPSR can be changed, control bits can't"): an
-      # msr there cannot leave User mode or touch I, F or T.
+      # User mode writes the flags only (GBATEK, "ARM Opcodes: PSR Transfer
+      # (MRS, MSR)": "In non-privileged mode (user mode): only condition
+      # code bits of CPSR can be changed, control bits can't").
       if mode == modeUSR: mask = mask and 0xFF000000'u32
     var carry_out {.used.} = false  # written only in the `imm_flag` instantiations
     let value =
       when imm_flag:
         cpu.immediate_offset(bits_range(instr, 0, 11), addr carry_out) and mask
       else:
-        # The operand goes through the barrel shifter like any other: an
-        # immediate shift of Rm, RRX included (png183 psr/psr2). The
-        # loose-decoded BX forms (bit 4 set, arm_branch_exchange) take Rm as is.
+        # The operand goes through the barrel shifter: an immediate shift of
+        # Rm, RRX included (png183 psr/psr2). The loose-decoded BX forms (bit
+        # 4 set, arm_branch_exchange) take Rm as is.
         if bit(instr, 4): cpu.r[int(bits_range(instr, 0, 3))] and mask
         else: cpu.rotate_register(bits_range(instr, 0, 11), addr carry_out,
                                   allow_register_shifts = false) and mask
@@ -712,29 +699,27 @@ proc arm_psr_transfer*[imm_flag, spsr, msr: static bool](cpu: CPU; instr: uint32
         cpu.switch_mode(cast[CpuMode](written and 0x1F'u32))
       cpu.cpsr = cast[PSR]((((uint32(cpu.cpsr) and not mask) or written) and PSR_PHYS_MASK))
       if cpu.cpsr.thumb:
-        # MSR writes the T bit on ARM7TDMI (Pokemon Pinball R/S exits its
-        # decompressor via `msr cpsr, r2` with T set, then a Thumb `bx r0`). The
-        # two words already prefetched as ARM: A+4 executes as a Thumb nop, then
-        # the low halfword of A+8, and fetching resumes at A+12 (hardware: gbaedge
-        # MSRTBIT/MSRTBIT2 on AGB SP, docs/hwprobe.md).
+        # MSR writes the T bit on ARM7TDMI (Pokemon Pinball R/S relies on it).
+        # Of the two words prefetched as ARM, A+4 executes as a Thumb nop, then
+        # the low halfword of A+8; fetching resumes at A+12 (AGB SP, gbaedge
+        # MSRTBIT/MSRTBIT2, docs/hwprobe-results-agb.md).
         cpu.pipeline.clear()
         cpu.pipeline.push(0x46C0'u32)  # Thumb nop (mov r8, r8)
         cpu.pipeline.push(cpu.gba.bus.read_word_internal(cpu.r[15]) and 0xFFFF'u32)
       if was_irq_disabled and not cpu.cpsr.irq_disable:
         if cpu.gba.interrupts.irq_deliverable:
-          # msr clearing CPSR.I over a parked IF recognizes late, like the IME/IE
-          # gate stores (gbaedge IRQWIN/IRQWIN2).
+          # msr clearing CPSR.I over a parked IF recognises late, like the
+          # IME/IE gate stores (gbaedge IRQWIN/IRQWIN2).
           cpu.gba.interrupts.gate_opened()
         else:
           cpu.gba.interrupts.schedule_interrupt_check()
   else:  # MRS
     let rd = int(bits_range(instr, 12, 15))
     when imm_flag:
-      # The immediate form of the MRS slot (TST/CMP immediate with S clear,
-      # bit 21 clear) copies Rn to Rd and ignores the immediate, whichever
-      # PSR bit 22 names. AGB SP, tools/hwlink, 2026-09-24: 0xE30F0000 gives
-      # r0 = pc, 0xE3010000 r0 = r1, 0xE3001002 r1 = r0 and 0xE34031F2
-      # r3 = r0 with r1, r2 untouched (png183 psr/psr2 tests 16-20).
+      # The immediate form of the MRS slot (TST/CMP immediate, S and bit 21
+      # clear) copies Rn to Rd, ignoring the immediate and bit 22. AGB SP,
+      # tools/hwlink: 0xE30F0000 gives r0 = pc, 0xE3010000 r0 = r1,
+      # 0xE34031F2 r3 = r0 (png183 psr/psr2).
       discard cpu.set_reg(rd, cpu.r[int(bits_range(instr, 16, 19))])
     else:
       if spsr and has_spsr:
@@ -752,11 +737,10 @@ proc arm_branch_exchange*(cpu: CPU; instr: uint32) =
   # BX decodes loosely (png183 arm/branches, from hardware). Bits 5-6 are
   # ignored and Rm is written to Rd (bits 12-15; r15 = the branch). With
   # bit 21 set, bits 16-19 are a PSR field mask (bit 22 = SPSR): mask bits 0
-  # and 3 together make the exchange, T <- Rm bit 0 and nothing else, and any
-  # other mask is an MSR of Rm under it (the control field writes mode, I, F
-  # and T from Rm's low byte). The same reading explains gbaedge BXDECODE on
-  # an AGB SP: `0xE120FF11` branches to a Thumb address in ARM state and
-  # wedges; `0xE12FFF31`, ARMv5's BLX, executes as BX.
+  # and 3 together make the exchange, T <- Rm bit 0 only; any other mask is
+  # an MSR of Rm under it. Matches gbaedge BXDECODE (AGB SP): `0xE120FF11`
+  # branches to a Thumb address in ARM state and wedges; `0xE12FFF31`
+  # (ARMv5 BLX) executes as BX.
   let value = cpu.r[int(bits_range(instr, 0, 3))]
   let rd = int(bits_range(instr, 12, 15))
   if bit(instr, 21):
@@ -880,10 +864,9 @@ proc arm_data_processing*[imm_flag: static bool, opcode: static ArmAluOp,
       if rd != 15: cpu.r[15] -= 4
   when set_cond:
     if rd == 15:
-      # User and System mode: the flags the ALU just set do not stick. The
-      # CPSR stands in for the missing SPSR as it was before the instruction
-      # (tests/roms/payloads/sysmovs.s on an AGB SP: movs pc, lr and subs pc,
-      # lr, #0 with Z and C set keep them, 0x6000029F in every cell).
+      # User and System mode: the ALU's flags do not stick; the CPSR from
+      # before the instruction stands in for the SPSR (AGB SP,
+      # payloads/sysmovs.s: movs pc, lr and subs pc, lr, #0 keep Z and C).
       if mode_bank(cast[CpuMode](cpu.cpsr.mode)) == 0:
         cpu.cpsr = pre_cpsr
       cpu.exception_return_restore()

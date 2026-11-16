@@ -1,17 +1,4 @@
 # Serial/SIO implementation (included by gba.nim)
-#
-# Register map:
-#   0x120-0x121  SIODATA32_L / SIOMULTI0
-#   0x122-0x123  SIODATA32_H / SIOMULTI1
-#   0x124-0x125  SIOMULTI2
-#   0x126-0x127  SIOMULTI3
-#   0x128-0x129  SIOCNT
-#   0x12A-0x12B  SIODATA8 / SIOMLT_SEND
-#   0x134-0x135  RCNT
-#   0x140-0x141  JOYCNT
-#   0x150-0x153  JOY_RECV
-#   0x154-0x157  JOY_TRANS
-#   0x158-0x159  JOYSTAT
 
 type
   SioMode* = enum
@@ -35,26 +22,19 @@ proc sio_mode*(serial: Serial): SioMode =
 
 # ==================== SioDriver interface ====================
 #
-# A driver models whatever is plugged into the link port; it is consulted
-# only on SIO register access and transfer completion.
-#
-#  - sio_start: SIOCNT start-bit rising edge. The driver decides when and
-#    with what data the transfer completes: schedule it
-#    (schedule_sio_completion -> etSerial -> sio_complete) or, for
-#    out-of-process transports, leave busy set and call finish_sio_transfer
-#    when the peer responds. Doing nothing models a transfer that never
-#    completes.
-#  - sio_complete: the etSerial event fired; fill the receive registers,
-#    then call finish_sio_transfer.
-#  - sio_pin_state: SC/SD/SI/SO levels (RCNT bits 0-3); games probe these in
+# A driver models whatever is plugged into the link port, consulted only
+# on SIO register access and transfer completion.
+#  - sio_start: start-bit rising edge. Schedule completion
+#    (schedule_sio_completion -> etSerial -> sio_complete), or for
+#    out-of-process transports leave busy set and call finish_sio_transfer
+#    when the peer responds. Doing nothing = a transfer that never ends.
+#  - sio_complete: fill the receive registers, then finish_sio_transfer.
+#  - sio_pin_state: SC/SD/SI/SO (RCNT bits 0-3); games probe these in
 #    general-purpose mode as a "cable present?" check.
-#  - sio_siocnt_status: mode-dependent read-only SIOCNT bits; read_siocnt
-#    masks the result to the bits the mode exposes.
-#  - sio_mode_changed / sio_attached / sio_detached: cable attach/detach.
-#
-# The base methods implement the no-cable behaviour (mGBA suite SIO register
-# R/W tests). In-flight transfer state lives in Serial; drivers are never
-# serialized.
+#  - sio_siocnt_status: read-only SIOCNT bits; read_siocnt masks them to
+#    the mode.
+# The base methods are the no-cable behaviour (mGBA suite SIO register
+# tests). In-flight state lives in Serial; drivers are never serialized.
 
 type
   NullSioDriver* = ref object of SioDriver
@@ -74,14 +54,10 @@ proc normal_transfer_cycles*(serial: Serial): int =
   let fast = bit(serial.siocnt, 1)
   let bits = if is_32bit: 32 else: 8
   let cycles_per_bit = if fast: 8 else: 64
-  # Start-up overhead before the first shifted bit; pinned by the mGBA suite
-  # SIO timing tests (which shift uniformly when CPU cycle accounting changes).
-  # Those rows end on a Halt wake, so they measure this PLUS the BIOS's Halt
-  # return. At 8 they passed under the HLE and all four read one cycle long
-  # under the real BIOS -- the HLE's Halt return was a cycle short
-  # (hle_bios.HALT_RETURN_COST, found against an AGB SP) and hid it. With the
-  # BIOS path exact in both cores the remainder is 7, and the real-BIOS core
-  # passes the four rows for the first time.
+  # Start-up overhead before the first shifted bit, pinned by the mGBA suite
+  # SIO timing tests. They end on a Halt wake, so they measure this plus the
+  # BIOS's Halt return (hle_bios.HALT_RETURN_COST); pass under both the HLE
+  # and the real BIOS.
   const SIO_TRANSFER_OVERHEAD = 7 - TIMER_STOP_DELAY  # fitted on rows that stop a timer to read it
   bits * cycles_per_bit + SIO_TRANSFER_OVERHEAD
 
@@ -245,8 +221,8 @@ proc read_siocnt(serial: Serial): uint16 =
   of smUart:
     v = (v and 0x7FAF'u16) or (status and 0x0050'u16)  # bits 4, 6 flags
   of smGeneralPurpose, smJoyBus:
-    # GBATEK: read/written "same manner as for Normal, Multiplay, or UART
-    # mode"; normal-mode masking is used.
+    # GBATEK: "same manner as for Normal, Multiplay, or UART mode"; uses
+    # normal-mode masking.
     v = (v and 0x7F8B'u16) or (status and 0x0004'u16)
   v
 
@@ -276,12 +252,10 @@ proc write_siocnt(serial: Serial; old_val: uint16) =
   let mode = serial.sio_mode()
 
   let start_rising = not bit(old_val, 7) and bit(serial.siocnt, 7)
-  # A normal-mode transfer started on the external clock (Start set, nothing
-  # clocking it) begins shifting when SC is switched to the internal clock
-  # with Start still set: the AGB SP completes it one transfer's length after
-  # the switching write, as if Start had risen there (tests/roms/payloads/
-  # sioclk.s; Nintendo's link start-up in Coloris and Dial Hex does this,
-  # docs/playtest-bugs.md §101)
+  # A normal-mode transfer started on the external clock begins when SC is
+  # switched to internal with Start still set: the AGB SP completes it one
+  # transfer after the switching write (tests/roms/payloads/sioclk.s;
+  # Coloris and Dial Hex link start-up do this; docs/playtest-bugs.md §101).
   let clock_to_internal = mode in {smNormal8, smNormal32} and
     bit(old_val, 7) and bit(serial.siocnt, 7) and
     not bit(old_val, 0) and bit(serial.siocnt, 0)

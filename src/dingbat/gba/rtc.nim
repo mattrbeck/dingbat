@@ -6,30 +6,25 @@
 # of written data). Calendar rules and the battery-save trailer live in
 # rtc_calendar.nim.
 #
-# Clock model. The chip counts seconds from whatever it was last set to; it
-# has no notion of a time zone. dingbat keeps that count as
-#   calendar seconds = source seconds + bias
-# where the source is the host's unix clock, or the frozen `epoch` in
-# deterministic mode. A game writing DATE_TIME/TIME moves `bias`; so does a
-# battery-file trailer at boot that records a set clock (bias = saved
-# date/time - latch time, which is "saved + (now - latch)"). Otherwise
-# (`bias_set` false) the RTC shows host LOCAL time, tracking the host zone, or
-# UTC in deterministic mode (a zone would make peers in different zones
-# disagree); RESET returns it there. Once set, the clock counts real seconds
-# like the chip and no longer follows host daylight-saving changes.
-# Why host time rather than the chip's 2000-01-01 reset: docs/gba-rtc.md.
+# Clock model: calendar seconds = source seconds + bias, where the source
+# is the host's unix clock, or the frozen `epoch` in deterministic mode. A
+# DATE_TIME/TIME write or a battery-file trailer recording a set clock
+# moves `bias` (trailer: saved + (now - latch)). Otherwise (`bias_set`
+# false) the RTC shows host LOCAL time, or UTC in deterministic mode (a
+# zone would make peers disagree); RESET returns it there. A set clock
+# counts real seconds and ignores host daylight-saving changes. Why host
+# time rather than the chip's 2000-01-01 reset: docs/gba-rtc.md.
 
-# Per-minute IRQ poll interval: one emulated second. The S-3511A asserts /INT
-# at second 00 of every minute; this RTC reads a live clock, so a once-per-
-# second poll comparing whole minutes (not `second == 0`) finds the boundary
-# even when emulated time drifts from the wall clock (turbo / slowdown).
+# Per-minute IRQ poll interval: one emulated second. The S-3511A asserts
+# /INT at second 00 of every minute; comparing whole minutes (not
+# `second == 0`) finds the boundary even when emulated time drifts from the
+# wall clock (turbo / slowdown).
 const RTC_IRQ_POLL_CYCLES = 1 shl 24
 
 const RTC_STATUS_DEFAULT = S3511_STATUS_24H
   ## Status with no battery-file record: 24-hour mode, interrupts off. The
-  ## chip powers on at 82h (datasheet 3.1) and every RTC game seen resets and
-  ## selects 24-hour mode on a POWER flag, leaving 40h; a battery that never
-  ## failed reads that.
+  ## chip powers on at 82h (datasheet 3.1), but RTC games reset it and select
+  ## 24-hour mode on the POWER flag, leaving 40h.
 
 proc rtc_source_seconds(rtc: RTC): int64 =
   ## Unix seconds the clock runs from: the frozen epoch, or the host clock.
@@ -73,10 +68,8 @@ proc rtc_irq_poll*(gba: GBA) =
 
 proc enable_deterministic_rtc*(gba: GBA; epoch: int64) =
   ## Freeze the RTC's source clock to a shared unix epoch for a linked or
-  ## replayed session. Both peers must pass the SAME epoch (exchange one
-  ## peer's value at connect). A clock the game set, or one read from the
-  ## battery file, is kept as an offset from that epoch: it comes from bytes
-  ## (state or .sav) the peers already share, so they still agree.
+  ## replayed session; both peers must pass the SAME epoch. A set clock stays
+  ## an offset from it: it comes from bytes (state or .sav) the peers share.
   gba.bus.gpio.rtc.deterministic = true
   gba.bus.gpio.rtc.epoch = epoch
 
@@ -129,10 +122,8 @@ const RTC_HOST_TRAILER_SLACK = 2'i64
 proc rtc_apply_trailer*(rtc: RTC; t: openArray[byte]): bool =
   ## Resume the clock from a battery-file trailer. False if the bytes are not
   ## a clock reading (rtc_calendar.parse_trailer); the RTC is then untouched.
-  ## A trailer that only records host time (what a host-clock emulator, or
-  ## dingbat with no game-set clock, writes) keeps the clock following the
-  ## host, so it still tracks zone and daylight-saving changes; any other
-  ## trailer is a set clock and resumes as saved + (now - latch).
+  ## A trailer that only records host time keeps the clock following the
+  ## host; any other is a set clock and resumes as saved + (now - latch).
   var clock: TrailerClock
   if not parse_trailer(t, clock): return false
   rtc.bias = clock.seconds - clock.latch
@@ -162,8 +153,8 @@ proc rtc_register_bytes(reg: int): int =
 # ==================== Serial interface ====================
 #
 # The chip's side of the three GPIO pins (SCK = bit 0, SIO = bit 1, CS =
-# bit 2), as the gba-rtc-test ROM (CasualPokePlayer, "RTC Basic Tests") pins
-# it down on a real S-3511A:
+# bit 2), as gba-rtc-test ("RTC Basic Tests") pins it down on a real
+# S-3511A:
 #   * CS high starts a command and CS low ends whatever is running; no SCK
 #     level is required at CS's rising edge.
 #   * While CS is low the chip sees SCK as high, so CS rising with SCK high
@@ -227,7 +218,7 @@ proc rtc_strobe(rtc: RTC): bool =
   case rtc.reg
   of 0:  # RESET: datasheet 3.3 status 00h. The chip also loads 2000-01-01
          # 00:00:00; dingbat returns to the host clock instead so a new game
-         # shows today's date, as other emulators do (docs/gba-rtc.md)
+         # shows today's date (docs/gba-rtc.md)
     let before = rtc.status
     rtc_set_status(rtc, 0'u8)
     rtc_follow_host(rtc)

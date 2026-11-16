@@ -35,10 +35,9 @@ proc new_ppu*(gba: GBA): PPU =
     result.bghofs[i] = BGOFS()
     result.bgvofs[i] = BGOFS()
   for i in 0..1:
-    # PA/PD start at 1.0 (0x100), PB/PC at 0: GBATEK lists BG2PA-PD as
-    # write-only with no reset value, and the real BIOS writes exactly this
-    # identity to BG2/BG3 during boot (observed under LLE), so it is what a
-    # game inherits when it never writes the affine registers (Doom, mode 4).
+    # PA/PD 1.0 (0x100), PB/PC 0: GBATEK gives no reset value, but the real
+    # BIOS writes this identity to BG2/BG3 at boot (seen under LLE), and a
+    # game that never writes them inherits it (Doom, mode 4).
     result.bgaff[i][0] = cast[BGAFF](0x100'u16)
     result.bgaff[i][1] = BGAFF()
     result.bgaff[i][2] = BGAFF()
@@ -69,36 +68,30 @@ proc new_ppu*(gba: GBA): PPU =
 
 proc skip_boot_phase*(ppu: PPU) =
   ## Video phase at ROM entry when the BIOS boot is skipped: the BIOS hands
-  ## over on line 126, 841 cycles in (a full LLE boot here: 270 frames, 126
-  ## lines and 841 cycles from power-on; mGBA's skip-boot uses line 126 as
-  ## well). From line 0 the CPU reaches every boot-time
-  ## timer and vblank wait 126 lines early, which changes RNG seeds taken
-  ## from timer phase (Yu-Gi-Oh! WCT 2004's starter deck).
+  ## over on line 126, 841 cycles in (a full LLE boot: 270 frames, 126 lines,
+  ## 841 cycles; mGBA's skip-boot uses line 126 as
+  ## well). Starting at line 0 shifts RNG seeds taken from timer phase
+  ## (Yu-Gi-Oh! WCT 2004's starter deck).
   const ENTRY_LINE = 126
-  # The BIOS reaches the entry point with the first two ROM words already
-  # fetched, charged to its own branch; this path still has to fetch them, so
-  # it starts that much earlier and the two boots run in lockstep from the
-  # first instruction on. 14 = a non-sequential plus a sequential 32-bit ROM
-  # read at the boot WAITCNT of 0.
+  # The BIOS enters with the first two ROM words already fetched (charged to
+  # its branch); this path must still fetch them, so it starts that much
+  # earlier and both boots run in lockstep. 14 = N + S 32-bit ROM read at
+  # boot WAITCNT 0.
   const PIPELINE_REFILL = 14
-  # 841 is where the LLE boot's first ROM instruction runs, bracketed by
-  # alyosha DMA_pause_timing_end_1/_2 and Internal_Cycle_DMA_IRQ_Br_pre(_tim)
-  # (end_1 red at 839, Br_pre red at 842).
+  # 841: the LLE boot's first ROM instruction; bracketed by alyosha
+  # DMA_pause_timing_end_1 (fails at 839) and Internal_Cycle_DMA_IRQ_Br_pre
+  # (fails at 842).
   const ENTRY_LINE_POS = 841 - PIPELINE_REFILL
   ppu.gba.scheduler.clear(etPPUStartHBlank)
   ppu.vcount = ENTRY_LINE
   ppu.line_start_cycle = int64(ppu.gba.scheduler.cycles) - ENTRY_LINE_POS
   ppu.gba.scheduler.schedule(960 - ENTRY_LINE_POS, etPPUStartHBlank)
 
-# Forced blank cleared on line L: the BG layers and the palette fetch
-# nothing for the rest of line L and all of lines L+1 and L+2, and draw
-# from L+3. tests/roms/payloads/c2fb.s, AGB SP from EWRAM under a mode-0
-# scene of four text BGs: BG VRAM and palette RAM read with no contention
-# on line 40 after a clear on line 38 or 39 and as drawn after one on 37
-# or earlier, wherever in the line the clear lands; across the frame wrap
-# too (a clear on 227 leaves line 1 free and draws line 2; on line 1, 3
-# free and 4 drawn; on line 2, 3-4 free and 5 drawn). Contention is what
-# was measured: the picture on the held lines is drawn as before.
+# Forced blank cleared on line L: BG layers and palette fetch nothing for the
+# rest of L and all of L+1 and L+2, and fetch again from L+3, wherever in the
+# line the clear lands and across the frame wrap. AGB SP, payloads/c2fb.s
+# (four text BGs, mode 0): measured as contention only; the picture on the
+# held lines is drawn as before.
 const FB_EXIT_HOLD_LINES = 3'u8
 
 proc contend_mask_update*(ppu: PPU) =
@@ -116,11 +109,8 @@ proc bitmap*(ppu: PPU): bool =
   ppu.dispcnt.bg_mode >= 3
 
 # Cycles into a line at which the BG enable delay samples DISPCNT (see
-# `bg_enable_hist`). Bracketed by the mGBA suite's "Layer toggle 2" expected
-# screen under this core's CPU timing: an HBlank IRQ handler's enable that
-# lands 29 cycles into line 130 shows on line 132, and a poll loop's enable
-# that lands 39 cycles into line 146 does not show on line 148. 34 is the
-# middle; no hardware measurement pins it closer.
+# `bg_enable_hist`). The mGBA suite's "Layer toggle 2" brackets it to 30..39
+# under this core's CPU timing; 34 is the middle, unmeasured on hardware.
 const BG_ENABLE_LATCH_CYCLE = 34
 
 proc latch_oam*(ppu: PPU) {.inline.} =
@@ -170,38 +160,23 @@ when defined(bgtrace):
 proc start_line*(ppu: PPU) =
   ppu.gba.scheduler.schedule(960, etPPUStartHBlank)
 
-# GBATEK: "the H-Blank flag is '0' for a total of 1006 cycles". An AGB SP says
-# 1007: tests/roms/payloads/breakram.s enters on a V-count interrupt and reads
-# DISPSTAT once, a swept number of one-cycle NOPs later, with no polling loop
-# to quantise the answer. From the same entry the next VCOUNT edge and the
-# flag's fall both land on our cycle; the flag's RISE lands one cycle later,
-# and so do the two things raised off it, the H-blank DMA's write and (with
-# the DMA out of the way) the H-blank interrupt. Every earlier page that
-# bracketed the flag (linegeo.s, hdmageo.s) did it with a seven-cycle poll
-# and could not see one cycle.
-#
-# The mGBA suite's Misc "DMA Prefetch Break" sees this constant and
-# HBLANK_DMA_REQUEST_DELAY as one sum, and one cycle of it is a whole
-# scanline of that row's loop: at 46 the row read one line late under the
-# HLE and the real BIOS alike, at 47 it passes under both. The six "H-blank
-# bit start Flip" rows read the flag itself and pass at either.
-# docs/playtest-bugs.md section 25.
+# The H-blank flag rises 47 cycles after drawing ends (960), at 1007, where
+# GBATEK says "'0' for a total of 1006 cycles". AGB SP, payloads/breakram.s:
+# one DISPSTAT read a swept number of NOPs after a V-count entry; the VCOUNT
+# edge and the flag's fall land on our cycle, the rise (and the H-blank DMA
+# write and interrupt) one later. Seven-cycle polls (linegeo.s) cannot see
+# it. The mGBA suite's "DMA Prefetch Break" fails at 46. docs/gbatek-upstream.md
+# 1.9, docs/playtest-bugs.md section 25.
 const HBLANK_FLAG_DELAY {.intdefine.} = 47
 
 # Cycles from a PPU interrupt being raised to the CPU recognising it; one
-# longer than the timers' IRQ_SYNC_DELAY (3). ONE delay serves all three
-# sources once each is raised where the console raises it (breakram.s and
-# halthb.s, AGB SP):
+# longer than the timers' IRQ_SYNC_DELAY (3). One delay serves all three
+# sources, each raised where the console raises it (AGB SP, breakram.s and
+# halthb.s):
 #   V-blank        at the line boundary
-#   V-count match  one cycle after it -- the match flag in DISPSTAT reads its
-#                  old value for one cycle after VCOUNT has moved on, and the
-#                  interrupt follows the flag (VCOUNT_MATCH_DELAY)
+#   V-count match  one cycle after it: the DISPSTAT match flag lags VCOUNT by
+#                  a cycle and the interrupt follows the flag (VCOUNT_MATCH_DELAY)
 #   H-blank        with the H-blank flag
-# Before this the three carried 4, 5 and 6 to the same effect, except that
-# the H-blank's 6 was really 4 with two things folded in: the flag's missing
-# cycle, and one cycle of an H-blank DMA's stall (dma.nim: a pending
-# interrupt check slips by as long as a DMA holds the bus; a halted CPU
-# resumes on a DMA's last cycle, cpu.nim).
 const PPU_IRQ_SYNC_DELAY {.intdefine.} = 4
 const VCOUNT_MATCH_DELAY {.intdefine.} = 1
 const HBLANK_IRQ_SYNC_DELAY {.intdefine.} = PPU_IRQ_SYNC_DELAY
@@ -209,19 +184,14 @@ const LINE_IRQ_SYNC_DELAY {.intdefine.} = PPU_IRQ_SYNC_DELAY + VCOUNT_MATCH_DELA
 const VBLANK_IRQ_SYNC_DELAY {.intdefine.} = PPU_IRQ_SYNC_DELAY
 
 # An H-blank DMA is requested off the H-blank flag, not the end of drawing:
-# gbaedge HDMAPHASE (AGB SP, docs/hwprobe-results-agb.md session 6) freezes a
-# timer with the DMA's own write, and against the same clock and anchor the
-# write lands 48 cycles after a request at 960 would put it, on two lines,
-# with no spread. The 2 is measured, not derived: breakram.s stamps the write
-# from an interrupt-anchored entry, to the cycle, on two lines and two
-# channels, and flag + 2 with the flag at 1007 is exact.
+# AGB SP, gbaedge HDMAPHASE (docs/hwprobe-results-agb.md 32) puts its write
+# 48 cycles after a request at 960 would. The 2 is measured: breakram.s
+# stamps the write to the cycle at flag + 2 (two lines, two channels).
 const HBLANK_DMA_REQUEST_DELAY {.intdefine.} = 2
 # The V-blank DMA's request is raised two cycles after the V-blank flag, as
-# the H-blank's is after its own. breakram.s (AGB SP) stamps its write from a
-# V-count entry on line 159: 1097 on the console, 1096 here at +1.
-# hdmamul.s/hdmasweep.s report this write minus the H-blank DMA's and read
-# 227 on the console; they held at +1 only while the H-blank flag was also a
-# cycle early.
+# the H-blank's is after its own (AGB SP, breakram.s: the write at 1097 from
+# a V-count entry on line 159; +1 gives 1096). hdmamul.s/hdmasweep.s read the
+# V-blank write minus the H-blank write as 227 on the console.
 const VBLANK_DMA_REQUEST_DELAY {.intdefine.} = 2
 
 proc start_hblank*(ppu: PPU) =
@@ -231,10 +201,9 @@ proc start_hblank*(ppu: PPU) =
         if (ppu.gba.bus.sync_bits and 2) == 0: ppu.gba.wl_unsafe = true
       ppu.gba.bus.sync_bits = ppu.gba.bus.sync_bits or 2
       when REFILL_WINDOW_SPLIT:
-        # A new window: the last line's request may still be waiting for
-        # the fetch that closes its window, when a burst has held the bus
-        # from that request to here (hdmalag.s configuration 29). That fetch
-        # must not close this one before its own request.
+        # A new window: when a burst has held the bus since the last line's
+        # request, that request's closing fetch must not close this window
+        # (hdmalag.s configuration 29).
         ppu.gba.bus.window_closing = false
       ppu.gba.bus.fetch_page = 0xFFFFFFFF'u32
       ppu.gba.bus.fetch_key = 0xFFFFFFFF'u32
@@ -266,11 +235,9 @@ proc set_hblank_flag*(ppu: PPU) =
     ppu.gba.interrupts.schedule_interrupt_check(HBLANK_IRQ_SYNC_DELAY)
 
 proc end_hblank*(ppu: PPU) =
-  # Zero-delay event rather than a direct call: schedule's tie-break (newest
-  # same-cycle event pops first) makes it the next dispatch, after the
-  # post-dispatch DMA pump has granted the vblank / video-capture requests
-  # latched below, so the next line anchors at the same cycle but strictly
-  # after this line's deferred DMA work.
+  # Zero-delay event, not a direct call: newest same-cycle event pops first,
+  # so it runs after the DMA pump grants the V-blank / video-capture requests
+  # latched below; the next line anchors on the same cycle but after them.
   ppu.gba.scheduler.schedule(0, etPPUStartLine)
   ppu.dispstat.hblank = false
   ppu.vcount = uint16((int(ppu.vcount) + 1) mod 228)
@@ -312,10 +279,10 @@ proc end_hblank*(ppu: PPU) =
         ppu.bgref_int[bg_num][ref_num] = ppu.bgref[bg_num][ref_num].num
     ppu.draw()
   # Only a flag that rose here reaches the interrupt controller: an
-  # unconditional check would re-evaluate all of IE&IF at rise+1 for a bit
-  # another peripheral raised inside its own IRQ_SYNC_DELAY window (GBATEK:
-  # IF bits 0-2 are driven by the DISPSTAT conditions; nothing re-evaluates
-  # periodically). mGBA suite Timer count-up "0b, 0x000C 1xv 1d 4i".
+  # unconditional check would catch a bit another peripheral raised inside
+  # its own IRQ_SYNC_DELAY window. Pinned by the mGBA suite's Timer count-up
+  # "0b, 0x000C 1xv 1d 4i".
+
   if raised_if:
     ppu.gba.interrupts.schedule_interrupt_check(irq_delay)
 
@@ -382,12 +349,10 @@ proc unpack_bg4_span*(dst: ptr UncheckedArray[uint8]; col: int; row: uint32;
                       x_in_tile, span, flip_x_mask: int; bank: uint8) {.inline.} =
   ## Whole-tile SWAR expansion, falling back to the scalar loop otherwise.
   ## The three `((v shl s) or v) and M` steps scatter the eight nibbles of
-  ## `row` into eight bytes, low nibble to low byte; each step is shl/or/and
-  ## only, so it is OR-linear and carry-free (a permutation of 32 bits).
-  ## Flip is then a byte reverse. The bank is OR'd in without touching index
-  ## 0: `v + 0x0F0F..` cannot carry between bytes (each is <= 0x0F) and the
-  ## 0xF0F0.. mask leaves 0x10 per non-zero byte; times the bank nibble that
-  ## is at most 0xF0, so no carry there either.
+  ## `row` into eight bytes, low nibble to low byte, carry-free. Flip is then
+  ## a byte reverse. The bank skips index 0: `v + 0x0F0F..` cannot carry
+  ## between bytes (each <= 0x0F), the 0xF0F0.. mask leaves 0x10 per non-zero
+  ## byte, and times the bank nibble that is at most 0xF0.
   const little = cpuEndian == littleEndian
   if little and x_in_tile == 0 and span == 8:
     var v = uint64(row)
@@ -416,11 +381,9 @@ proc render_reg_bg_impl(ppu: PPU; bg: int; swar: static bool) =
   let bghofs = ppu.bghofs[bg]
   let bgvofs = ppu.bgvofs[bg]
   when defined(bgtrace):
-    # -d:bgtrace + DINGBAT_BGTRACE_FRAME=<n>: the scroll a text BG actually
-    # rendered each line with. A game steering one BG from a per-line H-blank
-    # DMA table (Donkey Kong Country 2's BG1 parallax) differs from a
-    # reference in what reaches the screen without differing in any register
-    # the CPU can read back, and the composite cannot say which layer moved.
+    # -d:bgtrace + DINGBAT_BGTRACE_FRAME=<n> (off by default): the scroll each
+    # text BG rendered each line with, for per-line H-blank DMA scroll tables
+    # the CPU cannot read back (Donkey Kong Country 2's BG1 parallax).
     if bgtrace_n == bgtrace_frame:
       stderr.writeLine "BGTRACE f=" & $ppu.frame & " v=" & $ppu.vcount &
         " bg=" & $bg & " h=" & $uint16(bghofs) & " v=" & $uint16(bgvofs) &
@@ -443,10 +406,9 @@ proc render_reg_bg_impl(ppu: PPU; bg: int; swar: static bool) =
   let ty_base         = int(tile_y) * 32
   let ty_extra        = if int(tile_y) >= 32 and bgcnt.screen_size == 0b11: 0x0400 else: 0
   let row_in_tile     = effective_row and 7
-  # Walk the scanline one tile span at a time: a span never crosses a tile
-  # boundary (and never wraps, since bg_width+1 is a multiple of 8), so the
-  # screen entry, tile row base, flip mask and palette bank are computed once
-  # per tile.
+  # One tile span at a time: a span never crosses a tile boundary (and never
+  # wraps, as bg_width+1 is a multiple of 8), so per-tile values are computed
+  # once.
   let dst = cast[ptr UncheckedArray[uint8]](addr ppu.layer_palettes[bg][0])
   let vram = cast[ptr UncheckedArray[uint8]](addr ppu.vram[0])
   var col = 0
@@ -541,11 +503,10 @@ proc render_aff_bg*(ppu: PPU; bg: int) =
         ppu.layer_palettes[bg][col] = ppu.layer_palettes[bg][col - col mod h]
 
 proc render_bitmap*(ppu: PPU) =
-  ## Fill the BG2 line buffers for the bitmap modes (3/4/5). Modes 3/5 are
-  ## direct BGR555; mode 4 is paletted. BG2 is an affine layer here: PA/PC
-  ## and the internal reference point apply as in modes 1/2, sampling the
-  ## bitmap as a texture (out of range = transparent; the wrap bit has no
-  ## effect). DBZ Legacy of Goku's intro FMV upscales with PD < 1.0.
+  ## Fill the BG2 line buffers for the bitmap modes (3/5 direct BGR555, 4
+  ## paletted). BG2 is affine here as in modes 1/2 (out of range =
+  ## transparent; the wrap bit has no effect). DBZ Legacy of Goku's intro FMV
+  ## upscales with PD < 1.0.
   let mode = int(ppu.dispcnt.bg_mode)
   ppu.bitmap_direct = mode != 4
   for col in 0..239: ppu.bg2_direct_opaque[col] = false
@@ -605,15 +566,12 @@ type ObjGeometry = tuple[x, y, ow, oh, w, h: int]
 
 proc obj_geometry(s: Sprite): ObjGeometry {.inline.} =
   ## Screen-space geometry of one OAM entry, shared by the per-line scan, the
-  ## candidate-list rebuild and the OBJ contention map so they cannot drift
-  ## apart. GBATEK "LCD OBJ - OAM Attributes": X is 9 bits (0-511), Y 8 bits
-  ## (0-255). `x` is the signed left edge (past 239 it goes negative; with
-  ## widths up to 128 that is the same as wrapping mod 512). `y` is the raw
-  ## 8-bit Y: the vertical range wraps through 256, so a line is inside the
-  ## OBJ when `obj_row` < `h` (see there). `ow`/`oh` are the texture
-  ## footprint, `w`/`h` the drawn one (double for affine double-size, so the
-  ## line test must use `h`). attr0.9 means double-size only with affine set;
-  ## otherwise it disables the sprite. Prohibited shape 3 has no footprint.
+  ## candidate-list rebuild and the OBJ contention map so they cannot drift.
+  ## X is 9 bits, Y 8 (GBATEK). `x` is the signed left edge (past 239 it goes
+  ## negative, same as mod 512 for widths up to 128). `y` is the raw 8-bit Y;
+  ## see `obj_row`. `ow`/`oh` are the texture footprint, `w`/`h` the drawn one
+  ## (doubled for affine double-size; line tests use `h`). attr0.9 without
+  ## affine disables the sprite. Prohibited shape 3 has no footprint.
   let shape3 = s.obj_shape == 3
   var x = int(cast[int16](bits_range(s.attr1, 0, 8)))
   let y = int(bits_range(s.attr0, 0, 7))
@@ -663,14 +621,13 @@ proc rebuild_obj_lines*(ppu: PPU) =
 
 proc oam_touched*(ppu: PPU) {.inline.} =
   ## Mark `oam_view` stale, which rebuilds the per-line OBJ candidate list
-  ## when the next line start copies it. MUST be called by every path
-  ## that mutates ppu.oam: bus.oam_store16 / oam_store32 inline it, setting
-  ## oam_view_stale on every store but clearing the contention key only for
-  ## one that changes that map (byte writes to OAM are discarded; DMA and
-  ## cheats funnel through these), load_ppu_state (covers rewind, rollback and link restores), and the HLE
-  ## RegisterRamReset OAM clear. Test code seeding ppu.oam must call it and
-  ## then latch_oam.
-  ## Backstops: scanline() force-rebuilds once per frame, and -d:objListVerify
+  ## when the next line start copies it. MUST be called by every path that
+  ## mutates ppu.oam: bus.oam_store16 / oam_store32 inline it (clearing the
+  ## contention key only when that map changes; DMA and cheats go through
+  ## them, OAM byte writes are discarded), load_ppu_state (rewind, rollback,
+  ## link restores) and the HLE RegisterRamReset OAM clear. Test code seeding
+  ## ppu.oam must call it and then latch_oam. Backstops: scanline()
+  ## force-rebuilds once per frame; -d:objListVerify (off by default)
   ## cross-checks the list against a full scan every line.
   ppu.oam_view_stale = true
   ppu.cont_obj_key = -1   # the OBJ layer's contention map reads live OAM
@@ -680,14 +637,12 @@ proc render_sprites_impl(ppu: PPU; force_scan: bool) =
   let base = 0x10000'u32
   let sprites = ppu.sprites_ptr()
   let bitmap_mode = ppu.dispcnt.bg_mode >= 3
-  # Per-line OBJ cycle budget: 1210 cycles, or 954 with DISPCNT's H-Blank
-  # Interval Free bit (GBATEK "LCD OBJ Overview"). A regular sprite costs
-  # `width` cycles, an affine one 10 + 2*width over its drawn footprint; once
-  # the budget is spent, later OAM entries do not render. The sprite that
-  # exhausts the budget still draws fully: AGB SP, gbaedge page 37 OBJBUDGET
-  # (docs/hwprobe-results-agb.md, session 5). The Famicom Mini FDS carts
-  # park full-width masking sprites at the end of OAM that hardware has no
-  # time to draw.
+  # Per-line OBJ cycle budget: 1210, or 954 with H-Blank Interval Free
+  # (GBATEK "LCD OBJ Overview"). A sprite costs `width` cycles, affine 10 +
+  # 2*width over its drawn box; later OAM entries past the budget do not
+  # render, but the one that exhausts it draws fully (AGB SP, gbaedge page 37
+  # OBJBUDGET, docs/hwprobe-results-agb.md session 5). Famicom Mini FDS carts
+  # park masking sprites at the end of OAM that hardware has no time to draw.
   var obj_cycles = if ppu.dispcnt.hblank_interval_free: 954 else: 1210
   let vc = int(ppu.vcount)
 
@@ -764,9 +719,8 @@ proc render_sprites_impl(ppu: PPU; force_scan: bool) =
             offset *= 0x20
         offset += tex_x shr 3
         var pal_idx: uint32
-        # OBJ character fetches wrap within the 32K of OBJ VRAM: AGB SP, gbaedge
-        # page 38 OBJGEOM's tile-1020 sprite (docs/hwprobe-results-agb.md,
-        # session 5).
+        # OBJ character fetches wrap within the 32K of OBJ VRAM (AGB SP,
+        # gbaedge page 38 OBJGEOM, docs/hwprobe-results-agb.md session 5).
         if bit(sprite.attr0, 13):  # 8bpp
           # GBATEK "LCD OBJ - OAM Attributes", OBJ Tile Number: in 256-colour
           # mode "the lower bit of the tile number should be zero (in
@@ -824,9 +778,10 @@ proc render_sprites_impl(ppu: PPU; force_scan: bool) =
       obj_entry(s_idx)
 
 when defined(objListVerify):
-  # Self-checking build: every scanline renders the OBJ layer via the
-  # candidate list and via the reference scan and aborts on a difference.
-  # Catches an OAM mutation path that forgot oam_touched; run real ROMs.
+  # Self-checking build (-d:objListVerify): renders the OBJ layer by both the
+  # candidate list and the reference scan and aborts on a difference, to
+  # catch an OAM path that forgot oam_touched.
+
   var objVerifyLines*: int = 0
   proc render_sprites*(ppu: PPU; force_scan = false) =
     let before_pixels = ppu.sprite_pixels
@@ -999,14 +954,12 @@ proc bgr16_pack*(v: uint64): uint16 {.inline.} =
          (((v shr 16) and 0x1F'u64) shl 5) or
          (((v shr 32) and 0x1F'u64) shl 10))
 
-# Colour special effects, per 5-bit channel, as measured on a GBA SP with
-# tests/roms/blendprobe.gba (expected/blendprobe-agb-sp-1.txt): alpha sums
-# both weighted layers BEFORE the single truncating shift, (t*EVA + b*EVB)
-# >> 4, saturated at 31; darken truncates the scaled colour, t*(16-EVY) >> 4
-# (so the amount removed rounds up); brighten truncates the amount added,
-# t + ((31-t)*EVY >> 4). Coefficients above 16 act as 16. GBATEK gives these
-# without their rounding; truncating each alpha term separately, or
-# subtracting the truncated t*EVY/16, is a step off on the probe's rows.
+# Colour special effects per 5-bit channel, measured on a GBA SP with
+# tests/roms/blendprobe.gba (expected/blendprobe-agb-sp-1.txt; GBATEK omits
+# the rounding): alpha min(31, (t*EVA + b*EVB) >> 4), one shift after the
+# sum; darken t*(16-EVY) >> 4; brighten t + ((31-t)*EVY >> 4). Coefficients
+# above 16 act as 16. Truncating each alpha term, or subtracting a truncated
+# t*EVY/16, is a step off. docs/hwprobe-questions.md "Colour special effects".
 proc blend_colors*(ppu: PPU; top_u16, bot_u16: uint16; blend_mode: int): uint16 =
   case blend_mode
   of 0: top_u16  # None
@@ -1187,16 +1140,12 @@ proc composite_span(ppu: PPU; row_base: uint32; lo, hi: int;
       w.n = k + 1
 
   # Colour math needs the top layer to be a BLDCNT 1st target, or a
-  # semi-transparent OBJ pixel (which forces alpha regardless of mode); if
-  # neither is reachable the effects apparatus is dead for this span. A
-  # semi-transparent OBJ pixel alpha-blends with a 2nd-target layer below it
-  # even where the window's colour-effect bit is clear; everything else (1st
-  # targets, brighten/darken, the semi-transparent fallback to them) needs
-  # the bit. So an effects-off span keeps only that blend: its 1st-target
-  # selections are cleared (w.sel1 above, sel1_obj/sel1_bd below) and the
-  # blend loop then reaches the bottom search only from a semi-transparent
-  # top. docs/playtest-bugs.md, "Semi-transparent OBJ under an effects-off
-  # window".
+  # semi-transparent OBJ pixel (which forces alpha in any mode). That OBJ
+  # blend with a 2nd target below works even where the window's colour-effect
+  # bit is clear; everything else needs the bit. So an effects-off span keeps
+  # only that blend: its 1st-target selections are cleared (w.sel1 above,
+  # sel1_obj/sel1_bd below). docs/playtest-bugs.md, "Semi-transparent OBJ
+  # under an effects-off window".
   let semi_obj = obj_enable and ppu.line_sprite_blend
   let can_blend =
     if effects:
@@ -1214,9 +1163,10 @@ proc composite_span(ppu: PPU; row_base: uint32; lo, hi: int;
     ppu.composite_span_shade(w, row_base, lo, hi, obj_enable)
     return
 
-  # Colour math is reachable: find the top layer, then the layer under it
-  # only when the result can depend on it. Kept in this proc so the walk
-  # stays a plain local the compiler can keep in registers.
+  # Colour math is reachable: find the top layer, then the one under it only
+  # when the result can depend on it. Kept in this proc so the walk stays a
+  # register-resident local.
+
   let pram_u16 = cast[ptr UncheckedArray[uint16]](addr ppu.pram[0])
   let fb       = cast[ptr UncheckedArray[uint16]](addr ppu.framebuffer[0])
   let sprites  = cast[ptr UncheckedArray[SpritePixel]](addr ppu.sprite_pixels[0])
@@ -1386,19 +1336,17 @@ proc composite*(ppu: PPU; row_base: uint32) =
     ppu.composite_span(row_base, col, e, bits, eff)
     col = e
 
-# Cycle into the line at which pixel 0 is output. Bracketed by the mGBA
-# suite's "Layer toggle 2" expected screen (42..45 reproduce it); drawing
-# ends at 960 and the H-blank flag rises 46 cycles later, so 44 keeps the
-# 4-cycle dot grid of both.
+# Cycle into the line at which pixel 0 is output. The mGBA suite's "Layer
+# toggle 2" accepts 42..45; 44 keeps the 4-cycle dot grid that ends drawing
+# at 960.
 const BG_PIXEL0_CYCLE = 44
 
 proc midline_bg_enable(ppu: PPU; bg: int) =
-  ## A text BG whose DISPCNT bit rose after this line started (and that the
-  ## enable delay lets draw) shows nothing left of the pixel being output
-  ## at the write, and its first tile comes out two pixels late: pixels 0-7
-  ## show what pixels -2..5 would. mGBA suite Video tests, "Layer toggle 2",
-  ## lines 65 and 146. Rendering is whole-line, so the late start is
-  ## rebuilt from a second pass two pixels to the left.
+  ## A text BG enabled mid-line (and let draw by the enable delay) shows
+  ## nothing left of the pixel being output at the write, and its first tile
+  ## comes out two pixels late: pixels 0-7 show what -2..5 would (mGBA suite
+  ## "Layer toggle 2", lines 65 and 146). Rebuilt from a second whole-line
+  ## pass two pixels to the left.
   if not bit(ppu.line_bg_enables, bg) or bit(ppu.line_start_bg_bits, bg): return
   let t = ppu.bg_enable_cycle[bg]
   if t < 0: return
@@ -1510,10 +1458,8 @@ proc `[]`*(ppu: PPU; io_addr: uint32): uint8 =
   of 0x002..0x003: 0'u8  # green swap
   of 0x004:
     # The V-count match flag is a live compare, VCOUNT_MATCH_DELAY behind
-    # VCOUNT: for that long after a line boundary it still answers for the
-    # line before, and a write to the setting shows at once (breakram.s, AGB
-    # SP: `100` for one cycle as line 31 begins with the match at 30, and the
-    # flag already clear on line 30 itself once the setting is rewritten).
+    # VCOUNT; a write to the setting shows at once (AGB SP, breakram.s;
+    # docs/gbatek-upstream.md 1.9).
     var line = int(ppu.vcount)
     if int64(ppu.gba.scheduler.cycles) - ppu.line_start_cycle < VCOUNT_MATCH_DELAY:
       line = (line + 227) mod 228
@@ -1559,18 +1505,15 @@ proc write_dispcnt(ppu: PPU; io_addr: uint32; value: uint8) =
 
 proc write_dispstat(ppu: PPU; io_addr: uint32; value: uint8) =
   if io_addr == 0x004:
-    # Writable low-byte bits are 3-5 (the IRQ enables): bits 0-2 are the
-    # live flags and bits 6-7 do not latch (gbaedge IOBYTE page: strb 0x44
-    # reads back as just the flags)
+    # Writable low-byte bits are 3-5 (the IRQ enables): bits 0-2 are live
+    # flags and bits 6-7 do not latch (gbaedge IOBYTE/IOBYTE2,
+    # docs/hwprobe-results-agb.md)
     let preserved = uint8(toU16(ppu.dispstat)) and 0x07'u8
     write(ppu.dispstat, (value and 0x38'u8) or preserved, 0)
   else:
-    # The match is an edge of a live compare, so a write that moves the
-    # setting ONTO the current line raises the interrupt there and then.
-    # tests/roms/payloads/lycwrite.s, AGB SP, parked on line 100 with IF
-    # clean: setting 50 -> 100 sets IF's V-count bit; turning the enable on
-    # while already matching does not; acknowledging IF while still matching
-    # does not bring it back.
+    # The interrupt is the live compare's rising edge: a write that moves the
+    # setting onto the current line raises it; enabling while already
+    # matching, or acking IF while matching, does not (AGB SP, lycwrite.s).
     let was = int(ppu.dispstat.vcount_setting) == int(ppu.vcount)
     write(ppu.dispstat, value, 1)
     if not was and int(ppu.dispstat.vcount_setting) == int(ppu.vcount) and
@@ -1579,16 +1522,15 @@ proc write_dispstat(ppu: PPU; io_addr: uint32; value: uint8) =
       ppu.gba.interrupts.schedule_interrupt_check(PPU_IRQ_SYNC_DELAY)
 
 template dirty_if_changed(ppu: PPU; field: typed; body: untyped) =
-  ## Run `body`, a register write, and dirty the frame (render_dirty, the
-  ## whole-frame render skip) only if it changed `field`: games rewrite their
-  ## whole register set from a shadow copy every frame, mostly unchanged.
+  ## Run `body`, a register write, and set render_dirty only if it changed
+  ## `field`: games rewrite their registers from a shadow copy every frame.
   let before = field
   body
   if field != before: ppu.render_dirty = true
 
 proc `[]=`*(ppu: PPU; io_addr: uint32; value: uint8) =
-  # Each branch dirties the frame only through what it changes; a write that
-  # leaves every one of them as it was draws the same picture.
+  # Each branch dirties the frame only through what it changes.
+
   case io_addr
   of 0x000..0x001:
     ppu.dirty_if_changed((ppu.dispcnt, ppu.bg_enable_cycle, ppu.bg_enable_hist)):

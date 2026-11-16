@@ -58,11 +58,10 @@ proc `[]=`*(mmio: MMIO; address: uint32; value: uint8) =
   of 0x0B0..0x0DF:
     mmio.gba.dma[io_addr] = value
     when defined(breakirq):
-      # -d:breakirq: empty libgba's interrupt table as the mGBA suite's
-      # `DMA Prefetch Break` arms its DMA -- the state a console is in when
-      # Misc is opened straight from the menu, rather than after the twelve
-      # suites our auto-run puts in front of it (the last of which leaves a
-      # TIMER1 handler the V-blank dispatch has to step over). An experiment.
+      # -d:breakirq (experiment, off by default): empty libgba's interrupt
+      # table as the mGBA suite's `DMA Prefetch Break` arms its DMA, as when
+      # Misc is opened straight from the menu rather than after the auto-run's
+      # other suites.
       if io_addr == 0x0DF and mmio.gba.cpu.r[15] >= 0x08005F90'u32 and
          mmio.gba.cpu.r[15] < 0x08005FB0'u32:
         stderr.writeLine("breakirq: table was " &
@@ -72,9 +71,9 @@ proc `[]=`*(mmio: MMIO; address: uint32; value: uint8) =
         mmio.gba.bus.write_word_internal(0x03003368'u32, 0)
         mmio.gba.bus.write_word_internal(0x0300336C'u32, 0)
     when defined(breakwait):
-      # -d:breakwait -d:BREAKWAIT=N: run the mGBA suite's `DMA Prefetch Break`
-      # loop under another WAITCNT, as a flashcart loader that left its own
-      # setting behind would. An experiment, never a default.
+      # -d:breakwait -d:BREAKWAIT=N (experiment, off by default): run the mGBA
+      # suite's `DMA Prefetch Break` loop under another WAITCNT, as a
+      # flashcart loader's leftover setting would.
       const BREAKWAIT {.intdefine.} = 0
       if io_addr == 0x0DF and mmio.gba.cpu.r[15] >= 0x08005F90'u32 and
          mmio.gba.cpu.r[15] < 0x08005FB0'u32:
@@ -92,28 +91,18 @@ proc `[]=`*(mmio: MMIO; address: uint32; value: uint8) =
     mmio.postflg = value and 1
   of 0x301:
     # HALTCNT answers only to BIOS code; a byte write from ROM or RAM is
-    # ignored. Hardware (haltprobe on an AGB SP, docs/playtest-bugs.md
-    # section 18): through SWI 2 the CPU halts 4931 cycles and comes back on
-    # the V-count match four lines later, and dingbat agrees to the cycle --
-    # but a `strb` to 0x04000301 from IWRAM does not halt it at all, it stays
-    # on the same scanline, and mGBA agrees. We honoured the write from
-    # anywhere, so a game could halt itself by a route hardware ignores.
-    # SWI 2 is unaffected: hle_bios sets cpu.halted directly.
-    # What counts is where the newest fetch (r15) was made, by address, not
-    # which memory answered it: with MEMCNT's swap on, a `strb` from the
-    # chip WRAM at 01007000 or 01FFFFF0 (r15 01FFFFF8) halts the CPU and one
-    # from 01FFFFF8 (r15 02000000, where the BIOS now is) does not
-    # (tests/roms/payloads/haltswap.s on an AGB SP; png183 memory t110/t111).
-    # The BIOS's read protection goes by memory instead (bus.nim,
-    # swap_privileged).
+    # ignored (AGB SP, haltprobe: a `strb` from IWRAM does not halt;
+    # docs/playtest-bugs.md section 18). The HLE
+    # SWI 2 sets cpu.halted directly. What counts is the address of the
+    # newest fetch (r15), not which memory answered it: under MEMCNT's swap
+    # a `strb` with r15 01FFFFF8 halts and one with r15 02000000 does not
+    # (AGB SP, haltswap.s). The BIOS's read protection goes by memory
+    # instead (bus.nim swap_privileged).
     if mmio.gba.cpu.r[15] >= 0x02000000'u32: return
     # Entering the halt stalls the CPU HALT_ENTRY_STALL cycles, and an
-    # interrupt the CPU had already recognised by the write is taken at the
-    # boundary after them, with no halt and no wake instruction (alyosha
-    # irq/halt_pc_2..4, a timer overflowing across Halt's HALTCNT write:
-    # recognised on or before the write's cycle, the handler finds the
-    # BIOS's `bx lr` not yet run, 2 cycles after the write; recognised a
-    # cycle after it, `bx lr` has run, from 2 cycles after the write).
+    # interrupt already recognised by the write is taken at the boundary
+    # after them, with no halt and no wake instruction (alyosha
+    # irq/halt_pc_2..4).
     let seen = mmio.gba.cpu.irq_line and not bit(value, 7)
     mmio.gba.bus.add_cycles(HALT_ENTRY_STALL)
     if seen: return

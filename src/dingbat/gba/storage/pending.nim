@@ -3,53 +3,37 @@
 #
 # A ROM that links the EEPROM library beside the SRAM or a flash library
 # (storage_chip.nim storage_candidates) does not say which chip its board
-# carries, and the string scan's fixed order guessed EEPROM for all of them.
-# Breath of Fire (J) (EEPROM_V121, FLASH_V124, SRAM_V112; the US and European
-# releases link SRAM_V112 alone) saves to SRAM, and froze on its options
-# screen waiting for SRAM that never answered. With no battery file to go
-# by, the game's accesses choose. Logged over 12,000 frames of play for the
-# 31 such ROMs in the compatibility library (docs/playtest-bugs.md §105):
-#
-#   - an EEPROM command DMA to 0x0D first: 20 (Onimusha Tactics, Kim
-#     Possible, Medabots AX, Yggdra Union, ...); some send a flash ID command
-#     later.
-#   - a probe, then EEPROM: 7. Rocky writes five bytes to 0E000000h and
-#     reads them back; Ueki no Housoku and Nintendo's library sample send the
-#     flash ID command; DiGi Communication reads 16 bytes and writes; Japan
-#     Pro Mahjong reads 8 KB and never writes; Super Monkey Ball Jr runs a
-#     DMA into 0FFFFFFCh. On an EEPROM board nothing answers there, so each
-#     falls back to EEPROM, and both references save every one as EEPROM.
-#   - a long run of reads of the SRAM region, then a write there, and no
-#     EEPROM access: Breath of Fire (J), whose 5,120 reads (its settings
-#     block) precede its first write. A game reading back its own save is an
-#     SRAM game; a probe reads a handful of bytes, or never writes.
-#   - Advance GT2 only reads the region in that time; two touch nothing.
+# carries. With no battery file to go by, the game's accesses choose. In
+# the 31 such ROMs in the library (docs/playtest-bugs.md §105) most send an EEPROM command DMA to 0x0D
+# first; some probe 0x0E/0x0F first (write and read back, a flash ID
+# command, a DMA into 0FFFFFFCh) and fall back to EEPROM when nothing
+# answers; Breath of Fire (J) (EEPROM_V121, FLASH_V124, SRAM_V112) reads its
+# settings block from SRAM 5,120 times before its first write, and freezes
+# if SRAM never answers. A game reading back its own save is an SRAM game; a
+# probe reads a handful of bytes, or never writes.
 #
 # So the region answers as no chip at all (writes dropped, reads FFh, as on
-# an EEPROM board, and as the EEPROM guess did) until one of:
+# an EEPROM board) until one of:
 #
 #   - any access to the EEPROM window (0x0D) -> EEPROM
 #   - a CPU write to 0x0E/0x0F after SRAM_LOAD_READS CPU reads of the region
 #     and no write -> SRAM, and the write lands
 #
 # A ROM that names no backup library at all (storage_chip.nim
-# names_no_save_library) has its own save routine, or none: there is no
-# library probe to step round, so its first access chooses outright --
-# the EEPROM window -> EEPROM (Famicom Mini Vol. 04 Excitebike (J), which
-# the old SRAM guess left reporting セーブできませんでした), AAh written to
-# 0E005555h -> a 64 KB flash, any other CPU access to 0x0E/0x0F -> SRAM,
-# which is what such a game got before. One that never touches save memory
-# writes no battery file.
+# names_no_save_library) has no library probe to step round, so its first
+# access chooses outright: the EEPROM window -> EEPROM (Famicom Mini Vol. 04
+# Excitebike (J)), AAh written to 0E005555h -> a 64 KB flash, any other CPU
+# access to 0x0E/0x0F -> SRAM. One that never touches save memory writes no
+# battery file.
 #
-# DMA accesses to 0x0E/0x0F never decide (Super Monkey Ball Jr's first
-# "save" access is a DMA running into 0FFFFFFCh). Flash is chosen only by a
-# battery file of a flash chip's size (gba.nim new_storage): no game in the
-# set uses a flash chip, and answering a flash ID probe would invent one.
+# DMA accesses to 0x0E/0x0F never decide (Super Monkey Ball Jr). Flash is
+# chosen only by a battery file of a flash chip's size (gba.nim
+# new_storage): answering a flash ID probe would invent a chip.
 
 const SRAM_LOAD_READS = 256
   ## CPU reads of the SRAM region, with no write among them, that make the
-  ## next write an SRAM game's: Breath of Fire (J) makes 5,120; the probing
-  ## games 16 at most before a write (DiGi Communication), or none.
+  ## next write an SRAM game's: Breath of Fire (J) makes 5,120; probing games
+  ## at most 16 (DiGi Communication).
 
 proc chip_of(t: StorageType; gba: GBA): Storage =
   case t

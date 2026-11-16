@@ -13,7 +13,6 @@ macro armLutBuilder(): untyped =
       # SWP ignores bits 20, 21 and 23 (png183 arm/data_swap)
       of "0001....1001": call("arm_single_data_swap", i.bit(6))
       # BX, with bits 5-6 (ARMv5's BLX is bit 5) and bits 21-22 free
-      # (arm_branch_exchange).
       of "00010..00..1": call("arm_branch_exchange")
       of "000.....1..1": call("arm_halfword_data_transfer", i.bit(8), i.bit(7), i.bit(6), i.bit(5), i.bit(4), bits_range(i, 1, 2))
       of "011........1": call("arm_unimplemented")  # undefined instruction

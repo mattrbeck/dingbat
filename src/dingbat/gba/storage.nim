@@ -10,10 +10,9 @@ proc rtc_trailer_bytes(rtc: RTC): array[16, byte]  # rtc.nim
 
 proc battery_file_bytes*(st: Storage): string =
   ## What write_save puts on disk: the chip bytes, then on an RTC cart the
-  ## clock trailer (rtc_calendar.nim). A trailer read from a cart dingbat does
-  ## not treat as an RTC cart is kept verbatim: RTC detection is a ROM-string
-  ## heuristic, and a clock another tool recorded must not be lost to a cart
-  ## (a hack, a stripped ROM) the heuristic misses.
+  ## clock trailer (rtc_calendar.nim). A trailer on a cart not detected as RTC
+  ## is kept verbatim: detection is a ROM-string heuristic that can miss a
+  ## hack or stripped ROM.
   result = newString(st.memory.len)
   if st.memory.len > 0:
     copyMem(addr result[0], unsafeAddr st.memory[0], st.memory.len)
@@ -32,16 +31,14 @@ proc write_save*(st: Storage) =
   # detach it so a run leaves no .sav). dirty stays set so a rebind flushes.
   if st.dirty and st.save_path.len > 0:
     try:
-      # Temp file, fsync, rename: a crash, full disk or power cut mid-write
-      # leaves the previous save, never a short one that loads as valid.
-      # Synced although it can run every frame: only frames that changed the
-      # RAM write, and 128 KB costs ~0.3 ms on an SSD.
+      # Temp file, fsync, rename: a crash mid-write leaves the previous
+      # save, never a short one. Synced although it can run every frame:
+      # only frames that changed the RAM write, and 128 KB costs ~0.3 ms.
       write_file_atomic(st.save_path, st.battery_file_bytes())
       st.dirty = false
       st.save_error = ""
     except IOError, OSError:
-      # A read-only folder, a full disk, a file another program holds: the
-      # game plays on with its RAM still dirty, so every frame retries.
+      # The game plays on with its RAM still dirty, so every frame retries.
       # Said once per run of failures; the frontend shows `save_error`.
       if st.save_error.len == 0:
         st.save_error_new = true

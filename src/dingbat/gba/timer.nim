@@ -5,20 +5,19 @@ const
   TIMER_EVENT_TYPES* = [etTimer0, etTimer1, etTimer2, etTimer3]
   # Counting starts 2 cycles after the enable write.
   TIMER_START_DELAY = 2
+# Compile-time knobs. TIMER_STOP_DELAY: cycles the count runs on after a stop
+# (0 = stops at the write). TIMER_OLD_COUNT: reads before the start cycle see
+# the pre-enable count (false = the reload).
 const TIMER_STOP_DELAY {.intdefine.} = 1
 const TIMER_OLD_COUNT {.booldefine.} = true
 const TIMER_START_OVERFLOW {.booldefine.} = true
-  ## The overflow of an enable over a count stopped at 0xFFFF (the tick
-  ## before the reload, on the start cycle) is a whole overflow, not just its
-  ## interrupt: a sound FIFO the timer drives takes a sample and may ask for
-  ## a refill there (and a cascaded timer counts it: assumed, unmeasured).
-  ## tests/roms/payloads/fifospk.s on an AGB SP: a sound-FIFO page run right
-  ## after one whose exit froze TM0 at 0xFFFF reads two refill bursts (60
-  ## cycles) more at every NOP count,
-  ## where the page run after any other count reads what it always does --
-  ## the "spikes" of tests/roms/dbsuite fifodma, whose cases run in NOP
-  ## order and so each n = 14 and 24 case follows the n = 13 and 23 that
-  ## freeze TM0 on its overflow.
+  ## Enabling over a count stopped at 0xFFFF overflows on the start cycle,
+  ## and that is a whole overflow, not just its interrupt: a timer-driven
+  ## sound FIFO takes a sample and may ask for a refill (a cascaded timer
+  ## counts it too: assumed, unmeasured). AGB SP, payloads/fifospk.s: a FIFO
+  ## run after one that froze TM0 at 0xFFFF reads two more refill bursts (60
+  ## cycles); these are the "spikes" in dbsuite fifodma's n = 14 and 24 cases.
+  ## false: interrupt only. Compile-time knob, default true.
 
 # The prescaler is free-running: a timer with period P ticks at absolute
 # cycles divisible by P regardless of when it was enabled. Ticks are counted
@@ -42,9 +41,8 @@ proc effective_reload(tim: Timer; num: int): uint16 {.inline.} =
 proc timer_overflow_event*(tim: Timer; num: int; scheduled = true) =
   when defined(itrace):
     itl("TOVF " & $num & " t=" & $tim.gba.scheduler.cycles)
-  # TIMER_START_OVERFLOW: the overflow of an enable over a stopped 0xFFFF
-  # count lands on the start cycle itself; the enable has reloaded the count
-  # and raised the interrupt already
+  # TIMER_START_OVERFLOW: on the start cycle the enable has already
+  # reloaded the count and raised the interrupt.
   let at_start = TIMER_START_OVERFLOW and scheduled and
                  tim.gba.scheduler.cycles == tim.cycle_enabled[num]
   if not at_start:
@@ -79,16 +77,14 @@ proc get_current_tm(tim: Timer; num: int): uint16 =
     tim.gba.bus.volatile_read = true  # counts without events
     tim.gba.bus.volatile_pc = tim.gba.cpu.r[15]
     tim.gba.bus.dyn_vol = true
-    # Include un-ticked bus cycles: a DMA reading the timer runs inside event
-    # dispatch, where catch_up is suppressed, and each transfer must see the
-    # live count (AGS aging cartridge DMA-captures consecutive timer values).
+    # Include un-ticked bus cycles: a DMA reads inside event dispatch, where
+    # catch_up is suppressed, and each transfer must see the live count (AGS
+    # aging cartridge DMA-captures consecutive timer values).
     let now = tim.gba.scheduler.cycles + CycleCount(tim.gba.bus.cycles)
-    # cycle_enabled sits up to TIMER_START_DELAY in the future after an
-    # enable, and until then the count is still the one the enable found
-    # (tests/roms/payloads/tmrdma.s on an AGB SP: a DMA reading the timer a
-    # cycle after another DMA enabled it reads the old count under the new
-    # control bits; alyosha timer/timer_reset); on the start cycle it reads
-    # the reload.
+    # Before the start cycle (cycle_enabled, up to TIMER_START_DELAY ahead)
+    # the count is still the one the enable found; on it, the reload. AGB SP,
+    # payloads/tmrdma.s: a DMA reading a cycle after another DMA's enable gets
+    # the old count; pinned by alyosha timer/timer_reset.
     if now < tim.cycle_enabled[num]:
       return (if TIMER_OLD_COUNT: tim.tm_pre[num] else: tim.tm[num])
     if now == tim.cycle_enabled[num]: return tim.tm[num]
@@ -99,11 +95,9 @@ proc get_current_tm(tim: Timer; num: int): uint16 =
 
 proc write_now(tim: Timer): CycleCount {.inline.} =
   ## The cycle a register write lands on. A CPU store has synced the
-  ## scheduler to its access's end (bus.cycles is 0); a DMA's store runs
-  ## inside event dispatch with its burst's cycles so far still in
-  ## bus.cycles, and lands after them (tests/roms/payloads/dmadur.s on an AGB
-  ## SP: a one-word DMA that starts TM1 leaves it counting two cycles later
-  ## than the burst's grant).
+  ## scheduler (bus.cycles is 0); a DMA store lands after the burst cycles
+  ## still in bus.cycles (AGB SP, payloads/dmadur.s: a one-word DMA that
+  ## starts TM1 has it counting two cycles after the grant).
   tim.gba.scheduler.cycles + CycleCount(tim.gba.bus.cycles)
 
 proc update_tm(tim: Timer; num: int) =
@@ -117,7 +111,7 @@ proc `[]`*(tim: Timer; io_addr: uint32): uint8 =
   let num = int((io_addr and 0xF) div 4)
   if bit(io_addr, 1):
     # Bits 3-5 and the high byte are unused and read 0 (png183
-    # timer_check_count_up_presence writes 0x3C and reads back 0x04)
+    # timer_check_count_up_presence)
     read(cast[uint16](tim.tmcnt[num]) and 0x00C7'u16, io_addr and 1)
   else:
     let v = tim.get_current_tm(num)
@@ -150,10 +144,9 @@ proc `[]=`*(tim: Timer; io_addr: uint32; value: uint8) =
         # TM0CNT_H's count-up bit is unimplemented and reads back 0 (GBATEK,
         # "Timer Control").
         tim.tmcnt[0].cascade = false
-      # The count was snapshotted by update_tm; the transitions below only
-      # move the anchor and the overflow event. Cascade mode has no event
-      # (the timer below advances it); a cold enable anchors
-      # TIMER_START_DELAY ahead, cascade->prescaler anchors at the current cycle.
+      # update_tm has snapshotted the count; below only the anchor and the
+      # overflow event move. Cascade has no event; a cold enable anchors
+      # TIMER_START_DELAY ahead, cascade->prescaler at the current cycle.
       when defined(pftrace):
         if num == 0:
           if tim.tmcnt[0].enable and not was_enabled:
@@ -174,16 +167,12 @@ proc `[]=`*(tim: Timer; io_addr: uint32; value: uint8) =
       var start_ovf = false
       if tim.tmcnt[num].enable:
         if not was_enabled:
-          # A counter stopped at 0xFFFF ticks once more before the enable
+          # A count stopped at 0xFFFF ticks once more before the enable
           # reloads it, and that overflow raises the interrupt (alyosha
-          # timer/timer_disable test 2, prescaler 1; its readme). Only when
-          # the prescaler ticks on the enable's cycle: the mGBA suite's Timer
-          # count-up rows enable a /1024 timer over a 0xFFFF count and take
-          # no interrupt there. The tick is the timer's first, when it starts
-          # counting (TIMER_START_DELAY after the write): tests/roms/payloads/
-          # tmrffirq.s on an AGB SP takes that interrupt two cycles later
-          # than a raise on the write, by a clock started before it and by
-          # the reloaded count alike (tmrffff.s: the flag is set by then).
+          # timer/timer_disable test 2). Only if the prescaler ticks on the
+          # enable's cycle: the mGBA suite's /1024 count-up tests take none.
+          # The tick lands on the start cycle, TIMER_START_DELAY after the
+          # write (AGB SP, payloads/tmrffirq.s and tmrffff.s).
           let now = tim.write_now()
           if tim.tm[num] == 0xFFFF'u16 and not tim.tmcnt[num].cascade and
              ticks_between(now - 1, now, TIMER_PERIODS[tim.tmcnt[num].frequency]) > 0:
@@ -208,18 +197,16 @@ proc `[]=`*(tim: Timer; io_addr: uint32; value: uint8) =
             tim.gba.apu.dma_channels.fifo_window_at_start(num, first)
       elif was_enabled:
         when TIMER_STOP_DELAY > 0:
-          # The count goes on for a cycle after the write that stops it
-          # (tests/roms/payloads/tmrw.s on an AGB SP: a read, three NOPs and
-          # a stop freeze the count one higher than a stop-at-the-write gives,
-          # where the read itself agrees).
+          # The count goes on for a cycle after the stopping write (AGB SP,
+          # payloads/tmrw.s: the frozen count is one higher than a stop at
+          # the write gives).
           if not was_cascade:
             let now = tim.write_now()
             let extra = ticks_between(now, now + CycleCount(TIMER_STOP_DELAY), old_period)
             if extra > 0:
               if tim.tm[num] == 0xFFFF'u16:
                 # That cycle runs under the old control bits: an overflow on
-                # it still raises the interrupt (alyosha irq/IF_Timer,
-                # timer/timer_disable).
+                # it still raises the interrupt (alyosha irq/IF_Timer).
                 let new_ctrl = tim.tmcnt[num]
                 tim.tmcnt[num] = old_ctrl
                 tim.timer_overflow_event(num, scheduled = false)

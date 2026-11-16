@@ -14,34 +14,24 @@ export rtc_calendar
 import storage_chip
 export storage_chip
 
-# In an optimised build (-d:release, -d:danger) the core is quirky: a call
-# does not test Nim's error flag afterwards. With goto exceptions every call
-# to a proc that may raise (and Defects count, so every call) is followed by
-# a load and a branch on that flag, even with the checks off; dropping them
-# is 3-4 % on the web build and ~10 % of the host instructions natively.
-# The cost: a check that fails in the core still raises, but the code goes
-# on (the out-of-range access included) until the first caller outside it
-# tests the flag, so a wild index is a SIGSEGV instead of an IndexDefect.
-# The core's own state cannot make one; a loaded state is the outside input
-# that could, which is why the loader range-checks every field the core
-# indexes with (savestate.nim; tools/statefuzz.nim finds the ones it
-# misses, built with -d:gba_quirky=false so that a fault is reported where
-# it happens). A proc that catches can't be quirky, and the procs that load
-# files and states are not, so a raise there (a missing ROM, a damaged
-# state) still stops them at once: those are the `quirky: off` pushes below
-# and in bus.nim.
+# Optimised builds (-d:release, -d:danger) make the core quirky: no call
+# tests Nim's error flag afterwards (with goto exceptions every call does,
+# Defects included). Worth 3-4 % on web, ~10 % of host instructions natively.
+# Cost: a failed check runs on until a caller outside the core tests the
+# flag, so a wild index is a SIGSEGV, not an IndexDefect. Only a loaded state
+# can cause one, so the loader range-checks every indexed field (savestate.nim;
+# tools/statefuzz.nim, built -d:gba_quirky=false, finds misses). Procs that
+# catch, and the file/state loaders, stay `quirky: off` (below and in bus.nim).
 const gba_quirky {.booldefine.} = defined(release) or defined(danger)
 const QUIRKY_CORE = gba_quirky
 when QUIRKY_CORE:
   {.push quirky: on.}
 
 when defined(pftrace):
-  # -d:pftrace: dump ROM-bus activity inside each mGBA-suite Timing window
-  # (between TM0's enable and disable writes) that contained a DMA grant; this
-  # is how bus.rom_access_cycles' hand-off predicate is re-derived. Every call
-  # site is `when defined(pftrace)`, so a normal build pays nothing. With
-  # -d:pftrace_all too, every window prints, flushed at each TM0 read (the
-  # alyosha timing rows read a running timer and never disable it).
+  # -d:pftrace (off by default): dump ROM-bus activity in each mGBA-suite
+  # Timing window (TM0 enable to disable) that holds a DMA grant, to re-derive
+  # bus.rom_access_cycles' hand-off predicate. -d:pftrace_all prints every
+  # window, flushed at each TM0 read (alyosha timing tests never disable TM0).
   var pft_on*: bool
   var pft_dma*: bool
 
@@ -51,9 +41,9 @@ when defined(pftrace):
     if pft_on and pft_lines.len < 4096: pft_lines.add(s)
 
 when defined(itrace):
-  # -d:itrace: per-instruction trace to stderr, for chasing a cycle through a
-  # test ROM. Starts when the PC first enters [ITRACE_LO, ITRACE_HI] (hex)
-  # and runs ITRACE_N lines; timer, interrupt and DMA events interleave.
+  # -d:itrace (off by default): per-instruction trace to stderr from the first
+  # PC in [ITRACE_LO, ITRACE_HI] (hex) for ITRACE_N lines, with timer, IRQ and
+  # DMA events interleaved.
   var it_lo*, it_hi*: uint32
   var it_left* = -1
   var it_skip* = 0
@@ -73,10 +63,9 @@ when defined(bgtrace):
   var bgtrace_n*: int
 
 when defined(dmacount):
-  # -d:dmacount: per-frame H-blank DMA grant census. 160 visible lines means
-  # 160 grants per armed channel; a repeating channel whose source pointer is
-  # a per-frame accumulator (DKC2's per-line BG1 scroll table) drifts for the
-  # rest of the frame on any miscount.
+  # -d:dmacount (off by default): per-frame H-blank DMA grant census; expect
+  # 160 per armed channel. A miscount drifts a repeating channel's source for
+  # the rest of the frame (DKC2's per-line BG1 scroll table).
   var hdma_grants*: array[4, int]
   var hdma_frame*: int
 
@@ -87,8 +76,6 @@ include reg
 const CONT_WORDS* = 40
 # -d:CONTENTION=false: no renderer contention (every access as in blank)
 const CONTENTION* {.booldefine.} = true
-
-# All GBA types in one block for forward-reference support.
 
 const WL_VERDICT_SLOTS* = 256   # judge_loop's direct-mapped verdicts
 const DYN_REST_SLOTS* = 256   # dyn_loop's direct-mapped rest (waitloop.nim)
@@ -104,32 +91,28 @@ type
     memory*:    seq[byte]
     save_path*: string
     dirty*:     bool
-    # Why the last battery write failed ("" once one lands), and whether the
-    # frontend has yet to tell the player about this run of failures: it
-    # clears `save_error_new`, write_save sets it again only after a write
-    # has succeeded in between.
+    # Why the last battery write failed ("" once one lands). save_error_new:
+    # not yet shown; the frontend clears it, write_save sets it again only
+    # after a success in between.
     save_error*:     string
     save_error_new*: bool
-    # Battery-file RTC trailer (rtc_calendar.nim). rtc_cart: the ROM carries
-    # the RTC library (storage.nim). `trailer` holds the 16 bytes found after
-    # the chip data when the file had them; `rtc` is set on RTC carts and
-    # supplies a fresh trailer on every write.
+    # Battery-file RTC trailer (rtc_calendar.nim). rtc_cart: the ROM has the
+    # RTC library (storage.nim). `trailer`: the 16 bytes after the chip data,
+    # if present. `rtc` (RTC carts) supplies a fresh trailer on every write.
     rtc_cart*:    bool
     has_trailer*: bool
     trailer*:     array[16, byte]
     rtc* {.cursor.}: RTC
-    # EEPROM only: the battery file's bytes from 0x200 to its chip data's end
-    # (at most 0x2000), as loaded. A 4 Kbit chip uses the first 0x200; most
-    # emulators write 8 KB files for it anyway, and write_save puts these
-    # bytes back after the chip's so playing never shortens such a file.
+    # EEPROM only: the loaded file's bytes from 0x200 up to 0x2000. A 4 Kbit
+    # chip uses 0x200, but 8 KB files are common; write_save puts these back
+    # so playing never shortens such a file.
     eeprom_file_tail*: seq[byte]
-    # The chips the ROM's library strings leave open (storage_chip.nim
-    # storage_candidates); empty when they name one. Kept by the chip the
-    # first access settles on, so a save state from either side of that
-    # access still loads (savestate.nim).
+    # Chips the ROM's library strings leave open (storage_chip.nim
+    # storage_candidates); empty when they name one. Kept after the first
+    # access settles the chip, so states from before it still load.
     candidates*: set[StorageType]
-    # The ROM names no backup library at all (storage_chip.nim
-    # names_no_save_library): its first save access chooses outright.
+    # No backup library named (storage_chip.nim names_no_save_library): the
+    # first save access chooses outright.
     no_save_library*: bool
   Storage* = ref StorageObj
 
@@ -137,13 +120,12 @@ type
 
   NoBackup* = ref object of StorageObj   # empty memory, no .sav
 
-  # A cart whose chip the game's save-memory accesses choose
-  # (storage/pending.nim): no battery file yet, and the SRAM region answers
-  # as no chip until then. It replaces itself in `gba.storage`.
+  # Chip not yet chosen by the game's save accesses (storage/pending.nim): no
+  # battery file, SRAM region reads as no chip. Replaces itself in gba.storage.
   PendingStorage* = ref object of StorageObj
     gba_ref* {.cursor.}: GBA
-    # CPU reads of the SRAM region so far with no write among them (capped
-    # at SRAM_LOAD_READS); -1 once a write came first. In the save state.
+    # SRAM-region reads with no write yet (capped at SRAM_LOAD_READS); -1 once
+    # a write came first. In the save state.
     sram_reads*: int
     # Where the EEPROM window starts: 0DFFFF00h on a ROM over 16 MB, whose
     # lower 0x0D addresses are ROM (GBATEK "GBA Cart Backup EEPROM")
@@ -175,8 +157,8 @@ type
     ignored_reads*: int
     read_bits*:     int
     wrote_bits*:    int
-    # Absolute cycle until which the chip is busy programming after a write;
-    # rebased by end_frame. Not serialized (reset to 0 on state load).
+    # Absolute cycle the chip stays busy after a write until; rebased by
+    # end_frame. Not serialized (0 after a state load).
     busy_until*:    CycleCount
 
   Interrupts* = ref object
@@ -184,32 +166,31 @@ type
     reg_ie*: InterruptReg
     reg_if*: InterruptReg
     ime*:    bool
-    # IRQ recognition is held off until this cycle after a register write
-    # opens the last gate on a parked IF (IRQ_GATE_DELAY, interrupts.nim).
-    # Rebased by end_frame; in the state's in-flight section (rev 9).
+    # IRQ recognition held off until this cycle after a write opens the last
+    # gate on a parked IF (IRQ_GATE_DELAY, interrupts.nim). Rebased by
+    # end_frame; in the state's in-flight section.
     gate_open_at*: CycleCount
     # A timer interrupt in the synchroniser (raise_synced, interrupts.nim):
     # raised at pipe_at (pipe_new: the IF bits it set), IE & IF sampled into
     # pipe_bits after that cycle's register writes, recognised at pipe_due.
-    # Rebased by end_frame; in the state's in-flight section (rev 9), as is
-    # the stall span below.
+    # Rebased by end_frame; in the state's in-flight section, as is the
+    # stall span below.
     pipe_raised*:  uint16
     pipe_new*:     uint16
     pipe_bits*:    uint16
     pipe_sampled*: bool
     pipe_at*:      CycleCount
     pipe_due*:     CycleCount
-    # IRQ_PIPE_PER_SOURCE: a raise that comes due after the one in flight
-    # waits for its own cycle here instead of riding on it (pipe2_due is
-    # always pipe2_at + IRQ_SYNC_DELAY). Rebased by end_frame; rev 12.
+    # IRQ_PIPE_PER_SOURCE: a raise due after the one in flight waits here for
+    # its own cycle (pipe2_due = pipe2_at + IRQ_SYNC_DELAY). Rebased by
+    # end_frame.
     pipe2_raised*: uint16
     pipe2_new*:    uint16
     pipe2_at*:     CycleCount
     pipe2_due*:    CycleCount
-    # The span the last DMA burst stalled the running CPU (dma.run_pending),
-    # for the synchroniser, which stops with it (DMA_STALLS_IRQ_SYNC).
-    # stall_pushed: the burst delayed a recognition already under way.
-    # Transient like the pipe; rebased by end_frame.
+    # Span the last DMA burst stalled the CPU (dma.run_pending); the
+    # synchroniser stops with it (DMA_STALLS_IRQ_SYNC). stall_pushed: the
+    # burst delayed a recognition under way. Rebased by end_frame.
     stall_from*:   CycleCount
     stall_to*:     CycleCount
     stall_pushed*: bool
@@ -230,10 +211,10 @@ type
     waitcnt*: WAITCNT
     # POSTFLG (0x04000300): boot value 1 at ROM entry (gbaedge IDENT page).
     postflg*: uint8
-    # Internal memory control (0x04000800, mirrored every 64K): the EWRAM
-    # wait field, the board WRAM enable (bit 5) and the swap (bit 0) are live
-    # (bus.update_waitcnt). Reset value 0x0D000020 (gbaedge IDENT page). Both
-    # fields are in the state's in-flight section (rev 9).
+    # Internal memory control (0x04000800, mirrored every 64K): EWRAM wait,
+    # board WRAM enable (bit 5) and swap (bit 0) are live (bus.update_waitcnt).
+    # Reset 0x0D000020 (gbaedge IDENT page). Both fields are in the state's
+    # in-flight section.
     memctrl*: uint32
 
   Timer* = ref object
@@ -242,18 +223,17 @@ type
     tmd*:          array[4, uint16]
     tm*:           array[4, uint16]
     cycle_enabled*: array[4, CycleCount]
-    # The count a cold enable found: reads before counting starts still see
-    # it (TIMER_START_DELAY). With the reload latch below, in the state's
-    # in-flight section (rev 9).
+    # The count a cold enable found: reads before counting starts see it
+    # (TIMER_START_DELAY). In the state's in-flight section, as is the reload
+    # latch below.
     tm_pre*:       array[4, uint16]
     # Reload writes latch one cycle late relative to an overflow: an overflow
     # on the cycle right after the write still reloads the old value
     tmd_prev*:        array[4, uint16]
     tmd_write_cycle*: array[4, CycleCount]
 
-  # Link-cable driver. The base methods (serial.nim) are the no-cable
-  # behaviour, so the base type is the null driver. Frontend configuration,
-  # never serialized.
+  # Link-cable driver; the base type (serial.nim) is the no-cable driver.
+  # Frontend configuration, never serialized.
   SioDriver* = ref object of RootObj
 
   Serial* = ref object
@@ -293,36 +273,32 @@ type
     count*:     array[4, uint16]
     # Latch per channel: https://github.com/mgba-emu/mgba/issues/2105
     latch*:     array[4, uint32]
-    # Scheduler cycle of the last FIFO transfer on channels 1/2 (mp2k.nim
-    # measure_latency dates a ring slot's crossing from it)
+    # Scheduler cycle of the last FIFO transfer on channels 1/2 (read by
+    # mp2k.nim measure_latency)
     fifo_xfer_cycle*: array[4, int64]
-    # Priority arbitration: bitmask of channels with a latched request, and
-    # the channel of the innermost burst in progress (4 = none). A pending
-    # channel runs only while its number is below current_priority; a
-    # higher-priority request preempts via a nested run_pending. Always 0/4
-    # between instructions, so not serialized.
+    # Priority arbitration: bitmask of latched requests; current_priority is
+    # the innermost burst's channel (4 = none). A pending channel runs only
+    # if its number is below current_priority, preempting via a nested
+    # run_pending. Always 0/4 between instructions, so not serialized.
     pending*:          uint8
     # DMA_PENDING_CHAIN: the requests already latched when the burst in
     # progress was granted (run_pending; transient, not serialized)
     pending_at_grant*: uint8
     # When each armed immediate channel requests the bus (DMA_START_DELAY
-    # after its enable write). Only read within that delay; in the state's
-    # in-flight section (rev 9).
+    # after its enable write). In the state's in-flight section.
     imm_due*:          array[4, CycleCount]
     # IMM_NEEDS_EDGE (dma.nim): channels switched to immediate timing while
-    # enabled, with no 0 -> 1 edge, which request nothing. Cleared by the
-    # next CNT_H store that disables or edge-enables the channel. Saved in
-    # the spare high nibble of the DMA section's first FIFO hand-back byte.
+    # enabled (no 0 -> 1 edge); they request nothing until a CNT_H store
+    # disables or edge-enables them. Saved in the spare high nibble of the
+    # DMA section's first FIFO hand-back byte.
     imm_blocked*:      uint8
-    # HDMA_DROP_BUSY: until when each channel's burst holds the bus (its
-    # last write and the hand-back; high(CycleCount) while it runs). An
-    # H-blank request earlier than this is lost. Never ahead of the clock
-    # between instructions, so not serialized: a load clears it.
+    # HDMA_DROP_BUSY: until when each channel's burst holds the bus (last
+    # write plus hand-back; high(CycleCount) while running). An H-blank
+    # request before this is lost. Not serialized (never ahead of the clock
+    # between instructions).
     busy_until*:       array[4, CycleCount]
     # FIFO_LEVEL_AT_OVERFLOW: the cycle each word of the last sound-FIFO burst
-    # on channels 1/2 was written (index channel - 1). Only compared with an
-    # overflow inside that burst; not serialized (a load clears it), as
-    # busy_until.
+    # on channels 1/2 was written (index channel - 1). Not serialized.
     fifo_word_at*:     array[2, array[4, CycleCount]]
     # FIFO_HANDBACK_CHAIN (index channel - 1): 1 = a request landed in the
     # burst's hand-back cycle and is granted its first read; 2 = that word
@@ -341,9 +317,9 @@ type
     irq_was_set*:      bool
     current_priority*: int
     # DMA3 video-capture frame latch: set at line 2, cleared with the enable
-    # bit at line 162; a channel armed mid-frame waits for the next frame's
-    # line 2 (gbaedge CAPDMA page). In the state's in-flight section (rev 9):
-    # a capture runs across the frame boundary.
+    # bit at line 162; a channel armed mid-frame waits for the next line 2
+    # (gbaedge CAPDMA page). In the state's in-flight section: a capture
+    # spans the frame boundary.
     video_active*:     bool
   RtcState* = enum
     rtcWaiting, rtcCommand, rtcReading, rtcWriting,
@@ -370,10 +346,9 @@ type
     deterministic*: bool
     epoch*:         int64   # unix seconds; the frozen clock when deterministic
     # The chip's own clock (rtc.nim "Clock model"): calendar seconds = source
-    # unix seconds + bias. Until the game writes the clock or a battery file
-    # supplies one (bias_set false) the RTC shows host local time, or UTC in
-    # deterministic mode. wday_bias shifts the weekday counter from the
-    # date's own weekday (the chip's septenary counter is set independently).
+    # unix seconds + bias. While bias_set is false the RTC shows host local
+    # time (UTC when deterministic). wday_bias offsets the weekday counter,
+    # which the chip sets independently of the date.
     bias*:          int64
     bias_set*:      bool
     bias_host*:     bool   # bias came from a trailer that recorded host time
@@ -391,21 +366,20 @@ type
     direction*:   uint8
     allow_reads*: bool
     rtc*:         RTC
-    # Z-axis gyro (WarioWare: Twisted!, game code RZW*): a serial ADC on the
-    # RTC pins, never coexisting with an RTC (GBATEK "GBA Cart Gyro Sensor").
-    # 16-bit shift register = 4 zeros + 12-bit sample, MSB out per falling
-    # clock edge. gyro_z is the live frontend input (-1..1, CW positive).
+    # Z-axis gyro (WarioWare: Twisted!, RZW*): a serial ADC on the RTC pins,
+    # never with an RTC (GBATEK "GBA Cart Gyro Sensor"). Shift register = 4
+    # zeros + 12-bit sample, MSB out per falling clock edge. gyro_z: live
+    # frontend input (-1..1, CW positive).
     gyro_present*: bool
     gyro_z*:       float
     gyro_sample*:  uint16
     gyro_clock*:   bool
     gyro_out*:     uint8
     # Solar sensor (Boktai 1/2, Shin Bokura no Taiyou; GBATEK "GBA Cart
-    # Solar Sensor"), sharing the port with the RTC: bit 0 clocks a counter,
-    # bit 1 resets it, bit 3 (input) reads 1 once the counter reaches the
-    # light level. solar_level is the live frontend input: 0xE8 is dark,
-    # smaller is brighter (GBATEK: ~0x50 in direct sunlight). The counter is
-    # not serialized: a state loaded mid-measurement misreads one sample.
+    # Solar Sensor"), shares the port with the RTC: bit 0 clocks a counter,
+    # bit 1 resets it, bit 3 reads 1 once it reaches the light level.
+    # solar_level: live input, 0xE8 dark, smaller brighter (~0x50 direct
+    # sun). Counter not serialized: a mid-measurement load misreads once.
     solar_present*: bool
     solar_level*:   uint8
     solar_counter*: uint8
@@ -416,36 +390,34 @@ type
     # Cached: avoids a double pointer-chase on the per-fetch/per-MMIO paths
     sched*:      Scheduler
     cycles*:     int
-    # Cycles already handed to the scheduler mid-instruction by catch_up;
-    # cpu.tick folds them into the instruction total and resets this
+    # Cycles handed to the scheduler mid-instruction by catch_up; cpu.tick
+    # folds them into the instruction total and resets this
     synced*:     int
     bios*:       seq[byte]
-    # No BIOS file loaded: `bios` holds the HLE stub. HLE SWI paths that jump
-    # into stub code check this so they stay inert under a real BIOS.
+    # No BIOS file: `bios` holds the HLE stub. HLE SWI paths that jump into
+    # stub code check this, staying inert under a real BIOS.
     stub_bios*:  bool
     # MP2K HLE sound window (mp2k.nim "Runtime detection"): a work-RAM store
     # with (address - snd_wbase) < snd_wlen is offered to mp2k_sound_write
     # before it lands. snd_wlen 0 = closed.
     snd_wbase*:  uint32
     snd_wlen*:   uint32
-    # True only during a genuine byte-sized store (strb / DMA byte). Wider IO
-    # writes decompose into byte writes, and a few registers treat real byte
-    # stores differently (gbaedge IOBYTE/DMAEDGE pages). Not serialized.
+    # True only during a real byte store (strb / DMA byte); wider IO writes
+    # decompose into byte writes, and some registers treat real byte stores
+    # differently (gbaedge IOBYTE/DMAEDGE pages). Not serialized.
     byte_io_write*: bool
     wram_board*: seq[byte]
     wram_chip*:  seq[byte]
-    # What 02000000-02FFFFFF reads and writes: the 256K board WRAM, or with
-    # MEMCNT (0x04000800) bit 5 clear the 32K chip WRAM, at chip WRAM timing.
-    # Derived from mmio.memctrl in update_waitcnt; a raw pointer, so the
-    # switch costs the hot path nothing.
+    # What 02000000-02FFFFFF maps: the 256K board WRAM, or with MEMCNT
+    # (0x04000800) bit 5 clear the 32K chip WRAM at chip WRAM timing. Set from
+    # mmio.memctrl in update_waitcnt; a raw pointer keeps the hot path free.
     ewram_off*:  bool
     ew_ptr*:     ptr UncheckedArray[byte]
     ew_mask*:    uint32
     gpio*:       GPIO
     # Tilt sensor (Yoshi's Universal Gravitation, Koro Koro Puzzle): byte
     # registers at 0x0E008000-0x0E008500 (GBATEK "GBA Cart Tilt Sensor").
-    # Latches are per-frame samples, not serialized; tilt_in_* are the live
-    # frontend inputs, -1..1.
+    # Latches are per-frame, not serialized; tilt_in_*: live inputs, -1..1.
     tilt_present*: bool
     tilt_armed*:   bool
     tilt_x*:       uint16
@@ -453,14 +425,13 @@ type
     tilt_in_x*:    float
     tilt_in_y*:    float
     bios_latch*: uint32
-    # Instruction-fetch fast path: pointer + mask + waitstates for the page PC
-    # executes from. Buffers never move and ROM is padded to the full 32 MB
-    # mirror, so the pointer stays valid; RAM code writes are visible because
-    # fetches read the live buffer.
+    # Instruction-fetch fast path: pointer + mask + waitstates for PC's page.
+    # Buffers never move and ROM is padded to the full 32 MB mirror, so the
+    # pointer stays valid; fetches read the live buffer, so code writes show.
     fetch_page*: uint32
     # What the fetch fast path compares against: fetch_page, or invalid to
-    # force the miss path without losing which page the CPU fetches from
-    # (IRQ_LAST_WAITS's window; the prefetch logic reads fetch_page).
+    # force the miss path while keeping fetch_page (IRQ_LAST_WAITS's window;
+    # the prefetch logic reads fetch_page).
     fetch_key*: uint32
     fetch_mask*: uint32
     fetch_c16*:  int
@@ -477,37 +448,36 @@ type
     wait32_n*: array[16, int8]
     wait32_s*: array[16, int8]
     prefetch_on*: bool
-    # Per-page bitmap of the prefetch-hand-off stall (rom_access_cycles): bit
-    # `e` is set when a prefetch halfword started `e` cycles ago is in its
-    # final, uninterruptible cycle. Precomputed from wait16_s so the data
-    # path needs a shift, not a division; the buffer is full by e = 8*s <= 72,
-    # so only the s = 9 tail needs the modulo fallback.
+    # Per-page bitmap of the prefetch hand-off stall (rom_access_cycles): bit
+    # `e` set when a prefetch halfword started `e` cycles ago is in its final,
+    # uninterruptible cycle. Precomputed from wait16_s (a shift, not a
+    # division); the buffer is full by e = 8*s <= 72, so only s = 9 needs the
+    # modulo fallback.
     pf_commit*: array[16, uint64]
     # ROM bus bookkeeping: the address that would continue the current burst,
     # and the absolute cycle the ROM bus went idle (prefetch credit accrues
     # from there while the CPU runs off other memory)
     rom_next_addr*:  uint32
     rom_free_since*: CycleCount
-    # Prefetch buffer states the rom_free_since credit cannot express
-    # (rom_access_cycles). pf_paused: the buffer filled and the prefetcher
-    # stopped until the CPU drains it; pf_count halfwords are left, and at 0
-    # the next fetch is the CPU's own, nonsequential. pf_running: the
-    # prefetcher has had a free bus cycle since the CPU's last own ROM
-    # access; until it has, a branch to the next halfword is nonsequential.
-    # rom_ahead: how far the console's fetch address leads the executing
-    # instruction's, which is where dingbat fetches (8 ARM, 4 Thumb).
+    # Prefetch states the rom_free_since credit cannot express
+    # (rom_access_cycles). pf_paused: buffer full, prefetcher stopped until
+    # drained; pf_count halfwords left, and at 0 the next fetch is the CPU's
+    # own, nonsequential. pf_running: the prefetcher has had a free bus cycle
+    # since the CPU's last ROM access; until then a branch to the next
+    # halfword is nonsequential. rom_ahead: how far the console's fetch
+    # address leads the executing instruction's (8 ARM, 4 Thumb).
     pf_paused*:      bool
     pf_running*:     bool
     pf_count*:       int8
     rom_ahead*:      int8
-    # A read whose value changes with time and no scheduler event (a running
-    # timer's count, a PSG status, an EEPROM ready poll) happened since the
-    # waitloop detector last looked; such a loop is never skipped.
+    # Since the waitloop detector last looked, a read whose value changes with
+    # no scheduler event (running timer, PSG status, EEPROM ready poll)
+    # happened; such a loop is never skipped.
     volatile_read*:  bool
     volatile_pc*:    uint32   # r15 at the latest such read
-    # The dynamic loop check's own view since it last armed (waitloop.nim,
-    # dyn_loop): the IO classes read, a volatile read, a contended access,
-    # and stores that changed memory (counted only while track_changes)
+    # dyn_loop's view since it last armed (waitloop.nim): IO classes read, a
+    # volatile read, a contended access, and memory-changing stores (counted
+    # only while track_changes)
     dyn_io*:         uint8
     dyn_vol*:        bool
     dyn_cont*:       bool
@@ -522,49 +492,44 @@ type
     # since the waitloop detector last looked
     contended_access*: bool
     # Second burst tracker for DMA: src and dst streams interleave on the ROM
-    # bus yet each stays sequential, without needing back-to-back bus cycles
+    # bus yet each stays sequential
     rom_next_addr2*: uint32
     dma_active*:     bool
-    # SWP holds the bus from its read to its write: DMA requests granted in
-    # between wait for the write (arm_single_data_swap). Never set between
-    # instructions, so not serialized.
+    # SWP holds the bus from its read to its write: DMA granted in between
+    # waits for the write (arm_single_data_swap). Not serialized.
     swp_lock*:       bool
     # Prefetch hand-off to a DMA burst: rom_free_since is on the CPU's bus
-    # clock while a granted DMA runs on the event clock (tick_slow rewinds to
-    # the due event's cycle), so the prefetcher's phase is counted forward
-    # from the grant cycle captured here instead. Seeded and consumed within
-    # one burst; not serialized.
+    # clock but a granted DMA runs on the event clock (tick_slow rewinds), so
+    # the prefetcher's phase counts from this grant cycle instead. Lives
+    # within one burst; not serialized.
     dma_grant_now*:  CycleCount
     dma_first_rom*:  bool
-    # PF_WAIT_UNDER_BURST / FIFO_FETCH_GATE: the last gamepak opcode fetch that waited on the
-    # prefetcher, [from, to) on the bus clock. Read only by a burst granted
-    # inside it (the same instruction); not serialized.
+    # PF_WAIT_UNDER_BURST / FIFO_FETCH_GATE: the last gamepak opcode fetch that
+    # waited on the prefetcher, [from, to) on the bus clock. Read only by a
+    # burst granted inside it; not serialized.
     pf_wait_from*:   CycleCount
     pf_wait_to*:     CycleCount
     # True while the CPU fetch stream is unbroken: sequential ROM fetches skip
     # the absolute-time bookkeeping. Any other cycle consumer must "cool" the
     # stream (recording rom_free_since) first.
     rom_hot*:        bool
-    # True while a delayed immediate DMA is scheduled: data accesses catch the
-    # scheduler up so the DMA preempts the CPU at its exact start cycle (a
-    # read one instruction after the enable must see the DMA'd data)
-    # Every data access syncs the scheduler while either bit is set: bit 0 an
-    # immediate DMA is armed, bit 1 a PPU-timed DMA request is close
-    # (DMA_ACCESS_WINDOW). One test on the data path and none on fetches: the
-    # window invalidates the fetch cache and rides its miss path. Bit 2 (with
-    # bit 0): the armed immediate DMA's request found the CPU with an access
-    # in flight and waits a cycle for it (IMM_IDLE_GRANT). Bit 3: an
-    # interrupt is on its way to the CPU, whose accesses record where their
-    # wait states lie (IRQ_LAST_WAITS). Bit 4: a sound FIFO's refill request
-    # is close; data accesses and internal cycles sync,
-    # fetches stay on the fast path (FIFO_DMA_WINDOW). Bit 5 (with bit 4): the
-    # refill was granted; the CPU's next internal cycles close the window.
-    # Bit 6 (SB_SWAP): MEMCNT's swap bit is set, and accesses to 00000000-
-    # 03FFFFFF go through the swapped map (bus.nim, swap_read_word); derived
-    # from mmio.memctrl in update_waitcnt, never serialized.
+    # Data accesses sync the scheduler while bits 0/1 are set, so a DMA
+    # preempts the CPU at its exact cycle (a read one instruction after an
+    # enable sees the DMA'd data). One test on the data path, none on
+    # fetches: the window invalidates the fetch cache and rides its miss path.
+    # Bit 0: an immediate DMA is armed. Bit 1: a PPU-timed DMA request is
+    # close (DMA_ACCESS_WINDOW). Bit 2 (with 0): the armed request found an
+    # access in flight and waits a cycle (IMM_IDLE_GRANT). Bit 3: an IRQ is
+    # on its way; accesses record where their wait states lie
+    # (IRQ_LAST_WAITS). Bit 4: a sound FIFO refill is close; data accesses
+    # and internal cycles sync, fetches stay fast (FIFO_DMA_WINDOW). Bit 5
+    # (with 4): refill granted; the CPU's next internal cycles close the
+    # window. Bit 6 (SB_SWAP): MEMCNT swap set, 00000000-03FFFFFF go through
+    # the swapped map (bus.nim swap_read_word); set from mmio.memctrl in
+    # update_waitcnt, never serialized.
     sync_bits*: uint8
-    # A fetch is going through the swapped map: it reads the BIOS whoever
-    # asks (transient).
+    # A fetch is going through the swapped map: it reads the BIOS regardless
+    # of PC (transient).
     swap_fetching*: bool
     # IRQ_LAST_WAITS, recorded while bit 3 is set: where the last CPU access
     # ended and how many of its cycles were wait states.
@@ -575,8 +540,8 @@ type
     # IMM_ACCESS_WAIT: an immediate DMA's request landed in the CPU access
     # being synced; the accessor grants it once the access has taken effect.
     imm_post*: bool
-    # and one that came due in a load or exactly as an access ended: the next CPU step
-    # at that cycle hands over (an internal cycle through IMM_IDLE_GRANT's
+    # ... or one due in a load or exactly as an access ended: the next CPU
+    # step at that cycle hands over (an internal cycle via IMM_IDLE_GRANT's
     # path, a data access before it starts; a fetch leaves it to the
     # one-cycle retry).
     imm_pre*: bool
@@ -588,37 +553,34 @@ type
     dma_before_access*: bool        # FIFO_DMA_WINDOW: the grant came first; nothing ran under it
     dma_idle_edge*: bool            # FIFO_DMA_WINDOW: internal cycles ended on the grant; the last ran under it
     idle_until*: CycleCount         # end of the internal cycles a window sync is inside
-    # IMM_IDLE_GRANT: the internal cycles the CPU charged last while an
-    # immediate DMA was armed, [imm_idle_from, imm_idle_until). Only read
-    # within DMA_START_DELAY of the arming write; not serialized.
+    # IMM_IDLE_GRANT: the CPU's last internal cycles while an immediate DMA
+    # was armed, [from, until). Read only within DMA_START_DELAY of the
+    # arming write; not serialized.
     imm_idle_from*: CycleCount
     imm_idle_until*: CycleCount
     imm_at*: CycleCount             # when the armed immediate DMA requests the bus
     in_catch_up*: bool              # a dispatch from inside an access's sync (catch_up_slow)
     dma_end_at*: CycleCount         # when the last CPU-interrupting burst let go
     dma_held*: int                  # and how long it had held the bus
-    # Running total of the cycles DMA bursts stopped the CPU for: the HLE
-    # BIOS's routine-body cost models measure their own time net of it
-    # (hle_bios.nim hle_body_now). A difference counter only; not serialized.
+    # Running total of cycles DMA stalled the CPU; HLE BIOS cost models time
+    # themselves net of it (hle_bios.nim hle_body_now). Differences only; not
+    # serialized.
     dma_stall_total*: int64
-    # Open-bus latch left by DMA: the last word a DMA moved stays on the data
-    # bus until the CPU's next bus access replaces it, so an unmapped read
-    # sees that word only if it is the first access after the burst
-    # (read_open_bus_value). dma_request_at is the cycle the latest burst was
-    # requested at. Hardware: gbaedge DMAOPENBUS and HDMAPHASE on AGB SP
-    # (docs/hwprobe-results-agb.md sessions 5-6). mGBA suite Misc "DMA
-    # Prefetch Read" and three games need the word: Hello Kitty Collection:
-    # Miracle Fashion Maker's boot (a sound-FIFO DMA's final zero word) and
-    # Famicom Mini Metroid, whose table walk off the end of a ROM table stops
-    # only on an H-blank DMA's word.
+    # Open-bus latch left by DMA: the last word moved stays on the data bus
+    # until the CPU's next access, so only the first access after the burst
+    # can read it unmapped (read_open_bus_value). dma_request_at: when the
+    # latest burst was requested. AGB SP, gbaedge DMAOPENBUS and HDMAPHASE
+    # (docs/hwprobe-results-agb.md sessions 5-6); mGBA suite Misc "DMA
+    # Prefetch Read". Games: Hello Kitty Collection: Miracle Fashion Maker's
+    # boot (a sound-FIFO DMA's final zero) and Famicom Mini Metroid (a ROM
+    # table walk stops only on an H-blank DMA's word).
     dma_open_bus*:       uint32
-    # The HLE SoundDriverMain's pass (hle_sound.nim sd_mix) computes the
-    # pcmBuffer slot at once, but the real routine writes it byte by byte
-    # over the pass: a sound DMA that drains that slot meanwhile (the first
-    # passes after a start, when the ring has no lead) reads what the real
-    # routine had written by then. The pass leaves its writes here, timed
-    # from sd_tw_start (bus.nim sd_tw_word); a FIFO DMA read in the window
-    # gets the byte as of its cycle. Not serialized: cleared on state load.
+    # HLE SoundDriverMain (hle_sound.nim sd_mix) fills a pcmBuffer slot at
+    # once; the real routine writes it byte by byte, and a sound DMA draining
+    # that slot meanwhile (first passes after a start, ring has no lead) sees
+    # the partial bytes. The pass leaves its writes here, timed from
+    # sd_tw_start (bus.nim sd_tw_word); a FIFO DMA read in the window gets
+    # the byte as of its cycle. Not serialized.
     sd_tw_active*:       bool
     sd_tw_start*:        CycleCount
     sd_tw_a0*:           uint32
@@ -630,9 +592,8 @@ type
     sd_tw_t*:            seq[int32]     # per write: cycle from sd_tw_start
     sd_tw_v*:            seq[uint8]     # per write: the byte's new value
     # DMA_READS_CPU_BUS: the CPU's last synced data load (address, size in
-    # bytes, and r15 while it ran); 0 = none. A burst's first unmapped read
-    # sees that load's value if the CPU has fetched nothing since. Written
-    # only on the syncing access path; not serialized.
+    # bytes, r15); 0 = none. A burst's first unmapped read sees its value if
+    # the CPU has fetched nothing since. Syncing path only; not serialized.
     load_addr*:          uint32
     load_size*:          int
     load_pc*:            uint32
@@ -650,35 +611,28 @@ type
     # DMA_READS_IO_LOAD: the value the CPU's last I/O register load read
     load_io*:            uint32
     load_io_ok*:         bool  # load_io is that load's (its read has happened)
-    # DMA_SEES_REFILL_FETCH: of the instruction the burst was granted in by
-    # its closing tick, the cycles still to run after the request
+    # DMA_SEES_REFILL_FETCH: cycles of the granting instruction still to run
+    # after the request (set by its closing tick)
     dma_bus_tail*:       int
     iwram_latch*:        uint32  # the last word a DMA moved to or from IWRAM
     dma_request_at*:     CycleCount
     dma_has_run*:        bool
-    # -d:obuslatch: the same bus modelled as a real 32-bit register instead
-    # of a predicate -- halves written independently, driven by opcode
-    # fetches and by the last word a DMA moved, read back whole. That is the
-    # only shape that can return the half-DMA, half-opcode word an AGB SP
-    # gives two NOPs after a burst (obuswint.s; docs/playtest-bugs.md
-    # section 13). Not serialized: a save state reloads it on the next fetch.
+    # -d:obuslatch (off by default): open bus as a real 32-bit register, halves
+    # driven independently by opcode fetches and DMA words. Only this shape
+    # gives the half-DMA, half-opcode word an AGB SP returns two NOPs after a
+    # burst (obuswint.s; docs/playtest-bugs.md section 13). Not serialized.
     obus_latch*:         uint32
-    # The cycle each half was last driven by an opcode fetch. A DMA is not
-    # applied here but resolved against these at read time, because dingbat
-    # defers an immediate DMA to the next data access: it runs in the right
-    # CYCLE but the wrong ORDER, after fetches it should precede. Comparing
-    # stamps per half keeps the timestamps that already pass the suite and
-    # still lets the two halves answer differently, which is what DEAD6019
-    # requires.
+    # Cycle each half was last driven by an opcode fetch. DMA is resolved
+    # against these at read time, not applied here: a deferred immediate DMA
+    # runs in the right cycle but after fetches it should precede. Per-half
+    # stamps let the halves answer differently (DEAD6019).
     obus_half_at*:       array[2, CycleCount]
-    # -d:obusahead: the bus clock at the PREVIOUS instruction's start. The
-    # real pipeline issued this opcode's fetch about one instruction before
-    # dingbat charges it, so that is the cycle the fetch actually drove the
-    # bus at. Timing-neutral: only the latch stamps move.
+    # -d:obusahead (off by default): bus clock at the previous instruction's
+    # start, when the real pipeline drove this opcode's fetch. Only the latch
+    # stamps move; timing-neutral.
     obus_prev_at*:       CycleCount
-    # Per page: true for palette RAM / VRAM / OAM while the renderer may
-    # hold that memory, so an access there asks contention.nim how long it
-    # waits (ppu.contend_mask_update). Derived, not serialized.
+    # Per page: true for palette RAM / VRAM / OAM while the renderer may hold
+    # it; accesses then ask contention.nim (ppu.contend_mask_update). Derived.
     contended*:          array[16, bool]
 
   WLInstrKind* = enum
@@ -691,8 +645,8 @@ type
     wlMoveShiftedRegister, wlUnimplemented
 
   WLTables* = ref object
-    ## Out of CPU's own object: ~11 KB in its middle cost the hot fields
-    ## after it measurably
+    ## Out of CPU's own object: ~11 KB inside it measurably slowed the hot
+    ## fields after it
     verdict_key*:  array[WL_VERDICT_SLOTS, uint32]
     verdict*:      array[WL_VERDICT_SLOTS, uint8]
     verdict_load*: array[WL_VERDICT_SLOTS, uint32]
@@ -711,12 +665,11 @@ type
     cpsr*:        PSR
     spsr*:        PSR
     pipeline*:    Pipeline
-    # True between a PC write and the first opcode fetch at the destination:
-    # a write landing near the new PC in that window (an immediate DMA granted
-    # right after the branch) must be visible to the refill, so the
-    # self-modifying-code pipeline capture in write_*_internal stands down
-    # (Golden Sun TLA DMAs a `bx pc` trampoline onto the stack and branches
-    # to it before the transfer has run)
+    # True between a PC write and the first fetch at the destination: a write
+    # near the new PC then (an immediate DMA right after the branch) must
+    # reach the refill, so write_*_internal's self-modifying-code capture
+    # stands down (Golden Sun TLA DMAs a `bx pc` trampoline onto the stack
+    # and branches to it before the transfer runs)
     refill_pending*: bool
     reg_banks*:   array[7, array[7, uint32]]  # [6] = UNDEF_BANK, see cpu.nim
     spsr_banks*:  array[6, uint32]
@@ -727,32 +680,31 @@ type
     irq_line_v:   bool
     # When the synchroniser raised irq_line (IRQ_LAST_WAITS).
     irq_line_at*: CycleCount
-    # Set when an IRQ wakes the CPU from halt. Nothing reads it any more; it
-    # stays because it is serialized CPU state.
+    # Set when an IRQ wakes the CPU from halt. Unread; kept for the state
+    # format.
     halt_wake_v:  bool
     # HLE IntrWait: while active, the CPU re-halts at resume_addr until the
     # user IRQ handler ORs a masked flag into the BIOS mirror at 0x03007FF8
     intr_wait_active_v:     bool
     intr_wait_mask*:        uint16
     intr_wait_resume_addr*: uint32
-    # HLE Halt/Stop: the real BIOS runs its SWI-dispatcher return path after
-    # the wake IRQ is serviced, so its cost is charged when execution reaches
-    # the instruction after the SWI.
+    # HLE Halt/Stop: the real BIOS runs its dispatcher return path after the
+    # wake IRQ is serviced, so that cost is charged on reaching the
+    # instruction after the SWI.
     halt_resume_charge_v:   int32
     halt_resume_addr*:      uint32
-    # The parked charge belongs to a Halt/Stop SWI, whose entry left the
-    # dispatcher's {r2, lr} frame live (System sp shifted down 8); the resume
-    # must pop it. Decompression SWIs park charges here but never shift sp.
+    # The parked charge is a Halt/Stop SWI's, whose entry left the dispatcher's
+    # {r2, lr} frame live (System sp - 8); the resume must pop it.
+    # Decompression SWIs park charges here but never shift sp.
     halt_resume_pop*:       bool
     # Any of halted, irq_line, halt_wake, intr_wait_active or a parked
-    # halt_resume_charge: tick's checks before an opcode have something to do.
-    # Kept by those five fields' setters, so it is exact by construction.
+    # halt_resume_charge: tick's pre-opcode checks have work. Kept exact by
+    # those five fields' setters.
     cpu_slow*:              bool
     # An HLE CpuSet/CpuFastSet preempted by an IRQ rewinds onto its SWI with
-    # the continuation in r0-r2 (hle_bios.nim); these name that SWI and
-    # state so the re-dispatch is known as the same routine resuming (it
-    # pays no dispatch or entry again, as the real one returns into its
-    # loop). In the state's in-flight section (rev 9).
+    # the continuation in r0-r2 (hle_bios.nim); these identify it so the
+    # re-dispatch resumes without paying dispatch or entry again, as the real
+    # one returns into its loop. In the state's in-flight section.
     copy_cont_pc*:          uint32
     copy_cont_regs*:        array[3, uint32]
     # Waitloop fields
@@ -761,9 +713,9 @@ type
     branch_dest*:                uint32
     identified_waitloops*:       HashSet[uint32]
     identified_non_waitloops*:   HashSet[uint32]
-    # One-entry caches in front of the two HashSets: a hot loop re-analyzes
-    # the same backward branch every iteration (1 = no entry; thumb addresses
-    # are even / 0 = no entry; a waitloop start is always a ROM address)
+    # One-entry caches in front of the HashSets: a hot loop re-analyzes the
+    # same branch every iteration. last_non_waitloop 1 = empty (Thumb
+    # addresses are even); last_waitloop 0 = empty (always a ROM address).
     last_non_waitloop*:          uint32
     last_waitloop*:              uint32
     # Loops the scan could not follow but might repeat (judge_loop, WL_DYN)
@@ -777,9 +729,9 @@ type
     # A waitloop's first memory load (0xFFFFFFFF: none), per cached start
     waitloop_first_load*:        Table[uint32, uint32]
     last_waitloop_first_load*:   uint32
-    # Exact-skip bookkeeping (see waitloop.nim "Transparency"): the loop
-    # whose branch was seen last, the bus time it was seen and the period
-    # since the visit before; the dispatch count at that visit
+    # Exact-skip bookkeeping (waitloop.nim "Transparency"): the last loop
+    # branch seen, its bus time, the period since the visit before, and the
+    # dispatch count then
     wl_addr*:                    uint32
     wl_time*:                    int64
     wl_period*:                  int64
@@ -793,9 +745,8 @@ type
     # A loop whose current run read something volatile (waitloop.nim)
     wl_volatile_at*:             uint32
     wl_volatile_rest*:           int32
-    # The dynamic loop check (waitloop.nim, dyn_loop): the armed loop, when
-    # it armed, the registers (r15's slot holds CPSR) and counters then, and
-    # a direct-mapped rest for loops that failed it
+    # dyn_loop (waitloop.nim): the armed loop, when it armed, registers then
+    # (r15's slot holds CPSR) and counters
     dyn_key*:                    uint32
     dyn_time*:                   int64
     dyn_regs*:                   array[16, uint32]
@@ -806,10 +757,9 @@ type
     dyn_mark_dispatch*:          uint32
     swi_count*:                  uint32
     irq_count*:                  uint32
-    # Where the last judged iteration ended (the loop's start again), for
-    # which loop, and the prefetcher's state there relative to that cycle
-    # (waitloop_skip): an iteration that starts in the state the previous
-    # one started in, and takes as long, repeats until an event
+    # Where the last judged iteration ended (the loop's start), which loop,
+    # and the prefetcher's state there (waitloop_skip): an iteration starting
+    # in the previous one's state and taking as long repeats until an event
     wl_bound*:                   int64
     wl_bound_addr*:              uint32
     wl_sig_next*:                uint32
@@ -817,27 +767,25 @@ type
     wl_sig_bits*:                uint32
     wl_bound_dma*:               uint32   # gba.dma_bursts there
     wl_verdict_dma*:             uint32   # ... and at the last verdict
-    # Whether a skip may run through events that cannot tell it from the
-    # loop (cpu.wl_crossable). Off on cores stepped in lockstep with another
-    # (link.nim, netcore.nim): a longer skip changes how the cores
-    # interleave. Configuration, not serialized.
+    # Whether a skip may run through events the loop cannot observe
+    # (cpu.wl_crossable). Off for cores in lockstep (link.nim, netcore.nim):
+    # a longer skip changes their interleave. Configuration, not serialized.
     wl_cross_events*:            bool
     # The IO registers the iteration the last verdict closed read (io_read)
     wl_reads_io*:                uint8
     # ... or waited on the renderer (its cost then moves with the dot)
     wl_contended*:               bool
     waitloop_instr_lut*:         seq[WLInstrKind]
-    # The LDM^ glitch (arm/arm.nim, ldm_user_glitch): the current-bank
-    # registers holding banked OR user for the one instruction after an LDM^,
-    # their own values, and that instruction. Never serialized: a state is
-    # taken with it settled (gba_state_payload).
+    # The LDM^ glitch (arm/arm.nim ldm_user_glitch): current-bank registers
+    # reading banked OR user for the one instruction after an LDM^, their own
+    # values, and that instruction. Not serialized: states are taken with it
+    # settled (gba_state_payload).
     ldm_glitch*:       uint16
     ldm_glitch_instr*: uint32
     ldm_glitch_saved*: array[16, uint32]
-    # Transient, within one instruction (never serialized): a return to
-    # Thumb code refilled from the gamepak prefetcher's stream, at Thumb
-    # width already, at ret_refill_at (cpu.refill_from_head), so
-    # exception_return_restore must not redo it.
+    # Within one instruction: a return to Thumb already refilled from the
+    # prefetcher's stream at Thumb width, at ret_refill_at
+    # (cpu.refill_from_head); exception_return_restore must not redo it.
     ret_refilled_thumb*: bool
     ret_refill_at*: uint32
 
@@ -856,9 +804,8 @@ type
   PPU* = ref object
     gba* {.cursor.}:          GBA
     framebuffer*:  seq[uint16]
-    # Frame boundaries reached but not yet consumed by step_frame/end_frame.
-    # A counter, not a bool: an HLE decompression SWI runs atomically and can
-    # span several frames.
+    # Frame boundaries not yet consumed by step_frame/end_frame. A counter: an
+    # atomic HLE decompression SWI can span several frames.
     frame*:        int
     layer_palettes*: array[4, array[240, uint8]]
     sprite_pixels*: array[240, SpritePixel]
@@ -889,42 +836,36 @@ type
     bldcnt*:       BLDCNT
     bldalpha*:     BLDALPHA
     bldy*:         BLDY
-    # Line-start latches (serialized from GBA payload rev 6). The mGBA suite
-    # "Video tests" pin all three; the constants are its expected screens.
-    # bg_enable_hist: DISPCNT's BG0-3 enables sampled on the last three
-    # lines, newest in the low nibble. A BG draws only while its bit is set
-    # now AND was set at the sample two lines ago, so an enable shows from
-    # the third line after the write and a disable is immediate ("Layer
-    # toggle" 1 and 2).
+    # Line-start latches, pinned by the mGBA suite "Video tests".
+    # bg_enable_hist: DISPCNT's BG0-3 enables on the last three lines, newest
+    # in the low nibble. A BG draws only if its bit is set now AND two lines
+    # ago: an enable shows from the third line, a disable is immediate
+    # ("Layer toggle" 1 and 2).
     bg_enable_hist*: uint16
-    # Lines (counting the current one) the renderer stays as in forced blank
-    # after DISPCNT's forced-blank bit is cleared (FB_EXIT_HOLD_LINES): no
-    # BG or palette fetch, so no BG VRAM or palette RAM contention. Rides in
-    # bg_enable_hist's spare bits 12-13 in the payload.
+    # Lines (counting this one) the renderer stays in forced blank after the
+    # bit clears (FB_EXIT_HOLD_LINES): no BG/palette fetch, so no contention.
+    # Saved in bg_enable_hist's spare bits 12-13.
     fb_hold*: uint8
-    # Scheduler cycle of the current line's start, for the sample point
-    # inside the line (BG_ENABLE_LATCH_CYCLE); rebased by end_frame, dated
-    # from the pending line event on a state load.
+    # Scheduler cycle of this line's start (for BG_ENABLE_LATCH_CYCLE);
+    # rebased by end_frame, recomputed from the pending line event on load.
     line_start_cycle*: int64
-    # WIN0/WIN1 vertical state: set at the line start where VCOUNT equals
-    # Y1, cleared where it equals Y2 (the clear wins on a tie). A Y2 that
-    # VCOUNT never reaches leaves the window open into the next frame
-    # ("Window offscreen reset").
+    # WIN0/WIN1 vertical state: set at the line start where VCOUNT == Y1,
+    # cleared where it == Y2 (clear wins a tie). An unreached Y2 leaves the
+    # window open into the next frame ("Window offscreen reset").
     win0_inside*:  bool
     win1_inside*:  bool
-    # OAM as the sprite scan sees it: copied from `oam` after each line is
-    # drawn, so an OAM write moves sprites from the second line after it
-    # ("OAM Update Delay"). oam_view_stale says a write is waiting.
+    # OAM as the sprite scan sees it: copied from `oam` after each line, so a
+    # write moves sprites from the second line after it ("OAM Update Delay").
+    # oam_view_stale: a write is waiting.
     oam_view*:       seq[byte]
     oam_view_stale*: bool
-    # Frame-start copies of the latches above, so render-skip notices a
-    # latch that settles a frame after the register write that moved it.
+    # Frame-start copies of the latches above, so render-skip notices a latch
+    # that settles a frame after its register write.
     frame_start_latches*: uint32
     # BG enables for the line being drawn (scratch): DISPCNT and the delay.
     line_bg_enables*: uint16
-    # A BG switched on after its line started (see midline_bg_enable):
-    # DISPCNT's BG bits at the line start, and the cycle into the line each
-    # BG's bit rose (-1: not this line). Derived, not serialized.
+    # Mid-line BG enable (midline_bg_enable): DISPCNT's BG bits at line start
+    # and the cycle into the line each bit rose (-1: not this line). Derived.
     line_start_bg_bits*: uint16
     bg_enable_cycle*:    array[4, int32]
     # Compositing scratch, recomputed each scanline: contributing BGs as a
@@ -936,32 +877,30 @@ type
     line_effects*: array[240, bool]
     line_sprite_blend*: bool  # any semi-transparent sprite pixel on this line
     line_obj_window*: bool    # any OBJ-window sprite pixel on this line
-    # Per-line OBJ candidate set: obj_line_mask[line] is a 128-bit set (entry
-    # N = bit N&63 of word N>>6) of the OAM entries whose bounding box covers
-    # the line. Rebuilt lazily (obj_list_dirty, set via oam_touched); past
-    # OBJ_LIST_REBUILD_LIMIT rebuilds in a frame the rest of the frame uses
-    # the straight 128-entry scan. Derived from OAM, so not serialized.
+    # Per-line OBJ candidates: obj_line_mask[line] is a 128-bit set (entry N
+    # = bit N&63 of word N>>6) of OAM entries whose box covers the line.
+    # Rebuilt lazily (obj_list_dirty via oam_touched); past
+    # OBJ_LIST_REBUILD_LIMIT rebuilds a frame, the rest of it uses the plain
+    # 128-entry scan. Derived, not serialized.
     obj_line_mask*:     array[160, array[2, uint64]]
     obj_list_dirty*:    bool
     obj_list_rebuilds*: int
     # Render skipping: render_dirty is set by anything that can change the
-    # picture; after a full frame without a change the framebuffer already
-    # holds the next frame, so rendering is skipped. frame_static lets the
-    # frontend skip the texture upload too.
+    # picture; after a full unchanged frame, rendering is skipped.
+    # frame_static lets the frontend skip the texture upload too.
     render_dirty*: bool
     skip_render*:  bool
     frame_static*: bool
-    # Debug-UI layer visibility (bits 0-3 = BG0-3, bit 4 = OBJ; 1 = shown).
-    # ANDed into the per-scanline enable computation only, so the per-pixel
-    # compositing hot path is untouched.
+    # Debug-UI layer visibility (bits 0-3 = BG0-3, bit 4 = OBJ; 1 = shown),
+    # applied per scanline only, keeping the per-pixel path untouched.
     debug_layer_mask*: uint16
     # Forces composite() to build per-column window tables even on uniform
     # lines; only tests/ppucomposite_test.nim sets it.
     disable_uniform_window*: bool
-    # Renderer contention (contention.nim): which dots of a line the
-    # renderer holds BG VRAM / palette RAM / OBJ VRAM / OAM, one bit a dot.
-    # Derived from registers and OAM on demand, keyed by what they depend
-    # on; never serialized (a key that cannot occur forces a rebuild).
+    # Renderer contention (contention.nim): the dots of a line the renderer
+    # holds BG VRAM / palette RAM / OBJ VRAM / OAM, one bit a dot. Built on
+    # demand, keyed by inputs; never serialized (an impossible key forces a
+    # rebuild).
     cont_regs_stale*: bool          # DISPCNT/BGxCNT/BGxHOFS/BLDCNT written
     cont_bg_key*:   uint32
     cont_bg*:       array[CONT_WORDS, uint32]
@@ -987,20 +926,17 @@ type
     latches*:   array[2, int16]
     # FIFO reconstruction (render-side, not serialized): point-sampling the
     # held latch at 32768 Hz folds zero-order-hold images into the audible
-    # band, so the signal between FIFO updates is rebuilt with a causal
-    # Four-point cubic over hist (index 0 oldest .. 3 newest).
-    # last_update_cycle timestamps the newest latch; inv_period is 1/measured
-    # update period (0 = none yet: hold the latch). fifo_interp=false emits
-    # the raw held latch.
+    # band, so a causal four-point cubic over hist (0 oldest .. 3 newest)
+    # rebuilds the signal. last_update_cycle: newest latch's time;
+    # inv_period: 1/measured update period (0 = none yet: hold the latch).
     hist*:            array[2, array[4, int16]]
     last_update_cycle*: array[2, int64]
     inv_period*:        array[2, float32]
     fifo_interp*:     bool   # cubic FIFO reconstruction (default on)
-    # MP2K HLE slot timing (mp2k.nim render_frame, not serialized): the
-    # address each FIFO byte was read from by a special-timing sound DMA
-    # (0 = any other source), and up to four ring addresses whose first
-    # appearance at the DAC is stamped with the HLE's output clock
-    # (watch_clock, -1 until it plays; watch_cyc, the scheduler cycle).
+    # MP2K HLE slot timing (mp2k.nim render_frame, not serialized): source
+    # address of each FIFO byte from a special-timing sound DMA (0 = other),
+    # and up to four ring addresses whose first DAC appearance is stamped
+    # (watch_clock: HLE output clock, -1 until played; watch_cyc: scheduler).
     tags*:        array[2, array[32, uint32]]
     watch_addr*:  array[4, uint32]
     watch_clock*: array[4, int]
@@ -1016,9 +952,9 @@ type
     buffer_pos*:        int
     frame_sequencer_stage*: int
     first_half_of_length_period*: bool
-    # Cycle of the last SOUNDCNT_X master-on, or GBA_NO_STEP (dropped at a
-    # rebase that passes it). Read only within PSG_POWER_ON_WINDOW of it. NOT
-    # serialized: a state saved in those 8 cycles loads without the window.
+    # Cycle of the last SOUNDCNT_X master-on, or GBA_NO_STEP (dropped by a
+    # rebase past it). Read only within PSG_POWER_ON_WINDOW. Not serialized:
+    # a state saved in those 8 cycles loads without the window.
     power_on_at*: CycleCount
     channel1*:          Channel1
     channel2*:          Channel2
@@ -1030,9 +966,9 @@ type
     # Master volume as an 8.8 fixed-point factor (256 = unity)
     master_volume_factor*: int32
     master_muted*:      bool
-    # Nobody hears this core (muted, volume 0, a run-ahead lookahead, link
-    # player 2): get_sample skips the catch-up and the mix (set_audio_silent).
-    # Presentation-only, not serialised.
+    # Nobody hears this core (muted, volume 0, run-ahead lookahead, link
+    # player 2): get_sample skips catch-up and mix (set_audio_silent). Not
+    # serialised.
     silent*:            bool
     # 2x speed: drop every other stereo frame at the queue point
     turbo*:             bool
@@ -1044,7 +980,7 @@ type
     stretch_engaged:    bool  # tracks the stretch-path rising edge (auto-reset)
     owns_audio*:        bool  # this core holds the audio queue (audio_out)
     # Optional analog-output low-pass: one-pole IIR on the native mix (web
-    # uses a BiquadFilter node). Off by default; presentation-only.
+    # uses a BiquadFilter node). Off by default.
     audio_lowpass*:     bool
     lp_left, lp_right:  float32
     left_resampler*:    Resampler[float32]
@@ -1092,9 +1028,9 @@ type
 
   Mp2kHle* = ref object
     gba* {.cursor.}: GBA
-    # Pass detection (mp2k.nim "Runtime detection"): the SoundInfo the bus
-    # window watches, whether its lock write has been seen with no ring store
-    # yet, and the ring each FIFO DMA plays (len 0 = none)
+    # Pass detection (mp2k.nim "Runtime detection"): the watched SoundInfo,
+    # whether its lock write was seen with no ring store yet, and the ring
+    # each FIFO DMA plays (len 0 = none)
     wsip*:       uint32
     armed*:      bool
     pass_streak*: int               # consecutive locked passes that stored into a ring (engaging needs 2)
@@ -1149,10 +1085,10 @@ type
     pend_maxc*:      int
     pend_mono*:      int
     pend_dma_src*:   uint32         # sound DMA replay cursor at the hook (mp2k.nim hw_latency)
-    # Predictive mode (mp2k.nim predict_envelope): a pass's frame is rendered
-    # at its own hook from the envelope the pass is about to compute, and
-    # placed at the hardware's latency; falsified by the real bytes one hook
-    # later, the HLE drops back to rendering one hook late.
+    # Predictive mode (mp2k.nim predict_envelope): a pass's frame renders at
+    # its own hook from the predicted envelope, placed at the hardware's
+    # latency; if the real bytes one hook later disagree, the HLE falls back
+    # to rendering one hook late.
     predict*:        bool
     pred_ok*, pred_bad*: int
     # Measured pass-to-DMA latency (mp2k.nim measure_latency): each pass's
@@ -1188,10 +1124,10 @@ type
     fifo_settle_ref*: int           # the target the last settle converged to
     fifo_step_ref*:  int            # the target at the previous frame (render_frame: a moved target vs a jumped level)
     fifo_last_a*, fifo_last_b*: float32  # held across an underrun
-    # Quality tier (mp2k.nim "Quality tier"): off = the driver's own
-    # arithmetic (parity checks); on = un-floored output, ramped gains,
-    # interpolated echo. fine_a/fine_b carry this sample's un-truncated
-    # FIFO values for apu.nim to add the sub-LSB remainder after the DAC.
+    # Quality tier (mp2k.nim "Quality tier"): off = the driver's arithmetic
+    # (parity checks); on = un-floored output, ramped gains, interpolated
+    # echo. fine_a/fine_b: this sample's un-truncated FIFO values, for
+    # apu.nim to add the sub-LSB remainder after the DAC.
     quality*:        bool
     fine_a*, fine_b*: float32
     frame_n*:        int            # output samples in the frame being rendered
@@ -1314,17 +1250,16 @@ type
                            ## identity hash exactly this range
 
   GBA* = ref object of EmuObj
-    # Events dispatched so far (wrapping) and cpu.r[15] at the last one;
-    # the waitloop detector's staleness test (waitloop.nim)
+    # Events dispatched (wrapping) and cpu.r[15] at the last one: the
+    # waitloop detector's staleness test (waitloop.nim)
     dispatch_count*:   uint32
     dma_bursts*:       uint32   # DMA bursts granted (waitloop_skip's steadiness)
     dyn_kinds*:        uint64   # event kinds dispatched since dyn_loop armed
     verdict_kinds*:    uint64   # ... and since analyze_loop's last verdict
     last_dispatch_pc*: uint32
-    # WL_QUIET_EVENTS: since the waitloop detector last looked, something
-    # ran that could change what a loop reads -- an event not known to leave
-    # memory alone, a DMA transfer, or an IO read. Not serialized: a state
-    # load sets it.
+    # WL_QUIET_EVENTS: since the detector last looked, something ran that
+    # could change what a loop reads (an event not known to leave memory
+    # alone, a DMA, an IO read). Not serialized: a state load sets it.
     wl_unsafe*:        bool
     bios_path*:  string
     rom_path*:   string
@@ -1332,16 +1267,15 @@ type
     use_hle*:        bool
     hle_after_bios*: bool
     scheduler*:      Scheduler
-    # Emulated cycle at which the current frame started; frame progress is
-    # derived from it rather than counted per instruction.
+    # Cycle the current frame started at; frame progress derives from it.
     frame_start_cycles*: CycleCount
-    # Everything end_frame has subtracted from the scheduler since power-on:
-    # rebased + scheduler.cycles is an absolute clock, for debug tools that
-    # compare two runs (tools/playtest dingbat_driver `trace`,
-    # tests/biosdrv_probe.nim). Not serialized: a state load restarts it.
+    # Total end_frame has subtracted since power-on: rebased +
+    # scheduler.cycles is an absolute clock for debug tools comparing runs
+    # (tools/playtest dingbat_driver `trace`, tests/biosdrv_probe.nim). Not
+    # serialized.
     rebased*: int64
-    # Length of the last state payload: the next is written into a buffer
-    # of that capacity rather than grown from empty (savestate.nim)
+    # Last state payload's length: the next buffer starts at that capacity
+    # (savestate.nim)
     payload_len_hint: int
     cartridge*:  Cartridge
     storage*:    Storage
@@ -1365,9 +1299,9 @@ type
     when defined(test_harness):
       test_output*: TestOutput
 
-# The fields tick tests before every opcode. Each write goes through a
-# setter that keeps cpu_slow, so a CPU with none of them set takes one test.
-# Getters are procs, not templates, so `+=` on one can't skip its setter.
+# The fields tick tests before every opcode. Setters keep cpu_slow, so the
+# common case is one test. Getters are procs, not templates, so `+=` can't
+# skip the setter.
 proc set_cpu_slow(cpu: CPU) {.inline.} =
   cpu.cpu_slow = cpu.halted_v or cpu.irq_line_v or cpu.halt_wake_v or
                  cpu.intr_wait_active_v or cpu.halt_resume_charge_v != 0
@@ -1412,10 +1346,9 @@ when defined(obuslatch):
 proc rom_cool*(bus: Bus) {.inline.}
 proc wl_passable(gba: GBA; kind: EventType): bool
 proc dyn_loop*(cpu: CPU; start_addr, end_addr: uint32; arm: bool)
-# The prefetch serve sits on the ROM fetch slow path, which runs once per
-# instruction outside a hot stream; clang left it out of line, costing ~1% of
-# retired instructions. Pinned where the attribute exists (GCC makes a failed
-# always_inline a hard error).
+# pf_serve is on the ROM fetch slow path (once per instruction outside a hot
+# stream); clang left it out of line, ~1% of retired instructions. Forced on
+# clang only (GCC makes a failed always_inline a hard error).
 when defined(clang):
   {.pragma: pf_inline, codegenDecl: "__attribute__((always_inline)) inline $# $#$#".}
 else:
@@ -1426,9 +1359,8 @@ proc pf_serve(bus: Bus; now: CycleCount; page: int; halves: int): int {.pf_inlin
 const ROM_REFILL_ORDERED* {.booldefine.} = true
 const BRANCH_COMMIT_WAIT* {.booldefine.} = true
   ## A branch out of a gamepak stream waits out a prefetch halfword in its
-  ## final cycle (cpu.clear_pipeline). A knob for docs/playtest-bugs.md
-  ## section 29 (Final Fight One): off, dingbat lands 9.7k cycles sooner there and
-  ## still a frame later than both reference emulators.
+  ## final cycle (cpu.clear_pipeline). Off: Final Fight One lands 9.7k
+  ## cycles sooner, still a frame behind (docs/playtest-bugs.md section 29).
 const ROM_REFILL_ORDERED_PF* {.booldefine.} = true
 const DMA_KEEPS_PREFETCH* {.booldefine.} = true
   ## A DMA that never touches the gamepak leaves the prefetcher running: the
@@ -1437,9 +1369,8 @@ const DMA_KEEPS_PREFETCH* {.booldefine.} = true
 const PREFETCH_TOGGLE_LAW* {.booldefine.} = true
   ## WAITCNT switching the prefetcher off keeps the buffer until the CPU
   ## drains it; switching it on after idle cycles breaks the burst
-  ## (bus.write_waitcnt). Measured on hardware by the AGBEEG aging cartridge
-  ## (toggle_prefetcher, 32/32 cells); with it alyosha timing/prefetch_enable,
-  ## ppu/start_up and ppu/start_up_vbl_irq_halt read right too.
+  ## (bus.write_waitcnt). Hardware: AGBEEG aging cartridge
+  ## (toggle_prefetcher). Pinned by alyosha timing/prefetch_enable.
 const HALT_WAKE_RUNS_ONE* {.booldefine.} = true
   ## An interrupt that wakes a halted CPU is taken one instruction after the
   ## wake, not at it (cpu.tick; tests/roms/payloads/wakeirq.s).
@@ -1447,62 +1378,49 @@ const IRQ_FETCH_VIA_PREFETCH* {.booldefine.} = true
   ## The IRQ entry's in-flight gamepak fetch comes from the prefetcher when
   ## it runs on the interrupted stream (cpu.irq).
 const FIFO_FETCH_WINDOW* {.booldefine.} = true
-  ## FIFO_DMA_WINDOW's measured rule -- a refill request landing in a CPU
-  ## access begun before its request cycle is granted at the access's end;
-  ## one begun on it waits the whole burst -- for opcode fetches from board
-  ## WRAM and the gamepak too: the console's grant waits for any access in
-  ## flight (slotdma.s, an H-blank DMA against gamepak fetches). While a FIFO
-  ## window is open (FIFO_WINDOW_LEAD cycles before a request) those fetches
-  ## leave the fetch cache and sync to their end, as IMM_FETCH_WAIT's do for
-  ## an immediate DMA. kit3 on an AGB SP (fifo_6's own 3/1 waits from a flash
-  ## cart, 2026-11-04) and the empty-slot 4/2 cells: with the prefetcher off
-  ## the console takes the interrupt on the sled's own 4-cycle grid after
-  ## the burst, which a burst granted mid-fetch cannot give. With it, every
-  ## alyosha fifo_dma ROM passes (fifo, fifo_2..6, fifo_dma_disable_3..5),
-  ## kit3 241 -> 342/449 cells, the rig's 4/2 cells 270 -> 326/452, the
-  ## mGBA suite unmoved.
+  ## FIFO_DMA_WINDOW's rule (a refill request landing in a CPU access begun
+  ## before its request cycle is granted at the access's end; one begun on
+  ## it waits the whole burst) applied to opcode fetches from board WRAM and
+  ## the gamepak too: the grant waits for any access in flight (slotdma.s).
+  ## While a FIFO window is open (FIFO_WINDOW_LEAD cycles before a request)
+  ## those fetches leave the fetch cache and sync to their end, as
+  ## IMM_FETCH_WAIT's do. AGB SP, kit3 (flash cart, 3/1) and the empty-slot
+  ## 4/2 sled: with the prefetcher off the interrupt lands on the sled's
+  ## 4-cycle grid after the burst, which a mid-fetch grant cannot give
+  ## (docs/hwprobe-questions.md, fifo_6). Pinned by alyosha fifo_dma/*.
 const FIFO_IRQ_PF_EXTRA* {.intdefine.} = 1
-  ## With FIFO_FETCH_WINDOW: a FIFO burst's end interrupt a cycle later when
-  ## the CPU runs from the gamepak through the prefetcher (kit3's 3/1 and the
-  ## empty slot's 4/2 DMA-end cells: every phase but the request-cycle one
-  ## reads a cycle short without it). That phase, where the CPU's wait on
-  ## the prefetcher began the cycle before the grant, is PF_WAIT_UNDER_BURST's
-  ## and takes no extra cycle.
+  ## With FIFO_FETCH_WINDOW: a FIFO burst's end interrupt comes a cycle later
+  ## when the CPU runs from the gamepak through the prefetcher (AGB SP, kit3
+  ## 3/1 and empty-slot 4/2 DMA-end cells: every phase but the request-cycle
+  ## one reads a cycle short without it). That phase (the prefetcher wait
+  ## began the cycle before the grant) is PF_WAIT_UNDER_BURST's: no extra.
 const PF_WAIT_UNDER_BURST* {.booldefine.} = true
-  ## A sound-FIFO burst that never touches the gamepak, granted while the
-  ## CPU waits on the prefetcher for an opcode, and the wait began the cycle
-  ## before the grant or later: the wait runs under the burst (the
-  ## prefetcher fills meanwhile, DMA_KEEPS_PREFETCH), and a wait begun that
-  ## cycle before also gives the CPU the cycle back -- it had stopped there,
-  ## and its interrupt synchroniser with it: an interrupt raised under the
-  ## burst is recognised a cycle sooner too (14 more cells a BIOS: TM3's
-  ## interrupt during the burst at d = 2 read the handler a cycle late).
-  ## A wait begun earlier is FIFO_FETCH_WINDOW's (the grant waits for it).
-  ## tests/roms/payloads/f6q.s and f6slot.s on an AGB SP (2026-11-04, the
-  ## empty slot's NV sled at 4/2; and kit3's cartridge sled at 3/1): with
-  ## the prefetcher on, the phase whose fetch begins a cycle before the
-  ## grant (d = 2, 6, 10) reads the handler 5 cycles sooner than a wait
-  ## frozen at the grant; the five other phases are the window's. With the
-  ## window and this half alone the phase read a cycle late. On: 18 cells a
-  ## BIOS gained, none lost, the mGBA suite unmoved, every alyosha fifo_dma
-  ## ROM green under both BIOSes. The earlier full rule (a wait begun before
-  ## the stop resumed after the burst) lost 354 cells on top of the window.
+  ## A sound-FIFO burst off the gamepak, granted while the CPU waits on the
+  ## prefetcher for an opcode, with the wait begun the cycle before the
+  ## grant or later: the wait runs under the burst (the prefetcher fills,
+  ## DMA_KEEPS_PREFETCH). A wait begun that cycle before also gives the CPU
+  ## the cycle back, and its interrupt synchroniser: an IRQ raised under the
+  ## burst is recognised a cycle sooner. A wait begun earlier is
+  ## FIFO_FETCH_WINDOW's. AGB SP, payloads/f6q.s and f6slot.s (empty-slot NV
+  ## sled 4/2; kit3 cart sled 3/1): the phase whose fetch begins a cycle
+  ## before the grant (d = 2, 6, 10) reads the handler 5 cycles sooner than
+  ## a wait frozen at the grant. Refuted: resuming a wait begun before the
+  ## stop after the burst (354 cells lost).
 const IRQ_FETCH_STOPPED_BUFFER* {.booldefine.} = true
-  ## A full, stopped prefetch buffer that still holds the in-flight opcode
+  ## A full, stopped prefetch buffer still holding the in-flight opcode
   ## serves the IRQ entry's fetch, as a running one does
-  ## (IRQ_FETCH_VIA_PREFETCH). f6q.s on an AGB SP (2026-11-04): TM3's
-  ## interrupt taken just after a 30-cycle FIFO burst, which filled the
-  ## buffer under it, enters 7 cycles sooner than an N fetch would give.
+  ## (IRQ_FETCH_VIA_PREFETCH). AGB SP, f6q.s: TM3's IRQ just after a 30-cycle
+  ## FIFO burst (which filled the buffer) enters 7 cycles sooner than an N
+  ## fetch gives.
 const IRQ_INFLIGHT_SEQ* {.booldefine.} = true
-  ## An IRQ entry's in-flight gamepak fetch, when the prefetcher is not
-  ## serving it, costs what the stream makes it -- N or S -- less the cycle
-  ## the entry overlaps; off, a flat 2*S16 (cpu.irq_enter). Subsumes the
-  ## former IRQ_INFLIGHT_NONSEQ (after a burst; after a gamepak load that
-  ## stopped the prefetcher).
+  ## An IRQ entry's in-flight gamepak fetch not served by the prefetcher
+  ## costs N or S as the stream makes it, less the cycle the entry overlaps
+  ## (also after a burst or a prefetcher-stopping load); off, a flat 2*S16
+  ## (cpu.irq_enter).
 const PF_RUNS_OFF_ROM* {.booldefine.} = true
-  ## The gamepak prefetcher keeps fetching while the CPU runs from the BIOS
-  ## or RAM: it goes on at the address the CPU would have fetched next, and a
-  ## branch back to that address takes what it fetched (cpu.clear_pipeline).
+  ## The gamepak prefetcher keeps fetching while the CPU runs from BIOS or
+  ## RAM, at the address the CPU would have fetched next; a branch back
+  ## there takes what it fetched (cpu.clear_pipeline).
 const THUMB_RESTORE_RUNS_NEXT* {.booldefine.} = true
   ## A Thumb `cmp pc` whose SPSR restore clears T still runs the next
   ## halfword as Thumb before ARM takes over (thumb.nim).
@@ -1520,34 +1438,26 @@ const DMA_ACCESS_WINDOW* {.booldefine.} = true
 const REFILL_WINDOW_SPLIT* {.booldefine.} = true
   ## With the access window open, a pipeline refill outside the gamepak is
   ## two fetches a PPU-timed DMA can be granted between (cpu.window_refill),
-  ## not one block. hdmalag.s configuration 29 on an AGB SP: DMA1 (3 words)
-  ## and DMA3 (302 halfwords) every H-blank leave the CPU 3 cycles a line,
-  ## its `blo` loop from IWRAM progressing 3 cycles at a time; every burst
-  ## starts on its H-blank's cycle, 20 lines in a row. The core held the
-  ## grant behind a refill begun the cycle before the request (the H-blank
-  ## after the one whose window the `blo` itself took) and the next
-  ## opcode fetch -- that line's bursts started 2 cycles late, the next
-  ## H-blank found DMA3 still running and dropped it: 18 bursts. The refill
-  ## was the `blo`'s own, run after the bursts its fetch was granted at; the
-  ## window it needed was the next line's, which the last line's leftover
-  ## `window_closing` shut at that fetch (ppu.start_hblank now clears it).
+  ## not one block. AGB SP, hdmalag.s configuration 29: DMA1 (3 words) and
+  ## DMA3 (302 halfwords) every H-blank leave an IWRAM `blo` loop 3 cycles a
+  ## line, and every burst starts on its H-blank's cycle, 20 lines running
+  ## (docs/playtest-bugs.md section 42). ppu.start_hblank clears a leftover
+  ## `window_closing` so the next line's window opens.
 const SB_SWAP* = 64'u8
   ## bus.sync_bits bit 6: MEMCNT's swap is on (bus.nim, swap_read_word).
 const DMA_LEAD_CYCLES* {.intdefine.} = 1
   ## Of a burst's two hand-off cycles, how many come before its first
-  ## transfer; the rest follow its last. One and one: with both in front the
-  ## DMA's own writes landed a cycle late, which only showed once a timer
-  ## stop was put where tmrw.s measures it -- every DMA-written stop stamp
-  ## (halthb.s, breakram.s, dmaphase.s, slotdma.s) had been absorbing it.
-  ## A PPU-timed DMA is granted at the end of the bus access in flight, not
-  ## at its request (tests/roms/payloads/dmaphase.s, hdmastamp.s). Knowing
-  ## where accesses end costs a scheduler sync per access, so it is paid only
-  ## from the H-blank's start to the request, and only with such a DMA armed.
+  ## transfer; the rest follow its last. Both in front lands the DMA's
+  ## writes a cycle late (payloads/tmrw.s timer-stop stamps).
+  ## DMA_ACCESS_WINDOW: a PPU-timed DMA is granted at the end of the bus
+  ## access in flight, not at its request (payloads/dmaphase.s, hdmastamp.s).
+  ## That needs a scheduler sync per access, paid only from the H-blank's
+  ## start to the request, with such a DMA armed.
 const DMA_STALLS_IRQ_SYNC* {.booldefine.} = true
   ## The stall gives back internal cycles the CPU ran under the burst
-  ## (Interrupts.unstall); without it alyosha Interactions
-  ## Internal_Cycle_DMA_IRQ_7/_ldr_IWRAM/_MUL_IRQ go red. The access the
-  ## CPU was waiting to make is IRQ_LAST_WAITS's.
+  ## (Interrupts.unstall); pinned by alyosha Interactions
+  ## Internal_Cycle_DMA_IRQ_*. The access the CPU was waiting to make is
+  ## IRQ_LAST_WAITS's.
 # The output sample clock (apu.nim); the waitloop skip reads the period too
 const APU_SAMPLE_RATE*    = 32768
 const CPU_CLOCK_SPEED*    = 1 shl 24
@@ -1555,8 +1465,8 @@ const APU_SAMPLE_PERIOD*  = CPU_CLOCK_SPEED div APU_SAMPLE_RATE
 const WL_VOLATILE_REST* = 32
   ## Iterations of a loop not judged after one read something volatile
 const WL_BODY_MAX* = 30
-  ## The longest Thumb loop body (bytes before its branch) the waitloop
-  ## detector judges; Adventures of Mr. Bean's IO poll is 22
+  ## Longest Thumb loop body (bytes before its branch) the waitloop detector
+  ## judges; Adventures of Mr. Bean's IO poll is 22
 const DYN_BODY_MAX* = 512
   ## The longest loop (bytes before its branch) the dynamic check takes on
 const DYN_FIRST* = 1024
@@ -1567,175 +1477,134 @@ const DYN_REST* = 64
 const WL_ARM_BODY_MAX* = 32
   ## The same for ARM loops (eight instructions before the branch)
 const WL_CROSS_PERIOD_MAX* = 46
-  ## The longest loop period a skip crosses anything but output samples in
+  ## Longest loop period a skip crosses anything but output samples in
   ## (cpu.wl_crossable): shorter than every booking a passable handler makes
-  ## (wl_passable) other than its own +0 and +2 chains, so nothing it books
-  ## falls inside the iteration being skipped. HBLANK_FLAG_DELAY (47) is the
-  ## shortest.
+  ## (wl_passable) besides its +0 and +2 chains, so none lands inside the
+  ## skipped iteration. The shortest is HBLANK_FLAG_DELAY (47).
 const
   IO_PPU_STATUS* = 1'u8   ## DISPSTAT, VCOUNT (bus.io_read)
   IO_KEYPAD*     = 2'u8   ## KEYINPUT, KEYCNT: change only between frames
   IO_OTHER*      = 128'u8
 const WL_QUIET_EVENTS* {.booldefine.} = true
-  ## The waitloop detector counts an event that ran after the loop's load as
-  ## harmless when it cannot have changed what the loop read: it writes no
-  ## memory, no DMA ran, and the loop read no IO (waitloop.analyze_loop).
+  ## An event after the loop's load is harmless to the waitloop detector if
+  ## it writes no memory, no DMA ran, and the loop read no IO
+  ## (waitloop.analyze_loop).
 const IRQ_LAST_WAITS* {.booldefine.} = true
-  ## An interrupt is taken after an instruction only if it was recognised
-  ## before the wait states of that instruction's last bus access; one
-  ## recognised during them waits for the next instruction. A wait-stated
-  ## access is one stretched cycle, and the core samples the interrupt as
-  ## that cycle begins. tests/roms/payloads/irqwait.s on an AGB SP: a TM0
-  ## interrupt breaks into a NOP sled one NOP later from EWRAM (ARM: five
-  ## wait states per fetch, Thumb: two) than the cycle count alone says,
-  ## at every phase, and identically from IWRAM (no waits). Also alyosha
-  ## ppu/start_up_vbl_irq (a cartridge VCOUNT poll, one instruction later
-  ## than from Halt) and, through the first fetch after a DMA burst,
-  ## Interactions Internal_Cycle_DMA_IRQ/_ST/_ST_p3/_br, which a tail on the
-  ## burst's stall used to carry. Nearly free while nothing is on its way:
-  ## a window (bus.sync_bits bit 3), opened by schedule_interrupt_check and,
-  ## IRQ_WINDOW_LEAD cycles early, ahead of a timer's or the PPU's raise,
-  ## has the CPU's fetches and stores note their wait states until no check
-  ## is left to run. FireRed, same work: +0.06% retired instructions.
+  ## An interrupt is taken after an instruction only if recognised before
+  ## the wait states of its last bus access; one recognised during them
+  ## waits an instruction (a wait-stated access is one stretched cycle,
+  ## sampled as it begins). AGB SP, payloads/irqwait.s: a TM0 IRQ breaks
+  ## into a NOP sled one NOP later from EWRAM (ARM 5 waits per fetch, Thumb
+  ## 2) than cycles alone say, at every phase; from IWRAM (no waits), not.
+  ## Pinned by alyosha ppu/start_up_vbl_irq and Interactions
+  ## Internal_Cycle_DMA_IRQ*. Cost only while an IRQ is on its way: a window
+  ## (bus.sync_bits bit 3), opened by schedule_interrupt_check or
+  ## IRQ_WINDOW_LEAD cycles before a timer/PPU raise, has fetches and stores
+  ## note their wait states. FireRed: +0.06% retired instructions.
 const DMA_READS_CPU_BUS* {.booldefine.} = true
   ## A DMA read of unmapped memory returns what is on the data bus: the last
   ## word the burst itself moved, or, for its first transfer, the CPU's last
   ## bus transaction -- its data load if that came after its last opcode
   ## fetch, else the fetched opcode (Bus.dma_bus_word).
 const DMA_BUS_BACK_TO_BACK* {.booldefine.} = true
-  ## DMA_READS_CPU_BUS's "the CPU's last bus transaction" only holds when the
-  ## CPU had the bus last. Bursts granted one after another with no CPU
-  ## access between them (two channels on the same H-blank, a chained
-  ## immediate pair) hand the bus over with the earlier burst's last word
-  ## still on it, and the later burst's first unmapped read gets that word
-  ## (tests/roms/payloads/hdmalag.s on an AGB SP: the second channel on an
-  ## H-blank reads the cycle after the first's last write). Phantasy Star
-  ## Collection's Master System player depends on it: DMA1 (H-blank, ROM
-  ## table -> BG1VOFS) and DMA2 (H-blank, fixed write-only BG1VOFS ->
-  ## BG0VOFS) keep its high-priority window layer scrolling with the
-  ## picture; with the CPU's opcode instead every window was drawn with
-  ## shifted scanlines. Both reference emulators agree, and so does the
-  ## console: tests/roms/payloads/hdmaobus.s on an AGB SP, 2026-10-02, the
-  ## second channel reads the first's X_k on every line, CPU in a NOP sled
-  ## or halted (docs/playtest-bugs.md section 28).
+  ## Bursts granted back to back with no CPU access between (two channels on
+  ## one H-blank, a chained immediate pair): the later burst's first
+  ## unmapped read gets the earlier one's last word, not the CPU's last
+  ## transaction. AGB SP, payloads/hdmalag.s and hdmaobus.s (second channel
+  ## reads the first's word every line, CPU in a NOP sled or halted).
+  ## Phantasy Star Collection's Master System player needs it: DMA2 copies
+  ## write-only BG1VOFS to BG0VOFS right after DMA1 writes it
+  ## (docs/playtest-bugs.md section 28).
 const DMA_BUS_WHILE_HALTED* {.booldefine.} = true
-  ## A halted CPU drives nothing, so the data bus keeps the last word a DMA
-  ## put on it until the CPU runs again: a burst granted while the CPU has
-  ## stayed halted since the previous one ended reads that word for its
-  ## first unmapped read, not the opcode the CPU fetched before halting.
-  ## tests/roms/payloads/hdmaobus.s on an AGB SP, 2026-10-02: an H-blank
-  ## DMA reading write-only BG1VOFS ahead of the channel that writes X_k
-  ## there each line reads X_(k-1) under a halt (cells 0x301-0x305), and the
-  ## BIOS's fetched literal (0x0300) only on the first line (0x300).
+  ## A halted CPU drives nothing, so the bus keeps the last DMA word until
+  ## the CPU runs: a burst granted while the CPU stayed halted since the
+  ## previous one reads that word first, not the opcode fetched before the
+  ## halt. AGB SP, payloads/hdmaobus.s: an H-blank DMA reading write-only
+  ## BG1VOFS ahead of the channel writing X_k there reads X_(k-1) under a
+  ## halt (cells 0x301-0x305); the BIOS's fetched literal (0x0300) only on
+  ## the first line (0x300).
 const DMA_READS_IO_LOAD* {.booldefine.} = true
-  ## DMA_READS_CPU_BUS's data load includes an I/O register's: the value the
-  ## CPU read is what the burst finds on the bus. hdmaobus.s on an AGB SP,
-  ## 2026-10-02: an H-blank DMA reading write-only BG1VOFS while the CPU
-  ## polls VCOUNT with `ldrh` reads the polled line number (cell 0x306, line
-  ## 46: 002E), where the opcode fallback answered the loop's `bne` (1AFF).
-  ## The I/O bus is 32 bits wide: hdmaphase.s, an `ldrh` or `ldrb` of VCOUNT
-  ## leaves DISPSTAT on the word's other half too (Bus.dma_bus_word).
+  ## DMA_READS_CPU_BUS's data load includes an I/O register's: the burst
+  ## finds the value the CPU read. AGB SP, hdmaobus.s: an H-blank DMA reading
+  ## write-only BG1VOFS while the CPU polls VCOUNT with `ldrh` reads the line
+  ## number (cell 0x306, line 46: 002E), not the `bne` opcode (1AFF). The I/O
+  ## bus is 32 bits: hdmaphase.s, an `ldrh`/`ldrb` of VCOUNT leaves DISPSTAT
+  ## on the other half too (Bus.dma_bus_word).
 const DMA_SEES_REFILL_FETCH* {.booldefine.} = true
-  ## A pipeline refill is two fetches, and a burst requested between them
-  ## finds the first on the bus. The core charges the refill as one block
-  ## and moves r15 past both, so a burst granted by the closing tick of a
-  ## branch with a refill fetch still to start reads one fetch further back.
-  ## hdmaphase.s on an AGB SP, an H-blank DMA reading write-only I/O against
-  ## a `bne` loop from IWRAM: the request one cycle before the loop's end
-  ## reads the branch target (the loop's first opcode), where r15 alone
-  ## answered the second (n = 1 rows, every load width and either half).
+  ## A refill is two fetches; a burst requested between them finds the first
+  ## on the bus. The core charges the refill as one block with r15 past both,
+  ## so a burst granted by a branch's closing tick with a refill fetch still
+  ## to start reads one fetch further back. AGB SP, hdmaphase.s (H-blank DMA
+  ## reading write-only I/O against an IWRAM `bne` loop): a request one
+  ## cycle before the loop's end reads the branch target, not the second
+  ## opcode (n = 1 cases, every load width, either half).
 const IMM_BOUNDARY_GRANT* {.booldefine.} = true
   ## An immediate DMA whose request (two cycles after the enable) falls
-  ## exactly between two instructions is granted there, ahead of the next
-  ## opcode fetch, instead of waiting a cycle as for an access in flight.
-  ## dmaobus2.s on an AGB SP, the enable store followed by one-cycle
-  ## instructions from IWRAM: the burst's word is the opcodes fetched
-  ## before the third instruction (Thumb 31033104, ARM E2811004), one fetch
-  ## earlier than without it (31053104, E2811005); from EWRAM, where the
-  ## request lands inside a 3-cycle fetch, both agree. Off: those two cells
-  ## (HLE and real BIOS) read one fetch late; on, alyosha
-  ## prefetcher/prefetcher_dma and AGBEEG cpu_runs_idles_during_dma turn
-  ## green and nothing else moves.
+  ## exactly between instructions is granted there, ahead of the next fetch,
+  ## not a cycle later as for an access in flight. AGB SP, dmaobus2.s
+  ## (enable store, then one-cycle IWRAM instructions): the burst's word is
+  ## the opcodes fetched before the third instruction (Thumb 31033104, ARM
+  ## E2811004), not one fetch later (31053104, E2811005). Pinned by alyosha
+  ## prefetcher/prefetcher_dma and AGBEEG cpu_runs_idles_during_dma.
 const IMM_FAST_FETCH_GRANT* {.booldefine.} = true
-  ## An immediate DMA whose request comes due inside an instruction running
-  ## from IWRAM or the BIOS, in no synced access (a branch's refill), is
-  ## granted on that cycle: those fetches take one cycle, so the one at the
-  ## request starts with it and loses the bus (IMM_ACCESS_WAIT's rule for an
-  ## access starting on the request cycle). tests/roms/payloads/dmairqk.s on
-  ## an AGB SP (2026-11-05): DMA3 armed by a word or a CNT_H halfword store
-  ## (the same answers), k NOPs, then a branch into an IWRAM sled; with the
-  ## branch right after the store (k = 0, 1) the end interrupt is taken on
-  ## the cycle it is with k >= 2, where dingbat granted a cycle late, after
-  ## the refill. dmairqv.s's d >= 2 cells (the branch after the store, then
-  ## NOPs) are the same fact. Off: those 28 cells read one to three late.
+  ## An immediate DMA whose request comes due inside an IWRAM or BIOS
+  ## instruction, in no synced access (a branch's refill), is granted on
+  ## that cycle: those one-cycle fetches start with the request and lose the
+  ## bus (IMM_ACCESS_WAIT's rule). AGB SP, payloads/dmairqk.s (DMA3 armed by
+  ## a word or CNT_H store, k NOPs, branch into an IWRAM sled): with k = 0, 1
+  ## the end interrupt lands on the same cycle as with k >= 2; dmairqv.s's
+  ## d >= 2 cells agree. Off: 28 cells read one to three cycles late.
 const DMA_CHAIN* {.booldefine.} = true
-  ## An immediate DMA whose request comes due while another burst holds the
-  ## bus follows it with no cycles between: the pair pays one lead and one
-  ## hand-back. tests/roms/payloads/tmrdma.s on an AGB SP: DMA1 armed, DMA0
-  ## armed by the next store (its request lands in DMA1's burst); DMA0 reads
-  ## the timer DMA1 enabled on the very next cycle (old count, new control),
-  ## and the CPU is back two cycles sooner than for two separate bursts.
+  ## An immediate DMA due while another burst holds the bus follows it
+  ## directly: the pair pays one lead and one hand-back. AGB SP,
+  ## payloads/tmrdma.s (DMA0 armed during DMA1's burst): DMA0 reads the
+  ## timer DMA1 enabled on the next cycle (old count, new control), and the
+  ## CPU is back two cycles sooner than for separate bursts.
 const DMA_PENDING_CHAIN* {.booldefine.} = true
-  ## DMA_CHAIN for a request that was already latched when a burst was
-  ## granted: the next grant follows with no hand-back and no lead between
-  ## them. A request that arrives during the burst still pays both (not
-  ## measured; chaining those too moved Pokemon Mystery Dungeon - Red Rescue
-  ## Team's timing-seeded quiz under the official BIOS). Two H-blank
-  ## channels granted on the same H-blank: hdmalag.s on an AGB SP has the
-  ## second's first read the cycle after the first's last write, and
-  ## hdmaphase.s has the CPU held 10 cycles by a one-halfword reader and a
-  ## one-halfword writer (6 by the reader alone), not 12.
+  ## DMA_CHAIN for a request already latched at a burst's grant: the next
+  ## grant follows with no hand-back or lead. A request arriving during the
+  ## burst still pays both (unmeasured; chaining it moved Pokemon Mystery
+  ## Dungeon - Red Rescue Team's timing-seeded quiz under the real BIOS).
+  ## AGB SP, two channels on one H-blank: hdmalag.s, the second's first read
+  ## is the cycle after the first's last write; hdmaphase.s, a one-halfword
+  ## reader and writer hold the CPU 10 cycles (reader alone 6), not 12.
 const IMM_ACCESS_WAIT* {.booldefine.} = true
-  ## An immediate DMA whose request lands inside a CPU data access that
-  ## began before it waits for that access to end, and the access sees
-  ## memory as it was before the burst; an access beginning on the request
-  ## cycle loses the bus to it. tests/roms/payloads/dmastart.s on an AGB SP,
-  ## the enable store followed from IWRAM by one instruction: an EWRAM ldr,
-  ## ldrh or str there (data from the next cycle on) delays the burst by its
-  ## length less one and reads the old word, while a nop before the ldr, or
-  ## an ldm's second access, lets the burst in first.
+  ## An immediate DMA whose request lands inside a CPU data access begun
+  ## before it waits for the access to end, which sees pre-burst memory; an
+  ## access beginning on the request cycle loses the bus. AGB SP,
+  ## payloads/dmastart.s: an EWRAM ldr/ldrh/str right after the enable store
+  ## delays the burst by its length less one and reads the old word; a nop
+  ## before the ldr, or an ldm's second access, lets the burst in first.
 const IMM_FETCH_WAIT* {.booldefine.} = true
-  ## An immediate DMA whose request lands inside a CPU instruction fetch
-  ## waits for the whole fetch, as for a data access (IMM_ACCESS_WAIT), and
-  ## takes the bus as it ends. On an AGB SP: Hades-Tests dma-start-delay's
-  ## own code run from board WRAM (tests/roms/payloads/hadesdsd.s): the DMA
-  ## reads TM0 3 cycles later than the one-cycle retry gave, after the whole
-  ## 6-cycle ARM fetch, while the CPU is back on the same cycle; and a Thumb
-  ## store executed from the empty cartridge slot (slotimm.s): the request
-  ## lands in the next opcode's 5-cycle gamepak fetch and the DMA reads TM0
-  ## 2 cycles later than the retry gave, at the fetch's end; with the
-  ## prefetcher on the fetch is 2 cycles and the burst starts at its end,
-  ## a cycle sooner than the retry. The ROM rows of dma-start-delay (ARM,
-  ## N+S fetches, with and without the prefetcher) turn green with it.
+  ## An immediate DMA whose request lands inside an instruction fetch waits
+  ## for the whole fetch (as IMM_ACCESS_WAIT) and takes the bus as it ends.
+  ## AGB SP: payloads/hadesdsd.s (Hades-Tests dma-start-delay from board
+  ## WRAM) reads TM0 after the whole 6-cycle ARM fetch, CPU back on the same
+  ## cycle; slotimm.s (Thumb store from the empty slot) has the request in a
+  ## 5-cycle gamepak fetch and the DMA at its end (prefetcher on: 2-cycle
+  ## fetch, burst at its end). Pinned by Hades dma-start-delay's ROM cases.
 const IMM_IDLE_GRANT* {.booldefine.} = true
   ## An immediate DMA requests the bus two cycles after its enable write. If
-  ## the CPU is running internal cycles then, the burst starts there and
-  ## those cycles run under it; if the CPU has a gamepak access in flight,
-  ## the burst starts on the third cycle, as it always did (mGBA suite
-  ## Trivial DMA; any other access: IMM_ACCESS_WAIT). tests/roms/payloads/irqstorm.s on an AGB SP: the enable
-  ## is followed by an IWRAM `ldr`, whose internal cycle is the enable's
-  ## third, and the CPU comes out of every burst (1 to 4096 words) a cycle
-  ## sooner than a third-cycle start gives -- the timer interrupt it then
-  ## takes is a cycle earlier at every period. hades dma-start-delay's two
-  ## IWRAM rows turn green with it. Off: irqstorm's ten DMA cells read one
-  ## late.
+  ## the CPU is in internal cycles then, the burst starts there and they run
+  ## under it; with a gamepak access in flight it starts on the third cycle
+  ## (mGBA suite Trivial DMA; other accesses: IMM_ACCESS_WAIT). AGB SP,
+  ## payloads/irqstorm.s (enable, then an IWRAM `ldr` whose internal cycle is
+  ## the third): the CPU leaves every burst (1 to 4096 words) a cycle sooner
+  ## than a third-cycle start gives. Pinned by Hades dma-start-delay's IWRAM
+  ## cases.
 const DMA_REGRAB* {.intdefine.} = 0
   ## A PPU-timed request landing within this many cycles of the last burst's
   ## end is granted at once, not deferred to the end of the CPU access in
-  ## flight. It was 1, fitted to alyosha DMA_pause_timing_end_4 while that
-  ## row's immediate burst (armed from ROM) started a cycle early; with the
-  ## gamepak fetch waited out (IMM_FETCH_WAIT) _end_4's request lands on the
-  ## burst's last cycle and _end_3's one after it, and 0 holds both.
+  ## flight. 0 is pinned by alyosha DMA_pause_timing_end_3/_4.
 proc add_cycles*(bus: Bus; n: int) {.inline.}
 proc idle_window*(bus: Bus; n: int)
 proc `[]`*(bus: Bus; address: uint32): uint8
 proc `[]=`*(bus: Bus; address: uint32; value: uint8)
 proc read_half*(bus: Bus; address: uint32): uint16
 proc read_word*(bus: Bus; address: uint32): uint32
-# The instruction fetch runs once per instruction, yet clang left
-# fetch_half/fetch_word and their cached halves out of line: every fetch was
-# two calls. Pinned: -3.4% retired instructions on FireRed native, +4% fps
-# in the web build (GCC makes a failed always_inline a hard error).
+# clang left fetch_half/fetch_word out of line (two calls per fetch). Forcing
+# them inline: -3.4% retired instructions on FireRed native, +4% fps on web
+# (clang only: GCC makes a failed always_inline a hard error).
 when defined(clang):
   {.pragma: fetch_inline, codegenDecl: "__attribute__((always_inline)) inline $# $#$#".}
 else:
@@ -1824,11 +1693,10 @@ proc contend_slow(bus: Bus; address: uint32; is32: bool; cost: int): int {.noinl
 proc hle_halt_return*(cpu: CPU)
 proc exception_return_restore*(cpu: CPU)
 proc read_instr*(cpu: CPU): uint32 {.inline.}
-# The bank an undefined CPSR mode pattern selects: r13 and r14 read 0 there
-# and the mode field holds the pattern (hardware: gbaedge UNDMODE on AGB SP,
-# patterns 15/1A/1E, docs/hwprobe-results-agb.md). It is zeroed on entry,
-# so nothing written in it survives; r8-r12 and the SPSR are unprobed and
-# follow the user bank. Never serialized (always empty at a boundary).
+# The bank an undefined CPSR mode pattern selects: r13 and r14 read 0 and the
+# mode field holds the pattern (AGB SP, gbaedge UNDMODE, patterns 15/1A/1E,
+# docs/hwprobe-results-agb.md). Zeroed on entry, so nothing written survives;
+# r8-r12 and SPSR are unprobed and follow the user bank. Never serialized.
 const UNDEF_BANK* = 6
 # The stub BIOS's room for the HLE's decompression and unpack routines
 # (hle_unc.nim, filled in bus.nim new_bus): ARM instructions, then Thumb ones
@@ -1838,31 +1706,28 @@ const UNC_THUMB_LO* = 0x3A00'u32
 const UNC_THUMB_HI* = 0x4000'u32
 proc mode_bank*(m: CpuMode): int
 
-# Textual includes: the whole GBA core compiles as one module so the C
-# compiler inlines across files (notes/architecture.md). The forward
-# declarations above make the order mostly arbitrary; the exceptions:
-#   * hle_bios before arm/arm and thumb/thumb — both SWI handlers call
+# Textual includes: the core is one module so the C compiler inlines across
+# files (notes/architecture.md). Order is free except:
+#   * hle_bios before arm/arm and thumb/thumb: both SWI handlers call
 #     hle_swi, which has no forward declaration.
-#   * arm/arm before arm/lut — `const armLut = armLutBuilder()` resolves the
+#   * arm/arm before arm/lut: `const armLut = armLutBuilder()` resolves the
 #     arm_* handlers at compile time; a const cannot be forward-declared.
 
 # CPU fetch pipeline
 template note_waits*(bus: Bus; cost: int) =
   ## IRQ_LAST_WAITS: a CPU access of `cost` cycles just ended.
   bus.lw_end = bus.sched.cycles + CycleCount(bus.cycles)
-  # An uncached fetch that synced on the way (a FIFO window open under the
-  # interrupt's) has handed its cycles to the scheduler and reads as 0; it
-  # has no wait states to note either way, and a state carries 0..1023.
+  # An uncached fetch that synced on the way (a FIFO window inside the IRQ
+  # one) already handed its cycles over and reads as 0: no waits to note,
+  # and a state carries 0..1023.
   bus.lw_waits = max(cost - 1, 0)
 
 when defined(cpu_testbus):
-  # The single-instruction test build (tests/singlestep_test.nim): every CPU
-  # access goes to these instead of the memory map, which a test vector's
-  # flat 32-bit space has nothing to do with. `kind` is 0 for an opcode
-  # fetch, 1 for a load. `peek` serves the untimed reads some instructions
-  # make of the bus (read_*_internal). `refill` is clear_pipeline, which
-  # charges the two refill fetches without making them. Compiled out of
-  # every other build: nothing on the shipping path tests for them.
+  # -d:cpu_testbus, the single-instruction test build
+  # (tests/singlestep_test.nim): every CPU access goes here instead of the
+  # memory map. `kind`: 0 opcode fetch, 1 load. `peek`: untimed reads
+  # (read_*_internal). `refill`: clear_pipeline, charging the two refill
+  # fetches without making them. Compiled out of every other build.
   var gba_testbus_read*: proc(kind, size: int; address: uint32): uint32 {.nimcall.}
   var gba_testbus_write*: proc(size: int; address, value: uint32) {.nimcall.}
   var gba_testbus_peek*: proc(size: int; address: uint32): uint32 {.nimcall.}
@@ -1898,11 +1763,10 @@ when defined(mp2kwav):  # throwaway A/B capture buffers (see mp2k.nim)
   var dbgFifoServed*: array[2, int]
   var dbgFifoDrop*: array[2, int]
   var dbgFifoWrites*: array[2, int]
-  # Pass placement oracle (DINGBAT_PASSDUMP): each FIFO byte tagged with the
-  # address the sound DMA read it from; per rendered pass, the capture index
-  # the HLE placed its frame at and the index at which the byte the pass's
-  # first ring store wrote (kind 0) / the model's slot start (kind 1) left
-  # the FIFO.
+  # Pass placement oracle (DINGBAT_PASSDUMP): FIFO bytes tagged with their DMA
+  # source; per pass, the capture index the HLE placed its frame at and the
+  # index where the pass's first ring store (kind 0) / the model's slot
+  # start (kind 1) left the FIFO.
   var dbgPassStore*: uint32 = 0
   var dbgWatch*: seq[tuple[a: uint32, pass: int, kind: int]] = @[]
   var dbgPassPlaced*: seq[int] = @[]
@@ -1918,9 +1782,8 @@ when defined(mp2kwav):  # throwaway A/B capture buffers (see mp2k.nim)
   var dbgHookSad*: seq[uint32] = @[]    # DMA1 source register at each hook
   var dbgHookSad2*: seq[uint32] = @[]
   var dbgHookCnt*: seq[int] = @[]        # SoundInfo.pcmDmaCounter at each mixer hook
-  # Note-on with a non-zero SoundChannel.count: did the engine start the
-  # sample at that offset (honoured) or at 0 (ignored)? Judged one pass later
-  # from the count it left (apply_pending).
+  # Note-on with non-zero SoundChannel.count: did the engine start there
+  # (honoured) or at 0 (ignored)? Judged a pass later (apply_pending).
   var dbgStartHonoured*: int = 0
   var dbgStartIgnored*: int = 0
   var dbgStartUnclear*: int = 0
@@ -1940,10 +1803,9 @@ include mp2k
 include gs_bon
 
 proc set_audio_silent*(gba: GBA; on: bool) =
-  ## Whether anybody hears this core (APU.silent): muted, volume 0, link
-  ## player 2. Call between frames. The sound-driver HLEs render nothing while
-  ## silent, so turning sound back on re-latches their voices from the
-  ## engine's own state, as a state load does.
+  ## Whether anybody hears this core (APU.silent). Call between frames. The
+  ## sound-driver HLEs render nothing while silent, so un-silencing
+  ## re-latches their voices from the engine's state, as a state load does.
   if gba.apu.silent and not on:
     if gba.mp2k != nil: gba.mp2k.mp2k_state_loaded()
     if gba.gs_bon != nil: gba.gs_bon.gs_state_loaded()
@@ -1971,22 +1833,21 @@ include mmio
 
 {.push quirky: off.}
 proc new_storage*(gba: GBA; rom_path: string): Storage =
-  # changeFileExt, not "up to the last dot": an extensionless path (the
-  # command line takes any) would otherwise name `<parent>.sav` or `.sav`
+  # changeFileExt, not "up to the last dot": an extensionless path would
+  # otherwise give `<parent>.sav` or `.sav`
   let save_path = rom_path.changeFileExt(".sav")
   let content = readFile(rom_path)
   var t = find_storage_type(content)
   when defined(yoshi_eeprom_pin):
-    # Tilt carts save to EEPROM but the string scan can misread them as SRAM
-    # (which aliases save bytes under the tilt registers). Behind a define
-    # until the pin-by-game-code policy is decided.
+    # -d:yoshi_eeprom_pin (off by default): tilt carts save to EEPROM but the
+    # string scan can misread them as SRAM (aliasing the tilt registers).
+    # Pending a pin-by-game-code policy.
     if gba.cartridge != nil and
        gba.cartridge.game_code() in ["KYGE", "KYGJ", "KYGP", "KHPJ"]:
       t = stEEPROM
-  # EEPROM beside another library: the battery file, when there is one, says
-  # which chip it came from; otherwise what the game does with save memory
-  # will (storage/pending.nim). A file of no chip's size keeps the scan's
-  # guess.
+  # Several candidate chips: the battery file's size picks one; with no file,
+  # the game's save accesses do (storage/pending.nim). A file of no chip's
+  # size keeps the scan's guess.
   let candidates = storage_candidates(content)
   let data = if fileExists(save_path): readFile(save_path) else: ""
   var pending = false
@@ -2015,8 +1876,7 @@ proc new_storage*(gba: GBA; rom_path: string): Storage =
     return   # no battery file to load
   if data.len > 0:
     # A trailing RTC record (rtc_calendar.nim "Trailer location") is never
-    # chip data, even when it does not decode as a clock: the chip bytes are
-    # everything before it, read up to the chip's size as before.
+    # chip data, even when it does not decode as a clock.
     let toff = trailer_offset(data.len)
     let chip_len = if toff >= 0: toff else: data.len
     if toff >= 0:
@@ -2044,9 +1904,9 @@ proc new_gba*(bios_path, rom_path: string; run_bios: bool; use_hle: bool = false
 proc handle_saves*(gba: GBA)
 
 proc defer_dma_request(gba: GBA; kind: EventType): bool =
-  ## A PPU-timed DMA request that lands inside a CPU bus access is granted at
-  ## the access's end. Only a window sync knows where that is; a halted CPU,
-  ## an internal cycle or a closed window leave access_end in the past.
+  ## A PPU-timed DMA request inside a CPU bus access is granted at the
+  ## access's end. Only a window sync knows where that is; a halted CPU, an
+  ## internal cycle or a closed window leave access_end in the past.
   when DMA_ACCESS_WINDOW:
     let bus = gba.bus
     if bus.dma_deferred and gba.scheduler.cycles != bus.access_end:
@@ -2061,14 +1921,14 @@ proc defer_dma_request(gba: GBA; kind: EventType): bool =
   false
 
 proc defer_fifo_request(gba: GBA; kind: EventType): bool =
-  ## FIFO_DMA_WINDOW (gba/apu/dma_channels.nim). The refill request takes the bus a cycle ahead of this
-  ## event (FIFO_DMA_REQUEST_DELAY counts to the first cycle the CPU can
-  ## lose): a CPU access begun before that cycle holds the burst off to its
-  ## end, and an internal cycle on it runs under the burst; an access begun
-  ## on it, or on this one, waits the whole burst (tests/roms/dbsuite
-  ## fifodma on an AGB SP: EWRAM loads against the first request, one cycle
-  ## apart, cost the CPU the burst less its internal cycle while they hold
-  ## it off, the burst when they begin on it).
+  ## FIFO_DMA_WINDOW (gba/apu/dma_channels.nim). The refill request takes the
+  ## bus a cycle before this event (FIFO_DMA_REQUEST_DELAY counts to the
+  ## first cycle the CPU can lose): an access begun before that cycle holds
+  ## the burst off to its end, and an internal cycle on it runs under the
+  ## burst; an access begun on it or on this one waits the whole burst. AGB
+  ## SP, tests/roms/dbsuite fifodma: EWRAM loads one cycle apart cost the
+  ## burst less their internal cycle when holding it off, the whole burst
+  ## when begun on it.
   when DMA_ACCESS_WINDOW:
     let bus = gba.bus
     let now = gba.scheduler.cycles
@@ -2091,25 +1951,22 @@ proc defer_fifo_request(gba: GBA; kind: EventType): bool =
 static: doAssert WL_CROSS_PERIOD_MAX < HBLANK_FLAG_DELAY
 
 proc wl_passable(gba: GBA; kind: EventType): bool =
-  ## Whether a waitloop skip may dispatch `kind` inside an iteration it skips
-  ## (cpu.wl_crossable, which has already required a loop that reads no IO
-  ## and no renderer-contended memory, no access window open and no
-  ## interrupt pending). True only where the handler's path reads neither
-  ## the CPU nor the bus -- so it cannot tell where in the loop the CPU is --
-  ## writes no memory, raises no interrupt, requests no DMA, opens no access
-  ## window, ends no frame, and books nothing inside the iteration that is
-  ## not passable too (EndHBlank's StartLine at +0 is; SetHBlankFlag's
-  ## HDMARequest at +2 is whenever SetHBlankFlag is). DISPSTAT, VCOUNT and
-  ## the PSG change under it, but the loop reads no IO.
+  ## Whether a waitloop skip may dispatch `kind` inside a skipped iteration
+  ## (cpu.wl_crossable has already required no IO or contended reads, no
+  ## open window, no pending IRQ). True only if the handler reads neither
+  ## CPU nor bus (so cannot tell where in the loop the CPU is), writes no
+  ## memory, raises no IRQ, requests no DMA, opens no window, ends no frame,
+  ## and books nothing non-passable inside the iteration (EndHBlank's
+  ## StartLine at +0 is passable; SetHBlankFlag's HDMARequest at +2 is
+  ## whenever SetHBlankFlag is).
   let ppu = gba.ppu
   let st = ppu.dispstat
   case kind
   of etAPUSample, etAPUFrameSeq, etPPUStartLine: true
   of etPPUStartHBlank:
-    # Its access window for an H-blank / V-blank DMA. The interrupt windows
-    # it books ahead of this line's raises (IRQ_LAST_WAITS) are only
-    # bookings: IrqWindowOpen is not passable, and the one for the H-blank
-    # raise lands 31 cycles on (wl_crossable keeps the period under it).
+    # It opens the H-blank / V-blank DMA window. The IRQ windows it books
+    # (IRQ_LAST_WAITS) are only bookings: IrqWindowOpen is not passable, and
+    # the H-blank one lands 31 cycles on (wl_crossable keeps the period under).
     not (ppu.vcount < 160 and gba.dma.armed(2)) and
       not (ppu.vcount == 159 and gba.dma.armed(1))
   of etPPUSetHBlankFlag:
@@ -2120,8 +1977,7 @@ proc wl_passable(gba: GBA; kind: EventType): bool =
     # window open; trigger_hdma requests nothing with no channel armed
     not gba.bus.dma_deferred and not gba.dma.armed(2)
   of etPPUEndHBlank:
-    # Not the frame's end (160), the V-blank flag's fall (227) or the frame's
-    # first line (0), where contention and the flags change; no V-count
+    # Not lines 160, 227 or 0 (contention and flags change there); no V-count
     # match to raise, no video capture to request
     let next = (int(ppu.vcount) + 1) mod 228
     next != 0 and next != 160 and next != 227 and
@@ -2156,32 +2012,28 @@ proc gba_dispatch(gba: GBA): proc(kind: EventType) {.closure.} =
     gba.verdict_kinds = gba.verdict_kinds or (1'u64 shl ord(kind))
     if kind == etFifoWindow:
       # Changes nothing a program can read (FIFO_DMA_WINDOW), so a waitloop
-      # need not count it: the skip it stopped resumes after one iteration
+      # need not count it
       gba.apu.dma_channels.fifo_window_open()
       when WL_QUIET_EVENTS: gba.wl_unsafe = true   # but it opens a window
       return
     # Waitloop exactness: when, and at which PC, the last event ran
     inc gba.dispatch_count
     gba.last_dispatch_pc = gba.cpu.r[15]
-    # WL_QUIET_EVENTS: the PPU's line events, the APU's clocks, the
-    # interrupt controller, the timers and the IRQ windows write no memory
-    # (a video-capture DMA marks itself, dma.run_channel; the MP2K HLE's
-    # render only reads; a FIFO refill is its own event). Every other arm
-    # marks the waitloop detector's `wl_unsafe` (wl_mark). So does anything
-    # that opens or closes an access window, or raises an interrupt flag,
-    # where it does it (interrupts.nim, ppu.start_hblank, the sound FIFO's
-    # window): Duke Nukem Advance (U) [f_5], whose timer overflows open the
-    # FIFO's window, drew a different frame 251 than the unskipped run until
-    # those counted. Marked in place, not tested per dispatch: that cost
-    # Golden Sun 0.3% of its instructions.
+    # WL_QUIET_EVENTS: PPU line events, APU clocks, the interrupt controller,
+    # timers and IRQ windows write no memory (a video-capture DMA marks
+    # itself, dma.run_channel; the MP2K render only reads; a FIFO refill is
+    # its own event). Every other arm calls wl_mark, as does whatever opens
+    # or closes an access window or raises an IF bit, in place
+    # (interrupts.nim, ppu.start_hblank, the FIFO window): Duke Nukem Advance
+    # (U) [f_5]'s timer overflows open the FIFO window and drew a different
+    # frame 251 otherwise. Testing per dispatch instead costs Golden Sun 0.3%.
     template wl_mark() =
       when WL_QUIET_EVENTS: gba.wl_unsafe = true
     case kind
     of etAPUFrameSeq:   gba.apu.tick_frame_sequencer()
     of etAPUSample:     gba.apu.get_sample()
-    # PSG channels carry next_step deadlines instead of per-period events
-    # (apu.nim); these arms remain only for events in a state saved by an
-    # older build, which gba_apply_state drains into next_step first.
+    # PSG channels use next_step deadlines (apu.nim); these arms only serve
+    # events in older states, which gba_apply_state drains first.
     of etAPUChannel1, etAPUChannel2, etAPUChannel3, etAPUChannel4: wl_mark()
     of etPPUStartLine:     gba.ppu.start_line()
     of etPPUStartHBlank:   gba.ppu.start_hblank()
@@ -2205,9 +2057,8 @@ proc gba_dispatch(gba: GBA): proc(kind: EventType) {.closure.} =
         let now = gba.scheduler.cycles
         var at_boundary = false
         when IMM_BOUNDARY_GRANT:
-          # Due exactly as an instruction ends (the CPU's closing tick, not
-          # an access's sync): the request finds the next fetch not yet
-          # started, and wins the bus from it.
+          # Due exactly as an instruction ends (the CPU's closing tick, not an
+          # access's sync): the request wins the bus from the next fetch.
           at_boundary = not bus.in_catch_up and gba.scheduler.tick_left == 0 and
                         not gba.cpu.halted
         var in_access = false
@@ -2216,7 +2067,7 @@ proc gba_dispatch(gba: GBA): proc(kind: EventType) {.closure.} =
         when IMM_ACCESS_WAIT:
           # Measured for IWRAM/EWRAM/IO data accesses and (IMM_FETCH_WAIT)
           # EWRAM and gamepak fetches; a gamepak data access keeps the
-          # one-cycle wait (none can be in flight at W+2 after the enable).
+          # one-cycle wait (none can be in flight at W+2).
           if bus.in_catch_up and not bus.access_rom and not gba.cpu.halted and
              bus.access_start <= now and now <= bus.access_end:
             if bus.access_start == now: access_starts = now < bus.access_end
@@ -2230,8 +2081,8 @@ proc gba_dispatch(gba: GBA): proc(kind: EventType) {.closure.} =
           bus.imm_post = true
         elif (bus.sync_bits and 4) == 0 and in_access:
           # A load under way reads memory as it was; the CPU's next step at
-          # its end hands over (its internal cycle, which runs under the
-          # burst, or an ldm's next access), as for one ending on the request.
+          # its end hands over (its internal cycle, run under the burst, or an
+          # ldm's next access).
           bus.sync_bits = bus.sync_bits or 4
           bus.imm_at = bus.access_end
           bus.imm_pre = true
@@ -2290,14 +2141,11 @@ proc gba_dispatch(gba: GBA): proc(kind: EventType) {.closure.} =
       gba.keypad.keypad_irq_event()
     of etHandleInput, etIME, etCameraDone, etGbLycEdge: wl_mark()
 
-# Timer prescaler phase at ROM entry when the BIOS boot is skipped. The
-# prescaler runs free from power-on (timer.nim) and this core counts it from
-# scheduler cycle 0, so a skip-BIOS start at cycle 0 put every /64, /256 and
-# /1024 tick in the wrong place. alyosha timer/timer reads a /64 timer ten
-# times across three ticks straight after entry: it passes only at 8 mod 64
-# (7 misses the first tick, 9 catches the third a read early). The bits above
-# 64 are not pinned by any row; 776 is the value nearest the LLE boot's
-# own entry (795 mod 1024 here: 75,997,979 cycles to the first ROM fetch).
+# Timer prescaler phase at ROM entry when the BIOS boot is skipped: the
+# prescaler runs free from power-on and is counted from scheduler cycle 0.
+# Pinned mod 64 by alyosha timer/timer (passes only at 8 mod 64). Bits above
+# 64 are unpinned; 776 is nearest the LLE boot's entry (795 mod 1024:
+# 75,997,979 cycles to the first ROM fetch).
 const SKIP_BIOS_PRESCALER_PHASE {.intdefine.} = 776
 
 {.push quirky: off.}
@@ -2319,32 +2167,29 @@ proc post_init*(gba: GBA) =
   # Non-owning capture: the pump closure lives on the GBA's scheduler
   let g {.cursor.} = gba
   gba.scheduler.pump = proc() =
-    # Inside a DMA burst the clock is rewound to the event's cycle; the
-    # request stays latched and the burst loop runs run_pending at its next
-    # transfer boundary
+    # Inside a DMA burst (clock rewound to the event's cycle) the request
+    # stays latched; the burst loop runs run_pending at its next transfer
     if g.dma.pending != 0 and not g.bus.dma_active and not g.bus.swp_lock:
       g.dma.run_pending()
   gba.handle_saves()
   # MP2K HLE: runtime-detected (mp2k.nim); nothing runs unless gba.mp2k_hle
   gba.mp2k = new_mp2k(gba)
   gba.mp2k.init_mp2k()
-  # Camelot "Bon" HLE is dormant unless built with -d:gsbon: its shadow mixer
-  # frame-quantizes note attacks, audibly worse on percussion. Every consumer
-  # nil-checks gs_bon, so not creating it is the off-switch.
+  # Camelot "Bon" HLE only with -d:gsbon (off by default): its shadow mixer
+  # frame-quantizes note attacks, audibly worse on percussion. Consumers
+  # nil-check gs_bon, so not creating it is the off-switch.
   when defined(gsbon):
     gba.gs_bon = new_gs_bon(gba)
     gba.gs_bon.init_gs_bon()
   if not gba.run_bios:
-    # The state the BIOS leaves at ROM entry. Derived by logging every I/O
-    # write a full BIOS boot makes and then diffing the two boot paths'
-    # registers and RAM at ROM entry: what is set below is the whole
-    # difference, and it is the same for every ROM.
+    # The state the BIOS leaves at ROM entry: the whole register/RAM diff
+    # between a full BIOS boot and a skipped one, the same for every ROM.
     gba.cpu.skip_bios()
     # Link port in general-purpose mode (the BIOS's last RCNT write is
     # 0x8000); from RCNT = 0 Sonic Advance 1 and 2 hang at boot
     gba.serial.rcnt = 0x8000
-    # PSG and both DMA channels at full volume. The FIFO reset bits the BIOS
-    # writes alongside these are write-only.
+    # PSG and both DMA channels at full volume (the BIOS's FIFO reset bits
+    # are write-only).
     gba.apu.soundcnt_h = cast[SOUNDCNT_H](0x000E'u16)
     # The BIOS clears wave RAM; a cold Channel3 holds the GB power-on pattern
     for i in 0 ..< 2 * PSG_WAVE_BANK:
@@ -2358,25 +2203,23 @@ proc handle_saves*(gba: GBA) =
 
 proc end_frame*(gba: GBA): CycleCount {.discardable.} =
   ## Frame-boundary bookkeeping: rebase the scheduler and every absolute-cycle
-  ## anchor so uint32 cycles cannot overflow on WASM; the low 10 bits are kept
-  ## so timer prescaler phase survives. Returns the subtracted base for
-  ## link.nim's cross-core cycle comparisons.
+  ## anchor so uint32 cycles cannot overflow on WASM, keeping the low 10 bits
+  ## (timer prescaler phase). Returns the base, for link.nim's cross-core
+  ## comparisons.
   if gba.ppu.frame > 0: dec gba.ppu.frame
-  # PSG next_step deadlines are absolute cycles held outside the scheduler:
-  # catch them up first (every deadline then lies in the future) and move
-  # them with the events. This also bounds how far behind an unobserved
-  # channel can fall. end_frame is the single funnel for every GBA rebase.
+  # PSG next_step deadlines are absolute cycles outside the scheduler: catch
+  # up first (all deadlines then lie ahead) and move them with the events.
+  # This also bounds how far an unobserved channel lags. end_frame is the
+  # only GBA rebase.
   gba.apu.apu_catchup_all()
-  # Channel 4's divisor deadline can be in the past (the catch-up stops at
-  # the last LFSR shift): settle it while the clock it is measured against
-  # still stands (the GB's gb_rebase).
+  # Channel 4's divisor deadline can be in the past (catch-up stops at the
+  # last LFSR shift): settle it before the clock moves (as gb_rebase).
   ch4_advance_divisor(gba.apu.channel4, gba)
   let base = gba.scheduler.rebase(keep_phase_mask = 1023)
   gba.rebased += int64(base)
   when defined(switrace): (swtBase += int64(base); inc swtFrame)
   gba.apu.apu_rebase(base)
-  # FIFO transfer stamps and the MP2K HLE's pending slot hooks are absolute
-  # cycles too (mp2k.nim measure_latency)
+  # FIFO transfer stamps and the MP2K HLE's slot hooks are absolute too
   for c in 1..2: gba.dma.fifo_xfer_cycle[c] -= int64(base)
   gba.ppu.line_start_cycle -= int64(base)
   if gba.mp2k != nil:
@@ -2389,15 +2232,12 @@ proc end_frame*(gba: GBA): CycleCount {.discardable.} =
     if gba.timer.cycle_enabled[i] >= base:
       gba.timer.cycle_enabled[i] -= base
     elif gba.timer.tmcnt[i].enable and not gba.timer.tmcnt[i].cascade:
-      # Anchor predates the base: fold the ticks over (anchor, base] into
-      # the counter and anchor on cycle 0, which lies in the same prescaler
-      # period (base is a multiple of 1024). No overflow can hide in the
-      # skipped window: its event would have fired and re-anchored. The
-      # anchor must not land after the rebased clock: the old one kept its
-      # offset within the period, and a read in the frame's first cycles
-      # below that offset took the "not started yet" path and answered the
-      # reload (0) -- once every 16 frames, as the frame's length walks the
-      # clock's low bits (tests/roms/payloads/envrestart.s waits on TM2).
+      # Anchor predates the base: fold the ticks over (anchor, base] into the
+      # counter and anchor on cycle 0, in the same prescaler period (base is
+      # a multiple of 1024). No overflow can hide there: its event would have
+      # re-anchored. The anchor must not land after the rebased clock, or an
+      # early read takes the "not started yet" path and answers the reload
+      # (payloads/envrestart.s waits on TM2).
       let period = CycleCount(TIMER_PERIODS[gba.timer.tmcnt[i].frequency])
       let k = base div period - gba.timer.cycle_enabled[i] div period
       gba.timer.cycle_enabled[i] = 0
@@ -2413,10 +2253,8 @@ proc end_frame*(gba: GBA): CycleCount {.discardable.} =
     gba.bus.rom_free_since -= base
   else:
     gba.bus.rom_free_since = 0
-  # The post-DMA open-bus window bounds this stamp against cycles taken from
-  # the scheduler, so it has to move with the scheduler. Left behind it sat a
-  # whole frame in the future, and the window then could not open again until
-  # the next burst re-stamped it.
+  # The post-DMA open-bus window compares this stamp with scheduler cycles;
+  # unrebased, it would hold the window shut until the next burst.
   if gba.bus.dma_request_at >= base:
     gba.bus.dma_request_at -= base
   else:
@@ -2450,10 +2288,9 @@ proc end_frame*(gba: GBA): CycleCount {.discardable.} =
     gba.interrupts.gate_open_at -= base
   else:
     gba.interrupts.gate_open_at = 0
-  # IRQ_LAST_WAITS compares these with the scheduler's clock at the next
-  # boundary. The frame ends on line 160, four cycles before the V-blank
-  # interrupt is recognised, so left behind they never matched for it: every
-  # V-blank interrupt skipped the rule (alyosha irq/IRQ_sub_2_slow).
+  # IRQ_LAST_WAITS compares these with the clock at the next boundary. The
+  # frame ends four cycles before the V-blank IRQ is recognised, so unrebased
+  # they would never match for it (alyosha irq/IRQ_sub_2_slow).
   if gba.cpu.irq_line_at >= base: gba.cpu.irq_line_at -= base
   else: gba.cpu.irq_line_at = 0
   if gba.bus.lw_end >= base: gba.bus.lw_end -= base

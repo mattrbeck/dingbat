@@ -97,9 +97,8 @@ proc save_bus_state(bus: Bus; w: var Writer) =
   w.write_u32(bus.bios_latch)
   w.write_bytes(bus.wram_board)
   w.write_bytes(bus.wram_chip)
-  # ROM burst / prefetch trackers persist across frame boundaries; omitting
-  # them mistimes the first ROM access by a few cycles, which breaks
-  # bit-exact rollback replay.
+  # ROM burst / prefetch trackers persist across frame boundaries; without
+  # them the first ROM access is a few cycles off and rollback replay drifts.
   w.write_u32(bus.rom_next_addr)
   w.write_u32(bus.rom_next_addr2)
   w.write_u64(uint64(bus.rom_free_since))
@@ -259,15 +258,13 @@ proc save_dma_state(dma: DMA; w: var Writer) =
     w.write_u32(dma.latch[i])
     w.write_u16(dma.count[i])  # v5
   # rev 11: FIFO_HANDBACK_CHAIN, a word read in a burst's hand-back cycle and
-  # held in the latch for the FIFO's next refill (0 or 2 between instructions)
-  # The first byte's high nibble (spare: fifo_chain is 0..3) carries
-  # IMM_NEEDS_EDGE's DMA.imm_blocked, one bit per channel; rev-11 builds
-  # without it wrote 0 there
+  # held for the FIFO's next refill (0 or 2 between instructions). The first
+  # byte's spare high nibble (fifo_chain is 0..3) carries IMM_NEEDS_EDGE's
+  # DMA.imm_blocked, one bit per channel; rev-11 builds without it wrote 0.
   w.write_u8(dma.fifo_chain[0] or (dma.imm_blocked shl 4))
-  # The second byte's high nibble (spare too) carries two bus flags a burst
-  # leaves behind: bit 4 Bus.dma_bus_left (the last top-level burst ran under
-  # a HALT, so the next one before the wake keeps its bus value), bit 5
-  # Bus.dma_first_rom. Builds before wrote 0 there, which loads as both clear.
+  # The second byte's spare high nibble: bit 4 Bus.dma_bus_left (the last
+  # top-level burst ran under a HALT, so the next one before the wake keeps
+  # its bus value), bit 5 Bus.dma_first_rom. Older builds wrote 0 (both clear).
   let bus = dma.gba.bus
   w.write_u8(dma.fifo_chain[1] or (if bus.dma_bus_left: 0x10'u8 else: 0'u8) or
              (if bus.dma_first_rom: 0x20'u8 else: 0'u8))
@@ -760,9 +757,8 @@ proc load_storage_state(gba: GBA; r: var Reader) =
     check_one_of(n, [0x200, 0x2000], "eeprom.memory.len")
   elif n != st.memory.len:
     raise state_error("save state backup size mismatch")
-  # The .sav is rewritten only if the state's RAM differs from what the
-  # cart holds: run-ahead restores every frame, and marking it dirty
-  # unconditionally rewrote the save file (fsync'd, natively) every frame.
+  # Mark the .sav dirty only if the RAM differs: run-ahead restores every
+  # frame, and each dirty flush rewrites (and natively fsyncs) the file.
   let changed = n != st.memory.len or
     (n > 0 and not equalMem(addr st.memory[0], unsafeAddr r.buf[r.pos], n))
   st.memory.setLen(n)
@@ -829,10 +825,9 @@ proc load_storage_state(gba: GBA; r: var Reader) =
 
 # ---- In-flight machine state (rev 9) ----
 #
-# What a frame boundary can leave in motion and revs <= 8 did not carry, so a
-# load either dropped it or kept whatever the machine held before the load
-# (the rewound core and a freshly started one then replayed differently;
-# tests/state_soak_test.nim found each of these):
+# What a frame boundary can leave in motion and revs <= 8 did not carry (a
+# load dropped it or kept the pre-load machine's value; tests/state_soak_test
+# pins each):
 #   - CPU: the interrupt line as the last check left it and when it rose
 #     (IRQ_LAST_WAITS), the refill flag, an HLE CpuSet's preempted state;
 #   - bus: the page the CPU fetches from (the prefetch logic reads it, not
@@ -1021,14 +1016,11 @@ proc load_inflight_state(gba: GBA; r: var Reader; rev: uint32) =
     intr.pipe2_new = 0
 
 proc default_inflight_state(gba: GBA) =
-  ## Rev <= 8: that build dropped some of this at load and left the rest as
-  ## the machine had it before the load. The dropped values stay as they
-  ## were; the rest start as a freshly booted machine has them, so a load no
-  ## longer depends on what ran before it -- except the two registers a game
-  ## writes (memory control, POSTFLG), which keep the running game's value:
-  ## that is what the older build did, and a game writes them at boot, so a
-  ## state loaded into it after booting finds the value its game set.
-  ## irq_line and the fetch page are settled in gba_apply_state as before.
+  ## Rev <= 8: what that build dropped at load stays dropped; what it kept
+  ## from the pre-load machine starts as on a fresh boot, so a load does not
+  ## depend on what ran before -- except memory control and POSTFLG, which
+  ## keep the running game's value (as that build did; a game writes them at
+  ## boot). irq_line and the fetch page are settled in gba_apply_state.
   let cpu = gba.cpu
   cpu.irq_line_at = 0
   cpu.refill_pending = false
@@ -1073,17 +1065,16 @@ proc default_inflight_state(gba: GBA) =
     gba.timer.tmd_write_cycle[i] = 0   # tm_pre: load_timer_state set it to tm
   gba.dma.video_active = false
   for i in 0 .. 3: gba.dma.imm_due[i] = 0
-  # arm_delay: apu_extract_state_events set the current period, and
-  # ppu.frame: load_ppu_state cleared it, as before
+  # arm_delay: apu_extract_state_events set the current period;
+  # ppu.frame: load_ppu_state cleared it
 
 # ---- The PSG's in-flight state (rev 10) ----
 #
-# What the shared PSG (common/psg*.nim) keeps between register writes that
-# the older sections have no field for: the shift-0 check's state, which revs
-# <= 9 carried in spare bits of channel 1's sweep fields, the master-on
-# stamp PSG_POWER_ON_WINDOW reads (not carried at all before), and the
-# channels' latched duty outputs, pending envelope ticks and the noise
-# channel's divisor stage, and the wave bank playing.
+# What the shared PSG (common/psg*.nim) keeps that the older sections have
+# no field for: the shift-0 check (revs <= 9: spare bits of channel 1's
+# sweep fields), the master-on stamp PSG_POWER_ON_WINDOW reads (not carried
+# before), the latched duty outputs, pending envelope ticks, the noise
+# divisor stage and the wave bank playing.
 
 proc write_deadline(w: var Writer; at, now: CycleCount) =
   ## An absolute deadline as its distance from the payload's clock, which may
@@ -1170,9 +1161,9 @@ proc default_psg_state(gba: GBA) =
 
 # ---- PSG waveform deadlines <-> scheduler events ----
 #
-# The channels' next_step deadlines replaced one etAPUChannel<N> event per
-# armed channel (gba/apu.nim). They round-trip through those events so the
-# payload stays byte-identical to the older format in both directions.
+# The channels' next_step deadlines round-trip through one etAPUChannel<N>
+# event per armed channel, the older format's encoding, so the payload stays
+# byte-identical to it in both directions.
 
 proc apu_arm_state_events(gba: GBA) =
   # The catch-up guarantees each deadline is in the future (positive delay)
@@ -1200,9 +1191,8 @@ proc apu_extract_state_events(gba: GBA) =
       if ev.kind == et: ch.next_step = ev.cycles
     gba.scheduler.clear(et)
     # arm_delay is not recoverable from an event's target; the current
-    # period is right except across an unstepped frequency write, and it
-    # only breaks an exact-cycle tie (one sample off, once, after a load).
-    # Rev 9 carries it (the in-flight section, read after this).
+    # period is right except across an unstepped frequency write (one sample
+    # off, once). Rev 9 carries it (the in-flight section, read after this).
     ch.arm_delay = arm
   take(gba.apu.channel1, etAPUChannel1, uint32(sq_period(gba.apu.channel1, gba)))
   take(gba.apu.channel2, etAPUChannel2, uint32(sq_period(gba.apu.channel2, gba)))
@@ -1293,15 +1283,13 @@ proc restore_fetch_page(bus: Bus) =
 # ---- rev <= 3 -> 4: retrofit the HLE IntrWait System-stack frames ----
 #
 # The HLE IntrWait pushes {r2, lr} (dispatcher) + {r4, lr} (routine) onto
-# the System stack and pops all four unconditionally on resume. A rev <= 3
-# state parked in IntrWait has no frame and an unshifted sp, but its
-# registers still hold the caller's r2/r4/lr_sys (the old build never
-# overwrote them while waiting), so writing them where the pop expects them
-# reproduces the old caller-visible outcome exactly.
-#
-# Safe only while the CPU is halted in the wait loop: with the user IRQ
-# handler mid-flight on the same stack, lowering sp would move the base its
-# pushes already used, so those states are refused in gba_apply_state.
+# the System stack and pops all four on resume. A rev <= 3 state parked in
+# IntrWait has no frame and an unshifted sp, but its registers still hold
+# the caller's r2/r4/lr_sys, so writing them where the pop expects them
+# gives the old caller-visible outcome exactly. Safe only while halted in
+# the wait loop: with the user IRQ handler mid-flight on the same stack,
+# lowering sp would move the base its pushes used, so gba_apply_state
+# refuses those states.
 proc migrate_intr_wait_frame(gba: GBA) =
   let cpu = gba.cpu
   let usp = cpu.sys_sp()
@@ -1350,13 +1338,10 @@ proc gba_apply_state(gba: GBA; payload: string; rev: uint32;
   r.expect_tag(GBA_SEC_SCHED)
   gba.scheduler.load_from(r, pad = in_process)
   # Only the PPU event chain increments ppu.frame, and a running machine
-  # always carries exactly one of its events. A state with none (a corrupt
-  # event kind is still a legal enum value) would hang step_frame forever.
-  # Any link of the chain, so this holds if the capture phase changes. Not
-  # two: each would schedule the next link, doubling every line until the
-  # event buffer is full. start_hblank schedules two, the end of H-blank and
-  # the flag a few cycles in (not a link: it schedules nothing), and the
-  # line's start cycle is dated from the link (load_ppu_state).
+  # carries exactly one link of it. None (a corrupt event kind is still a
+  # legal enum) hangs step_frame forever; two double every line until the
+  # event buffer fills. The H-blank flag event is not a link (it schedules
+  # nothing). load_ppu_state dates the line's start from the link.
   block:
     var counts: array[4, int]
     for ev in gba.scheduler.events:
@@ -1404,17 +1389,13 @@ proc gba_apply_state(gba: GBA; payload: string; rev: uint32;
   if rev < 4 and gba.cpu.intr_wait_active:
     gba.migrate_intr_wait_frame()
   if rev < 9:
-    # Rev <= 8 did not carry irq_line: recompute it. check_interrupts also
-    # resolves the halt, and a frame-boundary state is written the instant
-    # vblank raises IF, so it nearly always carries a pending etInterrupts
-    # event: letting the recompute wake the CPU here fires that event
-    # IRQ_SYNC_DELAY cycles early (save -> load -> save was not idempotent).
-    # Every path that raises IF schedules the check, so the event owns the
-    # wake: keep halted/halt_wake/stopped. With a check pending, irq_line is
-    # taken as low -- the old build's choice, which is wrong when the line
-    # was already up (a vblank check ran and another source's check is still
-    # in flight): rev 9 carries it. With no check pending the recompute is
-    # exact: IF only gains bits between checks.
+    # Rev <= 8 did not carry irq_line: recompute it, but keep
+    # halted/halt_wake/stopped. A frame-boundary state nearly always carries
+    # a pending etInterrupts (written the instant vblank raises IF); waking
+    # here would fire it IRQ_SYNC_DELAY cycles early, so the event owns the
+    # wake. With a check pending, irq_line is taken as low (the old build's
+    # choice, wrong when the line was already up; rev 9 carries it). With
+    # none pending the recompute is exact: IF only gains bits between checks.
     let checkPending = gba.scheduler.has_event(etInterrupts)
     let halted  = gba.cpu.halted
     let wake    = gba.cpu.halt_wake
@@ -1440,17 +1421,14 @@ const GBA_STATE_ROM_TAG = 0x02000000'u32
 
 proc gba_rom_checksum(gba: GBA): uint32 =
   ## ROM identity: hash of the first 1 MB of the ROM file, cached at load
-  ## (Cartridge.rom_identity). Hashing the file rather than the padded
-  ## buffer keeps the identity independent of the allocation rule; reading
-  ## the cache rather than the live buffer keeps cheat patches from
-  ## re-identifying the cart. Not on any wire: netplay's `LinkMsg.rom_crc`
-  ## is a separate quantity.
+  ## (Cartridge.rom_identity). The file, not the padded buffer, so the
+  ## allocation rule cannot change it; the cache, so cheat patches cannot.
+  ## Not on any wire: netplay's `LinkMsg.rom_crc` is separate.
   gba.cartridge.rom_identity
 
 proc gba_whole_rom(gba: GBA): WholeRom =
-  ## The whole-ROM identity every state this build writes carries in a
-  ## trailer, and that a state with one must match: the header's 1 MB hash
-  ## (and its fixed size tag) cannot tell apart a hack that differs only
+  ## Whole-ROM identity, written in a trailer and matched when a state has
+  ## one: the header's 1 MB hash cannot tell apart a hack that differs only
   ## past 1 MB. Cached at load like rom_identity.
   WholeRom(known: true, hash: gba.cartridge.rom_identity_whole,
            size: uint32(max(gba.cartridge.rom_size, 0)))
@@ -1534,11 +1512,10 @@ proc gba_apply_checked(gba: GBA; payload: string; rev: uint32): bool =
     last_state_error = getCurrentExceptionMsg()
     echo "Load state failed: ", last_state_error
   except Defect as d:
-    # Backstop for a field no reader has bounded yet (the fix is a range
-    # guard in the reader; tools/statefuzz.nim's byte sweep fails on a
-    # reachable one). Continuing is safe only because the next line restores
-    # a payload this build serialized moments ago; an uncaught Defect would
-    # abort the wasm module over a stranger's file.
+    # Backstop for a field no reader bounds yet (fix with a range guard in
+    # the reader; tools/statefuzz.nim finds them). Safe only because the next
+    # line restores a payload this build just serialized; an uncaught Defect
+    # would abort the wasm module over a stranger's file.
     last_state_error = "this save state is damaged"
     last_state_reject_kind = srkCorrupt
     echo "Load state failed: an unbounded field reached a ", d.name,

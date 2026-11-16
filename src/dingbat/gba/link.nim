@@ -1,13 +1,10 @@
 # In-process lockstep link (docs/multiplayer.md).
 #
-# A Link owns N GBA cores and steps them in interleaved slices so no core
-# runs more than ~LINK_SLICE cycles (plus one bounded step) ahead of the
-# laggard. The initiating core of an SIO transfer schedules its completion
-# through the normal etSerial path; when it fires, every peer is advanced
-# to that cycle (run_to) before data latches and the transfer finishes on
-# all cores at the same emulated time.
-#
-# Cross-core clock comparisons use int64 global time = per-core rebase
+# A Link steps N cores in interleaved slices so none runs more than
+# ~LINK_SLICE cycles (plus one bounded step) ahead of the laggard. The
+# initiator's etSerial completion advances every peer to that cycle
+# (run_to) before data latches, so the transfer finishes on all cores at
+# the same emulated time. Cross-core clocks are int64 global time = rebase
 # offset + scheduler.cycles (CycleCount is uint32 on wasm).
 
 import ../common/[scheduler, util]
@@ -23,15 +20,14 @@ type
   Link* = ref object
     cores*: seq[GBA]
     offsets: seq[int64]   # global(i) = offsets[i] + scheduler.cycles
-    # Re-entrancy guard: core i is being advanced up the call stack, and
-    # re-entering cpu.tick mid-instruction would corrupt it.
+    # Core i is being advanced up the call stack; re-entering cpu.tick
+    # mid-instruction would corrupt it.
     active: seq[bool]
     frame_done: seq[bool]
     multi_active: bool
     multi_data: array[4, uint16]  # latched round words (0xFFFF = absent)
-    # Count of SIO transfers initiated. Games drive these continuously while
-    # linked and stop when done, so "not advancing" means the link is idle
-    # (the mode register stays latched in multi mode afterwards).
+    # SIO transfers initiated. Games transfer continuously while linked, so
+    # a count that stops means the link is idle (multi mode stays latched).
     transfers*: int
 
   LockstepSioDriver* = ref object of SioDriver
@@ -51,8 +47,7 @@ proc now(link: Link; i: int): int64 =
   link.offsets[i] + int64(link.cores[i].scheduler.cycles)
 
 proc advance_once(gba: GBA) {.inline.} =
-  # One bounded step. cpu.tick's halted branch drains events until wake or
-  # frame end, which is unbounded for lockstep purposes, so fast_forward.
+  # One bounded step: cpu.tick while halted runs until wake or frame end.
   when defined(linkTrace):
     let c0 = int64(gba.scheduler.cycles)
     let pc0 = gba.cpu.r[15]
@@ -106,8 +101,8 @@ proc step_frame*(link: Link) =
 # ---------------- multi-player (16-bit) mode ----------------
 
 proc start_multi(link: Link; parent: int) =
-  # Parent start-bit rising edge: advance the children to the start cycle
-  # and mark them busy. Words latch at completion (complete_multi).
+  # Parent start bit: children advance to the start cycle and show busy.
+  # Words latch at completion (complete_multi).
   if link.multi_active: return  # hardware can't restart a round in flight
   link.multi_active = true
   inc link.transfers
@@ -122,8 +117,6 @@ proc start_multi(link: Link; parent: int) =
   pserial.schedule_sio_completion(pserial.multi_transfer_cycles())
 
 proc complete_multi(link: Link; parent: int) =
-  # The parent's etSerial fired: every peer reaches the completion cycle
-  # before data latches and IRQs fire.
   let serial = link.cores[parent].serial
   if not link.multi_active:
     # Mode was switched mid-flight; just clear busy on the initiator.
@@ -133,9 +126,8 @@ proc complete_multi(link: Link; parent: int) =
   for i in 0 ..< link.cores.len:
     if i != parent:
       link.run_to(i, done_t)
-  # Latch SIOMLT_SEND at completion, not at the round's start: a unit whose
-  # prior serial IRQ retires late would otherwise be sampled with a stale
-  # word, which corrupts the partner's reassembled data.
+  # Latch SIOMLT_SEND at completion, not at start: a unit whose prior
+  # serial IRQ retires late would be sampled with a stale word.
   for slot in 0 ..< 4:
     link.multi_data[slot] = 0xFFFF'u16  # absent units read all-1s
   for i in 0 ..< link.cores.len:
@@ -150,11 +142,10 @@ proc complete_multi(link: Link; parent: int) =
            bit(core.serial.siocnt, 14):
           onCoalesce(idx)
       core.serial.finish_sio_transfer()
-  # A peer that overshot this completion has not serviced the serial IRQ
-  # yet; if the next transfer completed first the IF bit would merge and the
-  # game's SIO handler would advance its command index once for two words
-  # (the cross-game trade "communication error"). Drain each IRQ-driven peer
-  # now, bounded to one transfer window and the frame.
+  # A peer that overshot this completion has not serviced its serial IRQ;
+  # if the next transfer completed first the IF bits would merge and the
+  # handler would count one word for two (cross-game trade "communication
+  # error"). Drain each IRQ-driven peer, bounded to one round and the frame.
   for i in 0 ..< link.cores.len:
     if i != parent and link.cores[i].serial.sio_mode() == smMulti and
        link.cores[i].interrupts.reg_ie.serial:
@@ -180,10 +171,9 @@ proc normal_peer(link: Link; m: int): int =
   -1
 
 proc complete_normal(link: Link; m: int) =
-  # Master completion: advance the slave to this cycle, then exchange
-  # full-duplex. GBATEK: the master's clock shifts both registers whether or
-  # not the slave set its start bit; the slave only gets busy-clear/IRQ if
-  # it had started.
+  # Full-duplex exchange. GBATEK: the master's clock shifts both registers
+  # whether or not the slave set its start bit; the slave gets busy-clear
+  # and IRQ only if it had started.
   let ms = link.cores[m].serial
   let p = link.normal_peer(m)
   if p < 0:
@@ -292,9 +282,8 @@ proc capture_state*(link: Link): LinkSnapshot =
   result.multi_recv = newSeq[array[4, uint16]](link.cores.len)
   for i, c in link.cores:
     result.payloads[i] = c.state_payload()
-    # SIOMULTI0-3 latches are not in state_payload, but a rollback re-sim
-    # can read them before the frame's round re-latches; without them the
-    # replay diverges (in-game "communication error").
+    # SIOMULTI0-3 are not in state_payload, but a re-sim can read them
+    # before the frame's round re-latches; without them the replay diverges.
     result.multi_recv[i] = c.serial.multi_recv
   result.offsets = link.offsets
   result.multi_active = link.multi_active

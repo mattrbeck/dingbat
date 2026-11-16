@@ -1,53 +1,23 @@
 # A CpuSet or CpuFastSet parked by an earlier build (included by
 # hle_bios.nim)
 #
-# The copies now run as stub-BIOS code (hle_unc.nim). Before that, from
-# 98c0d1ce, each unit of their loop ran as the routine's instructions here,
-# and a copy an interrupt or the end of a video frame stopped parked in BIOS
-# code: the SWI's frames on the SVC and System stacks, its state in r0-r12,
-# r15 on the trap at COPY_TRAP. A save state written while one waited holds
-# exactly that, so the trap and the code that runs a parked copy on to its
-# end stay, for such a state; nothing else enters here. What follows is that
-# code as it was.
+# The copies now run as stub-BIOS code (hle_unc.nim). Earlier builds ran
+# them here, instruction by instruction, and parked a copy that an
+# interrupt or the frame's end stopped in BIOS code: the SWI's frames on
+# the SVC and System stacks, its state in r0-r12, r15 on COPY_TRAP. A save
+# state written while one waited holds exactly that, so this code stays to
+# run such a copy to its end; nothing else enters here.
 #
-# The copy routines run with the caller's IRQ mask, so an interrupt takes
-# them at the end of whichever of their instructions it arrives in: between
-# an ldmia and its stmia, inside the loop's test, after a store. The HLE used
-# to take one only at the end of a whole unit (a transfer, or an 8-word
-# burst), up to ~120 cycles late inside a CpuFastSet to VRAM (Contra Advance's
-# H-blank handler ran that late every line it fell in a copy), and from the
-# caller's code after rewinding onto the SWI, so the handler's entry and
-# return paid the caller's region and a fitted constant stood in for the
-# rest (cpusi.c: a Thumb caller in the cartridge 2 cycles a preemption short
-# at WAITCNT 0x4317, 2 long at 0x0000).
-#
-# Now each unit is the routine's own instructions with their times (the
-# playtest driver's `trace` of the official BIOS in this core, one step per
-# instruction; CpuSet's halfword copy is test, branch, ldrh, strh, add,
-# branch back), the loads and stores land in the instruction that makes
-# them, and an interrupt is taken at the instruction boundary the CPU would
-# take it at -- including one recognised in the last wait states of a single
-# store, which waits for the next instruction (IRQ_LAST_WAITS; an stmia's do
-# not), and the boundaries after the loop up to the dispatcher's `msr` that
-# masks interrupts for the return (copy_tail_steps). The loop starts where
-# the console's does against the swi: hle_bios.nim routine_phase moves the
-# fitted split of the fixed cost by the caller's comment read. A copy that
-# stops for one parks where the console's routine is, in BIOS code: the
-# SWI's frames go on the SVC and System stacks as a Halt's do, the routine's
-# own frame below them, its state in registers (r0-r2 the call's arguments,
-# r12 how far it got, r3 -- and r4-r10 for CpuFastSet -- the words loaded
-# and not yet stored), and the PC on a trap in the stub BIOS (COPY_TRAP)
-# that the interrupt returns to. Everything is architectural, so a save
-# state taken while a copy waits on its interrupt resumes it. A copy also
-# parks at the end of a video frame (hle_frame_ended), with no interrupt to
-# take, and the trap runs it on at the next instruction.
-#
-# tools/biosdrv/cpusi4.c (CpuSet's four kinds from ARM and Thumb callers in
-# IWRAM and the cartridge, under a timer interrupt every 3000 cycles and
-# none) and fastsi.c (CpuFastSet copies and fills, EWRAM and cartridge to
-# VRAM, likewise): every call's time and every interrupt's entry cycle are
-# the console's; cpusi.c the same at WAITCNT 0x4317 (and its 0x0317 and
-# 0x0000 rebuilds), 1340 of 1342 entries.
+# Each unit is the routine's own instructions with their times (the
+# official BIOS in this core, traced), loads and stores land in the
+# instruction that makes them, and an interrupt is taken at the boundary
+# the CPU would take it at: one recognised in a single store's last wait
+# states waits for the next instruction (IRQ_LAST_WAITS; an stmia's do
+# not), and the boundaries run on to the dispatcher's `msr` that masks
+# interrupts for the return (copy_tail_steps). Parked state: r0-r2 the
+# call's arguments, r12 progress, r3 (r4-r10 for CpuFastSet) words loaded
+# and not yet stored. Pinned against the console by tools/biosdrv/cpusi4.c,
+# fastsi.c and cpusi.c (WAITCNT 0x4317, 0x0317, 0x0000).
 
 const COPY_TRAP = 0x0BC8'u32   # stub BIOS: an ARM `swi 0`
 

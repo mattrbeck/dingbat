@@ -35,7 +35,6 @@ proc build_waitloop_lut*(): seq[WLInstrKind] =
 proc parse_wl_instr*(kind: WLInstrKind; instr: uint16): Option[WLParsed] =
   case kind
   of wlPcRelativeLoad:
-    # Literal-pool load: loop-invariant.
     let rd = bits_range(instr, 8, 10)
     some(WLParsed(read_only: true, read_bits: 0, write_bits: 1'u16 shl rd))
   of wlConditionalBranch:
@@ -100,8 +99,8 @@ proc parse_wl_instr*(kind: WLInstrKind; instr: uint16): Option[WLParsed] =
     let rd = bits_range(instr, 0, 2)
     some(WLParsed(read_only: true, read_bits: 1'u16 shl rs, write_bits: 1'u16 shl rd))
   of wlLoadStoreRegisterOffset, wlLoadStoreSignExtended:
-    # ldr / ldrb / ldrh / ldrsb / ldrsh [rb, ro] (Oshare Princess 3's
-    # `ldrsh r0, [r0, r2]`); the stores, str / strb / strh, are not reads
+    # Register-offset loads count as reads (Oshare Princess 3's `ldrsh`);
+    # the stores do not
     let load = if kind == wlLoadStoreRegisterOffset: bit(instr, 11)
                else: bit(instr, 10) or bit(instr, 11)
     let ro = bits_range(instr, 6, 8)
@@ -122,14 +121,13 @@ proc parse_wl_instr*(kind: WLInstrKind; instr: uint16): Option[WLParsed] =
       some(WLParsed(read_only: false, read_bits: (1'u16 shl 13) or (1'u16 shl rd),
                     write_bits: 0'u16))
   of wlHighRegBranchExchange:
-    # ADD / CMP / MOV with a high register (Crash Nitro Kart's `mov r1, sl`
-    # ahead of its VCOUNT poll); BX / BLX leave the loop's analysis
+    # ADD / CMP / MOV with a high register (Crash Nitro Kart's VCOUNT
+    # poll); BX / BLX leave the loop's analysis
     let op = bits_range(instr, 8, 9)
     let rd = bits_range(instr, 0, 2) or (bits_range(instr, 7, 7) shl 3)
     let rs = bits_range(instr, 3, 6)
     if op == 3 or rd == 15: return none(WLParsed)
-    # `mov r8, r8` is the Thumb NOP (Horse & Pony: Let's Ride 2 pads its
-    # poll with one): no register moves
+    # `mov r8, r8` is the Thumb NOP (Horse & Pony: Let's Ride 2)
     if op == 2 and rd == rs:
       return some(WLParsed(read_only: true, read_bits: 0'u16, write_bits: 0'u16))
     # r15 as an operand is this instruction's address + 4: loop-invariant
@@ -147,8 +145,8 @@ const WL_NO_LOAD = 0xFFFFFFFF'u32
 
 template kind_bit(k: EventType): uint64 = 1'u64 shl ord(k)
 # Events that change neither memory, a cartridge's storage or clock, nor a
-# CPU register: all a loop that reads no IO could ever see of them is a DMA
-# they start, counted apart (GBA.dma_bursts)
+# CPU register: a loop that reads no IO sees only a DMA they start, counted
+# apart (GBA.dma_bursts)
 const WL_MEMORY_QUIET_KINDS =
   kind_bit(etAPUSample) or kind_bit(etAPUFrameSeq) or kind_bit(etPPUStartLine) or
   kind_bit(etPPUStartHBlank) or kind_bit(etPPUSetHBlankFlag) or
@@ -177,9 +175,7 @@ proc scan_thumb_loop(cpu: CPU; start_addr, end_addr: uint32; first_load: var uin
     let instr = uint16(cpu.gba.bus.read_half_internal(cur_addr))
     let kind  = cpu.waitloop_instr_lut[instr shr 8]
     if kind == wlConditionalBranch:
-      # A second way out: a conditional branch that leaves the loop (Salt
-      # Lake 2002 polls two flags and leaves on either). An iteration that
-      # reached the loop's own branch did not take it. Its condition must
+      # A second way out (Salt Lake 2002 polls two flags). Its condition must
       # come from flags this iteration set, not ones carried in from the last.
       let target = cur_addr + 4 + uint32(cast[int32](cast[int8](uint8(instr and 0xFF))) * 2)
       if not flags_set or (target >= start_addr and target <= end_addr) or
@@ -192,8 +188,7 @@ proc scan_thumb_loop(cpu: CPU; start_addr, end_addr: uint32; first_load: var uin
        (kind == wlHighRegBranchExchange and bits_range(instr, 8, 9) == 1):
       flags_set = true
     let parsed = parse_wl_instr(kind, instr)
-    # Something the scan cannot follow (a call, bx, push/pop): what it does
-    # to the registers after here is unknown
+    # Something the scan cannot follow (a call, bx, push/pop)
     if parsed.isNone: return WL_DYN
     let p = parsed.get
     if not p.read_only: stores = true
@@ -316,10 +311,9 @@ proc scan_arm_loop(cpu: CPU; start_addr, end_addr: uint32; first_load: var uint3
 proc wl_key(start_addr, end_addr: uint32; arm: static bool): uint32 {.inline.} =
   ## A loop's identity in the verdict caches: its start, bit 0 for ARM, and
   ## its length in bits 28-31 (addresses there are open bus, never judged).
-  ## Two loops can share a start: Rockman Zero 4's inner `bcc` and outer
-  ## `bne` both go back to 0x08000906, and only the inner is a waitloop.
-  ## Code 15 stands for any loop longer than the scan accepts (WL_BODY_MAX,
-  ## WL_ARM_BODY_MAX): only ever WL_DYN or WL_NEVER, never a waitloop by scan.
+  ## The length matters: two loops can share a start (Rockman Zero 4).
+  ## Length code 15 = longer than the scan accepts (WL_BODY_MAX,
+  ## WL_ARM_BODY_MAX): never a waitloop by scan.
   when arm:
     let n = (end_addr - start_addr) shr 2
     start_addr or 1 or ((if n > 8: 15'u32 else: n) shl 28)
@@ -329,7 +323,7 @@ proc wl_key(start_addr, end_addr: uint32; arm: static bool): uint32 {.inline.} =
 
 proc note_never(cpu: CPU; key: uint32) {.inline.} =
   ## The branch sites skip analyze_loop for the last four loops judged never
-  ## (loop_worth): a work loop's every iteration then costs a compare
+  ## (loop_worth)
   if key != cpu.never_keys[0] and key != cpu.never_keys[1] and
      key != cpu.never_keys[2] and key != cpu.never_keys[3]:
     cpu.never_keys[3] = cpu.never_keys[2]
@@ -369,9 +363,7 @@ proc ram_body_same(cpu: CPU; slot: int; start_addr, end_addr: uint32): bool =
 
 proc judge_loop[arm: static bool](cpu: CPU; start_addr: uint32; end_addr: uint32) =
   # Analyze only when the same backward-branch target arrives twice in a row
-  # (branch_dest; the defer records every call's target). ARM loops are
-  # keyed with bit 0 set (their addresses are word-aligned), so the caches
-  # never mistake one for Thumb code at the same address.
+  # (branch_dest).
   let key = wl_key(start_addr, end_addr, arm)
   if key != cpu.branch_dest:
     # A loop that calls a function comes back after the callee's own branch:
@@ -383,9 +375,8 @@ proc judge_loop[arm: static bool](cpu: CPU; start_addr: uint32; end_addr: uint32
       cpu.wl_volatile_at = 0
       return
   # This run of the loop just read something volatile (analyze_loop): the
-  # next WL_VOLATILE_REST iterations would too, most likely, and are not
-  # judged. Only a hint -- a skipped judgement never makes a skip -- so a
-  # value that settles (a device finishing) is picked up that much later.
+  # next WL_VOLATILE_REST iterations are not judged. Only a hint: a skipped
+  # judgement never makes a skip, it only delays one.
   if key == cpu.wl_volatile_at:
     dec cpu.wl_volatile_rest
     if cpu.wl_volatile_rest > 0: return
@@ -393,9 +384,8 @@ proc judge_loop[arm: static bool](cpu: CPU; start_addr: uint32; end_addr: uint32
   if not (start_addr < end_addr and (end_addr - start_addr) <= DYN_BODY_MAX): return
   let scan_len = when arm: WL_ARM_BODY_MAX else: WL_BODY_MAX
   # Cache a waitloop verdict only for ROM addresses: RAM code can be
-  # overwritten. A rejection is cached anywhere -- it can only ever cost a
-  # skip, never make one -- or a hot RAM loop (an IWRAM mixer's ARM code)
-  # would be scanned again on every iteration.
+  # overwritten. A rejection is cached anywhere (it can only cost a skip),
+  # or a hot IWRAM loop would be rescanned every iteration.
   let cacheable = cpu.cache_waitloop_results and
                   bits_range(start_addr, 24, 27) in 0x8'u32 .. 0xD'u32
   if cacheable and key == cpu.last_waitloop:
@@ -410,10 +400,10 @@ proc judge_loop[arm: static bool](cpu: CPU; start_addr: uint32; end_addr: uint32
     if key == cpu.last_dyn_loop:
       cpu.wl_dyn = true
       return
-    # Direct-mapped memory of the sets below (0 empty): loops that take
-    # turns miss the one-entry caches, and a hash lookup each time showed.
-    # It also holds waitloop verdicts on RAM code, with the body's bytes:
-    # honoured only while the code is still exactly what was judged.
+    # Direct-mapped memory of the sets below (0 empty), for loops that take
+    # turns in the one-entry caches (a hash lookup each time showed in
+    # profiles). Also holds RAM-code waitloop verdicts with the body's bytes,
+    # honoured only while the code is unchanged.
     if cpu.wlt.verdict_key[vslot] == key:
       if cpu.wlt.verdict[vslot] == WL_ACCEPT:
         # (RAM code under MEMCNT's swap is not judged at all: below)
@@ -491,17 +481,13 @@ proc judge_loop[arm: static bool](cpu: CPU; start_addr: uint32; end_addr: uint32
   cpu.last_waitloop_first_load = first_load
   cpu.entered_waitloop = true
 
-# The dynamic check. A loop the scan above cannot follow -- it calls a
-# function, closes with an unconditional branch, runs longer than the scan
-# looks, stores the values already there -- is judged by what it did: an
-# iteration that began with every register (and CPSR) the previous one began
-# with, changed no memory, took no SWI or interrupt, saw no DMA, read nothing
-# volatile, and read no IO an event since could have changed, is that
-# iteration again. waitloop_skip then asks the same of it that it asks of any
-# loop (the prefetcher's state and the period repeated) before skipping.
-# Only one loop is armed at a time; one that fails rests DYN_REST arrivals
-# in a direct-mapped table, so a work loop costs a snapshot every 64 times
-# round, not every time.
+# The dynamic check, for loops the scan cannot follow (a call, an
+# unconditional closing branch, too long, stores of unchanged values): an
+# iteration that began with the previous one's registers and CPSR, changed no
+# memory, took no SWI or interrupt, saw no DMA, read nothing volatile, and
+# read no IO an event since could have changed, is that iteration again.
+# waitloop_skip then applies its usual checks. Only one loop is armed at a
+# time; one that fails rests DYN_REST arrivals in a direct-mapped table.
 const PPU_STATUS_CHANGERS = (1'u64 shl ord(etPPUSetHBlankFlag)) or
                             (1'u64 shl ord(etPPUEndHBlank))
 
@@ -587,8 +573,7 @@ proc dyn_loop*(cpu: CPU; start_addr, end_addr: uint32; arm: bool) =
   cpu.wl_quiet = io == 0 and not cpu.irq_line
   when WL_QUIET_EVENTS: g.wl_unsafe = false
   # An interrupt recognised during the branch is taken at the next
-  # instruction, not iterations later: Franklin the Turtle (E) [f_4] took an
-  # H-blank interrupt 180 cycles late, three periods of its ARM loop.
+  # instruction, not iterations later (Franklin the Turtle (E)).
   cpu.wl_skip_ok = not cpu.irq_line
   cpu.entered_waitloop = true
   cpu.dyn_arm(key, t)
@@ -610,10 +595,8 @@ proc analyze_loop*(cpu: CPU; start_addr: uint32; end_addr: uint32; arm: static b
   ## At a taken backward branch at end_addr to start_addr, in either state
   ## (thumb_conditional_branch, arm_branch).
   if not cpu.attempt_waitloop_detection: return
-  # Code outside real memory -- unmapped space, or the gamepak past the end
-  # of the ROM -- is open bus: nothing a crashed program runs there is a
-  # loop the detector can reason about (Guilty Gear X - Advance Edition (J)
-  # [b2], a bad dump, "waits" at 0x08800364 of an 8 MB ROM)
+  # Code outside real memory (unmapped, or past the end of the ROM) is open
+  # bus: never judged (a bad dump of Guilty Gear X "waits" there).
   if start_addr >= 0x10000000'u32 or
      (start_addr >= 0x08000000'u32 and
       (start_addr and 0x01FFFFFF'u32) >= cpu.gba.bus.rom_len):
@@ -657,16 +640,12 @@ proc analyze_loop*(cpu: CPU; start_addr: uint32; end_addr: uint32; arm: static b
     fresh = pc >= start_addr + LEAD and pc <= last + LEAD
     when WL_QUIET_EVENTS:
       # One that ran after the read is harmless if it could not have changed
-      # what was read: FireRed's WaitForVBlank (an IWRAM flag) otherwise ran
-      # an extra iteration for real after each line event, or not, by where
-      # in the loop the line happened to fall.
+      # what was read (FireRed's WaitForVBlank polls an IWRAM flag).
       if not fresh and not cpu.gba.wl_unsafe and not cpu.irq_line:
         fresh = true
-    # Nor can any event have changed what a loop that read no IO read, bar
-    # a DMA: the PPU, the timers and the interrupt controller write no
-    # memory. Tekken Advance's loop lost a verdict to the IF bit and the
-    # interrupt window of an H-blank interrupt IE never lets through, every
-    # line.
+    # Nor can any event but a DMA have changed what a loop that read no IO
+    # read: the PPU, the timers and the interrupt controller write no memory
+    # (Tekken Advance: a masked H-blank interrupt every line).
     if not fresh and cpu.wl_reads_io == 0 and no_dma and not cpu.irq_line:
       fresh = true
   when WL_QUIET_EVENTS:
@@ -678,9 +657,8 @@ proc analyze_loop*(cpu: CPU; start_addr: uint32; end_addr: uint32; arm: static b
     # again until the program branches elsewhere (judge_loop)
     cpu.entered_waitloop = false
     cpu.wl_bound_addr = 0
-    # Only when the read is the loop's own (r15 inside it): the flag covers
-    # everything since the last verdict, the code before the loop, an
-    # interrupt handler, a DMA reading a timer
+    # Only when the read is the loop's own (r15 inside it): the flag also
+    # covers code before the loop, interrupt handlers and DMA
     if cpu.gba.bus.volatile_pc - start_addr <= end_addr - start_addr + LEAD:
       cpu.wl_volatile_at = key
       cpu.wl_volatile_rest = WL_VOLATILE_REST

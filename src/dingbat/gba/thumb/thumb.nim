@@ -46,10 +46,9 @@ proc thumb_conditional_branch*[cond: static uint32](cpu: CPU; instr: uint32) =
   let offset      = cast[int32](cast[int8](uint8(bits_range(instr, 0, 7))))
   let branch_dest = uint32(int(cpu.r[15]) + offset * 2)
   if cpu.check_cond(cond):
-    # Only a taken branch goes round the loop again. The branch that leaves
-    # it must not be judged: a waitloop verdict there fast-forwards past the
-    # exit to the next deadline (mGBA suite "H-blank bit start" Flip rows,
-    # Video tests "Layer toggle 2").
+    # Only a taken branch goes round the loop again. A verdict on the exiting
+    # branch would fast-forward past the exit (mGBA suite "H-blank bit
+    # start" Flip tests).
     if branch_dest < cpu.r[15] - 4 and cpu.loop_worth(branch_dest, cpu.r[15] - 4, arm = false):
       cpu.analyze_loop(branch_dest, cpu.r[15] - 4)
     discard cpu.set_reg(15, branch_dest)
@@ -119,10 +118,9 @@ proc thumb_push_pop_registers*[pop, pclr: static bool](cpu: CPU; instr: uint32) 
     else:
       cpu.idle(1)  # I cycle after the last transfer
   else:
-    # PUSH is STMDB: the lowest register goes to the lowest address and the
-    # stores run upward from there, lr last (GBATEK, "THUMB Opcodes: Memory:
-    # Multiple Load/Store (PUSH/POP and LDM/STM)"). Same memory either way;
-    # the order is what an I/O target or a DMA sees.
+    # PUSH is STMDB: the stores run upward from the lowest address, lr last
+    # (GBATEK, "THUMB Opcodes: Memory: Multiple Load/Store"). The order is
+    # what an I/O target or a DMA sees.
     address -= 4'u32 * uint32(count_set_bits(list) + (when pclr: 1 else: 0))
     var a = address
     for idx in 0..7:
@@ -269,14 +267,9 @@ proc thumb_high_reg_branch_exchange*[op: static uint32, h1, h2: static bool](cpu
             cpu.gba.interrupts.schedule_interrupt_check()
           if not cpu.cpsr.thumb:
             # T cleared. The halfword behind the compare was already decoded
-            # as Thumb, and runs as Thumb; ARM execution starts after it, at
-            # the word holding the halfword after that. tests/roms/payloads/
-            # thumbpc3c.s on an AGB SP, `cmp pc, r0` at A with A % 4 == 2: a
-            # Thumb `bx r5` at A+2 is taken (no ARM word of the block runs),
-            # and a Thumb `movs r6, #0x20` there runs -- its flags land in
-            # CPSR -- and ARM goes on at (A+4) & ~3 or the word after it,
-            # never before. gbaedge THUMBPC/THUMBPC2 (A % 4 == 0, a Thumb
-            # `bx` at A+2) and THUMBPC3 (a) agree.
+            # as Thumb, and runs as Thumb; ARM execution starts at the word
+            # holding the halfword after that (AGB SP: thumbpc3c.s, gbaedge
+            # THUMBPC/THUMBPC2/THUMBPC3).
             when THUMB_RESTORE_RUNS_NEXT:
               cpu.thumb_restore_runs_next()
               return
@@ -424,9 +417,9 @@ proc thumb_restore_runs_next(cpu: CPU) {.noinline.} =
   let next_word = cpu.r[15] and not 3'u32   # (A+4) & ~3
   cpu.cpsr.thumb = true
   cpu.step_thumb()
-  # Fetched and dispatched here rather than through read_instr and
-  # thumb_execute: a second caller of either keeps the compiler from inlining
-  # it into cpu.tick (+4.9% retired instructions on FireRed).
+  # Fetched and dispatched here, not through read_instr and thumb_execute:
+  # a second caller of either stops it inlining into cpu.tick (+4.9%
+  # retired instructions on FireRed).
   let next = uint32(cpu.gba.bus.fetch_half(cpu.r[15] - 4))
   thumbLut[next shr 6](cpu, next)
   if cpu.cpsr.thumb and not cpu.refill_pending:

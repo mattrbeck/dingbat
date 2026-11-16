@@ -2,12 +2,12 @@
 
 const APU_CHANNELS*       = 2
 # Queue-push block in int16s (128 stereo frames = 3.9 ms); small so the SDL
-# queue level that audio-sync pacing reads moves in fine steps
+# queue level that pacing reads moves in fine steps
 const APU_BUFFER_SIZE*    = 256
-# Audio-sync pacing levels in bytes of queued s16 stereo (4 bytes/frame),
-# independent of the push granularity: 2048 B = 512 frames = 15.6 ms lead.
-# The backstop only stops a runaway queue; it sits far above the normal
-# 2-8 KB range because blocking in get_sample stalls emulation mid-frame.
+# Pacing levels in bytes of queued s16 stereo (4 bytes/frame): 2048 B =
+# 512 frames = 15.6 ms lead. The backstop only stops a runaway queue; it sits
+# far above the normal 2-8 KB because blocking in get_sample stalls emulation
+# mid-frame.
 const APU_SYNC_AHEAD_BYTES*    = 2048'u32
 const APU_SYNC_BACKSTOP_BYTES* = 16384'u32
 const FRAME_SEQ_RATE*     = 512
@@ -22,10 +22,9 @@ when defined(emscripten):
   proc appendAudioSample(left, right: float32) {.importc, cdecl.}
 
 when not defined(emscripten):
-  # DINGBAT_GBA_AUDIO_DUMP=<path>: every mixed sample as raw s16le stereo,
-  # interleaved L,R, at 32768 Hz. Outside the test_harness gate and before
-  # the output switch, so the headless test build dumps too (the APU
-  # byte-compare oracle).
+  # DINGBAT_GBA_AUDIO_DUMP=<path>: every mixed sample as raw s16le stereo
+  # at 32768 Hz. Outside the test_harness gate so the headless test build
+  # dumps too (the APU byte-compare oracle).
   var gba_audio_dump_file: File = nil
   var gba_audio_dump_on = false
   # DINGBAT_GBA_AUDIO_DUMP_FINE=1: dump the emitted value instead — the DAC
@@ -153,15 +152,13 @@ when not defined(test_harness) and not defined(emscripten):
     ## Bytes currently queued to the audio device (pacing diagnostics)
     if apu.owns_audio: audio_queued() else: 0
 
-# Lazy waveform catch-up (the four PSG channels): no per-period scheduler
-# events; each channel carries a `next_step` deadline advanced in closed form
-# at its observation points (design and math: gb/apu.nim "Lazy waveform
-# catch-up"). GBA deltas: CH3's closed form adds a bank flip per 32-entry
-# wrap; the observation points are the register block 0x60-0x84 plus wave
-# RAM 0x90-0x9F, SOUNDCNT_X writes (sync all four), get_sample,
-# RegisterRamReset's sound phase (apu_park_steps) and the per-frame rebase
-# (gba.end_frame); no PCM12/34 pair and no double-speed switch, so the
-# deadlines never rescale.
+# Lazy waveform catch-up (the four PSG channels): each channel carries a
+# `next_step` deadline advanced in closed form at its observation points
+# (design: gb/apu.nim "Lazy waveform catch-up"). GBA deltas: CH3 adds a bank
+# flip per 32-entry wrap; observation points are registers 0x60-0x84, wave
+# RAM 0x90-0x9F, SOUNDCNT_X (syncs all four), get_sample, RegisterRamReset
+# (apu_park_steps) and the per-frame rebase (gba.end_frame). No double-speed
+# switch, so the deadlines never rescale.
 
 proc apu_catchup_all*(apu: APU) {.inline.} =
   ## Materialize all four channels at the current cycle (frame sequencer,
@@ -234,12 +231,10 @@ proc tick_frame_sequencer*(apu: APU) =
     return
   if apu.frame_sequencer_stage == PSG_SEQ_FIRST: apu.frame_sequencer_stage = 0
   # A step while the CPU is halted ends channel 1's slow shift-0 timing
-  # (apu/psg_host.nim ch1_s0_kill_at). AGB SP: s0path.s / s0trig.s bit 14 switch
-  # the PSG on at payload entry and halt until line 50 -- a halt that spans
-  # a step -- and are off the slow timing; s0long.s's halt cells halt 12320
-  # cycles from their master-on, less than the earliest step (16384), and
-  # stay on it, as do s0long's 262144-cycle spins (steps, but no halt) and
-  # s0path's no-halt row. The skipped edge (above) does not count.
+  # (apu/psg_host.nim ch1_s0_kill_at). AGB SP: s0path.s / s0trig.s halt
+  # across a step and leave it; s0long.s halts that end before the first step
+  # (12320 < 16384 cycles) and its no-halt spins stay on it. The skipped edge
+  # (above) does not count.
   if apu.gba.cpu.halted: apu.channel1.s0_slow = false
   psg_seq_step(apu, apu.gba)
   apu.gba.scheduler.schedule(FRAME_SEQ_PERIOD, etAPUFrameSeq)
@@ -308,12 +303,11 @@ when not defined(test_harness) and not defined(emscripten):
 
 proc get_sample*(apu: APU) =
   if apu.silent:
-    # Nobody hears it: skip the catch-up and the mix. Neither is observable
-    # (every reader of a channel catches it up first, and the FIFO latches
-    # move on the timers), so the machine runs exactly as it would with sound.
+    # Nobody hears it: skip the catch-up and the mix. Unobservable (every
+    # reader catches a channel up first; FIFO latches move on the timers).
     # Except while channel 1's shift-0 stop is in flight: ch1_settle switches
-    # the channel off without catching it up, freezing the duty phase wherever
-    # the last observer left it, so observe it here as a mixing sample would.
+    # it off without catching up, freezing the duty phase where the last
+    # observer left it, so observe it here as a mixing sample would.
     if apu.channel1.kill_at != GBA_NO_STEP:
       ch1_settle(apu.channel1, apu.gba)
       if apu.channel1.enabled:
@@ -354,19 +348,17 @@ proc get_sample*(apu: APU) =
     else:
       ch1 * int16(l.channel_1_right) + ch2 * int16(l.channel_2_right) +
       ch3 * int16(l.channel_3_right) + ch4 * int16(l.channel_4_right)
-  # The master volume is the PSG block's own NR50 (the GBA's SOUNDCNT_L
-  # bits 0-2 / 4-6 are that register): (V + 1) / 8, so 0 is an eighth, not
-  # silence -- Pan Docs, and the GB core's mix (gb/apu.nim). The GBA follows
-  # the GB where the SP has not measured otherwise; this one is not measured
-  # yet (tests/roms/payloads/psgvol.s, by microphone). It was V / 8 here.
+  # Master volume is the PSG's NR50 (SOUNDCNT_L bits 0-2 / 4-6): (V + 1) / 8,
+  # so 0 is an eighth, not silence (Pan Docs; as gb/apu.nim). Not yet measured
+  # on the SP (tests/roms/payloads/psgvol.s, by microphone).
   let shift = if psg_muted: 5 else: 5 - int(apu.soundcnt_h.sound_volume)
   let psg_left  = int32(psg_sound_left)  * (int32(l.left_volume) + 1)  shr shift
   let psg_right = int32(psg_sound_right) * (int32(l.right_volume) + 1) shr shift
   var (raw_dma_a, raw_dma_b) = apu.dma_channels.dma_channels_get_amplitude()
   # MP2K HLE (mp2k.nim): substitute the shadow render for the FIFO A/B
   # latches (L->A, R->B) while the engine mixer is live and owns the stream;
-  # SOUNDCNT_H routing below applies unchanged. mp2k_watch renders un-emitted
-  # for on_frame's unlatch test; both accumulate the real-vs-shadow energies.
+  # SOUNDCNT_H routing applies unchanged. mp2k_watch renders un-emitted for
+  # on_frame's unlatch test; both accumulate real-vs-shadow energies.
   let mp2k_subst = apu.gba.mp2k_hle and apu.gba.mp2k != nil and
                    apu.gba.mp2k.engaged and not apu.gba.mp2k.fifo_foreign and
                    apu.gba.mp2k.mixer_live
@@ -374,9 +366,8 @@ proc get_sample*(apu: APU) =
                    apu.gba.mp2k.engaged and apu.gba.mp2k.fifo_foreign and
                    apu.gba.mp2k.mixer_live and apu.gba.mp2k.unlatch_watch
   when defined(mp2kwav):
-    # The game's own FIFO output for A/B calibration, gated on the same
-    # predicate as the HLE capture so both cover the same span; with the HLE
-    # disabled capture the whole run
+    # The game's own FIFO output for A/B calibration, over the same span as
+    # the HLE capture; with the HLE disabled, the whole run
     if not (apu.gba.mp2k_hle and apu.gba.mp2k != nil) or mp2k_subst or
        mp2k_watch or (apu.gba.gs_bon != nil and apu.gba.gs_bon.engaged):
       realDmaCapture.add raw_dma_a
@@ -438,9 +429,8 @@ proc get_sample*(apu: APU) =
   let fine_right = fine_a * fine_ga * float32(apu.soundcnt_h.dma_sound_a_right) + fine_b * fine_gb * float32(apu.soundcnt_h.dma_sound_b_right)
   # The level field is bits 1-9 (GBATEK: "Bias Level (Default=100h)", the
   # register's 200h), so in the 10-bit sum it counts twice: 200h centres the
-  # DAC's 0..3FFh on a DMA channel's full swing (an 8-bit sample x4 at
-  # 100%). Taken as 100h, the sum clipped at -256 below and 767 above: the
-  # negative half of every DirectSound peak past -64 x4 was cut off.
+  # DAC's 0..3FFh on a DMA channel's full swing (8-bit sample x4 at 100%).
+  # Taken as 100h it clips DirectSound negative peaks past -64 x4.
   let bias = int32(apu.soundbias.bias_level) shl 1
   # SOUNDBIAS bits 14-15 "Amplitude Resolution/Sampling Cycle" (GBATEK):
   # "0 9bit/32.768kHz, 1 8bit/65.536kHz, 2 7bit/131.072kHz, 3 6bit/262.144kHz".
@@ -604,21 +594,17 @@ proc `[]=`*(apu: APU; io_addr: uint32; value: uint8) =
         # Pan Docs, Power Control: power-on resets the wave sample buffer;
         # CH3 emits it through its trigger's start-up delay.
         apu.channel3.wave_ram_sample_buffer = 0
-        # The 512 Hz clock runs on (it does not restart), but the sequencer
-        # restarts at step 0 under the DMG power-on rule: with the tap bit
-        # set -- the next edge less than half a period away -- that edge is
-        # skipped, so the first step comes 16384..49151 cycles after the
-        # write, and a length enable until it is in the first half. AGB SP:
-        # fsfirst.s's counter-2 notes after a master-on die 16921..48031
-        # cycles later over nine runs; psgfirst.s's first ch2 notes live 15
-        # or 16 steps, and those right after a length step always 16.
+        # The 512 Hz clock runs on, but the sequencer restarts at step 0
+        # under the DMG power-on rule: if the next edge is less than half a
+        # period away it is skipped, so the first step comes 16384..49151
+        # cycles after the write, and a length enable until it is in the
+        # first half. AGB SP: fsfirst.s notes die 16921..48031 cycles after a
+        # master-on; psgfirst.s's first ch2 notes live 15 or 16 steps.
         # It restarts the PSG's 2 MHz / 1 MHz dividers on the first 4 MHz
-        # edge AFTER the write (a write on an edge is seen by the next one,
-        # as a trigger is; only such a write tells "after" from "at or
-        # after", and with "after" all five of dbsuite's lone sweeptrig.s
-        # rows land as on the console), and the 512 Hz edges move onto their
-        # grid (PSG_SEQ_GRID). Channel 1's shift-0 check is armed and on its
-        # slow timing (apu/psg_host.nim ch1_s0_kill_at).
+        # edge AFTER the write (a write on an edge is seen by the next one;
+        # "at or after" fails dbsuite sweeptrig.s), and the 512 Hz edges move
+        # onto their grid (PSG_SEQ_GRID). Channel 1's shift-0 check is armed
+        # on its slow timing (apu/psg_host.nim ch1_s0_kill_at).
         let at = apu.gba.scheduler.cycles + 1
         let anchor = at + CycleCount((PSG_S0_APU_PHASE + 4 - uint32(at and 3)) and 3)
         apu.channel1.s0_anchor = uint8(anchor and 31)

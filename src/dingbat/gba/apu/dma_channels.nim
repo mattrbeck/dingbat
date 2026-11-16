@@ -5,38 +5,31 @@ const DMA_CHANNELS_RANGE_HIGH* = 0xA7'u32
 const FIFO_MASTER_RESET {.booldefine.} = true
   ## Both FIFOs are held empty while SOUNDCNT_X's master enable is off:
   ## clearing it empties them, writes are dropped (apu `[]=`), and timer
-  ## overflows neither play nor request a DMA. alyosha fifo_dma/fifo, test 2:
-  ## 24 samples written with the sound off, and the first overflow after
-  ## the enable requests a DMA; test 3: the same with the sound cycled off
-  ## and on after the writes; without the gate an armed sound DMA refills a
-  ## FIFO that cannot fill, every overflow, and the ROM never draws a
-  ## verdict. fifo_2's eight rows each start that way (false: 051). AGB SP,
-  ## tests/roms/payloads/fifoslot.s w = 1: six words stored with the master
-  ## off and then the master on, and the first overflow asks for a refill
-  ## exactly as for an empty FIFO (8 cells, n = 20..100).
+  ## overflows neither play nor request a DMA. Pinned by alyosha
+  ## fifo_dma/fifo and fifo_2 (without the gate an armed sound DMA refills a
+  ## FIFO that cannot fill, every overflow, and fifo never draws a verdict).
+  ## AGB SP, tests/roms/payloads/fifoslot.s w = 1: words stored with the
+  ## master off, then the master on: the first overflow asks for a refill
+  ## exactly as for an empty FIFO.
 const FIFO_REQ_BEFORE_POP {.booldefine.} = true
   ## A FIFO asks for a refill on its timer's overflow when it held fewer than
   ## 16 bytes before the sample was taken, not after: alyosha fifo_dma/fifo_4
   ## preloads exactly 16 and the first overflow requests nothing, the second
-  ## does. (After the pop: fifo_4 reads 111; fifo_3 alone prefers it, by one
-  ## cycle -- 174 for 175 -- and it is red either way.)
+  ## does (after the pop fails fifo_4).
 const FIFO_DMA_REQUEST_DELAY {.intdefine.} = 4
   ## The refill DMA is requested this many cycles after the overflow.
-  ## alyosha fifo_dma/fifo_2 reads a timer just after the first refill, for
-  ## eight timer reloads: 3 puts the burst before the read in one row (081),
-  ## 5 after it in another (051). fifo_4 and fifo_dma_disable_4 read green
-  ## from 3 to 5. Bounded: at most one request per overflow per FIFO, and
-  ## a grant re-checks the FIFO level (dma.run_pending).
+  ## Pinned by alyosha fifo_dma/fifo_2 (3 and 5 each fail a case). At most
+  ## one request per overflow per FIFO; a grant re-checks the FIFO level
+  ## (dma.run_pending).
 
 const FIFO_LEVEL_AT_OVERFLOW {.booldefine.} = true
   ## A timer overflow that lands inside a refill burst of the FIFO it drives
   ## decides on the words that burst had written by its cycle, not on the
   ## whole burst (events dispatch after a burst, so the burst's word stamps,
   ## DMA.fifo_word_at, say which came later; a word written on the
-  ## overflow's own cycle counts). AGB SP, tests/roms/payloads/fifoslot.s
-  ## (2026-10-14, rig.ask, 3 passes, every cell one answer): FIFO A on TM0
-  ## at period k, an empty FIFO, a 4-word burst from EWRAM (30 cycles, its
-  ## words in at +8, +15, +22 and +29 from the grant): the second overflow
+  ## overflow's own cycle counts). AGB SP, tests/roms/payloads/fifoslot.s:
+  ## FIFO A on TM0 at period k, an empty FIFO, a 4-word burst from EWRAM
+  ## (30 cycles, words in at +8, +15, +22, +29 from the grant): the second overflow
   ## at +28 (k = 32) asks for another refill, at +29 (k = 33) it does not;
   ## from the gamepak slot (32 cycles, words in at +10 .. +31) the edge is
   ## between k = 34 and 35.
@@ -48,10 +41,8 @@ const FIFO_DROP_BUSY {.booldefine.} = true
   ## for k = 26..28 (EWRAM) and 26..30 (slot) and costs the CPU nothing; on
   ## or after the burst's end it gets a second burst, back to back at
   ## k = 30 / 32 and a cycle or two later at k = 31..32 / 33..34; on the
-  ## burst's last cycle see FIFO_HANDBACK_CHAIN. This replaced
-  ## FIFO_OWN_BURST_NO_REQUEST (an overflow during a burst that drains
-  ## events asked for nothing at all), whose console cells (fifospk.s, DMA0
-  ## armed, k = 20) it reproduces.
+  ## burst's last cycle see FIFO_HANDBACK_CHAIN. Also matches fifospk.s
+  ## (DMA0 armed, k = 20).
 const FIFO_HANDBACK_CHAIN {.booldefine.} = true
   ## A refill request that lands on the burst's last cycle, the hand-back,
   ## is granted there: the channel keeps the bus for the next burst's first
@@ -62,10 +53,9 @@ const FIFO_HANDBACK_CHAIN {.booldefine.} = true
   ## the hand-back) and the next one 23 (a write, three transfers, the
   ## hand-back), where two plain bursts cost 30 and 30; from the slot at
   ## k = 31, 38 and 25 (the chained read continues the burst's sequential
-  ## gamepak stream; the resumed one starts nonsequential). The older
-  ## fifoffff.s console table (tools/hwlink/open-agb.json, 2026-09-25,
-  ## IWRAM bursts of 10 at k = 3) reads 11 then 19 cycles, this shape, and
-  ## dingbat now does too.
+  ## gamepak stream; the resumed one starts nonsequential). fifoffff.s
+  ## (tools/hwlink/open-agb.json, IWRAM bursts of 10 at k = 3) reads 11 then
+  ## 19 cycles, the same shape.
 
 const FIFO_CART_CHAIN_LATE {.booldefine.} = true
   ## With the CPU fetching from the gamepak (prefetcher off), a refill
@@ -73,15 +63,13 @@ const FIFO_CART_CHAIN_LATE {.booldefine.} = true
   ## the hand-back is (FIFO_HANDBACK_CHAIN), a cycle later than with the CPU
   ## in RAM. The chained read comes before the CPU's fetch on that cycle,
   ## whose gamepak stream goes on behind it (dma.run_pending). AGB SP and a
-  ## flashcart, 2026-11-04: alyosha fifo_dma/fifo.gba (FIFO A on TM0 at
-  ## period 32, DMA1 refilling from the cartridge, code in the cartridge,
-  ## WAITCNT 0) read through tests/roms/alyfifo.py's variants: test 2's
-  ## reads 104 and 139, test 3's 104, test 4's 104 and 165 -- the second
-  ## overflow's request, on the cycle after the first burst, takes a 6-cycle
-  ## read there and the rest of that burst (25 cycles) comes at the third
-  ## overflow, between the two reads. Without this, a back-to-back second
-  ## burst: 132 142 132 132 166. The same request with the CPU in RAM gets a
-  ## back-to-back burst (fifoslot.s, the slot at k = 32). fifo.gba passes.
+  ## flashcart: alyosha fifo_dma/fifo.gba run from the cartridge (FIFO A on
+  ## TM0 at period 32, DMA1 from the cartridge, WAITCNT 0; variants in
+  ## tests/roms/alyfifo.py): the second overflow's request, on the cycle
+  ## after the first burst, takes a 6-cycle read there and the rest of that
+  ## burst (25 cycles) comes at the third overflow. Without this, a
+  ## back-to-back second burst, and fifo.gba fails. With the CPU in RAM the
+  ## same request gets a back-to-back burst (fifoslot.s, the slot at k = 32).
 
 const FIFO_WORD_WRAP {.booldefine.} = true
   ## The FIFO holds eight words, and the eighth written into it leaves it
@@ -106,22 +94,20 @@ const FIFO_DMA_WINDOW {.booldefine.} = true
 const FIFO_WINDOW_LEAD {.intdefine.} = 16
 
 const FIFO_RESET_KEEPS_WORD {.booldefine.} = false
-  ## The reference emulators' FIFO reset, REFUTED by the console and kept
-  ## off only to reproduce them: tests/roms/payloads/fiforeset.s on an AGB
-  ## SP, 2026-10-02, reads 2 in all 18 cells -- a reset by SOUNDCNT_H's bit
-  ## 11/15 or by the master enable empties the FIFO, the word being played
-  ## included (frozen in tests/roms/cyclelaws/fiforeset.gba).
-  ## On: a FIFO reset by SOUNDCNT_H's bit 11/15 drops the words queued in the
-  ## FIFO but not the rest of the word it is playing, whose remaining 1-3
-  ## samples still come out first. Both reference emulators behave so (tests/roms/payloads/fiforeset.s v = 0 reads 2 5 4 3 2 5 4 3
-  ## on them, 2 throughout on dingbat as shipped), and with it Kingdom
-  ## Hearts - Chain of Memories' left channel (FIFO B) runs 29 output
-  ## samples behind the right after its sound restart, as on both (the
-  ## restart resets FIFO A three bytes short of a word boundary, and m4a's
-  ## resync keeps that offset). The master enable going off clears the word
-  ## as well either way: kept there too, the console's fifomap cells after a
-  ## part-played cell (r0-agb.json, 0x1428) read one refill burst short, and
-  ## dbsuite's fifodma "spike" cells fail (docs/playtest-bugs.md section 30).
+  ## The reference emulators' FIFO reset, REFUTED by the console; off by
+  ## default, on only to reproduce them. AGB SP, tests/roms/payloads/
+  ## fiforeset.s reads 2 in all 18 cells: a reset by SOUNDCNT_H bit 11/15 or
+  ## by the master enable empties the FIFO, the playing word included
+  ## (frozen in tests/roms/cyclelaws/fiforeset.gba).
+  ## On: a bit-11/15 reset drops the queued words but not the rest of the
+  ## playing word, whose 1-3 samples still come out first (fiforeset.s v = 0
+  ## reads 2 5 4 3 on them). With it Kingdom Hearts - Chain of Memories'
+  ## FIFO B runs 29 output samples behind FIFO A after its sound restart (the
+  ## restart resets FIFO A three bytes short of a word boundary; m4a's resync
+  ## keeps the offset). The master enable going off clears the word either
+  ## way: keeping it there reads one refill burst short in the console's
+  ## fifomap cells after a part-played cell (r0-agb.json, 0x1428) and fails
+  ## dbsuite fifodma "spike" cells (docs/playtest-bugs.md section 30).
 
 proc dma_channels_in_range*(address: uint32): bool =
   address >= DMA_CHANNELS_RANGE_LOW and address <= DMA_CHANNELS_RANGE_HIGH
@@ -147,11 +133,9 @@ proc new_dma_channels*(gba: GBA): DMAChannels =
 proc fifo_reset*(dc: DMAChannels; channel: int; by_bit = false) =
   ## `by_bit`: SOUNDCNT_H's reset bit, not the master enable going off.
   when FIFO_RESET_KEEPS_WORD:
-    # The word on its way out keeps its unplayed bytes; only the words queued
-    # behind it go. The FIFO is filled a word at a time from position 0, so
-    # the head word has played `positions mod 4` of its bytes; one not yet
-    # started goes with the rest. The bytes stay where they are and the next
-    # word is stored right after them.
+    # The FIFO fills a word at a time from position 0, so the head word has
+    # played `positions mod 4` of its bytes; one not yet started goes with
+    # the rest. The next word is stored right after the kept bytes.
     let played = dc.positions[channel] mod 4
     if by_bit and played != 0 and dc.sizes[channel] > 0:
       dc.sizes[channel] = min(4 - played, dc.sizes[channel])
@@ -171,9 +155,9 @@ proc dma_channels_read*(dc: DMAChannels; address: uint32): uint8 =
 
 proc dma_channels_write*(dc: DMAChannels; address: uint32; value: uint8) =
   let channel = int(bit(address, 2))
-  # MP2K HLE provenance (mp2k.nim on_frame): the m4a driver feeds the FIFOs
-  # only via DMA1/2 in FIFO timing; bytes arriving any other way mean the game
-  # streams its own audio and must not be substituted.
+  # MP2K HLE (mp2k.nim on_frame): the m4a driver feeds the FIFOs only via
+  # DMA1/2 in FIFO timing; bytes arriving any other way mean the game streams
+  # its own audio and must not be substituted.
   var tag = 0'u32
   if dc.gba.mp2k != nil:
     let d = dc.gba.dma
@@ -200,7 +184,7 @@ proc push_fifo_sample(dc: DMAChannels; channel: int; sample: int16) {.inline.} =
   ## every DAC-advancing timer overflow (including empty-FIFO 0s). The delta
   ## between overflow cycles is the phase denominator: counting 32768 Hz reads
   ## instead degenerates at FIFO rates near the output rate and injects
-  ## broadband noise (tools/nbadiff/README.md).
+  ## broadband noise.
   dc.hist[channel][0] = dc.hist[channel][1]
   dc.hist[channel][1] = dc.hist[channel][2]
   dc.hist[channel][2] = dc.hist[channel][3]
@@ -215,9 +199,7 @@ proc timer_overflow*(dc: DMAChannels; timer: int): bool =
   ## Also whether a FIFO this timer drives will ask for a refill at its
   ## next overflow (FIFO_DMA_WINDOW books the window for it).
   when FIFO_MASTER_RESET:
-    # With the master enable off both FIFOs are held empty and request no
-    # DMA (alyosha fifo_dma/fifo: an armed sound DMA and a running timer
-    # with the sound off do not stall the CPU)
+    # FIFO_MASTER_RESET: with the master off, no sample and no DMA request
     if not dc.gba.apu.sound_enabled: return
   for channel in 0..1:
     let ch_timer = if channel == 0:
@@ -299,11 +281,9 @@ proc fifo_window_book*(dc: DMAChannels; overflow_in: int) =
         s.schedule(open_in, etFifoWindow)
 
 proc fifo_window_stale*(dc: DMAChannels) =
-  ## FIFO_DMA_WINDOW, at an overflow that booked nothing with the window open:
-  ## one with no request on its way was not needed (a stopped timer's)
-  ## (a request for a FIFO with no sound DMA armed on it books no burst; one
-  ## granted is closed by the internal cycles after it, which may run under
-  ## the burst)
+  ## FIFO_DMA_WINDOW, at an overflow that booked nothing with the window
+  ## open: close it unless a request is on its way for a FIFO with a sound
+  ## DMA armed (a granted one is closed by the internal cycles after it).
   when FIFO_DMA_WINDOW:
     let s = dc.gba.scheduler
     if (dc.gba.bus.sync_bits and 32) != 0: return
