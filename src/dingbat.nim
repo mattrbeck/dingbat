@@ -2864,7 +2864,12 @@ proc main() =
     let ui_interval = if is_paced() and not app.paused:
                         max(present_interval, 2 * frame_ticks * 1000 div sched_freq)
                       else: present_interval
-    if (emulated and is_paced()) or now - last_present >= ui_interval:
+    # Unpaced, a present waits for the last to reach the glass (Metal: each
+    # waits for a refresh), so every refresh shows the newest frame and the
+    # loop never stalls behind a queue; a hidden window, which never shows
+    # one, presents after two refreshes.
+    let glass_free = pr.waiting() == 0 or now - last_present >= 2 * present_interval
+    if (emulated and is_paced()) or (now - last_present >= ui_interval and glass_free):
       last_present = now
       # Black letterbox behind a game; brand purple on the home screen.
       if app.emu_kind == ekNone:

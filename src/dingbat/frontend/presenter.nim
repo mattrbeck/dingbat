@@ -40,6 +40,7 @@ when defined(macosx):
   proc dbmtl_read(x, y, w, h: cint; rgb: ptr byte): cint
   proc dbmtl_present(): uint64
   proc dbmtl_shown_at(seq: uint64): cdouble
+  proc dbmtl_waiting(): cint
   proc dbmtl_imgui_init()
   proc dbmtl_imgui_new_frame()
   proc dbmtl_imgui_render(dd: pointer)
@@ -155,6 +156,11 @@ proc present*(window: Window): uint64 =
   ## The present's number for shown_at (0: OpenGL, which cannot tell).
   when defined(macosx): result = dbmtl_present()
   else: gl_present(window)
+
+proc waiting*(): int =
+  ## Presents not yet on the glass (0 on OpenGL, which cannot tell)
+  when defined(macosx): int(dbmtl_waiting())
+  else: 0
 
 proc shown_at*(seq: uint64; freq: uint64): uint64 =
   ## When present `seq` reached the glass, in performance-counter ticks of
