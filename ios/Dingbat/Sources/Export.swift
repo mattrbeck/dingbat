@@ -191,7 +191,8 @@ enum GameExport {
         if files.count == 1 {
             data = files[0].file.data
         } else {
-            let info = ExportCore.infoJSON(game: e.fileName, system: e.system, exportedMs: now,
+            let info = ExportCore.infoJSON(game: e.fileName, title: RomLibrary.titles[e.fileName],
+                                           system: e.system, exportedMs: now,
                                            files: files.map { ($0.file.path, $0.kind) })
             data = try ExportCore.zip([("info.json", info)] + files.map { ($0.file.path, $0.file.data) },
                                       now: Date(timeIntervalSince1970: now / 1000))

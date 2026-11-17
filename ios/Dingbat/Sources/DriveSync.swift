@@ -12,7 +12,7 @@ import UIKit
 // file, "library", holds the merged play history, tombstones and rename
 // markers:
 //
-//     { recents: [{ name, ts, imp?, gen? }], tomb: [{ name, ts, gen? }],
+//     { recents: [{ name, ts, imp?, gen?, title? }], tomb: [{ name, ts, gen? }],
 //       ren: [{ from, to, ts }] }
 //
 // Uploads go through a persisted queue, flushed 2 s after the last change
@@ -22,38 +22,13 @@ import UIKit
 // docs/dev/ios-app.md and the web code's comments say why each rule is so; the
 // comments here keep the web's reasoning where it decides an edge.
 
-/// A tombstone: a game deleted at `ts`, of generation `gen`.
-struct Tomb: Codable, Equatable {
-    var name: String
-    var ts: Double
-    var gen: Int = 0
-    var js: JSObject {
-        var o = JSObject([("name", .string(name)), ("ts", .number(ts))])
-        if gen > 0 { o["gen"] = .number(Double(gen)) }
-        return o
-    }
-}
-
-/// A rename marker: other devices move `from`'s records to `to`.
-struct Ren: Codable, Equatable {
-    var from: String
-    var to: String
-    var ts: Double
-    var js: JSObject { JSObject([("from", .string(from)), ("to", .string(to)), ("ts", .number(ts))]) }
-}
-
 /// A queued in-place rename of one Drive file.
 struct QRen: Codable, Equatable {
     var from: String
     var to: String
 }
 
-/// The library as merged (web { recents, tomb, ren }).
-struct DriveLibrary {
-    var recents: [JSObject] = []
-    var tomb: [Tomb] = []
-    var ren: [Ren] = []
-
+extension DriveLibrary {
     /// The library as Drive gets it (web driveLibraryOf): DS games are this
     /// device's only, so none of their entries, tombstones or rename
     /// markers goes up.
@@ -63,122 +38,6 @@ struct DriveLibrary {
                             tomb: tomb.filter { !ds($0.name) },
                             ren: ren.filter { !ds($0.from) && !ds($0.to) })
     }
-
-    var js: JSValue {
-        .object(JSObject([("recents", .array(recents.map { .object($0) })),
-                          ("tomb", .array(tomb.map { .object($0.js) })),
-                          ("ren", .array(ren.map { .object($0.js) }))]))
-    }
-
-    static func parse(_ data: Data) -> DriveLibrary {
-        guard let o = JSValue.parse(data)?.objectValue else { return DriveLibrary() }
-        var lib = DriveLibrary()
-        let ok = RomLibrary.validName
-        lib.recents = (o["recents"]?.arrayValue ?? []).compactMap { $0.objectValue }
-            .filter { ok($0.string("name") ?? "") }
-        lib.tomb = (o["tomb"]?.arrayValue ?? []).compactMap { v in
-            guard let t = v.objectValue, let n = t.string("name"), ok(n) else { return nil }
-            return Tomb(name: n, ts: t.number("ts") ?? 0, gen: Lib.gen(t))
-        }
-        lib.ren = (o["ren"]?.arrayValue ?? []).compactMap { v in
-            guard let r = v.objectValue, let f = r.string("from"), let t = r.string("to"), ok(f), ok(t) else { return nil }
-            return Ren(from: f, to: t, ts: r.number("ts") ?? 0)
-        }
-        return lib
-    }
-
-    /// Deleted: a tombstone with no entry of a newer generation beside it.
-    func deleted(_ name: String) -> Bool {
-        tomb.contains { $0.name == name } && !recents.contains { $0.string("name") == name }
-    }
-
-    func gen(_ name: String) -> Int {
-        recents.first { $0.string("name") == name }.map(Lib.gen) ?? 0
-    }
-}
-
-/// An insertion-ordered map (a JS Map: re-setting a key keeps its place).
-private struct OMap<V> {
-    private(set) var keys: [String] = []
-    private var dict: [String: V] = [:]
-    subscript(k: String) -> V? {
-        get { dict[k] }
-        set {
-            if let v = newValue {
-                if dict[k] == nil { keys.append(k) }
-                dict[k] = v
-            } else if dict.removeValue(forKey: k) != nil {
-                keys.removeAll { $0 == k }
-            }
-        }
-    }
-    var values: [V] { keys.map { dict[$0]! } }
-}
-
-/// Array.prototype.sort is stable; so is this.
-private func stableSorted<T>(_ a: [T], by less: (T, T) -> Bool) -> [T] {
-    a.enumerated().sorted { x, y in
-        if less(x.element, y.element) { return true }
-        if less(y.element, x.element) { return false }
-        return x.offset < y.offset
-    }.map(\.element)
-}
-
-/// web mergeLibrary, line for line.
-func mergeLibrary(_ a: DriveLibrary, _ b: DriveLibrary) -> DriveLibrary {
-    func ts(_ o: JSObject) -> Double { o.number("ts") ?? 0 }
-    func imp(_ o: JSObject?) -> Double { o?.number("imp") ?? 0 }
-    var byName = OMap<JSObject>()
-    for e in a.recents + b.recents {
-        guard let name = e.string("name"), !name.isEmpty else { continue }
-        let prev = byName[name]
-        let im = max(imp(prev), imp(e))
-        let g = Lib.gen(e)
-        let pg = prev.map(Lib.gen) ?? -1
-        if prev == nil || g > pg || (g == pg && ts(e) > ts(prev!)) {
-            byName[name] = Lib.entry(name: name, ts: ts(e), imp: nil, gen: g)
-        }
-        if im != 0 { byName[name]!["imp"] = .number(im) }
-    }
-    var ren = OMap<Ren>()
-    for r in a.ren + b.ren {
-        guard !r.from.isEmpty, !r.to.isEmpty, r.from != r.to else { continue }
-        if let prev = ren[r.from], r.ts <= prev.ts { continue }
-        ren[r.from] = Ren(from: r.from, to: r.to, ts: r.ts)
-    }
-    var done = Set<String>()
-    for r in stableSorted(ren.values, by: { $0.ts < $1.ts }) {
-        let e = byName[r.from]
-        let reimported = e != nil && imp(e) > r.ts
-        if let e, !reimported {
-            byName[r.from] = nil
-            let t = byName[r.to]
-            if t == nil || Lib.gen(t!) < Lib.gen(e) || (Lib.gen(t!) == Lib.gen(e) && ts(t!) < ts(e)) {
-                byName[r.to] = Lib.entry(name: r.to, ts: ts(e), impFirst: imp(e) != 0 ? imp(e) : nil, gen: Lib.gen(e))
-            }
-            if r.ts > imp(byName[r.to]) { byName[r.to]!["imp"] = .number(r.ts) }
-            if done.contains(r.to) { ren[r.to] = nil }
-        }
-        if reimported { ren[r.from] = nil }
-        done.insert(r.from)
-    }
-    var tomb = OMap<Tomb>()
-    for t in a.tomb + b.tomb {
-        guard !t.name.isEmpty else { continue }
-        let prev = tomb[t.name]
-        let pg = prev?.gen ?? -1
-        if prev == nil || t.gen > pg || (t.gen == pg && t.ts > prev!.ts) {
-            tomb[t.name] = Tomb(name: t.name, ts: t.ts, gen: t.gen)
-        }
-    }
-    for name in tomb.keys {
-        guard let t = tomb[name] else { continue }
-        let e = byName[name]
-        if let e, Lib.gen(e) > t.gen { continue }
-        if let e, Lib.gen(e) == t.gen, ts(e) > t.ts { tomb[name] = nil } else { byName[name] = nil }
-    }
-    return DriveLibrary(recents: stableSorted(byName.values, by: { ts($0) > ts($1) }),
-                        tomb: tomb.values, ren: ren.values)
 }
 
 /// A Drive file name / key that belongs to a DS game (web driveExcluded):
@@ -1881,7 +1740,7 @@ final class DriveSync: ObservableObject {
         d.count > 1 << 20 ? await Task.detached(priority: .userInitiated) { sig(d) }.value : sig(d)
     }
 
-    static func display(_ name: String) -> String { (name as NSString).deletingPathExtension }
+    static func display(_ name: String) -> String { RomEntry(fileName: name).name }
 
     /// Which device took a session: a random id kept here, and its kind.
     static let deviceID: String = {

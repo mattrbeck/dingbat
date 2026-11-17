@@ -476,7 +476,7 @@ struct RenameView: View {
         }
         .presentationDetents([.medium, .large])
         .onAppear {
-            name = entry.name
+            name = entry.stem
             focused = true
         }
     }

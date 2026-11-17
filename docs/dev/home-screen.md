@@ -242,6 +242,10 @@ the game's title rather than taking the export's file name.
 Games added from a zip before titles existed have none (the zip's name was
 never kept) and show the ROM's name until the zip is added again.
 
+The iOS app does the same (`RomEntry.name`, `Lib.titleOf` / `zipTitle` and
+mergeLibrary in `ios/Dingbat/Sources/LibraryCore.swift`), and its entries
+carry only the fields the web's do (`name`, `ts`, `imp`, `gen`, `title`).
+
 ## Pictures
 
 - `frame:<game>` is the library's picture: the last screen stored (a slow

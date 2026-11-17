@@ -2,6 +2,13 @@
 // files the test wrote and writes what ExportCore makes of them.
 import Foundation
 
+// ZipReader's ROM extensions, as the app has them with DS Beta on, and its
+// name check.
+enum RomLibrary {
+    static let romExtensions: Set<String> = ["gba", "gb", "gbc", "cgb", "sgb", "nds"]
+    static func validName(_ n: String) -> Bool { Lib.validName(n) }
+}
+
 let dir = URL(fileURLWithPath: CommandLine.arguments[1])
 let spec = try! JSONSerialization.jsonObject(with: Data(contentsOf: dir.appendingPathComponent("spec.json"))) as! [String: Any]
 func bytes(_ name: String) -> Data { try! Data(contentsOf: dir.appendingPathComponent(name)) }
@@ -23,7 +30,8 @@ let files = names.enumerated().map { (name: $0.element, data: bytes("zip\($0.off
 put("zip.zip", try! ExportCore.zip(files, now: Date(timeIntervalSince1970: ms / 1000)))
 // Names, stamps, info.json.
 let safe = (spec["names"] as! [String]).map(ExportCore.safeName)
-let info = ExportCore.infoJSON(game: spec["game"] as! String, system: spec["system"] as! String, exportedMs: ms,
+let info = ExportCore.infoJSON(game: spec["game"] as! String, title: spec["title"] as? String,
+                               system: spec["system"] as! String, exportedMs: ms,
                                files: (spec["files"] as! [[String: String]]).map { ($0["path"]!, $0["kind"]!) })
 let text = try! JSONSerialization.data(withJSONObject: ["safe": safe, "stamp": ExportCore.stamp(ms), "day": ExportCore.day(ms)],
                                        options: [.sortedKeys])
@@ -33,6 +41,7 @@ put("info.json", info)
 var picked: [String: Any] = [:]
 for z in ["addback-export", "addback-other"] {
     let r = ZipReader.extractRom(from: bytes(z + ".zip"))
-    picked[z] = ["rom": r?.name ?? "", "romLen": r?.rom.count ?? -1, "artLen": r?.art?.count ?? 0]
+    picked[z] = ["rom": r?.name ?? "", "romLen": r?.rom.count ?? -1, "artLen": r?.art?.count ?? 0,
+                 "isExport": r?.isExport ?? false, "exportTitle": r?.exportTitle ?? NSNull()]
 }
 put("addback.json", try! JSONSerialization.data(withJSONObject: picked, options: [.sortedKeys]))
