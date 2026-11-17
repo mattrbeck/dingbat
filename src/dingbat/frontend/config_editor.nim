@@ -259,7 +259,12 @@ proc bios_rows(ed: ConfigEditor): seq[SettingRow] =
                   "state made with one BIOS\ndoes not load on the other (HLE or a dump).")
 
 proc general_rows(ed: ConfigEditor): seq[SettingRow] =
-  @[fold("Advanced", @[
+  @[label("Opening a game from the library:",
+     "Resume goes back to the moment you left. From save starts from the " &
+     "game's own save, and offers the moment after.",
+     @[choice(siLibraryOpen, ["Resume", "From save"], [0, 1],
+              if ed.general.library_resume: 0 else: 1, inline = true)]),
+    fold("Advanced", @[
     toggle(siDsBeta, "DS Beta", ed.general.ds_beta,
            "Lets DS games load. An early, incomplete Nintendo DS core."),
     note("Takes effect on the next game opened.")])]
@@ -290,6 +295,7 @@ proc set_value*(ed: ConfigEditor; id: SettingId; value: int; text = "") =
   of siNdsBios9, siNdsBios7, siNdsFirmware:
     ed.bios.ds_paths[ord(id) - ord(siNdsBios9)] = text
   of siDsBeta: ed.general.ds_beta = value != 0
+  of siLibraryOpen: ed.general.library_resume = value == 0
   of siRumble: ed.controller.rumble = value != 0
   of siNone, siKeyPreset, siKeyBinding, siPadDefaults, siPadBinding: discard
 

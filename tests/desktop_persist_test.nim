@@ -5,7 +5,8 @@
 ## short leaves the previous file whole (finding 18); two games with the same
 ## file name keep their own save-state slots (finding 2), also when they
 ## differ only past their first 1 MB; a second window on a game another
-## window has open is refused (finding 1).
+## window has open is refused (finding 1); a session counts only while the
+## battery on disk is the one it was taken with.
 
 import std/[os, osproc, streams, strformat, strutils, tempfiles]
 import dingbat/gba/gba
@@ -438,6 +439,30 @@ block:  # no lock file can be made: the game opens anyway
   var c: GameLock
   check(w.claim_files(blocked, make_gba_rom("Unlockable"), c) and not c.files.held,
         "the load goes ahead unlocked")
+
+echo "=== A session counts only with the battery it was taken with ==="
+block:
+  # web resumeSessionFor: a session taken before a save the game made since
+  # would put the older save back
+  let sav = dir / "sess.sav"
+  let session = dir / "sess.gba-00000000.session.state"
+  writeFile(session, "state")
+  check(not session_counts(session, sav),
+        "a session without its battery's signature (an older build's) never counts")
+  check(battery_signature(sav) == "none", "no battery file: none")
+  writeFile(sav, "")
+  check(battery_signature(sav) == "none", "an empty one: none, as the web's")
+  writeFile(session_battery_name(session), battery_signature(sav) & "\n")
+  check(session_counts(session, sav), "taken with no save, none since: it counts")
+  writeFile(sav, "saved once")
+  check(not session_counts(session, sav), "the game saved since: it does not")
+  writeFile(session_battery_name(session), battery_signature(sav) & "\n")
+  check(session_counts(session, sav), "taken with that save: it counts")
+  writeFile(sav, "saved once")
+  check(session_counts(session, sav), "the same bytes written again: still")
+  removeFile(session)
+  check(not session_counts(session, sav), "no session file: nothing to count")
+  check(session_age(dir / "no such file").len > 0, "an age for any file")
 
 removeDir(dir)
 

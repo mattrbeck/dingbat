@@ -311,6 +311,10 @@ type
     # The window was fullscreen when dingbat last quit (or last toggled it);
     # window_restore.nim decides whether the next start honours it.
     fullscreen*:        bool
+    # Opening a game from the library (Settings > General): its session, or
+    # (false) its battery with the session offered after (web "library-open").
+    # `library_open: save` is written only when false.
+    library_resume*:    bool
     # DS Beta (Settings > General > Advanced): .nds games load. The "nds" keys
     # below are written only when they differ from their defaults, so a file
     # from a user who never turned it on stays as it was.
@@ -359,6 +363,7 @@ proc new_config*(): Config =
     mp2k_hle:        false,
     frame_size:      3,
     fullscreen:      false,
+    library_resume:  true,
     ds_beta:         false,
     nds_keybindings: default_ds_keybindings(),
     nds_controller_bindings: default_ds_controller_bindings(),
@@ -509,6 +514,8 @@ proc parse_config(j: JsonNode): Config =
     cfg.frame_size = clamp(j["frame_size"].getInt(3), 1, 8)
   if j.hasKey("fullscreen"):
     cfg.fullscreen = j["fullscreen"].getBool(false)
+  if j.hasKey("library_open") and j["library_open"].kind == JString:
+    cfg.library_resume = j["library_open"].getStr() != "save"
   # bios path is nested under "gba" key to match Crystal's config structure
   var hle_key_present = false
   if j.hasKey("gba") and j["gba"].kind == JObject:
@@ -679,6 +686,7 @@ proc config_entries(cfg: Config): seq[ConfigEntry] =
     ("mp2k_hle",           "mp2k_hle: " & $cfg.mp2k_hle),
     ("frame_size",         "frame_size: " & $cfg.frame_size),
     ("fullscreen",         "fullscreen: " & $cfg.fullscreen),
+    ("library_open",       if cfg.library_resume: "" else: "library_open: save"),
     ("gba.bios",           "  bios:" & bios),
     ("gba.hle",            "  hle: " & $cfg.use_hle),
     ("gba.hle_after_bios", "  hle_after_bios: " & $cfg.hle_after_bios),
@@ -764,8 +772,11 @@ proc save_config_file*(cfg: Config; path: string) =
                      aside & " and replaced with the current settings."
       else:
         let theirs = entry_table(config_entries(on_disk))
+        # A key this process never read (a Config not loaded from a file) is
+        # its own: a key written only when set reads "" either way
         for e in merged.mitems:
-          if cfg.file_entries.getOrDefault(e.key) == e.text and e.key in theirs:
+          if e.key in cfg.file_entries and cfg.file_entries[e.key] == e.text and
+             e.key in theirs:
             e.text = theirs[e.key]
     write_file_atomic(path, render_entries(merged))
     cfg.file_entries = entry_table(current)

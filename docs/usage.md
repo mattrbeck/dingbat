@@ -10,10 +10,13 @@ tap).
 Native: run `dingbat`, pass a ROM path (`./dingbat /path/to/rom`), or drag a file onto
 the window. With no game open the window is the library, as in the browser: every game
 opened there as a tile with its last screen (or its newest save state's), newest first; a
-click, Return or a controller's A opens one, right-click (or the tile's ...) removes it, or
-for a file that has moved, Find the File… puts it back in its place. File > Close Game
-(⌘W on macOS, Ctrl+W elsewhere) goes back to the library with that game at its head:
-Resume picks up exactly where you closed it, Play starts it from its in-game save.
+click, Return or a controller's A opens one where you left it (Settings > General >
+Opening a game from the library: Resume, or From save, which starts from the in-game save
+and offers the moment you left for a few seconds), right-click (or the tile's ...) removes
+it, or for a file that has moved, Find the File… puts it back in its place. File > Close
+Game (⌘W on macOS, Ctrl+W elsewhere) goes back to the library with that game at its head:
+Resume picks up exactly where you closed it, Play starts it from its in-game save. Once a
+game has saved since you left it, it starts from that save.
 
 On macOS the menus live in the system menu bar (Settings and Quit in the dingbat menu),
 Settings… (⌘,) opens a Mac settings window, File > Add a Game… (⌘O) is the system's Open

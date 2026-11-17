@@ -1,9 +1,10 @@
 ## The desktop's windowless decisions about a game's files (headless in
 ## tests/desktop_persist_test.nim): the battery-write failure notice, the
-## state-save failure text, and slot file names. dingbat.nim draws and does
-## the file work.
+## state-save failure text, slot and session file names, and when a session
+## counts. dingbat.nim draws and does the file work.
 
-import std/[os, strutils]
+import std/[os, strutils, times]
+import ../common/serialize
 
 type
   BatteryNotice* = object
@@ -65,10 +66,50 @@ proc state_file_name*(rom_path: string; identity: uint32; slot: int): string =
   result.add ".state"
 
 proc session_file_name*(rom_path: string; identity: uint32): string =
-  ## The session snapshot Close Game takes and the home screen's Resume puts
-  ## back (web `stateauto:<game>`): `<rom file name>-<identity>.session.state`,
+  ## The session snapshot a game leaves (Close Game, a switch, quitting) and
+  ## Resume puts back (web `stateauto:<game>`): `<rom file name>-<identity>.session.state`,
   ## beside the slots but none of them, so Save States never lists it.
   rom_path.extractFilename() & "-" & identity.toHex(8) & ".session.state"
+
+proc session_battery_name*(session: string): string =
+  ## Beside a session: the signature of the battery it was taken with (web
+  ## `saveSig`), one line
+  session & ".battery"
+
+proc battery_signature*(sav_path: string): string =
+  ## A battery file's contents as one word: "none" for no file or an empty
+  ## one (a game that has never saved), else its FNV-1a. "" when it cannot be
+  ## read, which matches no session.
+  if sav_path.len == 0 or not fileExists(sav_path): return "none"
+  try:
+    let data = readFile(sav_path)
+    if data.len == 0: "none" else: fnv1a(data).toHex(8)
+  except CatchableError: ""
+
+proc session_battery*(session: string): string =
+  ## The signature a session was taken with; "" for none (taken before
+  ## sessions had one: not proof either way, so never resumed, as the web's)
+  try: readFile(session_battery_name(session)).strip()
+  except CatchableError: ""
+
+proc session_counts*(session, sav_path: string): bool =
+  ## A session to go back into: there, and taken with the battery that is on
+  ## disk now. One the game has saved past would put the older save back.
+  if session.len == 0 or not fileExists(session): return false
+  let sig = session_battery(session)
+  sig.len > 0 and sig == battery_signature(sav_path)
+
+proc session_age*(session: string): string =
+  ## How long ago a session was taken, as the web's toast says it (fmtAgo)
+  var m = 0'i64
+  try: m = ((getTime() - getLastModificationTime(session)).inSeconds + 30) div 60
+  except OSError: discard
+  m = max(0'i64, m)
+  if m < 1: return "moments ago"
+  if m < 60: return $m & "m ago"
+  let h = (m + 30) div 60
+  if h < 48: return $h & "h ago"
+  $((h + 12) div 24) & "d ago"
 
 proc legacy_state_file_name*(rom_path: string; slot: int): string =
   ## What builds before the identity names called the slot.

@@ -12,6 +12,8 @@
 #   close     an unapplied edit asks first; Discard leaves the file as it was;
 #             Revert puts the edit back
 #   ds beta   unticking DS Beta takes the DS rows away, before Apply
+#   library   General's "Opening a game from the library": Resume, or From
+#             save, which OK saves and the window shows chosen next time
 #   edit menu greyed with no text field; with the Cheats window's name field
 #             being typed in, enabled, and Select All and Undo reach it
 #             (nothing here goes through the clipboard)
@@ -120,6 +122,26 @@ check "Revert puts the edit back" "$(line "$work/reverted.txt" 'toggle LCD respo
 check "DS Beta off: no DS keys" "$(line "$work/nods.txt" 'binding X (DS) = D')" missing
 check "DS Beta off: no DS files" "$(grep -c 'path DS' "$work/nods.txt")" 0
 check "DS Beta off: not applied" "$(grep -c 'beta: true' "$yml")" 1
+
+echo "opening a game from the library (General)"
+run "" "1 sleep 200
+2 menu pick dingbat>Settings...
+3 sleep 300
+4 settings dump $work/lib0.txt
+5 settings do General>From save
+6 settings do >OK
+7 sleep 300
+8 menu pick dingbat>Settings...
+9 sleep 300
+10 settings dump $work/lib1.txt
+11 settings close
+12 sleep 300
+13 quit"
+check "the row, Resume chosen" \
+      "$(grep -A2 '^label Opening a game from the library:$' "$work/lib0.txt" | tr '\n' ',')" \
+      "label Opening a game from the library:,option Resume [x],option From save,"
+check "From save, OK: saved" "$(grep -c '^library_open: save$' "$yml")" 1
+check "  and chosen when it opens again" "$(line "$work/lib1.txt" 'option From save [x]')" present
 
 echo "Edit menu (the Cheats window's name field, GBA game: its third row, at y 156)"
 run tests/roms/hwverified/psrmask.gba "1 sleep 300
