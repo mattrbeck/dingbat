@@ -1,8 +1,8 @@
 #!/bin/sh
 # Screenshots of the desktop's ImGui UI, for looking at (not compared with
 # anything): the home screen empty, with a few games and with many; the
-# hero after Close Game; the menus open; every Settings tab; Cheats, Save
-# States, Link Cable; a notice.
+# hero after Close Game; the menus open; every Settings tab; Cheats (with
+# codes), Save States, Link Cable; a notice.
 # At UI scale 1 and 1.5 (DINGBAT_UI_SCALE, a Windows display at 150%), in a
 # hidden, muted window with a scratch HOME, through the GUI driver. ImGui's
 # menu bar and Settings window on macOS too (DINGBAT_IMGUI_MENU=1): what
@@ -189,11 +189,18 @@ $few"
            debug-io:mcGbaDebug:1 debug-video:mcGbaDebug:0 overlay:mcOverlay \
            notice:mcQuickLoad open-rom:mcOpenRom; do
     name=${w%%:*} rest=${w#*:}
+    # Cheats with codes listed (drawn monospaced), beside the game as the
+    # app keeps them
+    if [ "$name" = cheats ]; then
+      printf '[x] Keep the screen\n8203FFF0 0000\n\n[ ] Second slot\n8203FFF4 1234\n8203FFF6 ABCD\n' \
+        > "$games/Blend Probe.cht"
+    fi
     run "$name" "1 frames 30
 2 app cmd $(echo "$rest" | tr ':' ' ')
 3 sleep 300
 4 shot $(shot "$name")
 5 quit" "$g"
+    rm -f "$games/Blend Probe.cht"
   done
 done
 unset DINGBAT_UI_SCALE
