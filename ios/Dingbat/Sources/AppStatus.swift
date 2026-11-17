@@ -69,9 +69,14 @@ final class AppStatus: ObservableObject {
         }
     }
 
+    /// tools/status/rules.mjs allows only 2026-11-16T19:51:20Z; milliseconds
+    /// (JavaScript's toISOString) are read too, should one get past it.
     static func parse(_ s: String?) -> Date? {
         guard let s, !s.isEmpty else { return nil }
-        return ISO8601DateFormatter().date(from: s)
+        if let d = ISO8601DateFormatter().date(from: s) { return d }
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f.date(from: s)
     }
 
     func check() {

@@ -1,0 +1,535 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>status.json editor</title>
+<!-- Drafts web/status.json (docs/dev/announcements.md) with the same rules
+     the deploy checks (rules.mjs). Serve the repo root and open it:
+       python3 -m http.server 8799   then   http://localhost:8799/tools/status/editor.html
+     Chrome saves straight back to the file (File System Access); elsewhere,
+     Download or Copy and put the file in place. -->
+<style>
+:root {
+  --bg: #0e0a16; --stage: #07050c; --s1: #171126; --s2: #201834; --s3: #2c2146;
+  --border: rgba(255,255,255,0.08); --border2: rgba(255,255,255,0.14);
+  --text: #efeaf8; --dim: #a89cc4; --faint: #8c80a8;
+  --accent: #b79cff; --accent2: #cbb6ff; --ink: #1d1238;
+  --danger: #ff6b6b; --warn: #ffc880; --live: #4fd583;
+  --font: "Segoe UI", system-ui, -apple-system, Roboto, sans-serif;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 var(--font); }
+button, input, textarea, select { font: inherit; color: inherit; }
+input[type=checkbox] { accent-color: var(--accent); width: 16px; height: 16px; }
+h1 { font-size: 17px; margin: 0; }
+h2 { font-size: 13px; margin: 0; color: var(--dim); font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; }
+header { position: sticky; top: 0; z-index: 2; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 12px 16px;
+  background: linear-gradient(180deg, #161226, #100c1a); border-bottom: 1px solid var(--border); }
+header .grow { flex: 1; }
+.file { color: var(--dim); font-size: 13px; }
+.btn { min-height: 36px; padding: 0 14px; border-radius: 8px; border: 1px solid var(--border2);
+  background: linear-gradient(180deg, var(--s3), var(--s2)); cursor: pointer; }
+.btn:hover { border-color: rgba(183,156,255,0.5); }
+.btn:disabled { opacity: 0.45; cursor: default; }
+.btn-primary { border-color: rgba(183,156,255,0.6); background: linear-gradient(180deg, var(--accent2), var(--accent)); color: var(--ink); font-weight: 600; }
+.btn-small { min-height: 30px; padding: 0 10px; font-size: 13px; }
+.btn-ghost { background: none; border-color: transparent; color: var(--dim); }
+main { display: grid; grid-template-columns: minmax(0, 440px) minmax(0, 1fr); gap: 16px; padding: 16px; max-width: 1500px; margin: 0 auto; }
+@media (max-width: 900px) { main { grid-template-columns: minmax(0, 1fr); } }
+.panel { background: var(--s1); border: 1px solid var(--border2); border-radius: 12px; padding: 14px; display: flex; flex-direction: column; gap: 10px; }
+.col { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.items { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.item { display: flex; align-items: center; gap: 6px; }
+.item > button.pick { flex: 1; min-width: 0; text-align: left; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border);
+  background: var(--s2); cursor: pointer; display: flex; flex-direction: column; gap: 4px; }
+.item > button.pick[aria-current="true"] { border-color: var(--accent); background: #261c3e; }
+.item .t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.chip { font-size: 11px; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--border2); color: var(--dim); }
+.chip.live { color: var(--live); border-color: rgba(79,213,131,0.4); }
+.chip.err { color: var(--danger); border-color: rgba(255,107,107,0.5); }
+.chip.warn { color: var(--warn); border-color: rgba(255,200,128,0.4); }
+.empty { color: var(--faint); font-size: 13px; margin: 0; }
+label.f { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--dim); }
+label.f > span.hint, .hint { font-size: 12px; color: var(--faint); }
+input[type=text], input[type=url], input[type=datetime-local], textarea {
+  width: 100%; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border2); background: var(--bg); color: var(--text); }
+input:focus-visible, textarea:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+textarea { min-height: 72px; resize: vertical; }
+fieldset { border: 1px solid var(--border); border-radius: 8px; margin: 0; padding: 8px 10px 10px; display: flex; flex-wrap: wrap; gap: 6px 16px; }
+legend { font-size: 13px; color: var(--dim); padding: 0 4px; }
+fieldset label { display: flex; align-items: center; gap: 6px; min-height: 32px; cursor: pointer; }
+.when { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; align-items: center; }
+.utc { font: 12px ui-monospace, Menlo, monospace; color: var(--faint); }
+.count { font-size: 12px; color: var(--faint); align-self: flex-end; }
+.count.over { color: var(--warn); }
+.issues { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
+.issues li { display: flex; gap: 8px; }
+.issues .k { flex: none; font-weight: 600; }
+.issues .err .k { color: var(--danger); }
+.issues .warn .k { color: var(--warn); }
+.issues code { color: var(--dim); }
+pre.json { margin: 0; max-height: 360px; overflow: auto; padding: 10px; border-radius: 8px; background: var(--bg);
+  border: 1px solid var(--border); font: 12px/1.5 ui-monospace, Menlo, monospace; color: var(--dim); white-space: pre; }
+.tabs { display: flex; flex-wrap: wrap; gap: 4px; }
+.tabs button { min-height: 32px; padding: 0 12px; border-radius: 999px; border: 1px solid var(--border2); background: none; color: var(--dim); cursor: pointer; }
+.tabs button[aria-pressed="true"] { background: var(--accent); color: var(--ink); border-color: var(--accent); font-weight: 600; }
+/* The preview: a device-sized screen, scaled to fit. */
+.stage { display: flex; justify-content: center; padding: 8px 0; overflow: hidden; }
+.screen-wrap { position: relative; }
+.screen { position: absolute; top: 0; left: 0; transform-origin: 0 0; overflow: hidden; border-radius: 20px;
+  border: 1px solid var(--border2); font-family: var(--font); }
+.screen.ios { font-family: -apple-system, "SF Pro Text", system-ui, sans-serif; }
+.pv-bar { height: 56px; display: flex; align-items: center; gap: 8px; padding: 0 16px; background: linear-gradient(180deg, #161226, #100c1a);
+  border-bottom: 1px solid var(--border); font-weight: 700; }
+.ios .pv-bar { height: auto; padding: 54px 20px 10px; background: none; border: 0; font-size: 20px; }
+.pv-main { display: flex; flex-direction: column; align-items: center; gap: 20px; padding: 16px; }
+.pv-notes { width: 100%; display: flex; flex-direction: column; gap: 8px; }
+.pv-note { display: flex; flex-wrap: wrap; align-items: flex-start; column-gap: 12px; row-gap: 8px; padding: 12px 6px 12px 16px;
+  border-radius: 12px; background: linear-gradient(180deg, var(--s3), var(--s2)); border: 1px solid var(--border2); font-size: 14px; }
+.pv-note.sel { outline: 2px dashed rgba(183,156,255,0.55); outline-offset: 3px; }
+.pv-note p { flex: 1 1 200px; margin: 0; }
+.pv-note .x { order: 2; width: 32px; height: 32px; margin: -6px 0 -6px auto; display: flex; align-items: center; justify-content: center; color: var(--dim); }
+.pv-note .a { flex-basis: 100%; order: 3; color: var(--accent); font-weight: 600; font-size: 13.5px; }
+.wide .pv-note { align-items: center; padding-block: 8px; }
+.wide .pv-note .x { margin-block: 0; }
+.wide .pv-note .a { flex-basis: auto; order: 1; }
+.ios .pv-note { background: var(--s2); font-size: 15px; }
+.pv-hero { width: 100%; aspect-ratio: 3/2; border-radius: 11px; background: var(--stage); border: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: center; color: var(--faint); font-size: 12px; }
+.wide .pv-hero { width: 50%; align-self: flex-start; }
+.pv-toasts { position: absolute; left: 12px; right: 12px; bottom: 24px; display: flex; justify-content: center; }
+.pv-toast { display: flex; align-items: center; gap: 10px; max-width: 560px; padding: 8px 16px; border-radius: 16px;
+  background: linear-gradient(180deg, var(--s3), var(--s2)); border: 1px solid var(--border2); box-shadow: 0 8px 24px rgba(0,0,0,0.5); font-size: 13px; }
+.pv-toast.act { padding-right: 6px; }
+.pv-toast .a { padding: 3px 12px; border-radius: 999px; border: 1px solid var(--border2); background: var(--s1); color: var(--accent); font-weight: 600; white-space: nowrap; }
+.pv-toast .x { opacity: 0.6; width: 24px; text-align: center; }
+.ios .pv-toast { border-radius: 999px; background: var(--s2); font-weight: 500; }
+.ios .pv-toast .a { border: 0; background: none; padding: 0; }
+.pv-dim { position: absolute; inset: 0; background: rgba(7,5,12,0.66); display: flex; align-items: center; justify-content: center; padding: 20px; }
+.pv-card { width: 100%; max-width: 400px; padding: 22px 24px; border-radius: 18px; background: var(--s1); border: 1px solid var(--border2);
+  display: flex; flex-direction: column; gap: 12px; }
+.pv-card h3 { margin: 0; font-size: 19px; }
+.pv-card p { margin: 0; }
+.pv-card .foot { font-size: 13px; color: var(--dim); }
+.pv-card .acts { display: flex; justify-content: flex-end; }
+.pv-card .acts span { padding: 9px 18px; border-radius: 8px; background: linear-gradient(180deg, var(--accent2), var(--accent)); color: var(--ink); font-weight: 600; }
+.pv-full { position: absolute; inset: 0; background: var(--bg); display: flex; flex-direction: column; padding: 54px 28px 34px; text-align: center; }
+.pv-full .mid { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; }
+.pv-full h3 { margin: 0; font-size: 26px; }
+.pv-full p { margin: 0; font-size: 17px; max-width: 340px; }
+.pv-full .foot { font-size: 15px; color: var(--dim); }
+.pv-full .go { align-self: center; width: 100%; max-width: 480px; padding: 15px; border-radius: 14px; background: var(--accent); color: var(--ink); font-weight: 600; font-size: 17px; }
+.pv-full .go.none { background: none; border: 1px dashed var(--danger); color: var(--danger); font-weight: 400; font-size: 14px; }
+.pv-note-off { color: var(--faint); font-size: 13px; text-align: center; margin: 0; }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+</style>
+</head>
+<body>
+<header>
+  <h1>status.json editor</h1>
+  <span class="file" id="file-name">Not saved anywhere yet</span>
+  <span class="grow"></span>
+  <button type="button" class="btn" id="load-repo">Load web/status.json</button>
+  <button type="button" class="btn" id="open-file">Open…</button>
+  <button type="button" class="btn" id="download">Download</button>
+  <button type="button" class="btn" id="copy">Copy JSON</button>
+  <button type="button" class="btn btn-primary" id="save">Save</button>
+</header>
+<main>
+  <div class="col">
+    <section class="panel" aria-labelledby="ann-h">
+      <div class="row"><h2 id="ann-h" style="flex:1">Announcements</h2>
+        <button type="button" class="btn btn-small" id="add-ann">+ Announcement</button></div>
+      <ul class="items" id="ann-list"></ul>
+    </section>
+    <section class="panel" aria-labelledby="req-h">
+      <div class="row"><h2 id="req-h" style="flex:1">Required updates</h2>
+        <button type="button" class="btn btn-small" id="add-req">+ Required update</button></div>
+      <ul class="items" id="req-list"></ul>
+    </section>
+    <section class="panel" aria-labelledby="form-h" id="form-panel">
+      <h2 id="form-h">Edit</h2>
+      <div id="form"></div>
+    </section>
+  </div>
+  <div class="col">
+    <section class="panel" aria-labelledby="pv-h">
+      <div class="row"><h2 id="pv-h" style="flex:1">Preview</h2>
+        <div class="tabs" role="group" aria-label="Device" id="devices"></div></div>
+      <div class="stage" id="stage"></div>
+      <p class="hint" id="pv-hint"></p>
+    </section>
+    <section class="panel" aria-labelledby="iss-h">
+      <h2 id="iss-h">Checks</h2>
+      <ul class="issues" id="issues"></ul>
+    </section>
+    <section class="panel" aria-labelledby="json-h">
+      <h2 id="json-h">web/status.json</h2>
+      <pre class="json" id="json"></pre>
+    </section>
+  </div>
+</main>
+<script type="module">
+import { validate, PLATFORMS, SHOWS, TEXT_SOFT_MAX } from "./rules.mjs";
+
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+let doc = { announcements: [], required: [] };
+let sel = null; // { kind: "ann" | "req", i }
+let fileHandle = null;
+let dirty = false;
+let device = "phone";
+
+const DEVICES = {
+  phone: { label: "Phone (web)", w: 390, h: 844, platform: "web", wide: false },
+  desktop: { label: "Desktop (web)", w: 1280, h: 800, platform: "web", wide: true },
+  iphone: { label: "iPhone", w: 390, h: 844, platform: "ios", wide: false },
+  ipad: { label: "iPad", w: 1194, h: 834, platform: "ios", wide: true },
+};
+
+// --- times: the file holds UTC (2026-11-16T19:51:20Z), the inputs local time ---
+const toUtc = (local) => (local ? new Date(local).toISOString().replace(/\.\d{3}Z$/, "Z") : undefined);
+const toLocal = (utc) => {
+  const t = Date.parse(utc);
+  if (Number.isNaN(t)) return "";
+  const d = new Date(t);
+  const p = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+};
+
+// Keys in the file's order, empties left out: a stable, readable diff.
+const ANN_ORDER = ["id", "text", "show", "url", "label", "platforms", "from", "until", "builtBefore"];
+const REQ_ORDER = ["platforms", "minBuild", "message", "url"];
+const ordered = (o, order) => {
+  const out = {};
+  for (const k of order) if (o[k] !== undefined) out[k] = o[k];
+  for (const k of Object.keys(o)) if (!(k in out) && o[k] !== undefined) out[k] = o[k]; // kept, and flagged by the checks
+  return out;
+};
+const serialize = () => JSON.stringify({
+  announcements: doc.announcements.map((a) => ordered(a, ANN_ORDER)),
+  required: doc.required.map((r) => ordered(r, REQ_ORDER)),
+}, null, 2) + "\n";
+
+const set = (o, k, v) => { if (v === undefined || v === "" || (Array.isArray(v) && !v.length)) delete o[k]; else o[k] = v; };
+const changed = () => { dirty = true; render(); };
+
+const slug = (s) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 32).replace(/^-+|-+$/g, "");
+const newId = (text) => `${new Date().toISOString().slice(0, 10)}-${slug(text) || "note"}`;
+
+// --- state of an announcement now, for the list's chips ---
+const stateOf = (a, now = Date.now()) => {
+  const from = Date.parse(a.from), until = Date.parse(a.until);
+  if (until <= now) return ["expired", ""];
+  if (from > now) return ["scheduled", ""];
+  return ["live now", "live"];
+};
+
+const itemIssues = (r, prefix) => ({
+  err: r.errors.some((e) => e.path === prefix || e.path.startsWith(prefix + ".")),
+  warn: r.warnings.some((e) => e.path === prefix || e.path.startsWith(prefix + ".")),
+});
+
+const renderLists = (r) => {
+  const ann = $("ann-list");
+  ann.replaceChildren();
+  if (!doc.announcements.length) ann.innerHTML = '<li><p class="empty">None. Players see nothing new.</p></li>';
+  doc.announcements.forEach((a, i) => {
+    const li = document.createElement("li");
+    li.className = "item";
+    const iss = itemIssues(r, `announcements[${i}]`);
+    const [st, cls] = stateOf(a);
+    const shows = Array.isArray(a.show) && a.show.length ? a.show : ["toast"];
+    const plats = Array.isArray(a.platforms) && a.platforms.length ? a.platforms : ["web", "ios"];
+    li.innerHTML = `<button type="button" class="pick" aria-current="${sel?.kind === "ann" && sel.i === i}">
+        <span class="t">${esc(a.text || "(no text)")}</span>
+        <span class="chips">${shows.map((s) => `<span class="chip">${esc(s)}</span>`).join("")}
+          ${plats.map((p) => `<span class="chip">${p === "ios" ? "iOS" : esc(p)}</span>`).join("")}
+          <span class="chip ${cls}">${st}</span>
+          ${a.builtBefore ? '<span class="chip">older builds</span>' : ""}
+          ${iss.err ? '<span class="chip err">error</span>' : iss.warn ? '<span class="chip warn">check</span>' : ""}</span>
+      </button>
+      <button type="button" class="btn btn-small btn-ghost" data-move="-1" aria-label="Move up">↑</button>
+      <button type="button" class="btn btn-small btn-ghost" data-move="1" aria-label="Move down">↓</button>
+      <button type="button" class="btn btn-small btn-ghost" data-del aria-label="Delete">✕</button>`;
+    li.querySelector(".pick").onclick = () => { sel = { kind: "ann", i }; render(); };
+    li.querySelectorAll("[data-move]").forEach((b) => b.onclick = () => move("announcements", i, +b.dataset.move));
+    li.querySelector("[data-del]").onclick = () => remove("announcements", i);
+    ann.append(li);
+  });
+  const req = $("req-list");
+  req.replaceChildren();
+  if (!doc.required.length) req.innerHTML = '<li><p class="empty">None. No build is blocked.</p></li>';
+  doc.required.forEach((q, i) => {
+    const li = document.createElement("li");
+    li.className = "item";
+    const iss = itemIssues(r, `required[${i}]`);
+    const plats = Array.isArray(q.platforms) && q.platforms.length ? q.platforms : ["web", "ios"];
+    li.innerHTML = `<button type="button" class="pick" aria-current="${sel?.kind === "req" && sel.i === i}">
+        <span class="t">Builds before ${esc(q.minBuild || "?")}</span>
+        <span class="chips">${plats.map((p) => `<span class="chip">${p === "ios" ? "iOS" : esc(p)}</span>`).join("")}
+          ${iss.err ? '<span class="chip err">error</span>' : iss.warn ? '<span class="chip warn">check</span>' : ""}</span>
+      </button>
+      <button type="button" class="btn btn-small btn-ghost" data-del aria-label="Delete">✕</button>`;
+    li.querySelector(".pick").onclick = () => { sel = { kind: "req", i }; render(); };
+    li.querySelector("[data-del]").onclick = () => remove("required", i);
+    req.append(li);
+  });
+};
+
+const move = (list, i, d) => {
+  const a = doc[list], j = i + d;
+  if (j < 0 || j >= a.length) return;
+  [a[i], a[j]] = [a[j], a[i]];
+  if (sel?.i === i) sel.i = j;
+  changed();
+};
+const remove = (list, i) => {
+  if (!confirm("Delete this entry?")) return;
+  doc[list].splice(i, 1);
+  sel = null;
+  changed();
+};
+
+// --- the form: rebuilt only when the selection changes, so typing keeps focus ---
+let formFor = "";
+const checks = (name, legend, values, current, labels) => `<fieldset><legend>${legend}</legend>${values.map((v) =>
+  `<label><input type="checkbox" name="${name}" value="${v}" ${current.includes(v) ? "checked" : ""}> ${labels[v]}</label>`).join("")}</fieldset>`;
+const timeField = (key, label, hint, value) => `<label class="f">${label}
+    <span class="when"><input type="datetime-local" step="1" data-time="${key}" value="${esc(toLocal(value))}">
+    <button type="button" class="btn btn-small btn-ghost" data-clear="${key}">Clear</button></span>
+    <span class="utc" data-utc="${key}">${esc(value || "not set")}</span>
+    ${hint ? `<span class="hint">${hint}</span>` : ""}</label>`;
+const COMMIT_HINT = 'A commit\'s build time: <code>TZ=UTC git show -s --date=format-local:%Y-%m-%dT%H:%M:%SZ --format=%cd &lt;sha&gt;</code>. Paste it into the box under the field.';
+
+const renderForm = () => {
+  const key = sel ? `${sel.kind}:${sel.i}` : "";
+  const form = $("form");
+  if (key === formFor) return;
+  formFor = key;
+  if (!sel) { form.innerHTML = '<p class="empty">Pick an entry, or add one.</p>'; return; }
+  if (sel.kind === "ann") {
+    const a = doc.announcements[sel.i];
+    const shows = Array.isArray(a.show) && a.show.length ? a.show : ["toast"];
+    const plats = Array.isArray(a.platforms) && a.platforms.length ? a.platforms : [...PLATFORMS];
+    form.innerHTML = `<div style="display:flex;flex-direction:column;gap:12px">
+      <label class="f">Message<textarea data-k="text" placeholder="Online link is down for maintenance tonight, 9–10pm UTC.">${esc(a.text)}</textarea>
+        <span class="count" id="count"></span></label>
+      ${checks("show", "Show as", SHOWS, shows, { toast: "Toast <span class=hint>(once, 8–12 s)</span>", banner: "Banner <span class=hint>(home screen, until dismissed)</span>" })}
+      ${checks("platforms", "Platforms", PLATFORMS, plats, { web: "Web", ios: "iOS" })}
+      <label class="f">Link <span class="hint">optional, https</span><input type="url" data-k="url" placeholder="https://dingbat.gg/…" value="${esc(a.url)}"></label>
+      <label class="f">Link label<input type="text" data-k="label" placeholder="Read more" value="${esc(a.label)}"></label>
+      ${timeField("from", "Show from", "Your local time; saved as UTC. Empty: now.", a.from)}
+      ${timeField("until", "Show until", "Empty: until you remove it.", a.until)}
+      ${timeField("builtBefore", "Only builds older than", COMMIT_HINT, a.builtBefore)}
+      <label class="f">ID <span class="hint">what seen and dismissed remember: change it to show the message again</span>
+        <input type="text" data-k="id" value="${esc(a.id)}"></label>
+    </div>`;
+  } else {
+    const q = doc.required[sel.i];
+    const plats = Array.isArray(q.platforms) && q.platforms.length ? q.platforms : [...PLATFORMS];
+    form.innerHTML = `<div style="display:flex;flex-direction:column;gap:12px">
+      ${checks("platforms", "Platforms", PLATFORMS, plats, { web: "Web", ios: "iOS" })}
+      ${timeField("minBuild", "Block builds older than", COMMIT_HINT + " Web only blocks once a deploy that meets it is live; iOS blocks at once.", q.minBuild)}
+      <label class="f">Message<textarea data-k="message" placeholder="This version of dingbat has a problem that the update fixes.">${esc(q.message)}</textarea></label>
+      <label class="f">Update link <span class="hint">required for iOS: the App Store or TestFlight link</span>
+        <input type="url" data-k="url" placeholder="https://apps.apple.com/app/id…" value="${esc(q.url)}"></label>
+    </div>`;
+  }
+  const obj = () => (sel.kind === "ann" ? doc.announcements : doc.required)[sel.i];
+  form.querySelectorAll("[data-k]").forEach((el) => el.addEventListener("input", () => { set(obj(), el.dataset.k, el.value.trim() ? el.value : undefined); changed(); }));
+  form.querySelectorAll('input[type=checkbox]').forEach((el) => el.addEventListener("change", () => {
+    const name = el.name;
+    const vals = [...form.querySelectorAll(`input[name=${name}]:checked`)].map((x) => x.value);
+    const all = name === "show" ? SHOWS : PLATFORMS;
+    if (!vals.length) { el.checked = true; return; } // at least one
+    // The default (toast; every platform) is left out of the file.
+    const isDefault = name === "show" ? vals.length === 1 && vals[0] === "toast" : vals.length === all.length;
+    set(obj(), name, isDefault ? undefined : vals);
+    changed();
+  }));
+  form.querySelectorAll("[data-time]").forEach((el) => el.addEventListener("input", () => {
+    set(obj(), el.dataset.time, toUtc(el.value)); changed();
+    form.querySelector(`[data-utc="${el.dataset.time}"]`).textContent = obj()[el.dataset.time] || "not set";
+  }));
+  form.querySelectorAll("[data-utc]").forEach((el) => {
+    // The UTC line takes a pasted time too (from the git command).
+    el.contentEditable = "plaintext-only";
+    el.title = "Paste a UTC time here";
+    el.addEventListener("blur", () => {
+      const k = el.dataset.utc, v = el.textContent.trim();
+      if (v && v !== "not set") { set(obj(), k, v); form.querySelector(`[data-time="${k}"]`).value = toLocal(v); changed(); }
+    });
+  });
+  form.querySelectorAll("[data-clear]").forEach((b) => b.addEventListener("click", () => {
+    const k = b.dataset.clear; set(obj(), k, undefined);
+    form.querySelector(`[data-time="${k}"]`).value = "";
+    form.querySelector(`[data-utc="${k}"]`).textContent = "not set";
+    changed();
+  }));
+};
+
+// --- the preview ---
+const renderDevices = () => {
+  $("devices").innerHTML = Object.entries(DEVICES).map(([k, d]) =>
+    `<button type="button" data-dev="${k}" aria-pressed="${k === device}">${d.label}</button>`).join("");
+  $("devices").querySelectorAll("button").forEach((b) => b.onclick = () => { device = b.dataset.dev; render(); });
+};
+
+const forPlatform = (e, p) => !Array.isArray(e.platforms) || !e.platforms.length || e.platforms.includes(p);
+const showsOf = (a) => (Array.isArray(a.show) && a.show.length ? a.show : ["toast"]);
+
+const renderPreview = () => {
+  const d = DEVICES[device];
+  const ios = d.platform === "ios";
+  const now = Date.now();
+  const live = (a) => !(Date.parse(a.until) <= now) && !(Date.parse(a.from) > now);
+  const selAnn = sel?.kind === "ann" ? doc.announcements[sel.i] : null;
+  const selReq = sel?.kind === "req" ? doc.required[sel.i] : null;
+  // Banners: every live one for this platform, plus the selected one even if
+  // scheduled, so it can be seen before it starts.
+  const banners = doc.announcements.filter((a) => forPlatform(a, d.platform) && showsOf(a).includes("banner") && (live(a) || a === selAnn));
+  const note = (a) => `<div class="pv-note ${a === selAnn ? "sel" : ""}"><p>${esc(a.text)}</p><span class="x">✕</span>${a.url ? `<span class="a">${esc(a.label || (ios ? "Read More" : "Read more"))}</span>` : ""}</div>`;
+  let overlay = "";
+  let hint = "";
+  if (selAnn && !forPlatform(selAnn, d.platform)) hint = `This announcement isn't shown on ${ios ? "iOS" : "web"}.`;
+  else if (selAnn && showsOf(selAnn).includes("toast")) {
+    overlay += `<div class="pv-toasts"><div class="pv-toast ${selAnn.url ? "act" : ""}"><span>${esc(selAnn.text)}</span>${selAnn.url ? `<span class="a">${esc(selAnn.label || (ios ? "Read More" : "Read more"))}</span><span class="x">✕</span>` : ""}</div></div>`;
+    hint = selAnn.url ? "Toast: 12 s, its link as the action." : "Toast: 8 s, no buttons (add a banner for anything that must be seen).";
+  }
+  if (selReq) {
+    if (!forPlatform(selReq, d.platform)) hint = `This requirement doesn't apply on ${ios ? "iOS" : "web"}.`;
+    else if (ios) {
+      const host = (() => { try { return new URL(selReq.url).host; } catch { return ""; } })();
+      overlay = `<div class="pv-full"><div class="mid"><h3>Update Required</h3><p>${esc(selReq.message || "This version of dingbat has a problem that the update fixes.")}</p>
+        <p class="foot">Your games and saves stay on this device.</p></div>
+        ${selReq.url ? `<span class="go">${host.endsWith("apple.com") ? "Update on the App Store" : "Update"}</span>` : '<span class="go none">No update link: the player is stuck here</span>'}</div>`;
+      hint = "Covers the whole app on every build older than the minimum, at once.";
+    } else {
+      overlay = `<div class="pv-dim"><div class="pv-card"><h3>Update Required</h3><p>${esc(selReq.message || "This version of dingbat has a problem that the update fixes.")}</p>
+        <p class="foot">Your games and saves stay on this device.</p><div class="acts"><span>Update</span></div></div></div>`;
+      hint = "No way out but Update; shown only once a deploy that meets it is live.";
+    }
+  }
+  const scale = Math.min(1, ($("stage").clientWidth || 600) / d.w, 560 / d.h);
+  $("stage").innerHTML = `<div class="screen-wrap" style="width:${d.w * scale}px;height:${d.h * scale}px">
+    <div class="screen ${ios ? "ios" : ""} ${d.wide ? "wide" : ""}" style="width:${d.w}px;height:${d.h}px;transform:scale(${scale});background:var(--bg)">
+      <div class="pv-bar">dingbat</div>
+      <div class="pv-main">
+        ${banners.length ? `<div class="pv-notes" style="max-width:${d.wide ? 1100 : 480}px">${banners.map(note).join("")}</div>` : ""}
+        <div class="pv-hero">[last played game]</div>
+      </div>
+      ${overlay}
+    </div></div>`;
+  $("pv-hint").textContent = hint || (banners.length ? `${banners.length} banner(s) on ${d.label}.` : "Pick an entry to see it here.");
+};
+
+const renderIssues = (r) => {
+  const ul = $("issues");
+  const all = [...r.errors.map((e) => ["err", "Error", e]), ...r.warnings.map((w) => ["warn", "Check", w])];
+  ul.innerHTML = all.length ? all.map(([c, k, e]) => `<li class="${c}"><span class="k">${k}</span><span><code>${esc(e.path || "file")}</code> ${esc(e.msg)}</span></li>`).join("")
+    : '<li><span class="k" style="color:var(--live)">OK</span><span>Valid: the deploy will take it.</span></li>';
+  $("save").disabled = r.errors.length > 0;
+  $("download").disabled = r.errors.length > 0;
+  $("save").title = r.errors.length ? "Fix the errors first" : "";
+};
+
+const render = () => {
+  if (sel && !(sel.kind === "ann" ? doc.announcements : doc.required)[sel.i]) sel = null;
+  const r = validate(JSON.parse(serialize()));
+  renderLists(r);
+  renderForm();
+  renderDevices();
+  renderPreview();
+  renderIssues(r);
+  $("json").textContent = serialize();
+  const a = sel?.kind === "ann" ? doc.announcements[sel.i] : null;
+  const count = $("count");
+  if (count && a) { const n = (a.text || "").length; count.textContent = `${n} / ${TEXT_SOFT_MAX}`; count.classList.toggle("over", n > TEXT_SOFT_MAX); }
+  $("file-name").textContent = (fileHandle ? fileHandle.name : "Not saved anywhere yet") + (dirty ? " · unsaved changes" : "");
+};
+
+const load = (text, name) => {
+  let parsed;
+  try { parsed = JSON.parse(text); } catch (e) { alert("Not valid JSON: " + e.message); return; }
+  doc = { ...parsed, announcements: Array.isArray(parsed.announcements) ? parsed.announcements : [], required: Array.isArray(parsed.required) ? parsed.required : [] };
+  sel = null; formFor = "-"; dirty = false;
+  render();
+  if (name) $("file-name").textContent = name;
+};
+
+$("add-ann").onclick = () => {
+  const a = { id: newId(""), text: "" };
+  autoIds.add(a);
+  doc.announcements.push(a);
+  sel = { kind: "ann", i: doc.announcements.length - 1 }; changed();
+  $("form").querySelector("textarea")?.focus();
+};
+$("add-req").onclick = () => {
+  doc.required.push({ platforms: ["web"], minBuild: new Date().toISOString().replace(/\.\d{3}Z$/, "Z") });
+  sel = { kind: "req", i: doc.required.length - 1 }; changed();
+};
+// A new announcement's id follows its text until the id is edited by hand.
+const autoIds = new WeakSet();
+document.addEventListener("input", (e) => {
+  if (sel?.kind !== "ann") return;
+  const a = doc.announcements[sel.i];
+  if (e.target.dataset?.k === "id") { autoIds.delete(a); return; }
+  if (e.target.dataset?.k !== "text" || !autoIds.has(a)) return;
+  a.id = newId(a.text || "");
+  const idField = $("form").querySelector('[data-k="id"]');
+  if (idField) idField.value = a.id;
+  render();
+});
+
+$("load-repo").onclick = async () => {
+  try {
+    const res = await fetch("../../web/status.json", { cache: "no-store" });
+    if (!res.ok) throw new Error(res.status);
+    load(await res.text(), "web/status.json (read only: Save picks the file)");
+  } catch { alert("Couldn't read ../../web/status.json: serve the repo root (python3 -m http.server 8799) and open tools/status/editor.html."); }
+};
+$("open-file").onclick = async () => {
+  if (window.showOpenFilePicker) {
+    try {
+      [fileHandle] = await showOpenFilePicker({ types: [{ description: "JSON", accept: { "application/json": [".json"] } }] });
+      load(await (await fileHandle.getFile()).text());
+      render();
+    } catch {}
+    return;
+  }
+  const input = Object.assign(document.createElement("input"), { type: "file", accept: ".json,application/json" });
+  input.onchange = async () => input.files[0] && load(await input.files[0].text(), input.files[0].name);
+  input.click();
+};
+$("save").onclick = async () => {
+  if (!window.showSaveFilePicker && !fileHandle) { $("download").click(); return; }
+  try {
+    if (!fileHandle) fileHandle = await showSaveFilePicker({ suggestedName: "status.json", types: [{ description: "JSON", accept: { "application/json": [".json"] } }] });
+    const w = await fileHandle.createWritable();
+    await w.write(serialize());
+    await w.close();
+    dirty = false; render();
+  } catch {}
+};
+$("download").onclick = () => {
+  const a = Object.assign(document.createElement("a"), { href: URL.createObjectURL(new Blob([serialize()], { type: "application/json" })), download: "status.json" });
+  a.click(); URL.revokeObjectURL(a.href);
+};
+$("copy").onclick = async () => {
+  try { await navigator.clipboard.writeText(serialize()); $("copy").textContent = "Copied"; setTimeout(() => ($("copy").textContent = "Copy JSON"), 1200); } catch {}
+};
+window.addEventListener("beforeunload", (e) => { if (dirty) e.preventDefault(); });
+window.addEventListener("resize", renderPreview);
+
+render();
+// Served from the repo: start from the real file.
+fetch("../../web/status.json", { cache: "no-store" }).then((r) => (r.ok ? r.text() : null))
+  .then((t) => { if (t && !dirty) load(t, "web/status.json (read only: Save picks the file)"); }).catch(() => {});
+</script>
+</body>
+</html>

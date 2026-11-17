@@ -18,6 +18,29 @@ at launch, and again when the app comes back to the front, at most once an
 hour. Any failure (offline, a 404, bad JSON) means "nothing to say". A broken
 file can't stop anyone playing. Both lists take any number of entries.
 
+### Editing and checking it
+
+- **Editor:** `python3 -m http.server 8799` from the repo root, then
+  <http://localhost:8799/tools/status/editor.html>. It opens the current
+  `web/status.json`, drafts entries (toast / banner, web / iOS, link, window,
+  older builds only), previews them per device, checks them live, and in
+  Chrome saves straight back to the file (Save, then pick
+  `web/status.json`). Elsewhere, Download or Copy JSON.
+- **Check:** `node tools/status/validate.mjs [file]`. The web tests and the
+  Pages deploy run it, so a bad file fails CI and never deploys. The rules
+  live in `tools/status/rules.mjs`:
+  - unknown keys (a typo like `untill` would otherwise be ignored);
+  - times must be exactly `2026-11-16T19:51:20Z`;
+  - duplicate ids, unknown places or platforms, non-https links;
+  - a window that never opens;
+  - an iOS required update with no link (the player would have no way out).
+
+  Warnings: long text, a closed window, a future iOS `minBuild` (it blocks
+  every current iOS build at once).
+- Times: one form only. Web's date parser takes many forms (a bare date, no
+  zone, milliseconds) that iOS reads as no date at all, so a loose time would
+  mean an `until` that never ends on iOS.
+
 ```json
 {
   "announcements": [

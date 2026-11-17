@@ -27,6 +27,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Check status.json
+        # Announcements and required updates (docs/dev/announcements.md): a
+        # file the clients would misread never goes out.
+        run: node tools/status/validate.mjs web/status.json
+
       - uses: jiro4989/setup-nim-action@v2
         with:
           # Pinned, as test.yml's NIM_VERSION.
