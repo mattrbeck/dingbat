@@ -557,6 +557,87 @@ jobs:
           SDL_AUDIO_DRIVER: dummy
         run: xvfb-run -a -s "-screen 0 1280x1024x24" tests/desktop_home_test.sh
 
+  desktop-gui-macos:
+    # The same driven app on macOS (hidden window, drawn with Metal), and the
+    # macOS-only scripts: the system menu bar, the native Settings window,
+    # notices as alerts, a link kept through a menu held open. Built as the
+    # release build is (-d:macdist on build-artifacts.yml's cached static SDL
+    # 3), so its cache is shared.
+    runs-on: macos-15
+    timeout-minutes: 30
+    env:
+      # build-artifacts.yml's, so a cache miss here builds the same SDL
+      MACOSX_DEPLOYMENT_TARGET: "11.0"
+      DINGBAT_GUI_BIN: ${{ github.workspace }}/dingbat_gui_test
+      SDL_AUDIO_DRIVER: dummy
+    steps:
+      - uses: actions/checkout@v4
+      - name: Cache the static SDL 3 build
+        id: sdl3-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/sdl3-prefix
+          key: sdl3-static-${{ runner.os }}-${{ runner.arch }}-3.4.16-nocamera-macos11
+      - name: Build SDL 3 (static, from source)
+        if: steps.sdl3-cache.outputs.cache-hit != 'true'
+        run: .github/scripts/build-sdl3.sh "$HOME/sdl3-prefix"
+      - name: Install SDL 3 where nim.cfg looks
+        run: |
+          set -e
+          cp -R "$HOME/sdl3-prefix/lib/." /opt/homebrew/lib/
+          cp -R "$HOME/sdl3-prefix/include/." /opt/homebrew/include/
+      - name: Install Nim
+        # As build-artifacts.yml's macOS job
+        env:
+          CHOOSENIM_CHOOSE_VERSION: ${{ env.NIM_VERSION }}
+        run: |
+          set -eo pipefail
+          .github/scripts/retry.sh 3 bash -c \
+            'curl -fsSL --retry 5 --retry-all-errors --connect-timeout 30 \
+               https://nim-lang.org/choosenim/init.sh | sh -s -- -y'
+          echo "$HOME/.nimble/bin" >> "$GITHUB_PATH"
+      - name: Install dependencies
+        shell: bash
+        run: |
+          set -e
+          cd "$RUNNER_TEMP"
+          for p in "https://github.com/nim-lang/sdl3@#bb137829ff619b0a27a473628cb28fc1c86f3fe5" imguin@1.92.4.0 yaml stb_image zippy; do
+            "$GITHUB_WORKSPACE/.github/scripts/retry.sh" 3 nimble install -y "$p"
+          done
+      - name: Restore the GUI build's nimcache
+        id: nimcache
+        uses: actions/cache/restore@v4
+        with:
+          path: .nimcache-gui
+          key: nimcache-gui-${{ runner.os }}-nim${{ env.NIM_VERSION }}-${{ hashFiles('src/**/*.nim', 'src/**/*.c', 'src/**/*.h', 'src/**/*.m', 'src/**/*.mm', 'nim.cfg') }}
+          restore-keys: nimcache-gui-${{ runner.os }}-nim${{ env.NIM_VERSION }}-
+      - name: Build (-d:gui_driver)
+        run: nim c -d:release -d:macdist -d:gui_driver --hints:off --nimcache:.nimcache-gui -o:dingbat_gui_test src/dingbat.nim
+      - name: Save the nimcache for the next run
+        if: github.ref == 'refs/heads/main' && steps.nimcache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .nimcache-gui
+          key: nimcache-gui-${{ runner.os }}-nim${{ env.NIM_VERSION }}-${{ hashFiles('src/**/*.nim', 'src/**/*.c', 'src/**/*.h', 'src/**/*.m', 'src/**/*.mm', 'nim.cfg') }}
+      - name: Desktop app driven through SDL 3
+        timeout-minutes: 5
+        run: tests/desktop_gui_test.sh
+      - name: Desktop home screen's library
+        timeout-minutes: 5
+        run: tests/desktop_home_test.sh
+      - name: macOS menu bar
+        timeout-minutes: 5
+        run: tests/desktop_mac_menu_test.sh
+      - name: macOS Settings window
+        timeout-minutes: 5
+        run: tests/desktop_mac_settings_test.sh
+      - name: macOS notices as alerts
+        timeout-minutes: 5
+        run: tests/desktop_mac_alert_test.sh
+      - name: macOS link kept through a menu held open
+        timeout-minutes: 5
+        run: tests/desktop_mac_link_test.sh
+
   wasm:
     # The web build, made once for the end-to-end jobs (the test job never
     # makes it).
