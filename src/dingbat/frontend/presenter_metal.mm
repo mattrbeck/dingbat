@@ -288,6 +288,8 @@ destinationBytesPerImage:stride * (NSUInteger)h];
 enum { SHOWN_RING = 1 << 16 };
 static double shown_at[SHOWN_RING];
 static uint64_t present_seq;
+// Presents committed to the glass and not yet on it
+static _Atomic int waiting;
 
 extern "C" uint64_t dbmtl_present(void) {
   if (!in_frame) return 0;
@@ -296,8 +298,10 @@ extern "C" uint64_t dbmtl_present(void) {
   uint64_t seq = ++present_seq;
   shown_at[seq % SHOWN_RING] = 0;
   if (drawable) {
+    waiting++;
     [drawable addPresentedHandler:^(id<MTLDrawable> d) {
       shown_at[seq % SHOWN_RING] = d.presentedTime;
+      if (waiting > 0) waiting--;
     }];
     [cmd presentDrawable:drawable];
   }
@@ -309,6 +313,8 @@ extern "C" uint64_t dbmtl_present(void) {
   in_frame = false;
   return seq;
 }
+
+extern "C" int dbmtl_waiting(void) { return waiting; }
 
 extern "C" double dbmtl_shown_at(uint64_t seq) {
   return seq + SHOWN_RING > present_seq ? shown_at[seq % SHOWN_RING] : 0;
