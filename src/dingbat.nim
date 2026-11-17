@@ -33,6 +33,8 @@ from dingbat/frontend/presenter as pr import nil
 import dingbat/frontend/util
 import dingbat/frontend/menu_model
 import dingbat/frontend/imgui_menu
+import dingbat/frontend/library
+import dingbat/frontend/library_view
 when defined(macosx):
   import dingbat/frontend/mac_menu
   import dingbat/frontend/mac_settings
@@ -99,14 +101,15 @@ proc print_help() =
   echo "                      in device pixels: 2x the window on a Retina display)"
   echo "                      to PATH as a PNG and exit"
 
-proc load_logo_texture(): float32 =
-  ## The logo's height over its width.
+proc load_logo_texture(): (uint64, int, int) =
+  ## The bat as an ImGui image, drawn by the home screen at 2x, nearest
   var buf = newSeq[byte](LOGO_PNG_DATA.len)
   for i, c in LOGO_PNG_DATA: buf[i] = byte(c)
   var w, h, comp: int
   let pixels = stbi.loadFromMemory(buf, w, h, comp, stbi.RGBA)
-  pr.logo_upload(unsafeAddr pixels[0], w, h)
-  float32(h) / float32(w)
+  var tex: uint64
+  pr.ui_texture(tex, unsafeAddr pixels[0], w, h, bgr555 = false, linear = false)
+  (tex, w, h)
 
 # --capture N:PATH. Reads the actual back buffer, so it proves the shader
 # path rather than the core's buffers. -1 disables.
@@ -133,7 +136,8 @@ type AppState = ref object
   # as a Super Game Boy and has transferred a border.
   border_shown:    bool     # what the last present decided; drives window sizing
   border_gen:      uint32   # last border generation uploaded to the texture
-  canvas_aspect:   float32
+  logo_texture:    uint64   # an ImGui image (presenter.ui_texture)
+  logo_w, logo_h:  int
   fe:              FileExplorer
   ce:              ConfigEditor
   dbg:             GbaDebug
@@ -180,6 +184,11 @@ type AppState = ref object
   enable_overlay:  bool
   last_mouse_tick: uint64
   drag_hover:      bool  # a file is being dragged over the window
+  # The home screen's games (frontend/library.nim) and its drawing
+  library:         Library
+  home:            LibraryView
+  home_stale:      bool    # the library changed since the view last took it
+  home_open:       string  # a game the home screen chose; the main loop opens it
   open_rom_request: bool # Open ROM chosen: the ImGui explorer opens next frame
 
 var app: AppState
@@ -497,6 +506,8 @@ proc input_log_close() =
   input_log_open = false
 
 proc new_core_takes_held_input()  # defined below, with the controllers
+proc store_last_screen()          # defined below, with the library
+proc record_played(g: LibGame)
 
 proc load_notice(text, hint: string) =
   echo text, (if hint.len > 0: " (" & hint & ")" else: "")
@@ -589,6 +600,8 @@ proc load_rom(path: string; keep_ds = false) =
       app.state_notice_hint = last_state_error
   # What that finished frame wrote goes too
   flush_saves()
+  # The library keeps the outgoing game's last screen
+  store_last_screen()
   # The old game's files are written out; its locks go to the new game
   app.game_lock.commit(claim)
   let was_ds = app.emu_kind == ekNDS
@@ -663,6 +676,11 @@ proc load_rom(path: string; keep_ds = false) =
   while recs.len > 8: recs.setLen(8)
   app.cfg.recents = recs
   save_config(app.cfg)
+  let rom_name = rom_path.extractFilename()
+  var system = if as_ds: "DS" else: system_of(rom_name)
+  if system.len == 0: system = if app.emu_kind == ekGB: "GB" else: "GBA"
+  record_played(LibGame(path: path, rom: rom_name, system: system,
+                        identity: identity.toHex(8)))
   when defined(macosx):
     if native_menu:
       mac_note_recent(path)
@@ -942,13 +960,14 @@ proc bgr555_to_rgb(px: uint16; correct, gbc: bool): array[3, byte] =
     result[1] = byte(round(g5 * 255.0))
     result[2] = byte(round(b5 * 255.0))
 
-proc save_screenshot() =
-  ## Write the current frame to config_dir/screenshots/<rom>-<timestamp>.png,
-  ## colour-corrected when the setting is on so it matches the screen.
-  if app.emu_kind == ekNone: return
+proc screen_rgb(hd = true): (int, int, seq[byte]) =
+  ## The frame as shown, 8-bit RGB, colour-corrected when the setting is on.
+  ## A DS game's both screens, HD 3D's size only with `hd`.
+  if app.emu_kind == ekNone: return (0, 0, @[])
   let border = sgb_border_active()
-  # A DS game's picture as shown: with HD 3D on, the HD screens
-  let (w, h) = if app.emu_kind == ekNDS: app.nds.screen_size() else: output_size()
+  let (w, h) = if app.emu_kind == ekNDS:
+                 (if hd: app.nds.screen_size() else: (NDS_W, NDS_H))
+               else: output_size()
   let correct = app.cfg.color_correction
   let gbc = app.emu_kind == ekGB
   var rgb = newSeq[byte](w * h * 3)
@@ -980,9 +999,16 @@ proc save_screenshot() =
     of ekNDS:
       # Both screens, top above bottom; the DS's own LCDs, so no correction
       var pic: seq[uint16]
-      app.nds.compose(pic, hd = true)
+      app.nds.compose(pic, hd = hd)
       for i in 0 ..< w * h: put(i, pic[i], false)
-    of ekNone: return
+    of ekNone: discard
+  (w, h, rgb)
+
+proc save_screenshot() =
+  ## Write the current frame to config_dir/screenshots/<rom>-<timestamp>.png,
+  ## colour-corrected when the setting is on so it matches the screen.
+  let (w, h, rgb) = screen_rgb()
+  if rgb.len == 0: return
   let dir = config_dir() / "screenshots"
   try:
     createDir(dir)
@@ -996,13 +1022,142 @@ proc save_screenshot() =
   else:
     echo "Screenshot failed: ", path
 
-# ──────────────────────────── Rendering ────────────────────────────
+# ──────────────────────────── The library (home screen) ────────────────────────────
 
-proc render_logo() =
-  var w, h: cint
-  discard getWindowSize(app.window, w, h)
-  let window_aspect = float32(w) / float32(h)
-  pr.draw_logo(window_aspect * app.canvas_aspect, 0.5'f32)
+proc library_file(): string = config_dir() / "library.json"
+proc pictures_dir(): string = config_dir() / "pictures"
+
+proc probe_game(path: string): LibGame =
+  ## A game the library takes in from recents, described without opening
+  ## it: a zip by the ROM inside
+  result = LibGame(path: path, rom: path.extractFilename(), system: system_of(path))
+  if path.splitFile().ext.toLowerAscii() == ".zip":
+    let inner = zip_rom_name(config_dir() / "zip-cache", path)
+    if inner.len > 0:
+      result.rom = inner
+      result.system = system_of(inner)
+  elif result.system.len == 0 and is_nds_file(path):
+    result.system = "DS"
+
+proc save_library() =
+  let err = app.library.write_library(library_file())
+  if err.len > 0: echo "library: could not save ", library_file(), ": ", err
+
+proc reload_library() =
+  ## From the file: another dingbat window may have opened a game since
+  let (lib, added) = read_library(library_file(), app.cfg.recents, probe_game)
+  app.library = lib
+  if added: save_library()
+  app.home_stale = true
+
+proc record_played(g: LibGame) =
+  app.library = read_library(library_file(), @[]).lib
+  app.library.note_played(g)
+  save_library()
+  app.home_stale = true
+
+proc remove_from_library(path: string) =
+  ## The tile's Remove from Library: from the recents too, or the next
+  ## start would take it back in
+  app.library = read_library(library_file(), @[]).lib
+  app.library.remove(path)
+  save_library()
+  let i = app.cfg.recents.find(path)
+  if i >= 0:
+    app.cfg.recents.delete(i)
+    save_config(app.cfg)
+  app.home_stale = true
+
+proc set_library_sort(sort: string) =
+  app.library = read_library(library_file(), app.cfg.recents, probe_game).lib
+  app.library.sort = sort
+  save_library()
+  app.home_stale = true
+
+proc store_last_screen() =
+  ## The picture the library shows for the game being left (web
+  ## `frame:<game>`): its screen as shown, unless that is all one colour (a
+  ## boot's white, a fade), which would stand for nothing.
+  let rom = current_rom_path()
+  if app.emu_kind == ekNone or rom.len == 0: return
+  let (w, h, rgb) = screen_rgb(hd = false)
+  if rgb.len < 3: return
+  var one_colour = true
+  for i in countup(3, rgb.len - 3, 3):
+    if rgb[i] != rgb[0] or rgb[i + 1] != rgb[1] or rgb[i + 2] != rgb[2]:
+      one_colour = false
+      break
+  if one_colour: return
+  let path = pictures_dir() / picture_name(rom.extractFilename(), state_identity())
+  let tmp = path & ".tmp"
+  try:
+    createDir(pictures_dir())
+    if stbiw.writePNG(tmp, w, h, 3, rgb): moveFile(tmp, path)
+  except CatchableError as e:
+    echo "library: could not store the last screen: ", e.msg
+
+proc load_library_picture(path: string; g: LibGame): Picture =
+  ## A tile's picture as RGBA: a last screen (PNG), or a slot's thumbnail,
+  ## a black-and-white game's in its shade palette as on screen
+  if path.endsWith(".png"):
+    try:
+      var w, h, comp: int
+      let px = stbi.load(path, w, h, comp, stbi.RGBA)
+      return Picture(w: w, h: h, rgba: px)
+    except CatchableError:
+      return
+  var data = ""
+  try: data = readFile(path)
+  except CatchableError: return
+  let (tw, th, pixels) = parse_state_thumbnail(data)
+  if pixels.len == 0: return
+  result = Picture(w: tw, h: th, rgba: newSeq[byte](tw * th * 4))
+  let px = cast[ptr UncheckedArray[uint16]](unsafeAddr pixels[0])
+  let mono = g.system == "GB"
+  for i in 0 ..< tw * th:
+    let v = px[i] and 0x7FFF'u16
+    let c = if mono and (dmg_shade(v) >= 0 or v in OLD_DMG_COLORS): dmg_shade_rgb(v)
+            else: bgr555_to_rgb(v, false, false)
+    result.rgba[i * 4] = c[0]
+    result.rgba[i * 4 + 1] = c[1]
+    result.rgba[i * 4 + 2] = c[2]
+    result.rgba[i * 4 + 3] = 255
+
+proc make_home_texture(p: Picture): uint64 =
+  pr.ui_texture(result, unsafeAddr p.rgba[0], p.w, p.h, bgr555 = false,
+                linear = true, mipmaps = true)
+
+proc free_home_texture(t: uint64) =
+  var tex = t
+  pr.ui_texture_free(tex)
+
+proc home_view(): LibraryView =
+  ## Made the first time the home screen draws: a game opened from the
+  ## command line never reads the library
+  if app.home == nil:
+    let v = new_library_view()
+    v.logo_tex = app.logo_texture
+    v.logo_w = float32(app.logo_w)
+    v.logo_h = float32(app.logo_h)
+    v.pictures_dir = pictures_dir()
+    v.states_dir = states_dir()
+    v.load_picture = load_library_picture
+    v.make_texture = make_home_texture
+    v.free_texture = free_home_texture
+    v.on_open = proc(path: string) = app.home_open = path
+    v.on_add = proc() = push_cmd(mcOpenRom)
+    v.on_remove = remove_from_library
+    v.on_sort = set_library_sort
+    app.home = v
+    reload_library()
+  if app.home_stale or app.home.ds_beta != app.cfg.ds_beta:
+    app.home.ds_beta = app.cfg.ds_beta
+    app.home.sort = app.library.sort
+    app.home.set_games(app.library.shown(app.cfg.recents, app.cfg.ds_beta))
+    app.home_stale = false
+  app.home
+
+# ──────────────────────────── Rendering ────────────────────────────
 
 proc upload_frame(fb: ptr uint16; w, h: int) =
   ## Upload the frame through the LCD response model. The model advances once
@@ -1171,8 +1326,7 @@ proc render_game() =
     pr.game_upload(0, tw, th div 2, app.nds.top_screen())
     pr.game_upload(th div 2, tw, th div 2, app.nds.bottom_screen())
     pr.draw_game(vx, vy, vw, vh, app.look)
-  of ekNone:
-    render_logo()
+  of ekNone: discard   # the home screen is ImGui's (library_view.nim)
 
 proc show_menu_bar(): bool =
   ## The in-window bar: on the home screen, and over a game while the mouse
@@ -1590,6 +1744,11 @@ proc render_imgui() =
   if menu_visible:
     overlay_h += render_menu_bar(menu_bar(native = false), MOD_KEY_STR)
 
+  # Under every window, so drawn first
+  if app.emu_kind == ekNone:
+    home_view().draw(if app.cfg.ds_beta: ".gba, .gb, .gbc, .nds or a .zip"
+                     else: ".gba, .gb, .gbc or a .zip")
+
   app.fe.render("ROM", app.open_rom_request,
                 if app.cfg.ds_beta: ROM_DIALOG_EXTS_DS else: ROM_DIALOG_EXTS,
                 proc(path: string) = load_rom(path))
@@ -1679,23 +1838,6 @@ proc render_imgui() =
         igPopFont()
         igSetCursorPos(ImVec2(x: (vp[].Size.x - d_size.x) * 0.5'f32, y: top + t_h))
         igTextDisabled(cstring(rom_types))
-      igEnd()
-
-  # Home screen: point out that ROMs can be dragged onto the window
-  if app.emu_kind == ekNone and not app.drag_hover:
-    let vp = igGetMainViewport()
-    if vp != nil:
-      let (vpos, vsize) = (vp[].Pos, vp[].Size)
-      igSetNextWindowPos(ImVec2(x: vpos.x + vsize.x * 0.5'f32,
-                                y: vpos.y + vsize.y - ui_px(16)),
-                         cint(ImGui_Cond_Always), ImVec2(x: 0.5, y: 1.0))
-      igSetNextWindowBgAlpha(0.0'f32)
-      let hint_flags = cint(ImGui_WindowFlags_NoDecoration) or
-                       cint(ImGui_WindowFlags_NoMove) or
-                       cint(ImGui_WindowFlags_NoInputs) or
-                       cint(ImGui_WindowFlags_NoSavedSettings)
-      if igBegin("##drop_hint", nil, hint_flags):
-        igTextDisabled(cstring("Drop a ROM here to play (" & rom_types & ")"))
       igEnd()
 
   # Without it a paused game with the menu bar hidden looks frozen
@@ -1972,6 +2114,10 @@ proc handle_input() =
     of EVENT_WINDOW_ENTER_FULLSCREEN, EVENT_WINDOW_LEAVE_FULLSCREEN:
       # Sent once the transition is over (macOS animates Spaces)
       track_fullscreen()
+
+    of EVENT_WINDOW_FOCUS_GAINED:
+      # Back at the home screen: another window may have played since
+      if app.emu_kind == ekNone and app.home != nil: reload_library()
 
     of EVENT_MOUSE_MOTION:
       app.last_mouse_tick = getTicks()
@@ -2299,7 +2445,7 @@ proc main() =
   when defined(gui_driver): readable = true
   if not pr.init(window, readable): system.quit(1)
   defer: pr.shutdown()
-  let canvas_aspect = load_logo_texture()
+  let (logo_tex, logo_w, logo_h) = load_logo_texture()
 
   discard igCreateContext(nil)
   igStyleColorsDark(nil)
@@ -2330,7 +2476,10 @@ proc main() =
     gba_emu:         nil,
     window:          window,
     io:              io_ptr,
-    canvas_aspect:   canvas_aspect,
+    logo_texture:    logo_tex,
+    logo_w:          logo_w,
+    logo_h:          logo_h,
+    home_stale:      true,
     fe:              fe,
     ce:              ce,
     cheats:          new_cheats_widget(),
@@ -2363,6 +2512,9 @@ proc main() =
       if last_state_error.len > 0:
         echo "Slot load refused: ", last_state_error
   app.save_states.on_delete = proc(slot: int) = delete_state_slot(slot)
+  when defined(gui_driver):
+    gui_driver.home_dump = proc(): string =
+      if app.home != nil and app.emu_kind == ekNone: app.home.dump() else: "none\n"
   when defined(macosx):
     if native_menu:
       mac_menu_install(window, proc(): seq[MenuItem] = menu_bar(native = true),
@@ -2675,6 +2827,10 @@ proc main() =
     handle_input()
     lat_poll_input()
     run_menu_cmds()
+    if app.home_open.len > 0:
+      let path = app.home_open
+      app.home_open = ""
+      load_rom(path)
     when defined(macosx):
       mac_settings_tick()
       if native_menu: mac_notices()
@@ -2693,9 +2849,10 @@ proc main() =
                       else: present_interval
     if (emulated and is_paced()) or now - last_present >= ui_interval:
       last_present = now
-      # Black letterbox behind a game; brand purple on the home screen.
+      # Black letterbox behind a game; the home screen's page behind it.
       if app.emu_kind == ekNone:
-        pr.begin(window, 60.0'f32/255, 61.0'f32/255, 107.0'f32/255)
+        let (r, g, b) = stage_rgb()
+        pr.begin(window, r, g, b)
       else:
         pr.begin(window, 0'f32, 0'f32, 0'f32)
       render_game()
@@ -2763,6 +2920,7 @@ proc main() =
   link_auto_stop()
   link_cancel_setup()
   teardown_netlink()
+  store_last_screen()
   flush_saves()
   input_log_close()
 

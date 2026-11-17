@@ -9,10 +9,13 @@ were measured while macOS could still draw with OpenGL too.
 ## One design, two backends
 
 - `frontend/presenter.nim`: the calls `dingbat.nim` makes, in the same order
-  each present: `begin` (clear) → `game_upload` → `draw_game` / `draw_logo`
-  → `read` (a capture) → `imgui_new_frame` … `imgui_render` → `read` (a GUI
-  driver shot) → `present`. Rects are back-buffer pixels from the bottom
-  left, as `glViewport`'s. ImGui images go through `ui_texture`.
+  each present: `begin` (clear) → `game_upload` → `draw_game` (none on the
+  home screen) → `read` (a capture) → `imgui_new_frame` … `imgui_render` →
+  `read` (a GUI driver shot) → `present`. Rects are back-buffer pixels from
+  the bottom left, as `glViewport`'s. ImGui images go through `ui_texture`
+  (the home screen's bat, its tiles' pictures); the ones that must stay
+  pixel-crisp are drawn between `ui_nearest_begin` / `ui_nearest_end`, as
+  ImGui's Metal backend samples linearly.
 - `frontend/present_shader.nim`: the game shader written once. A prelude
   per language maps the shared body (`float3`, the uniform block `u`, the
   texel fetch) onto GLSL 3.30 or Metal Shading Language, so every filter

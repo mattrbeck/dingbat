@@ -59,6 +59,7 @@ build desktopsettings dingbat_desktop_settings_test tests/desktop_settings_test.
 build desktoppersist  dingbat_desktop_persist_test  tests/desktop_persist_test.nim
 build desktoplifecycle dingbat_desktop_lifecycle_test tests/desktop_lifecycle_test.nim
 build desktopnds      dingbat_desktop_nds_test      tests/desktop_nds_test.nim
+build desktoplibrary  dingbat_desktop_library_test  tests/desktop_library_test.nim
 build clipreplay      dingbat_clipreplay_test       tests/clip_replay_test.nim
 build mp2kpass        dingbat_mp2kpass_test         tests/mp2k_pass_test.nim
 build cyclelaws       dingbat_cyclelaws_test        tests/cyclelaws_test.nim

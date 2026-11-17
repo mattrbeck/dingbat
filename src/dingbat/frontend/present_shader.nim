@@ -245,27 +245,6 @@ void main() {
 
 const GAME_FRAG_GLSL* = GLSL_PRELUDE & PRESENT_BODY & GLSL_FRAG_MAIN
 
-const LOGO_VERT_GLSL* = """
-#version 330 core
-out vec2 tex_coord;
-uniform float aspect;
-uniform float scale;
-const vec2 vertices[4] = vec2[](vec2(-1.0,-1.0),vec2(1.0,-1.0),vec2(-1.0,1.0),vec2(1.0,1.0));
-void main() {
-  vec2 scaled_xy = vec2(vertices[gl_VertexID]) * scale;
-  gl_Position = vec4(scaled_xy.x, scaled_xy.y * aspect, 0.0, 1.0);
-  tex_coord = (vertices[gl_VertexID] + 1.0) / vec2(2.0, -2.0);
-}
-"""
-
-const LOGO_FRAG_GLSL* = """
-#version 330 core
-in vec2 tex_coord;
-out vec4 frag_color;
-uniform sampler2D input_texture;
-void main() { frag_color = texture(input_texture, tex_coord); }
-"""
-
 # Metal: the game and border textures are R16Uint holding the core's BGR555
 # words as they are (bit 15 the border's opaque flag), read texel by texel
 # with OpenGL's NEAREST + REPEAT rule, so both presenters pick the same texel
@@ -327,21 +306,6 @@ fragment float4 game_frag(QuadOut in [[stage_in]],
                           texture2d<ushort, access::read> input_texture [[texture(0)]],
                           texture2d<ushort, access::read> border_texture [[texture(1)]]) {
   return present(u, input_texture, border_texture, in.tex_coord);
-}
-
-struct LogoParams { float aspect; float scale; };
-
-vertex QuadOut logo_vert(uint vid [[vertex_id]], constant LogoParams& p [[buffer(0)]]) {
-  QuadOut o;
-  float2 xy = QUAD[vid] * p.scale;
-  o.pos = float4(xy.x, xy.y * p.aspect, 0.0, 1.0);
-  o.tex_coord = (QUAD[vid] + 1.0) / float2(2.0, -2.0);
-  return o;
-}
-
-fragment float4 logo_frag(QuadOut in [[stage_in]], texture2d<float> tex [[texture(0)]]) {
-  constexpr sampler s(filter::nearest, address::repeat);
-  return tex.sample(s, in.tex_coord);
 }
 """
 

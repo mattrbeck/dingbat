@@ -4,7 +4,7 @@
 ## shader source (present_shader.nim), the same calls in the same order each
 ## present:
 ##
-##   begin -> game_upload* -> draw_game | draw_logo -> [read] ->
+##   begin -> game_upload* -> [draw_game] -> [read] ->
 ##   imgui_new_frame ... imgui_render -> [read] -> present
 ##
 ## Rects are back-buffer pixels from the bottom left, as glViewport's.
@@ -30,20 +30,19 @@ when defined(macosx):
   proc dbmtl_available(): cint
   proc dbmtl_init(layer: pointer; msl: cstring; readable, vsync: cint): cint
   proc dbmtl_device_name(): cstring
-  proc dbmtl_logo_upload(px: pointer; w, h: cint)
   proc dbmtl_game_alloc(w, h: cint)
   proc dbmtl_game_upload(y0, w, h: cint; px: pointer)
   proc dbmtl_border_upload(px: pointer)
   proc dbmtl_begin(pw, ph: cint; r, g, b: cfloat)
   proc dbmtl_draw_game(x, y, w, h: cint; params: pointer)
-  proc dbmtl_draw_logo(aspect, scale: cfloat)
   proc dbmtl_read(x, y, w, h: cint; rgb: ptr byte): cint
   proc dbmtl_present(): uint64
   proc dbmtl_shown_at(seq: uint64): cdouble
   proc dbmtl_imgui_init()
   proc dbmtl_imgui_new_frame()
   proc dbmtl_imgui_render(dd: pointer)
-  proc dbmtl_ui_texture(old: uint64; px: pointer; w, h, bgr555: cint): uint64
+  proc dbmtl_ui_texture(old: uint64; px: pointer; w, h, bgr555, mipmaps: cint): uint64
+  proc dbmtl_ui_texture_free(tex: uint64)
   proc dbmtl_ui_nearest(list: ptr ImDrawList; cmd: ptr ImDrawCmd)
   {.pop.}
 
@@ -90,10 +89,6 @@ proc shutdown*() =
   else:
     gl_shutdown()
 
-proc logo_upload*(px: pointer; w, h: int) =
-  when defined(macosx): dbmtl_logo_upload(px, cint(w), cint(h))
-  else: gl_logo_upload(px, w, h)
-
 proc game_alloc*(w, h: int) =
   ## The game texture's size: on a core load, and when a DS's HD scale moves.
   when defined(macosx): dbmtl_game_alloc(cint(w), cint(h))
@@ -135,11 +130,6 @@ proc draw_game*(x, y, w, h: int; look: Look) =
   else:
     gl_draw_game(x, y, w, h, frame_pw, frame_ph, look)
 
-proc draw_logo*(aspect, scale: float32) =
-  ## The home screen's logo over the whole window, alpha-blended.
-  when defined(macosx): dbmtl_draw_logo(aspect, scale)
-  else: gl_draw_logo(aspect, scale)
-
 proc read*(x, y, w, h: int): seq[byte] =
   ## What this present has drawn so far in (x, y, w, h): RGB, top row first.
   ## Empty if it could not be read.
@@ -179,14 +169,24 @@ proc imgui_render*(dd: ptr ImDrawData) =
   when defined(macosx): dbmtl_imgui_render(dd)
   else: gl_imgui_render(dd)
 
-proc ui_texture*(tex: var uint64; px: pointer; w, h: int; bgr555, linear: bool) =
+proc ui_texture*(tex: var uint64; px: pointer; w, h: int; bgr555, linear: bool;
+                 mipmaps = false) =
   ## Create or refill an ImGui image (its ImTextureID in `tex`, 0 = none):
   ## w x h BGR555 words or RGBA8. ImGui's Metal backend always samples
   ## linearly: there a nearest image is drawn between ui_nearest_begin/end.
+  ## `mipmaps`: a linear image drawn smaller than its pixels stays smooth.
   when defined(macosx):
-    tex = dbmtl_ui_texture(tex, px, cint(w), cint(h), cint(bgr555))
+    tex = dbmtl_ui_texture(tex, px, cint(w), cint(h), cint(bgr555), cint(mipmaps))
   else:
-    gl_ui_texture(tex, px, w, h, bgr555, linear)
+    gl_ui_texture(tex, px, w, h, bgr555, linear, mipmaps)
+
+proc ui_texture_free*(tex: var uint64) =
+  ## The image's texture goes (`tex` becomes 0); a present still drawing it
+  ## keeps it until done.
+  if tex == 0: return
+  when defined(macosx): dbmtl_ui_texture_free(tex)
+  else: gl_ui_texture_free(tex)
+  tex = 0
 
 proc ui_nearest_begin*() =
   ## ImGui images drawn from here to ui_nearest_end sample nearest, as their

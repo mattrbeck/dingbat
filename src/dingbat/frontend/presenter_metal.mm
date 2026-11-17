@@ -7,7 +7,7 @@
 // be reading is never written. At most MAX_INFLIGHT presents are on the GPU
 // (the semaphore) and RING > MAX_INFLIGHT, which keeps that true even for
 // presents that reuse an older upload (a still GBA frame uploads nothing).
-// Rarely changed textures (border, logo, ImGui images) are replaced whole
+// Rarely changed textures (border, ImGui images) are replaced whole
 // instead: an in-flight command buffer keeps the old one alive.
 
 #import <Metal/Metal.h>
@@ -20,11 +20,11 @@ enum { RING = 3, MAX_INFLIGHT = 2 };
 static id<MTLDevice> dev;
 static id<MTLCommandQueue> queue;
 static CAMetalLayer* layer;
-static id<MTLRenderPipelineState> game_pso, logo_pso, ui_nearest_pso;
+static id<MTLRenderPipelineState> game_pso, ui_nearest_pso;
 static id<MTLTexture> game_ring[RING];
 static int game_cur, game_w, game_h;
 static bool game_uploaded;  // this present has taken its ring slot
-static id<MTLTexture> border_tex, logo_tex;
+static id<MTLTexture> border_tex;
 static dispatch_semaphore_t inflight;
 
 // The present being built
@@ -37,9 +37,9 @@ static MTLRenderPassDescriptor* rpd;
 static int frame_w, frame_h;
 static bool in_frame;
 
-static id<MTLTexture> new_texture(MTLPixelFormat fmt, int w, int h) {
+static id<MTLTexture> new_texture(MTLPixelFormat fmt, int w, int h, bool mipmapped = false) {
   MTLTextureDescriptor* d = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:fmt
-      width:(NSUInteger)w height:(NSUInteger)h mipmapped:NO];
+      width:(NSUInteger)w height:(NSUInteger)h mipmapped:mipmapped ? YES : NO];
   d.usage = MTLTextureUsageShaderRead;
   return [dev newTextureWithDescriptor:d];
 }
@@ -49,19 +49,11 @@ static void fill(id<MTLTexture> t, int y0, int w, int h, const void* px, int bpp
        mipmapLevel:0 withBytes:px bytesPerRow:(NSUInteger)(w * bpp)];
 }
 
-static id<MTLRenderPipelineState> pipeline(id<MTLLibrary> lib, NSString* v, NSString* f,
-                                           bool blend) {
+static id<MTLRenderPipelineState> pipeline(id<MTLLibrary> lib, NSString* v, NSString* f) {
   MTLRenderPipelineDescriptor* d = [MTLRenderPipelineDescriptor new];
   d.vertexFunction = [lib newFunctionWithName:v];
   d.fragmentFunction = [lib newFunctionWithName:f];
   d.colorAttachments[0].pixelFormat = layer.pixelFormat;
-  if (blend) {
-    MTLRenderPipelineColorAttachmentDescriptor* a = d.colorAttachments[0];
-    a.blendingEnabled = YES;
-    a.sourceRGBBlendFactor = a.sourceAlphaBlendFactor = MTLBlendFactorSourceAlpha;
-    a.destinationRGBBlendFactor = a.destinationAlphaBlendFactor =
-        MTLBlendFactorOneMinusSourceAlpha;
-  }
   NSError* err = nil;
   id<MTLRenderPipelineState> p = [dev newRenderPipelineStateWithDescriptor:d error:&err];
   if (!p) fprintf(stderr, "Metal pipeline %s: %s\n", f.UTF8String,
@@ -144,9 +136,8 @@ extern "C" int dbmtl_init(void* sdl_layer, const char* msl, int readable, int vs
     fprintf(stderr, "Metal shader error: %s\n", err.localizedDescription.UTF8String);
     return 0;
   }
-  game_pso = pipeline(lib, @"game_vert", @"game_frag", false);
-  logo_pso = pipeline(lib, @"logo_vert", @"logo_frag", true);
-  if (!game_pso || !logo_pso) return 0;
+  game_pso = pipeline(lib, @"game_vert", @"game_frag");
+  if (!game_pso) return 0;
   ui_nearest_pso = ui_nearest_pipeline();
   border_tex = new_texture(MTLPixelFormatR16Uint, 256, 224);
   inflight = dispatch_semaphore_create(MAX_INFLIGHT);
@@ -160,11 +151,6 @@ extern "C" int dbmtl_available(void) {
 }
 
 extern "C" const char* dbmtl_device_name(void) { return dev.name.UTF8String; }
-
-extern "C" void dbmtl_logo_upload(const void* px, int w, int h) {
-  logo_tex = new_texture(MTLPixelFormatRGBA8Unorm, w, h);
-  fill(logo_tex, 0, w, h, px, 4);
-}
 
 extern "C" void dbmtl_game_alloc(int w, int h) {
   for (int i = 0; i < RING; i++) {
@@ -263,17 +249,6 @@ extern "C" void dbmtl_draw_game(int x, int y, int w, int h, const void* params) 
   [e drawPrimitives:MTLPrimitiveTypeTriangleStrip vertexStart:0 vertexCount:4];
 }
 
-extern "C" void dbmtl_draw_logo(float aspect, float scale) {
-  if (!in_frame || !logo_tex) return;
-  id<MTLRenderCommandEncoder> e = encoder();
-  set_viewport(e, 0, 0, frame_w, frame_h);
-  float p[2] = { aspect, scale };
-  [e setRenderPipelineState:logo_pso];
-  [e setVertexBytes:p length:sizeof(p) atIndex:0];
-  [e setFragmentTexture:logo_tex atIndex:0];
-  [e drawPrimitives:MTLPrimitiveTypeTriangleStrip vertexStart:0 vertexCount:4];
-}
-
 extern "C" int dbmtl_read(int x, int y, int w, int h, uint8_t* rgb) {
   // What is drawn so far this present, (x, y, w, h) from the bottom left, as
   // RGB rows top first. Waits for the GPU; the present goes on in a new
@@ -356,13 +331,12 @@ extern "C" void dbmtl_ui_nearest(const ImDrawList*, const ImDrawCmd*) {
 }
 
 extern "C" uint64_t dbmtl_ui_texture(uint64_t old, const void* px, int w, int h,
-                                     int bgr555) {
+                                     int bgr555, int mipmaps) {
   // A fresh texture each time (see the top); `old`'s reference is dropped.
   if (old) CFRelease((CFTypeRef)(uintptr_t)old);
-  id<MTLTexture> t;
+  id<MTLTexture> t = new_texture(MTLPixelFormatRGBA8Unorm, w, h, mipmaps != 0);
   if (bgr555) {
     // ImGui's shader samples RGBA8: the 555 words expanded here
-    t = new_texture(MTLPixelFormatRGBA8Unorm, w, h);
     const uint16_t* s = (const uint16_t*)px;
     NSUInteger n = (NSUInteger)w * (NSUInteger)h;
     uint8_t* rgba = (uint8_t*)malloc(n * 4);
@@ -376,8 +350,19 @@ extern "C" uint64_t dbmtl_ui_texture(uint64_t old, const void* px, int w, int h,
     fill(t, 0, w, h, rgba, 4);
     free(rgba);
   } else {
-    t = new_texture(MTLPixelFormatRGBA8Unorm, w, h);
     fill(t, 0, w, h, px, 4);
   }
+  if (mipmaps && t.mipmapLevelCount > 1) {
+    // On the queue ahead of every present that draws it
+    id<MTLCommandBuffer> c = [queue commandBuffer];
+    id<MTLBlitCommandEncoder> blit = [c blitCommandEncoder];
+    [blit generateMipmapsForTexture:t];
+    [blit endEncoding];
+    [c commit];
+  }
   return (uint64_t)(uintptr_t)(__bridge_retained void*)t;
+}
+
+extern "C" void dbmtl_ui_texture_free(uint64_t tex) {
+  if (tex) CFRelease((CFTypeRef)(uintptr_t)tex);
 }

@@ -337,3 +337,41 @@ sign-in assets, unaltered). Signed in: the email's initial with a sync
 badge (a tick, a turning ring, an accent mark); its menu has the sync status,
 Sync now, Sign out, and Sign out everywhere (two taps; it signs every
 device out).
+
+## The desktop's home screen
+
+With no game open the desktop window draws the same page in ImGui, one
+implementation on Windows, Linux and macOS (`src/dingbat/frontend/library_view.nim`,
+the data in `library.nim`): the brand, then the library's tiles in the web's
+sizes and Night colours, or with no games the drop box and **Add a game**
+(the Open ROM dialog). Search, the system chips and the sort come in above
+8 games, as on the web. A window under 420 px either way shows the bat and
+the name on one line instead of the brand. There is no hero: the desktop
+has no paused game to come back to.
+
+**The library** is `library.json` beside `dingbat.yml` (path, the ROM's
+file name, system, ROM identity, last opened), every game opened here, up
+to 1000. `recents` in `dingbat.yml` stays the eight File > Open Recent shows,
+unchanged, so an older build reads the same settings; whatever recents such
+a build wrote are taken in at the next start (a zip by the ROM inside it,
+read from its zip-cache copy or its listing). *Last played* order is those
+recents first, as listed, then by when last opened. Remove from Library
+takes a game out of both. DS games show only with DS Beta on.
+
+**Pictures**, the newest of: the game's last screen
+(`pictures/<rom>-<identity>.png`, written when it is left for another game
+and at quit, never one of a single colour), and its save-state slots'
+thumbnails. Never anything fetched. No picture: the cartridge, as on the
+web. A picture becomes a texture the first time its tile is on screen, two
+a frame at most, and stays until its file changes; the only GL is
+`make_home_texture` / `free_home_texture` in `dingbat.nim`.
+
+**A missing file** (checked every 2 s at home) is a dashed, dimmed tile; a
+click says the file is not there any more. **Keys and pads**: arrows or
+the d-pad and stick move a focus ring through the grid (the first press
+lands on the most recent game), Return, Space or A opens, Escape or B lets
+go.
+
+Tests: `tests/desktop_library_test.nim` (the file, order, search, marks,
+the grid's sizes against the web's), `tests/desktop_home_test.sh` (the app
+driven: tiles, a missing game, a click, keys and a pad).

@@ -62,6 +62,10 @@
 ##                                     macOS also `ns=<w>:<h> inc=<w>:<h>`, the
 ##                                     NSWindow's content aspect ratio and
 ##                                     resize increments (free: 0:0 and 1:1)
+##   home dump <path.txt>              the home screen's tiles as last drawn,
+##                                     one a line: `<name>|x y w h|missing or
+##                                     present|picture or cart` (window points),
+##                                     or `empty`
 ##
 ## With the macOS menu bar, a `key ... down cmd` also goes through it, as a
 ## real Cmd shortcut does (the key handler leaves those to the menus).
@@ -96,6 +100,7 @@ var
   shot_id = ""
   mouse_x, mouse_y: cint
   mouse_in* = false
+  home_dump*: proc(): string   ## set by the app: the home screen's tiles
   dropped* = ""       # a `drop` path for handle_input (a pushed SDL drop
                       # event cannot own its path)
   texts: seq[string]  # `text` strings, alive until handle_input has read them
@@ -357,6 +362,9 @@ proc run(window: Window; s: Step): bool =
   of "pad":
     ack(s.id, pad_cmd(w))
     return true
+  of "home":
+    if w.len < 3 or w[1] != "dump": raise newException(ValueError, "home dump <path>")
+    writeFile(w[2], if home_dump != nil: home_dump() else: "")
   of "menu":
     when defined(macosx):
       if not mac_menu.installed: raise newException(ValueError, "no macOS menu bar")

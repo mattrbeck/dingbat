@@ -684,6 +684,10 @@ generated MBC5 rumble cart buzzing it, and the window's aspect lock following
 the picture (GBA, Game Boy, an SGB border, DS; none with Preserve aspect ratio
 off). `GUI_TEST_FULLSCREEN=1` adds a visible
 macOS window taken fullscreen by AppKit's own toggle, as the green button does.
+`tests/desktop_home_test.sh` drives the home screen's library the same way:
+recents an older build wrote taken in (a zip, a missing file, a DS game only
+with DS Beta), a click on a missing tile and on a game, the last screen kept
+as the tile's picture, and Return and a pad's A opening the most recent game.
 
 `.github/scripts/smoke-desktop.sh` runs each release binary on its own OS
 before the Build and Release workflows can publish it (Linux under Xvfb,

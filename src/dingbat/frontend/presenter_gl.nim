@@ -10,11 +10,11 @@ import imgui_sdl3
 
 var
   ctx: GLContext
-  game_prog, logo_prog: GLuint
-  game_tex, border_tex, logo_tex: GLuint
+  game_prog: GLuint
+  game_tex, border_tex: GLuint
   loc: tuple[sgb_backdrop, dmg_pal, tex_width, tex_height, scan_width,
              scan_height, color_correct, panel_gbc, lcd_grid, subpixel,
-             sgb_border, filter_mode, dmg_remap, aspect, scale: GLint]
+             sgb_border, filter_mode, dmg_remap: GLint]
 
 proc gl_window_flags*(): uint64 =
   ## Before the window exists: the context it will get.
@@ -92,7 +92,6 @@ proc gl_init*(window: Window): bool =
   glGenVertexArrays(1, addr vao)
   glBindVertexArray(vao)
   game_prog = link_program(GAME_VERT_GLSL, GAME_FRAG_GLSL)
-  logo_prog = link_program(LOGO_VERT_GLSL, LOGO_FRAG_GLSL)
   template at(p: GLuint; name: string): GLint = glGetUniformLocation(p, name)
   loc = (at(game_prog, "u.sgb_backdrop"), at(game_prog, "u.dmg_pal"),
          at(game_prog, "u.tex_width"), at(game_prog, "u.tex_height"),
@@ -100,21 +99,14 @@ proc gl_init*(window: Window): bool =
          at(game_prog, "u.color_correct"), at(game_prog, "u.panel_gbc"),
          at(game_prog, "u.lcd_grid"), at(game_prog, "u.subpixel"),
          at(game_prog, "u.sgb_border"), at(game_prog, "u.filter_mode"),
-         at(game_prog, "u.dmg_remap"), at(logo_prog, "aspect"),
-         at(logo_prog, "scale"))
+         at(game_prog, "u.dmg_remap"))
   glUseProgram(game_prog)
   glUniform1i(at(game_prog, "input_texture"), 0)
   glUniform1i(at(game_prog, "border_texture"), 1)
-  glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
   true
 
 proc gl_shutdown*() =
   if ctx != nil: discard glDestroyContext(ctx)
-
-proc gl_logo_upload*(px: pointer; w, h: int) =
-  logo_tex = new_texture(GL_TEXTURE0, GL_NEAREST)
-  glTexImage2D(GL_TEXTURE_2D, 0, GLint(GL_RGBA), GLsizei(w), GLsizei(h), 0,
-               GL_RGBA, GL_UNSIGNED_BYTE, px)
 
 proc gl_game_alloc*(w, h: int) =
   ## Storage once per size; per-frame uploads use glTexSubImage2D
@@ -145,7 +137,6 @@ proc gl_begin*(pw, ph: int; r, g, b: float32) =
 proc gl_draw_game*(x, y, w, h, pw, ph: int; look: Look) =
   ## Into (x, y, w, h), back-buffer pixels from the bottom left; the
   ## viewport goes back to the whole pw x ph window after.
-  glDisable(GL_BLEND)
   glUseProgram(game_prog)
   glActiveTexture(GL_TEXTURE1)
   glBindTexture(GL_TEXTURE_2D, border_tex)
@@ -170,15 +161,6 @@ proc gl_draw_game*(x, y, w, h, pw, ph: int; look: Look) =
   glDrawArrays(GL_TRIANGLE_STRIP, 0, 4)
   glViewport(0, 0, GLsizei(pw), GLsizei(ph))
 
-proc gl_draw_logo*(aspect, scale: float32) =
-  glEnable(GL_BLEND)
-  glUseProgram(logo_prog)
-  glActiveTexture(GL_TEXTURE0)
-  glBindTexture(GL_TEXTURE_2D, logo_tex)
-  glUniform1f(loc.aspect, aspect)
-  glUniform1f(loc.scale, scale)
-  glDrawArrays(GL_TRIANGLE_STRIP, 0, 4)
-
 proc gl_read*(x, y, w, h: int): seq[byte] =
   ## The back buffer's (x, y, w, h) (from the bottom left) as RGB rows, top
   ## row first.
@@ -201,7 +183,8 @@ proc gl_imgui_new_frame*() = ImGui_Impl_OpenGL3_NewFrame()
 
 proc gl_imgui_render*(dd: ptr ImDrawData) = ImGui_Impl_OpenGL3_RenderDrawData(dd)
 
-proc gl_ui_texture*(tex: var uint64; px: pointer; w, h: int; bgr555, linear: bool) =
+proc gl_ui_texture*(tex: var uint64; px: pointer; w, h: int;
+                    bgr555, linear, mipmaps: bool) =
   ## Create or refill an ImGui image. The binding on unit 0 is kept: the
   ## draws bind their own, but ImGui's backend restores what it found.
   var prev: GLint
@@ -213,7 +196,8 @@ proc gl_ui_texture*(tex: var uint64; px: pointer; w, h: int; bgr555, linear: boo
     tex = uint64(t)
   glBindTexture(GL_TEXTURE_2D, t)
   let f = GLint(if linear: GL_LINEAR else: GL_NEAREST)
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, f)
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER,
+                  if mipmaps: GLint(GL_LINEAR_MIPMAP_LINEAR) else: f)
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, f)
   # Linear filtering at an image's edge would blend in the opposite edge's
   # texels under the default REPEAT (a thumbnail's bottom row on its top)
@@ -225,7 +209,12 @@ proc gl_ui_texture*(tex: var uint64; px: pointer; w, h: int; bgr555, linear: boo
   else:
     glTexImage2D(GL_TEXTURE_2D, 0, GLint(GL_RGBA8), GLsizei(w), GLsizei(h), 0,
                  GL_RGBA, GL_UNSIGNED_BYTE, px)
+  if mipmaps: glGenerateMipmap(GL_TEXTURE_2D)
   glBindTexture(GL_TEXTURE_2D, GLuint(prev))
+
+proc gl_ui_texture_free*(tex: uint64) =
+  var t = GLuint(tex)
+  glDeleteTextures(1, addr t)
 
 proc gl_info*(): seq[string] =
   @["OpenGL",
