@@ -64,8 +64,10 @@ proc main() =
   h.make_gb = proc(r: string): GB =
     result = new_gb("", r, true, false)
     result.post_init()
-  h.started = proc() = echo "peer: started"
   var ol: OnlineLink
+  h.started = proc() =
+    echo "peer: started as ", (if ol.rb_local == 0: "host" else: "guest")
+    flushFile(stdout)
   h.ended = proc() = discard ol.take_solo()
   h.remote_pause = proc(on: bool) = paused = on
   h.remote_speed = proc(on: bool) = double = on
