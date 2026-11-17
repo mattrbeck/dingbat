@@ -2515,6 +2515,11 @@ proc main() =
   when defined(gui_driver):
     gui_driver.home_dump = proc(): string =
       if app.home != nil and app.emu_kind == ekNone: app.home.dump() else: "none\n"
+    gui_driver.app_cmd = proc(w: seq[string]) =
+      case w[0]
+      of "cmd": push_cmd(parseEnum[MenuCmd](w[1]), if w.len > 2: parseInt(w[2]) else: 0)
+      of "tab": imgui_settings.tab_request = parseInt(w[1])
+      else: raise newException(ValueError, "app cmd|tab")
   when defined(macosx):
     if native_menu:
       mac_menu_install(window, proc(): seq[MenuItem] = menu_bar(native = true),

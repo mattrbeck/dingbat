@@ -66,6 +66,9 @@
 ##                                     one a line: `<name>|x y w h|missing or
 ##                                     present|picture or cart` (window points),
 ##                                     or `empty`
+##   app cmd <MenuCmd> [arg]           run a menu item's command (mcSettings,
+##                                     mcCheats), on every platform
+##   app tab <n>                       the ImGui Settings window's tab n
 ##
 ## With the macOS menu bar, a `key ... down cmd` also goes through it, as a
 ## real Cmd shortcut does (the key handler leaves those to the menus).
@@ -101,6 +104,7 @@ var
   mouse_x, mouse_y: cint
   mouse_in* = false
   home_dump*: proc(): string   ## set by the app: the home screen's tiles
+  app_cmd*: proc(words: seq[string])  ## set by the app: `app ...`
   dropped* = ""       # a `drop` path for handle_input (a pushed SDL drop
                       # event cannot own its path)
   texts: seq[string]  # `text` strings, alive until handle_input has read them
@@ -365,6 +369,9 @@ proc run(window: Window; s: Step): bool =
   of "home":
     if w.len < 3 or w[1] != "dump": raise newException(ValueError, "home dump <path>")
     writeFile(w[2], if home_dump != nil: home_dump() else: "")
+  of "app":
+    if app_cmd == nil or w.len < 2: raise newException(ValueError, "app cmd|tab")
+    app_cmd(w[1 .. ^1])
   of "menu":
     when defined(macosx):
       if not mac_menu.installed: raise newException(ValueError, "no macOS menu bar")
