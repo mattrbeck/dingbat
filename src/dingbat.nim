@@ -416,6 +416,12 @@ proc setup_vao() =
 
 type EmuKind = enum ekNone, ekGBA, ekGB, ekNDS  # ekNDS: DS Beta only
 
+type LinkTab = enum
+  ## The Link Cable window's tabs
+  ltOnline   ## anyone, anywhere (frontend/online_link.nim)
+  ltLocal    ## another window on this computer (auto-pairs over localhost)
+  ltNetwork  ## Host/Join by address (TCP)
+
 type AppState = ref object
   cfg:             Config
   cur_path:        string  # what load_rom last loaded (a zip: the zip); Reset reloads it
@@ -475,7 +481,9 @@ type AppState = ref object
   netlink:         NetLink
   # ImGui "Link Cable" window; pairing is non-blocking.
   link_window:     bool
-  link_window_min_h: float32  # its content's height last frame
+  link_tab:        LinkTab    # the tab showing (this run only)
+  link_tab_shown:  LinkTab    # last frame's, for the pairing that follows it
+  link_tab_pick:   bool       # select link_tab on the next draw (CLI)
   link:            LinkCable  # pairing state (frontend/link_cable.nim)
   # Online link play (frontend/online_link.nim): input rollback over WebRTC
   # with the web and iOS apps. While it runs, app.gba_emu/gb_emu is this
@@ -2339,6 +2347,8 @@ proc establish_netlink(listen_port: int; connect_to: string; delay_ms: int) =
   app.link.delay_ms = delay_ms
   if app.link.start_cli(listen_port, connect_to, link_ready()):
     app.link_window = true
+    app.link_tab = ltNetwork
+    app.link_tab_pick = true
 
 proc link_cancel_setup() = app.link.cancel_setup()
 
@@ -2372,94 +2382,133 @@ proc link_mid_frame(): bool =
   ## The linked core stopped inside a frame, parked on the peer: states wait.
   app.netlink != nil and app.netlink.mid_frame
 
-proc render_link_advanced() =
-  ## Manual Host/Join behind a collapsed "Advanced" header; either button
-  ## first cancels auto-pairing.
-  if igCollapsingHeader_TreeNodeFlags("Advanced", 0):
-    igSetNextItemWidth(ui_px(120))
-    discard igInputInt("Port", addr app.link.port, 1, 100, 0)
-    igSeparator()
-    igText("To host, share your address and port with a friend:")
-    if igButton("Host game", ImVec2(x: 0, y: 0)):
-      link_auto_stop(); link_cancel_setup(); app.link.start_host(link_ready())
-    igSeparator()
-    igText("To join, enter the host's address:")
-    igSetNextItemWidth(ui_px(200))
-    discard igInputTextWithHint("##link_host", "127.0.0.1",
-      cast[cstring](addr app.link.host_buf[0]), csize_t(app.link.host_buf.len),
-      0, nil, nil)
-    igSameLine(0, -1)
-    if igButton("Join game", ImVec2(x: 0, y: 0)):
-      link_auto_stop(); link_cancel_setup(); app.link.start_join(link_ready())
+proc render_netlink_linked() =
+  ## A same-machine or Host/Join link that is up, on either of their tabs.
+  igText("Paired successfully")
+  igText("%s", cstring(app.link.status))
+  if app.netlink.peer_paused:
+    igText("Your friend has paused.")
+  elif app.netlink.stalled:
+    igText("Waiting for your friend...")
+  igText("Rewind, turbo and save-state load are paused while linked.")
+  if igButton("Disconnect", ImVec2(x: 0, y: 0)):
+    teardown_netlink()
+
+proc render_link_local() =
+  ## Another dingbat window on this computer: pairs by itself while this
+  ## tab shows (update_link_auto).
+  if not link_ready():
+    igTextWrapped("Load a GBA game to link two dingbat windows on this computer.")
+    return
+  if app.link.auto:
+    # An animated ellipsis so it's visibly working
+    let dots = 1 + (int(getTicks() div 400) mod 3)
+    igText("Waiting for another window%s", cstring(repeat('.', dots)))
+  else:
+    igTextWrapped("Open this tab in another dingbat window to link the two.")
+  # load_rom fails on a ROM file another window has open (game_lock.nim)
+  igTextWrapped("%s", cstring(LINK_SAME_MACHINE_HINT))
+
+proc render_link_network() =
+  ## Host or join by address over TCP (GBA, desktop to desktop).
+  if not link_ready():
+    igTextWrapped("Load a GBA game to host or join a link with another dingbat.")
+    return
+  case app.link.setup
+  of lsListening:
+    igText("Hosting on port %d", cint(app.link.port))
+    igText("Waiting for a friend to join...")
+    igText("They pick Join and enter  your-ip : %d", cint(app.link.port))
+    if igButton("Cancel", ImVec2(x: 0, y: 0)): link_cancel_setup()
+    return
+  of lsConnecting:
+    igText("Connecting to %s:%d...",
+           cstring(app.link.join_host()), cint(app.link.port))
+    if igButton("Cancel", ImVec2(x: 0, y: 0)): link_cancel_setup()
+    return
+  of lsHandshake:
+    igText("Connected. Waiting for your friend's game to answer")
+    igText("(up to %d s)...", cint(app.link.hello_timeout_ms div 1000))
+    if igButton("Cancel", ImVec2(x: 0, y: 0)): link_cancel_setup()
+    return
+  of lsNone: discard
+  igTextWrapped("Link with another dingbat by address: one hosts, the other " &
+                "joins. The host's port must be reachable.")
+  igSetNextItemWidth(ui_px(120))
+  discard igInputInt("Port", addr app.link.port, 1, 100, 0)
+  igSeparator()
+  igTextWrapped("To host, share your address and port with a friend:")
+  if igButton("Host game", ImVec2(x: 0, y: 0)):
+    link_cancel_setup(); app.link.start_host(link_ready())
+  igSeparator()
+  igText("To join, enter the host's address:")
+  igSetNextItemWidth(ui_px(200))
+  discard igInputTextWithHint("##link_host", "127.0.0.1",
+    cast[cstring](addr app.link.host_buf[0]), csize_t(app.link.host_buf.len),
+    0, nil, nil)
+  igSameLine(0, -1)
+  if igButton("Join game", ImVec2(x: 0, y: 0)):
+    link_cancel_setup(); app.link.start_join(link_ready())
 
 proc render_link_window() =
-  ## Opening it auto-pairs on localhost; manual Host/Join are under
-  ## "Advanced".
+  ## Three tabs, one cable at a time: Online, this computer, by address.
   if not app.link_window: return
-  igSetNextWindowSize(ImVec2(x: ui_px(340), y: 0), cint(ImGui_Cond_FirstUseEver))
-  # Never shorter than last frame's content, whatever imgui.ini kept, so
-  # nothing scrolls.
-  if app.link_window_min_h > 0:
-    igSetNextWindowSizeConstraints(ImVec2(x: 0, y: app.link_window_min_h),
-                                   ImVec2(x: 1e9, y: 1e9), nil, nil)
+  # Fixed width, height fitted to the tab showing every frame (y = 0), so a
+  # taller tab never scrolls
+  igSetNextWindowSize(ImVec2(x: ui_px(380), y: 0), cint(ImGui_Cond_Always))
   if igBegin("Link Cable", addr app.link_window,
              cint(ImGui_WindowFlags_NoCollapse)):
-    if app.netlink == nil:
-      render_online_section()
+    let online_busy = app.online != nil and app.online.active
+    if igBeginTabBar("##link_tabs", 0):
+      for tab in LinkTab:
+        let label = case tab
+                    of ltOnline: "Online"
+                    of ltLocal: "This computer"
+                    of ltNetwork: "Over the network"
+        let flags = if app.link_tab_pick and tab == app.link_tab:
+                      cint(ImGui_TabItemFlags_SetSelected) else: 0
+        if igBeginTabItem(cstring(label), nil, flags):
+          app.link_tab = tab
+          case tab
+          of ltOnline:
+            if app.netlink != nil:
+              igTextDisabled("Off while the link cable is in use.")
+            else:
+              render_online_section()
+          of ltLocal, ltNetwork:
+            if online_busy:
+              igTextDisabled("Off while linked online.")
+            elif app.netlink != nil:
+              render_netlink_linked()
+            elif tab == ltLocal:
+              render_link_local()
+            else:
+              render_link_network()
+          igEndTabItem()
+      app.link_tab_pick = false
+      igEndTabBar()
+    if app.link.status.len > 0 and app.netlink == nil and
+       app.link_tab != ltOnline:
       igSeparator()
-    if app.online != nil and app.online.active:
-      igTextDisabled("Same machine: off while linked online.")
-    elif app.netlink != nil:
-      igText("Paired successfully")
-      igText("%s", cstring(app.link.status))
-      if app.netlink.peer_paused:
-        igText("Your friend has paused.")
-      elif app.netlink.stalled:
-        igText("Waiting for your friend...")
-      igText("Rewind, turbo and save-state load are paused while linked.")
-      if igButton("Disconnect", ImVec2(x: 0, y: 0)):
-        teardown_netlink()
-    elif not link_ready():
-      igText("Same machine: load a GBA ROM to link two windows.")
-    else:
-      if app.link.auto:
-        # An animated ellipsis so it's visibly working; auto stops on close.
-        let dots = 1 + (int(getTicks() div 400) mod 3)
-        igText("Waiting to pair%s", cstring(repeat('.', dots)))
-        # load_rom fails on a ROM file another window has open (game_lock.nim)
-        igTextWrapped("%s", cstring(LINK_SAME_MACHINE_HINT))
-      elif app.link.setup == lsListening:
-        igText("Hosting on port %d", cint(app.link.port))
-        igText("Waiting for a friend to join...")
-        igText("They pick Join and enter  your-ip : %d", cint(app.link.port))
-        if igButton("Cancel", ImVec2(x: 0, y: 0)): link_cancel_setup()
-      elif app.link.setup == lsConnecting:
-        igText("Connecting to %s:%d...",
-               cstring(app.link.join_host()), cint(app.link.port))
-        if igButton("Cancel", ImVec2(x: 0, y: 0)): link_cancel_setup()
-      elif app.link.setup == lsHandshake:
-        igText("Connected. Waiting for your friend's game to answer")
-        igText("(up to %d s)...", cint(app.link.hello_timeout_ms div 1000))
-        if igButton("Cancel", ImVec2(x: 0, y: 0)): link_cancel_setup()
-      else:
-        igText("Two players, one emulated link cable, over the network.")
-      igSeparator()
-      render_link_advanced()
-    if app.link.status.len > 0 and app.netlink == nil:
-      igSeparator()
-      igText("%s", cstring(app.link.status))
-    # Content bottom (cursor sits one item spacing below the last item, title
-    # bar included) plus padding.
-    let style = igGetStyle()
-    app.link_window_min_h = igGetCursorPosY() - style.ItemSpacing.y +
-                            style.WindowPadding.y
+      igTextWrapped("%s", cstring(app.link.status))
   igEnd()
 
 proc update_link_auto() =
-  ## Opening the Link Cable window starts auto-pairing; closing it stops any
-  ## pairing, auto or manual.
-  app.link.update_auto(app.link_window, link_ready(),
-                       app.netlink != nil or (app.online != nil and app.online.active))
+  ## Same-machine pairing runs only while its tab shows. Leaving a tab, or
+  ## closing the window, ends the pairing it started; a link that is up
+  ## stays.
+  let tab = app.link_tab
+  let linked = app.netlink != nil or (app.online != nil and app.online.active)
+  if app.link_window and app.netlink == nil and tab != app.link_tab_shown:
+    case app.link_tab_shown
+    of ltLocal:  # stops auto-pairing and re-arms it for the next visit
+      app.link.update_auto(false, link_ready(), linked)
+    of ltNetwork: link_cancel_setup()
+    of ltOnline: discard
+  app.link_tab_shown = tab
+  if app.link_window and tab == ltNetwork:
+    return  # a Host/Join waits on its own; auto-pairing is off here
+  app.link.update_auto(app.link_window and tab == ltLocal, link_ready(), linked)
 
 # ──────────────────────────── Online link ────────────────────────────
 
@@ -2624,10 +2673,9 @@ proc service_online() =
       app.online.send_speed(turbo)
 
 proc render_online_section() =
-  ## The Link Cable window's first part: link with anyone, anywhere.
+  ## The Link Cable window's Online tab: link with anyone, anywhere.
   let ol = app.online
   if ol == nil: return
-  igText("Online")
   if ol.started:
     igText("Linked with your friend.")
     if ol.reconnecting: igText("Reconnecting...")
@@ -2902,9 +2950,11 @@ proc main() =
     if listen_port > 0 or connect_to.len > 0:
       establish_netlink(listen_port, connect_to, netlink_delay)
     elif link_auto:
-      # update_link_auto starts pairing on the window's open edge.
+      # update_link_auto starts pairing while the tab shows.
       if link_ready():
         app.link_window = true
+        app.link_tab = ltLocal
+        app.link_tab_pick = true
       else:
         echo "NETLINK: --link-auto needs a GBA ROM; ignoring"
   elif listen_port > 0 or connect_to.len > 0:
