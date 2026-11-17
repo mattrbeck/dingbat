@@ -2,7 +2,7 @@
 # Screenshots of the desktop's ImGui UI, for looking at (not compared with
 # anything): the home screen empty, with a few games and with many; the
 # hero after Close Game; the menus open; every Settings tab; Cheats (with
-# codes), Save States, Link Cable; a notice.
+# codes), Save States, Link Cable; a notice; the session offered in a toast.
 # At UI scale 1 and 1.5 (DINGBAT_UI_SCALE, a Windows display at 150%), in a
 # hidden, muted window with a scratch HOME, through the GUI driver. ImGui's
 # menu bar and Settings window on macOS too (DINGBAT_IMGUI_MENU=1): what
@@ -41,8 +41,12 @@ fresh() {  # fresh <yml extra lines>: a new settings folder, no library
   printf -- '---\nmute: true\n%s' "$1" > "$cfg/dingbat.yml"
 }
 # run <tag> <commands> [rom]: one session; its log is kept on failure
+# A session a run left would be offered over the next run's game (a toast):
+# gone, but for the shot of that offer (keep=1)
+keep=0
 run() {
   rm -rf "$work/drive"
+  [ "$keep" = 1 ] || rm -f "$cfg"/states/*.session.state "$cfg"/states/*.session.state.battery
   mkdir -p "$work/drive"
   printf '%s\n' "$2" > "$work/drive/cmd"
   APPDATA=$(native "$work/appdata") HOME="$home" DINGBAT_DRIVE=$(native "$work/drive") \
@@ -185,6 +189,16 @@ $few"
 15 sleep 300
 16 shot $(shot settings-4)
 17 quit" "$g"
+  # The session the last run left, offered as the game boots from its save
+  run play "1 frames 30
+2 quit" "$g"
+  keep=1
+  run offer "1 frames 30
+2 move 300 300
+3 sleep 300
+4 shot $(shot offer)
+5 quit" "$g"
+  keep=0
   for w in cheats:mcCheats save-states:mcSaveStates link-cable:mcLinkCable \
            debug-io:mcGbaDebug:1 debug-video:mcGbaDebug:0 overlay:mcOverlay \
            notice:mcQuickLoad open-rom:mcOpenRom; do

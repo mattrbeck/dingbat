@@ -20,6 +20,11 @@
 #             (the state's hash) without booting, so the battery stays as it
 #             was; Play boots from the battery (a generated cart counts its
 #             boots in it); Down then Return is Resume
+#   tile      a tile resumes the session (the hash taken at Close Game), as
+#             Open Recent does; with From save (library_open: save) it boots
+#             from the battery and offers the session in a toast, whose
+#             Resume puts it back, or once the game has saved since says it
+#             is gone; a drop, and a tile menu's Play, boot from the battery
 #   find      Find the File relinks a missing game to its renamed file and
 #             keeps its save states; another game's file is refused
 #   labels    the in-window bar says Add a game and Close Game, never Open ROM
@@ -320,6 +325,143 @@ home dump $work/keyed.txt
 quit")" "$work/games/Counter.gb"
 check "Close Game at home does nothing" "$(grep -c '^Game closed' "$work/out.log")" "1"
 check "Down, Return: Resume" "$(grep -c '^Session resumed' "$work/out.log")" "1"
+
+echo "a tile resumes; From save boots from the save and offers the session"
+# A cart with a battery it never writes, counting in WRAM for ever: its
+# session counts however long it runs
+python3 -I - "$work/games/Ticker.gb" <<'EOF'
+import sys
+rom = bytearray(0x8000)
+rom[0x100:0x104] = b'\x00\xc3\x50\x01'               # nop; jp $0150
+rom[0x134:0x13f] = b'TICKER'.ljust(11, b'\0')
+rom[0x147] = 0x03                                     # MBC1+RAM+BATTERY
+rom[0x149] = 0x02                                     # 8 KB
+rom[0x150:0x156] = bytes([0x21, 0x00, 0xc0, 0x34, 0x18, 0xfd])  # loop: ($C000)++
+x = 0
+for b in rom[0x134:0x14d]: x = (x - b - 1) & 0xFF
+rom[0x14d] = x
+open(sys.argv[1], 'wb').write(rom)
+EOF
+# centre <dump>: the centre ("x y") of the first toast's pill, the whole of
+# which is its button; centred in the window, so a longer "saved ... ago"
+# keeps it where it was
+centre() { head -1 "$1" | cut -d'|' -f3 | awk '{ print int($1 + $3 / 2), int($2 + $4 / 2) }'; }
+run "$(steps "frames 60
+$close
+quit")" "$work/games/Counter.gb"
+taken=$(grep '^session hash' "$work/out.log" | head -1 | cut -d' ' -f3)
+b0=$(boots)
+run "$(steps "sleep 400
+home dump $work/r0.txt
+quit")"
+check "a fresh start: no hero, the game a tile" \
+      "$(grep -c '^@hero' "$work/r0.txt") $(grep -c '^Counter|' "$work/r0.txt")" "0 1"
+run "1 sleep 400
+$(press "$work/r0.txt" Counter)
+3 frames 30
+4 toast dump $work/r1.txt
+5 quit"
+back=$(grep '^resumed hash' "$work/out.log" | cut -d' ' -f3)
+check "a tile resumes the session (Resume, the default)" "${back:-none}" "$taken"
+check "  booting nothing: the battery as it was" "$(boots)" "$b0"
+check "  offering nothing" "$(cat "$work/r1.txt")" "none"
+
+settings "frame_size: 5
+library_open: save
+"
+run "1 sleep 400
+$(press "$work/r0.txt" Counter)
+3 sleep 300
+4 toast dump $work/s1.txt
+5 frames 30
+6 quit"
+check "From save: a tile boots from the save" "$(boots)" "$((b0 + 1))"
+check "  and puts no session back" "$(grep -c '^resumed hash' "$work/out.log")" "0"
+check "  but offers it, as the web" \
+      "$(head -1 "$work/s1.txt" | cut -d'|' -f1-2 | sed 's/saved .*|/saved ...|/')" \
+      "Last session saved ...|Resume"
+check "  with a close box" "$(sed -n 2p "$work/s1.txt" | cut -d'|' -f1)" "@close"
+pill=$(centre "$work/s1.txt")
+run "1 sleep 400
+$(press "$work/r0.txt" Counter)
+3 sleep 300
+4 move $pill
+5 sleep 100
+6 click $pill
+7 sleep 300
+8 toast dump $work/s2.txt
+9 quit"
+check "its Resume, once the game has saved since: refused" \
+      "$(head -1 "$work/s2.txt" | cut -d'|' -f1)" "The game has saved since — that session is gone"
+check "  and nothing put back" "$(grep -c '^resumed hash' "$work/out.log")" "0"
+run "$(steps "frames 60
+$close
+quit")" "$work/games/Ticker.gb"
+taken=$(grep '^session hash' "$work/out.log" | head -1 | cut -d' ' -f3)
+run "$(steps "sleep 400
+home dump $work/k0.txt
+quit")"
+run "1 sleep 400
+$(press "$work/k0.txt" Ticker)
+3 sleep 300
+4 move $pill
+5 sleep 100
+6 click $pill
+7 sleep 300
+8 toast dump $work/k1.txt
+9 quit"
+back=$(grep '^resumed hash' "$work/out.log" | cut -d' ' -f3)
+check "its Resume puts back exactly the state taken" "${back:-none}" "$taken"
+check "  and says so" "$(head -1 "$work/k1.txt" | cut -d'|' -f1)" "Resumed"
+check "the session kept: From save never drops it" \
+      "$(ls "$cfg/states" | grep -c '^Ticker.gb-[0-9A-F]*\.session\.state$')" "1"
+run "$(steps "sleep 400
+drop $work/games/Ticker.gb
+sleep 300
+toast dump $work/k2.txt
+quit")"
+check "a drop boots from the save and offers the session" \
+      "$(grep -c '^resumed hash' "$work/out.log") $(head -1 "$work/k2.txt" | cut -d'|' -f2)" \
+      "0 Resume"
+settings "frame_size: 5
+"
+run "$(steps "sleep 400
+drop $work/games/Ticker.gb
+sleep 300
+toast dump $work/k4.txt
+quit")"
+check "a drop, with Resume set: from the save, the session offered" \
+      "$(grep -c '^resumed hash' "$work/out.log") $(head -1 "$work/k4.txt" | cut -d'|' -f2)" \
+      "0 Resume"
+run "$(steps "sleep 400
+app cmd mcOpenRecent 0
+frames 30
+toast dump $work/k3.txt
+quit")"
+check "Open Recent resumes, as a tile" "$(grep -c '^resumed hash' "$work/out.log")" "1"
+check "  offering nothing" "$(cat "$work/k3.txt")" "none"
+xy=$(tile "$work/k0.txt" "Ticker" centre)
+run "$(steps "sleep 400
+move $xy
+sleep 100
+click $xy right
+sleep 300
+home dump $work/k5.txt
+quit")"
+pxy=$(at "$work/k5.txt" "@menu Play")
+run "$(steps "sleep 400
+move $xy
+sleep 100
+click $xy right
+sleep 300
+move $pxy
+sleep 100
+click $pxy
+sleep 300
+toast dump $work/k6.txt
+quit")"
+check "a tile's menu Play: from the save, nothing offered" \
+      "$(grep -c '^resumed hash' "$work/out.log") $(cat "$work/k6.txt")" "0 none"
 
 echo "Find the File"
 run "$(steps "frames 60

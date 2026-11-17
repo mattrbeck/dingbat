@@ -21,6 +21,8 @@
 ##   drop <path>                       a file dropped on the window
 ##   drag over|leave                   a file dragged over the window, or away
 ##   window focus_lost|focus_gained|close
+##   window size <w> <h>               resize the window (window units), as a
+##                                     drag of its edge would
 ##   quit                              the window's close box / Cmd+Q path
 ##   frames <n>                        let n loop iterations run
 ##   sleep <ms>
@@ -86,6 +88,15 @@
 ##   app cmd <MenuCmd> [arg]           run a menu item's command (mcSettings,
 ##                                     mcCheats), on every platform
 ##   app tab <n>                       the ImGui Settings window's tab n
+##   settings imgui <path.txt>         the ImGui Settings window as last drawn:
+##                                     `window|x y w h|scroll` (or `noscroll`:
+##                                     whether its tab pane scrolls), then each
+##                                     row drawn `<tab>|<label>|x y w h` ([x]
+##                                     ticked or chosen); `closed` when it is
+##   toast dump <path.txt>             the toasts as drawn, newest first:
+##                                     `<message>|<button>|x y w h` (the pill;
+##                                     no button for a plain one), an offer's
+##                                     × as `@close|x y w h`; `none`
 ##
 ## With the macOS menu bar, a `key ... down cmd` also goes through it, as a
 ## real Cmd shortcut does (the key handler leaves those to the menus).
@@ -124,6 +135,8 @@ var
   link_state*: proc(): string  ## set by the app: `link`'s answer
   imgui_menu_dump*: proc(): string  ## set by the app: the in-window bar's menus
   explorer_dump*: proc(): string    ## set by the app: the ImGui file dialog's rows
+  settings_dump*: proc(): string    ## set by the app: the ImGui Settings window
+  toast_dump*: proc(): string       ## set by the app: the toasts
   app_cmd*: proc(words: seq[string])  ## set by the app: `app ...`
   dropped* = ""       # a `drop` path for handle_input (a pushed SDL drop
                       # event cannot own its path)
@@ -347,7 +360,10 @@ proc run(window: Window; s: Step): bool =
     e.drop.type = if w[1] == "over": EVENT_DROP_POSITION else: EVENT_DROP_COMPLETE
     e.drop.windowID = window.getWindowID()
     push(e)
-  of "window": push_window(window, w[1])
+  of "window":
+    if w[1] == "size":
+      discard setWindowSize(window, cint(parseInt(w[2])), cint(parseInt(w[3])))
+    else: push_window(window, w[1])
   of "quit":
     var e: Event
     e.quit.type = EVENT_QUIT
@@ -398,6 +414,9 @@ proc run(window: Window; s: Step): bool =
   of "home":
     if w.len < 3 or w[1] != "dump": raise newException(ValueError, "home dump <path>")
     writeFile(w[2], if home_dump != nil: home_dump() else: "")
+  of "toast":
+    if w.len < 3 or w[1] != "dump": raise newException(ValueError, "toast dump <path>")
+    writeFile(w[2], if toast_dump != nil: toast_dump() else: "")
   of "app":
     if app_cmd == nil or w.len < 2: raise newException(ValueError, "app cmd|tab")
     app_cmd(w[1 .. ^1])
@@ -417,6 +436,9 @@ proc run(window: Window; s: Step): bool =
       else: raise newException(ValueError, "menu dump|pick")
     else: raise newException(ValueError, "menu: macOS only")
   of "settings":
+    if w.len >= 3 and w[1] == "imgui":
+      writeFile(w[2], if settings_dump != nil: settings_dump() else: "")
+      return true
     when defined(macosx):
       case w[1]
       of "dump": writeFile(w[2], mac_settings_dump())

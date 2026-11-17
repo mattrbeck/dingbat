@@ -18,6 +18,12 @@
 #             spins) buzzes the pad
 #   aspect    the window resizes only to the picture's shape: GBA, Game Boy,
 #             an SGB border, DS; free with Preserve aspect ratio off
+#   settings  the ImGui Settings window: General's "Opening a game from the
+#             library" (Resume, or From save, saved only then); as tall as
+#             its tallest tab where the window allows, else down to the
+#             window's bottom with its tab pane scrolling, re-fitted as the
+#             app window shrinks and grows; a height dragged to holds for
+#             the run
 #   fullscreen (GUI_TEST_FULLSCREEN=1, macOS) a VISIBLE window taken
 #             fullscreen by AppKit's own toggle (the green button's), a Game
 #             Boy game loaded meanwhile, and back: the app's fullscreen flag
@@ -160,8 +166,9 @@ run tests/roms/inputrec.gba "" "1 frames 60
 17 sleep 500
 18 quit"
 check "z presses A after the notice" "$(masks)" "1 0"
+# (quitting also leaves the session, beside the slots)
 check "Quick Save after the notice writes a state" \
-      "$(ls "$work/home/.config/dingbat/states" 2>/dev/null | grep -c .)" "1"
+      "$(ls "$work/home/.config/dingbat/states" 2>/dev/null | grep -c '^inputrec.gba-[0-9A-F]*\.state$')" "1"
 
 echo "picture fills the back buffer (pixels, not points)"
 # A hwverified ROM paints a verdict block in its bottom-right corner over a
@@ -363,5 +370,141 @@ EOF
   check "back to a window, Game Boy-shaped" "$(ack 9)" "ok fullscreen=0 window=480x432"
   check "the app saw it leave" "$(grep -c '^fullscreen: false' "$yml")" "1"
 fi
+
+echo "Settings (ImGui): opening a game from the library; as tall as its tallest tab"
+yml="$work/home/.config/dingbat/dingbat.yml"
+# win <dump> <field>: the window line's y, h, bottom, scroll or fit
+win() {
+  line=$(head -1 "$1")
+  set -- "$2" $(echo "$line" | cut -d'|' -f2) "$(echo "$line" | cut -d'|' -f3)" \
+         "$(echo "$line" | cut -d'|' -f4 | sed 's/fit //')"
+  case $1 in
+    y) echo "$3" ;; h) echo "$5" ;; bottom) echo $(($3 + $5)) ;;
+    scroll) echo "$6" ;; fit) echo "$7" ;;
+  esac
+}
+# fits <dump> <app window height>: what the window should be, by the rule:
+# its tallest tab, no tab scrolling, or down to 12 above the bottom, where
+# the tab shown scrolls if it is taller (which tab is tallest is the font's)
+fits() {
+  room=$(($2 - 12 - $(win "$1" y)))
+  if [ "$(win "$1" fit)" -le "$room" ]; then echo "$(win "$1" fit) noscroll"
+  else echo "$room $(win "$1" scroll)"; fi
+}
+centre() { grep -F -m1 "$2|" "$1" | cut -d'|' -f3 | awk '{ print int($1 + $3 / 2), int($2 + $4 / 2) }'; }
+open_settings="2 app cmd mcSettings
+3 sleep 500"
+run "" "frame_size: 3
+" "1 sleep 300
+$open_settings
+4 settings imgui $work/s3.txt
+5 app tab 4
+6 sleep 300
+7 settings imgui $work/s3g.txt
+8 quit"
+check "720x480 (a GBA at 3x): as tall as the tallest tab, or the window" \
+      "$(win "$work/s3.txt" h) $(win "$work/s3.txt" scroll)" "$(fits "$work/s3.txt" 480)"
+check "  General's row, Resume chosen" \
+      "$(grep -c '^General|Opening a game from the library:|' "$work/s3g.txt") $(grep -c '^General|\[x\] Resume|' "$work/s3g.txt")" \
+      "1 1"
+save=$(centre "$work/s3g.txt" "General|From save")
+okb=$(centre "$work/s3g.txt" "|OK")
+apply=$(centre "$work/s3g.txt" "|Apply")
+run "" "frame_size: 3
+" "1 sleep 300
+$open_settings
+4 app tab 4
+5 sleep 300
+6 move $apply
+7 sleep 100
+8 click $apply
+9 sleep 300
+10 quit"
+check "Apply with Resume: the file names no library_open" "$(grep -c 'library_open' "$yml")" "0"
+run "" "frame_size: 3
+" "1 sleep 300
+$open_settings
+4 app tab 4
+5 sleep 300
+6 move $save
+7 sleep 100
+8 click $save
+9 sleep 200
+10 move $okb
+11 sleep 100
+12 click $okb
+13 sleep 300
+$open_settings
+14 app tab 4
+15 sleep 300
+16 settings imgui $work/s3s.txt
+17 quit"
+check "From save, OK: saved" "$(grep -c '^library_open: save$' "$yml")" "1"
+check "  and chosen when it opens again" "$(grep -c '^General|\[x\] From save|' "$work/s3s.txt")" "1"
+
+run "" "frame_size: 2
+" "1 sleep 300
+$open_settings
+4 settings imgui $work/s2.txt
+5 quit"
+check "480x320: down to the window's bottom, Keybindings scrolling" \
+      "$(win "$work/s2.txt" h) $(win "$work/s2.txt" scroll)" "$(($(fits "$work/s2.txt" 320 | cut -d' ' -f1))) scroll"
+run "" "frame_size: 5
+" "1 sleep 300
+$open_settings
+4 settings imgui $work/s5.txt
+5 window size 720 360
+6 sleep 300
+7 settings imgui $work/s5-small.txt
+8 window size 1200 800
+9 sleep 300
+10 settings imgui $work/s5-big.txt
+11 quit"
+check "1200x800: the tallest tab, no scrolling" \
+      "$(win "$work/s5.txt" h) $(win "$work/s5.txt" scroll)" "$(win "$work/s5.txt" fit) noscroll"
+check "  the app window made 360 tall: the Settings window fits in it" \
+      "$(win "$work/s5-small.txt" h) $(win "$work/s5-small.txt" scroll)" \
+      "$(fits "$work/s5-small.txt" 360)"
+check "  and 800 again: back to the tallest tab" \
+      "$(win "$work/s5-big.txt" h) $(win "$work/s5-big.txt" scroll)" "$(win "$work/s5.txt" fit) noscroll"
+# The resize grip, dragged 80 up
+x2=$(( $(head -1 "$work/s5.txt" | cut -d'|' -f2 | cut -d' ' -f1) + $(head -1 "$work/s5.txt" | cut -d'|' -f2 | cut -d' ' -f3) - 4 ))
+y2=$(( $(win "$work/s5.txt" bottom) - 4 ))
+run "" "frame_size: 5
+" "1 sleep 300
+$open_settings
+4 move $x2 $y2
+5 sleep 100
+6 down $x2 $y2
+7 sleep 100
+8 move $x2 $((y2 - 40))
+9 sleep 100
+10 move $x2 $((y2 - 80))
+11 sleep 100
+12 up $x2 $((y2 - 80))
+13 sleep 200
+14 settings imgui $work/u1.txt
+15 window size 720 360
+16 sleep 300
+17 window size 1200 800
+18 sleep 300
+19 settings imgui $work/u2.txt
+20 move $(centre "$work/s5.txt" '|OK')
+21 sleep 100
+22 click $(centre "$work/s5.txt" '|OK')
+23 sleep 300
+$open_settings
+24 settings imgui $work/u3.txt
+25 quit"
+dragged=$(win "$work/u1.txt" h)
+check "dragged 80 shorter" "$(( $(win "$work/s5.txt" h) - dragged ))" "80"
+check "  that height holds through a smaller window and back" "$(win "$work/u2.txt" h)" "$dragged"
+check "  and when it opens again in the same run" "$(win "$work/u3.txt" h)" "$dragged"
+run "" "frame_size: 5
+" "1 sleep 300
+$open_settings
+4 settings imgui $work/u4.txt
+5 quit"
+check "  the next run fits it again" "$(win "$work/u4.txt" h)" "$(win "$work/s5.txt" fit)"
 
 if [ "$fails" -eq 0 ]; then echo "all passed"; else echo "$fails failed"; exit 1; fi

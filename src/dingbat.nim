@@ -124,6 +124,14 @@ var present_count = 0
 
 type EmuKind = enum ekNone, ekGBA, ekGB, ekNDS  # ekNDS: DS Beta only
 
+type OpenHow = enum
+  ## How a game is being opened (web launchRom's options)
+  ohFile     ## a file handed in (Add a Game, a drop, the command line): from
+             ## its save, the session offered after
+  ohLibrary  ## a tile, Open Recent: the session or the save, as Settings says
+  ohPlay     ## Play: from its save, nothing offered
+  ohResume   ## the hero's Resume: the session
+
 type AppState = ref object
   cfg:             Config
   cur_path:        string  # what load_rom last loaded (a zip: the zip); Reset reloads it
@@ -194,7 +202,8 @@ type AppState = ref object
   home:            LibraryView
   home_stale:      bool    # the library changed since the view last took it
   home_open:       string  # a game the home screen chose; the main loop opens it
-  home_resume:     string  # the hero's Resume: the main loop opens it with its session
+  home_how:        OpenHow # and how
+  offer_taken:     string  # the session offer's Resume, for the game it was made for
   played_here:     seq[string]  # library paths played in this run, latest first (the hero's)
   find_for:        string  # Find the File: the missing game's path, while its dialog is up
   find_request:    bool    # Find the File chosen: the ImGui explorer opens next frame
@@ -536,6 +545,7 @@ proc input_log_close() =
 
 proc new_core_takes_held_input()  # defined below, with the controllers
 proc store_last_screen()          # defined below, with the library
+proc save_session()               # defined below, with Close Game
 proc record_played(g: LibGame)
 
 proc load_notice(text, hint: string) =
@@ -552,12 +562,11 @@ proc nds_paths(): NdsPaths =
 
 proc states_dir(): string = config_dir() / "states"
 
-proc load_rom(path: string; keep_ds = false; resume = false) =
+proc load_rom(path: string; keep_ds = false) =
   ## Every failure leaves the running game (or the home screen) as it was and
   ## says why. A DS game loads only with DS Beta on (`keep_ds`: a Reset of
-  ## the DS game running, whatever the setting says now). `resume`: the
-  ## caller puts the game's session back; any other boot reads the in-game
-  ## save, so the session would roll it back and goes.
+  ## the DS game running, whatever the setting says now). The outgoing game
+  ## leaves its session, as Close Game does (web loadRom).
   if not fileExists(path):
     load_notice(&"{path.extractFilename()} isn't there any more.", path)
     return
@@ -633,18 +642,12 @@ proc load_rom(path: string; keep_ds = false; resume = false) =
       app.state_notice_hint = last_state_error
   # What that finished frame wrote goes too
   flush_saves()
-  # The library keeps the outgoing game's last screen
+  # The library keeps the outgoing game's last screen, and where it was left
   store_last_screen()
+  save_session()
+  dismiss_game_toasts()
   # The old game's files are written out; its locks go to the new game
   app.game_lock.commit(claim)
-  if not resume:
-    let session = states_dir() / session_file_name(rom_path, identity)
-    if fileExists(session):
-      try:
-        removeFile(session)
-        echo "Session dropped: ", session
-      except OSError as e:
-        echo "Session not dropped: ", e.msg
   let was_ds = app.emu_kind == ekNDS
   if as_ds:
     app.nds = built_ds.game
@@ -970,11 +973,14 @@ proc process_pending_state() =
       app.state_notice_hint = last_state_error
 
 # ──────────────────────────── The session ────────────────────────────
-# Close Game takes a session snapshot, a save state outside the slots
-# (persist.nim session_file_name), after the battery is written; the home
-# screen's Resume boots the game and loads it, so the game is exactly where
-# it was left. Any other boot of the game drops it (load_rom): it would put
-# back the battery it was taken with, over anything saved in the game since.
+# Leaving a game (Close Game, another game or a Reset, quitting) takes a
+# session snapshot, a save state outside the slots (persist.nim
+# session_file_name), after the battery is written, with that battery's
+# signature beside it (web `saveSig`). Resume boots the game and loads it,
+# so the game is exactly where it was left. A session counts only while the
+# battery on disk is that one: once the game has saved since, it would put
+# the older save back, so it is never resumed or offered (web
+# resumeSessionFor).
 
 proc session_path(): string =
   let rom = current_rom_path()
@@ -996,22 +1002,38 @@ proc state_hash(): string =
     of ekNone: ""
   fnv1a(payload).toHex(8)
 
+proc battery_path(): string =
+  ## The running game's battery file
+  case app.emu_kind
+  of ekGBA: app.gba_emu.storage.save_path
+  of ekGB: app.gb_emu.cartridge.sav_path
+  of ekNDS: app.nds.save_path
+  of ekNone: ""
+
 proc save_session() =
-  ## At a frame boundary. A session that cannot be taken goes: an older one
-  ## would put back a moment from before this play.
+  ## At a frame boundary, the battery written. A session that cannot be
+  ## taken goes: an older one would put back a moment from before this play.
+  ## None in a link (frame-synced, as the web's).
   let path = session_path()
-  if path.len == 0: return
-  let ok = case app.emu_kind
-    of ekGBA: app.gba_emu.save_state(path, thumbnail = true)
-    of ekGB: app.gb_emu.save_state(path, thumbnail = true)
-    of ekNDS: app.nds.save_state_file(path)
-    of ekNone: false
+  if path.len == 0 or app.netlink != nil: return
+  let sig = battery_signature(battery_path())
+  var ok = false
+  if sig.len > 0:
+    ok = case app.emu_kind
+      of ekGBA: app.gba_emu.save_state(path, thumbnail = true)
+      of ekGB: app.gb_emu.save_state(path, thumbnail = true)
+      of ekNDS: app.nds.save_state_file(path)
+      of ekNone: false
   if ok:
-    echo "Session saved: ", path
-    when defined(gui_driver): echo "session hash ", state_hash()
-  else:
-    echo "Session not saved: ", last_state_error
-    discard tryRemoveFile(path)
+    try:
+      write_file_atomic(session_battery_name(path), sig & "\n")
+      echo "Session saved: ", path
+      when defined(gui_driver): echo "session hash ", state_hash()
+      return
+    except CatchableError as e: last_state_error = e.msg
+  echo "Session not saved: ", last_state_error
+  discard tryRemoveFile(path)
+  discard tryRemoveFile(session_battery_name(path))
 
 # ──────────────────────────── Screenshots ────────────────────────────
 
@@ -1220,6 +1242,16 @@ proc rom_file_identity(rom_path: string): uint32 =
     nds_savestate.rom_identity(toOpenArrayByte(data, 0, data.high))
   else: fnv1a(data)
 
+proc rom_file_of(path, rom: string): string =
+  ## Where a library game's ROM is read from, its battery beside it: the
+  ## file, or a zip's copy in its cache folder
+  if path.splitFile().ext.toLowerAscii() == ".zip" and rom.len > 0:
+    zip_cache_dir(config_dir() / "zip-cache", path) / rom
+  else: path
+
+proc library_session_ok(session: string; g: LibGame): bool =
+  session_counts(session, rom_file_of(g.path, g.rom).changeFileExt(".sav"))
+
 proc copy_if_missing(src, dst: string) =
   ## Never over a file already there: that one is the newer game's
   if src == dst or not fileExists(src) or fileExists(dst): return
@@ -1268,14 +1300,14 @@ proc relink_game(old, chosen: string) =
     for slot in 0 ..< NUM_SLOTS:
       copy_if_missing(states_dir() / state_file_name(entry.rom, identity, slot),
                       states_dir() / state_file_name(rom, identity, slot))
-    copy_if_missing(states_dir() / session_file_name(entry.rom, identity),
-                    states_dir() / session_file_name(rom, identity))
+    let session = session_file_name(entry.rom, identity)
+    copy_if_missing(states_dir() / session, states_dir() / session_file_name(rom, identity))
+    copy_if_missing(states_dir() / session_battery_name(session),
+                    states_dir() / session_battery_name(session_file_name(rom, identity)))
     copy_if_missing(pictures_dir() / picture_name(entry.rom, identity),
                     pictures_dir() / picture_name(rom, identity))
   # Where the old file's battery was: beside it, or a zip's cache folder
-  let old_rom = if old.splitFile().ext.toLowerAscii() == ".zip" and entry.rom.len > 0:
-                  zip_cache_dir(config_dir() / "zip-cache", old) / entry.rom
-                else: old
+  let old_rom = rom_file_of(old, entry.rom)
   for ext in [".sav", ".cht"]:
     copy_if_missing(old_rom.changeFileExt(ext), rom_path.changeFileExt(ext))
   var system = if is_nds_file(rom_path): "DS" else: system_of(rom)
@@ -1322,6 +1354,11 @@ proc free_home_texture(t: uint64) =
   var tex = t
   pr.ui_texture_free(tex)
 
+proc open_game(path: string; how: OpenHow) =
+  ## For the main loop, which opens it between frames (`take_open`)
+  app.home_open = path
+  app.home_how = how
+
 proc home_view(): LibraryView =
   ## Made the first time the home screen draws: a game opened from the
   ## command line never reads the library
@@ -1335,9 +1372,10 @@ proc home_view(): LibraryView =
     v.load_picture = load_library_picture
     v.make_texture = make_home_texture
     v.free_texture = free_home_texture
-    v.on_open = proc(path: string) = app.home_open = path
-    v.on_play = proc(path: string) = app.home_open = path
-    v.on_resume = proc(path: string) = app.home_resume = path
+    v.on_open = proc(path: string) = open_game(path, ohLibrary)
+    v.on_play = proc(path: string) = open_game(path, ohPlay)
+    v.on_resume = proc(path: string) = open_game(path, ohResume)
+    v.session_ok = library_session_ok
     v.on_find = find_file
     v.on_add = proc() = push_cmd(mcOpenRom)
     v.on_remove = remove_from_library
@@ -1387,6 +1425,7 @@ proc close_game() =
     return
   save_session()
   store_last_screen()
+  dismiss_game_toasts()
   input_log_close()
   app.gba_emu = nil
   app.gb_emu = nil
@@ -1417,19 +1456,73 @@ proc close_game() =
   app.home_stale = true
   echo "Game closed"
 
-proc resume_game(path: string) =
-  ## The hero's Resume: boot the game and put its session back before its
-  ## first frame. A session refused (another version, damaged) leaves the
-  ## game booted from its save, as Play, and says why.
-  load_rom(path, resume = true)
+proc resume_game(path: string; quiet = false) =
+  ## Boot the game and put its session back before its first frame, where
+  ## it still counts against the battery the boot just read. Without one
+  ## the game is booted from its save: `quiet` (a tile) just that, as the
+  ## web's tile; else (the hero's Resume, which showed only while it
+  ## counted) saying so. A session refused (another version, damaged) leaves
+  ## the game booted from its save and says why.
+  load_rom(path)
   if app.emu_kind == ekNone or app.cur_path != path: return
   let session = session_path()
+  if not session_counts(session, battery_path()):
+    if not quiet: show_toast("The game has saved since — starting from that save")
+    return
   if load_state_at(session):
     echo "Session resumed: ", session
     when defined(gui_driver): echo "resumed hash ", state_hash()
   else:
     app.state_notice = state_reject_sentence()
     app.state_notice_hint = last_state_error
+
+proc offer_session() =
+  ## After a boot from the save: the session, offered for a while, where it
+  ## still counts (web offerAutoResume, "Last session saved 5m ago")
+  let session = session_path()
+  if app.emu_kind == ekNone or app.netlink != nil or
+     not session_counts(session, battery_path()): return
+  let rom = app.cur_path
+  show_offer("Last session saved " & session_age(session), "Resume",
+             proc() = app.offer_taken = rom)
+
+proc take_offer(rom: string) =
+  ## The offer's Resume, between frames: still the game, and the battery as
+  ## it has it now still the session's (it may have saved since the offer)
+  if app.emu_kind == ekNone or app.cur_path != rom or app.netlink != nil: return
+  flush_saves()
+  let session = session_path()
+  if not session_counts(session, battery_path()):
+    show_toast("The game has saved since — that session is gone")
+    return
+  if load_state_at(session):
+    echo "Session resumed: ", session
+    when defined(gui_driver): echo "resumed hash ", state_hash()
+    show_toast("Resumed")
+  else:
+    app.state_notice = state_reject_sentence()
+    app.state_notice_hint = last_state_error
+
+proc open_file(path: string) =
+  ## A file handed in: from its save, the session offered (web handleRomFile)
+  load_rom(path)
+  if app.cur_path == path: offer_session()
+
+proc take_open() =
+  ## What the home screen, a recent or the offer chose, between frames
+  if app.offer_taken.len > 0:
+    take_offer(move app.offer_taken)
+    app.offer_taken = ""
+  if app.home_open.len == 0: return
+  let path = move app.home_open
+  app.home_open = ""
+  case app.home_how
+  of ohFile: open_file(path)
+  of ohPlay: load_rom(path)
+  of ohResume: resume_game(path)
+  of ohLibrary:
+    if app.cfg.library_resume: resume_game(path, quiet = true)
+    else: open_file(path)
 
 # ──────────────────────────── Rendering ────────────────────────────
 
@@ -1770,7 +1863,7 @@ proc run_menu(cmd: MenuCmd; arg: int) =
   of mcNone, mcRecentMenu, mcChannelsMenu: discard
   of mcOpenRom: open_rom_dialog()
   of mcOpenRecent:
-    if arg in 0 ..< app.cfg.recents.len: load_rom(app.cfg.recents[arg])
+    if arg in 0 ..< app.cfg.recents.len: open_game(app.cfg.recents[arg], ohLibrary)
   of mcClearRecents:
     app.cfg.recents.setLen(0)
     save_config(app.cfg)
@@ -1991,7 +2084,7 @@ proc run_menu_cmds() =
     if path.len > 0:
       app.cfg.explorer_dir = parentDir(path)  # the panel opens there next time
       if purpose == "find": relink_game(take_find_for(), path)
-      else: load_rom(path)
+      else: open_game(path, ohFile)
     elif purpose == "find": app.find_for = ""
 
 var frames_run = 0  # frames emulated (the GUI driver's `link`)
@@ -2008,7 +2101,7 @@ proc render_imgui() =
      (app.gb_dbg == nil or not app.gb_dbg.any_window_open) and
      not app.link_window and not app.cheats.window and
      not app.save_states.window and not app.drag_hover and
-     not app.open_rom_request and not app.find_request and
+     not app.open_rom_request and not app.find_request and not toasts_up() and
      # A notice must still draw with the menu bar idle-hidden (Quick Load
      # key); with the macOS menu bar it is an alert (mac_notices)
      (native_menu or app.state_notice.len == 0 and app.cfg.notice.len == 0 and
@@ -2046,7 +2139,7 @@ proc render_imgui() =
 
   app.fe.render("ROM", app.open_rom_request,
                 if app.cfg.ds_beta: ROM_DIALOG_EXTS_DS else: ROM_DIALOG_EXTS,
-                proc(path: string) = load_rom(path))
+                proc(path: string) = open_game(path, ohFile))
   app.open_rom_request = false
   app.fe.render("Find the File", app.find_request,
                 if app.cfg.ds_beta: ROM_DIALOG_EXTS_DS else: ROM_DIALOG_EXTS,
@@ -2155,6 +2248,7 @@ proc render_imgui() =
         igText(if app.rewinding: cstring"<< Rewinding" else: cstring"Paused")
       igEnd()
 
+  draw_toasts()
   igRender()
   pr.imgui_render(igGetDrawData())
 
@@ -2245,7 +2339,7 @@ proc open_dropped(path: string) =
   ## A file dropped on the window: a ROM or a zip loads (a DS game too with
   ## DS Beta on), anything else is ignored
   if is_rom_file(path) or (app.cfg.ds_beta and is_nds_file(path)):
-    load_rom(path)
+    open_game(path, ohFile)
 
 proc nds_view_top_left(): (int, int, int, int) =
   ## The picture's rect in window units, top-left origin, for the stylus
@@ -2834,6 +2928,8 @@ proc main() =
         " peer_paused=" & $ord(nl != nil and nl.peer_paused) &
         " frames=" & $frames_run
     gui_driver.explorer_dump = proc(): string = app.fe.dump()
+    gui_driver.settings_dump = imgui_settings.dump
+    gui_driver.toast_dump = library_view.toast_dump
     gui_driver.imgui_menu_dump = proc(): string =
       ## The in-window bar's menus as data: a title a line, indented under
       ## its menu, as the ImGui bar labels it ([off] greyed, [x] ticked)
@@ -2876,7 +2972,8 @@ proc main() =
   if rom_path != "":
     if not fileExists(rom_path):
       echo "ROM file not found: ", rom_path; system.quit(1)
-    load_rom(rom_path)
+    if listen_port > 0 or connect_to.len > 0 or link_auto: load_rom(rom_path)
+    else: open_file(rom_path)
     if listen_port > 0 or connect_to.len > 0:
       establish_netlink(listen_port, connect_to, netlink_delay)
     elif link_auto:
@@ -3169,14 +3266,7 @@ proc main() =
     handle_input()
     lat_poll_input()
     run_menu_cmds()
-    if app.home_open.len > 0:
-      let path = app.home_open
-      app.home_open = ""
-      load_rom(path)
-    if app.home_resume.len > 0:
-      let path = app.home_resume
-      app.home_resume = ""
-      resume_game(path)
+    take_open()
     when defined(macosx):
       mac_settings_tick()
       if native_menu: mac_notices()
@@ -3268,6 +3358,7 @@ proc main() =
   teardown_netlink()
   store_last_screen()
   flush_saves()
+  save_session()
   input_log_close()
 
 main()

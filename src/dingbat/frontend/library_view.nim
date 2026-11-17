@@ -10,6 +10,7 @@
 ## No file reads or textures here. The app decodes pictures (`load_picture`)
 ## and owns textures (`make_texture`, `free_texture`); each is made once, the
 ## first time its tile is on screen, and kept until its file changes.
+## The toasts over a game (web #toast) are drawn here too, in the page's look.
 
 import std/[math, os, strutils, tables, times]
 import imguin/cimgui
@@ -63,7 +64,8 @@ type
     on_sort*: proc(sort: string)
     # The hero
     hero*: LibGame            ## the game heading the page; path "" = none
-    hero_session*: string     ## its session snapshot's file: Resume while it is there
+    hero_session*: string     ## its session snapshot's file: Resume while it counts
+    session_ok*: proc(session: string; g: LibGame): bool  ## counts (nil: is there)
     has_session: bool
     hero_missing: bool
     hero_rects: seq[TileRect] ## its picture and buttons as last drawn
@@ -303,11 +305,13 @@ proc free_art(v: LibraryView; a: TileArt) =
 
 proc check_files*(v: LibraryView) =
   ## Which games' files are gone (a moved file, an unplugged drive), and
-  ## whether the hero's session is still there (another window may have
-  ## played the game since)
+  ## whether the hero's session still counts (another window may have
+  ## played the game since, or the game saved past it)
   v.missing.setLen(v.games.len)
   for i, g in v.games: v.missing[i] = not fileExists(g.path)
-  v.has_session = v.hero_session.len > 0 and fileExists(v.hero_session)
+  v.has_session = v.hero_session.len > 0 and
+    (if v.session_ok != nil: v.session_ok(v.hero_session, v.hero)
+     else: fileExists(v.hero_session))
   v.hero_missing = v.hero.path.len > 0 and not fileExists(v.hero.path)
   v.last_check = epochTime()
 
@@ -592,8 +596,8 @@ proc game_menu(v: LibraryView; id: string; g: LibGame; missing, hero: bool) =
     if hero and v.has_session and v.menu_item("Resume", not missing) and
        v.on_resume != nil:
       v.on_resume(g.path)
-    if v.menu_item("Play", not missing) and v.on_open != nil:
-      if hero and v.on_play != nil: v.on_play(g.path) else: v.on_open(g.path)
+    # Play is from the in-game save, as the hero's; a click is the setting's
+    if v.menu_item("Play", not missing) and v.on_play != nil: v.on_play(g.path)
     if missing and v.menu_item("Find the File...") and v.on_find != nil:
       v.on_find(g.path)
     if v.menu_item("Remove from Library") and v.on_remove != nil:
@@ -1314,3 +1318,153 @@ proc dump*(v: LibraryView): string =
                "|" & (if t.picture: "picture" else: "cart") & "\n"
   for t in v.menu_rects: result.add "@menu " & t.name & "|" & rect(t) & "\n"
   if v.games.len == 0: result.add "empty\n"
+
+# ──────────────────────────── Toasts ────────────────────────────
+# Short notes over the bottom of the window, the web's (#toast,
+# .toast-item): a pill per note, newest on top so an older one's button never
+# moves, three at most. A plain one is gone after 2.2 s and takes no clicks;
+# an offer (a button) after 8 s, the whole pill its button, × to dismiss.
+# An offer of the game's (`game`) goes when the game does.
+
+type
+  Toast = object
+    msg, label: string
+    fn: proc()
+    game: bool
+    until: float
+    id: int
+  ToastRect = object
+    text: string          ## "<message>|<button>"
+    pill, close: TileRect ## close.w 0: none
+
+var
+  toasts: seq[Toast]      ## newest first
+  toast_rects: seq[ToastRect]
+  toast_ids = 0
+
+const TOAST_MAX = 3
+
+proc push_toast(t: Toast) =
+  for i in countdown(toasts.high, 0):
+    if toasts[i].msg == t.msg and toasts[i].label == t.label: toasts.delete(i)
+  var t = t
+  inc toast_ids
+  t.id = toast_ids
+  toasts.insert(t, 0)
+  if toasts.len > TOAST_MAX: toasts.setLen(TOAST_MAX)
+
+proc show_toast*(msg: string) =
+  push_toast(Toast(msg: msg, until: epochTime() + 2.2))
+
+proc show_offer*(msg, label: string; fn: proc(); game = true) =
+  ## A toast with a button (web showActionToast)
+  push_toast(Toast(msg: msg, label: label, fn: fn, game: game,
+                   until: epochTime() + 8.0))
+
+proc toasts_up*(): bool = toasts.len > 0
+
+proc dismiss_game_toasts*() =
+  for i in countdown(toasts.high, 0):
+    if toasts[i].game: toasts.delete(i)
+
+proc draw_toasts*() =
+  ## Last in the frame, over everything the app draws
+  toast_rects.setLen(0)
+  let now = epochTime()
+  for i in countdown(toasts.high, 0):
+    if toasts[i].until <= now: toasts.delete(i)
+  let vp = igGetMainViewport()
+  if vp == nil or toasts.len == 0: return
+  let pos = vp[].WorkPos
+  let size = vp[].WorkSize
+  push_font(fRegular, 13)
+  let max_w = min(ui_px(480), size.x - ui_px(16))
+  var bottom = pos.y + size.y - ui_px(20)
+  var run: proc() = nil
+  var gone = -1
+  # The oldest at the bottom
+  for i in countdown(toasts.high, 0):
+    let t = toasts[i]
+    let offer = t.label.len > 0
+    let label_w = if offer: with_font_value(fBold, 13, calc_text_size(t.label).x) +
+                            ui_px(24) else: 0'f32
+    let close_w = if offer: ui_px(24) else: 0'f32
+    let gaps = if offer: ui_px(20) else: 0'f32
+    let room = max(ui_px(40), max_w - ui_px(32) - label_w - close_w - gaps)
+    let msg = fit_text(t.msg, room)
+    let ts = calc_text_size(msg)
+    let w = ui_px(32) + ts.x + label_w + close_w + gaps
+    let h = max(ts.y, if offer: ui_px(24) else: 0'f32) + ui_px(16)
+    let r = min(ui_px(16), h * 0.5)
+    let a = v2(round(pos.x + (size.x - w) * 0.5), round(bottom - h))
+    let b = v2(a.x + w, a.y + h)
+    bottom = a.y - ui_px(8)
+    var rec = ToastRect(text: t.msg & "|" & t.label,
+                        pill: TileRect(x: a.x, y: a.y, w: w, h: h))
+    igSetNextWindowPos(a, cint(ImGui_Cond_Always), v2(0, 0))
+    igSetNextWindowSize(v2(w, h), cint(ImGui_Cond_Always))
+    igPushStyleVar_Vec2(cint(ImGui_StyleVar_WindowPadding), v2(0, 0))
+    igPushStyleVar_Float(cint(ImGui_StyleVar_WindowBorderSize), 0)
+    var flags = cint(ImGui_WindowFlags_NoDecoration) or cint(ImGui_WindowFlags_NoMove) or
+                cint(ImGui_WindowFlags_NoSavedSettings) or cint(ImGui_WindowFlags_NoNav) or
+                cint(ImGui_WindowFlags_NoFocusOnAppearing) or
+                cint(ImGui_WindowFlags_NoBackground)
+    if not offer: flags = flags or cint(ImGui_WindowFlags_NoInputs)
+    if igBegin(cstring("##toast" & $t.id), nil, flags):
+      # The whole window is the pill: its shadow goes on the page's layer
+      let shadow = igGetBackgroundDrawList(vp)
+      for k in 1 .. 4:
+        let e = ui_px(float32(k) * 2)
+        ImDrawList_AddRectFilled(shadow, v2(a.x - e, a.y - e + ui_px(6)),
+                                 v2(b.x + e, b.y + e + ui_px(6)), rgb(0, 0.07),
+                                 r + e, dflags(ImDrawFlags_RoundCornersAll))
+      let dl = igGetWindowDrawList()
+      dl.fill_gradient(a, b, rgb(SURF3), rgb(SURF2), r)
+      dl.add_rect(a, b, border2(), r, 1)
+      ImDrawList_AddLine(dl, v2(a.x + r, a.y + hairline()), v2(b.x - r, a.y + hairline()),
+                         rgb(WHITE, 0.09), hairline())
+      let mid = (a.y + b.y) * 0.5
+      dl.text_at(v2(a.x + ui_px(16), round(mid - ts.y * 0.5)), rgb(TEXT), msg)
+      if offer:
+        let ca = v2(b.x - ui_px(10) - close_w, mid - ui_px(12))
+        let cb = v2(ca.x + close_w, ca.y + ui_px(24))
+        let la = v2(ca.x - ui_px(10) - label_w, mid - ui_px(11))
+        let lb = v2(la.x + label_w, mid + ui_px(11))
+        # The × first: where it sits it takes the click from the pill
+        let closed = button_at("##close", ca, cb)
+        let close_hot = igIsItemHovered(0)
+        let clicked = button_at("##pill", a, b)
+        let hot = igIsItemHovered(0) and not close_hot
+        ImDrawList_AddRectFilled(dl, la, lb, rgb(if hot: SURF_HOVER else: SURF1),
+                                 ui_px(11), dflags(ImDrawFlags_RoundCornersAll))
+        dl.add_rect(la, lb, border2(), ui_px(11), 1)
+        with_font(fBold, 13):
+          let ls = calc_text_size(t.label)
+          dl.text_at(v2(round((la.x + lb.x - ls.x) * 0.5), round(mid - ls.y * 0.5)),
+                     rgb(ACCENT), t.label)
+        with_font(fRegular, 17):
+          let xs = calc_text_size("×")
+          dl.text_at(v2(round((ca.x + cb.x - xs.x) * 0.5), round(mid - xs.y * 0.5)),
+                     rgb(TEXT, if close_hot: 1.0 else: 0.6), "×")
+        rec.close = TileRect(x: ca.x, y: ca.y, w: close_w, h: ui_px(24))
+        if closed: gone = i
+        elif clicked:
+          gone = i
+          run = t.fn
+    igEnd()
+    igPopStyleVar(2)
+    toast_rects.insert(rec, 0)
+  igPopFont()
+  if gone >= 0: toasts.delete(gone)
+  if run != nil: run()
+
+proc toast_dump*(): string =
+  ## The toasts as last drawn, newest first (gui_driver `toast dump`), in
+  ## window points: `<message>|<button>|x y w h` (no button for a plain
+  ## one), an offer's × after it as `@close|x y w h`; `none` with none
+  proc rect(t: TileRect): string =
+    $int(t.x) & " " & $int(t.y) & " " & $int(t.w) & " " & $int(t.h)
+  for t in toast_rects:
+    result.add t.text & "|" & rect(t.pill) & "\n"
+    if t.close.w > 0: result.add "@close|" & rect(t.close) & "\n"
+  if result.len == 0: result = "none\n"

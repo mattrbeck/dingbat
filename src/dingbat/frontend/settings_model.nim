@@ -14,7 +14,7 @@ type
     # BIOS
     siGbaBios, siRunBios, siBiosMode, siNdsBios9, siNdsBios7, siNdsFirmware
     # General, Controller
-    siDsBeta, siRumble
+    siDsBeta, siRumble, siLibraryOpen
     # Bindings: `arg` is the Input's ordinal, or DS_ARG + the DsInput's
     siKeyPreset, siKeyBinding, siPadDefaults, siPadBinding
 

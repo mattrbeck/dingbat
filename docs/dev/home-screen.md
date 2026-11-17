@@ -371,15 +371,48 @@ screen, then drops the core: its audio device, locks, Cheats, Save States,
 Link Cable and debug windows go with it. The session is a save state outside
 the slots, `states/<rom>-<identity>.session.state` (persist.nim
 `session_file_name`; the slots' naming, so its identity checks are theirs),
-taken after the battery is written. **Resume** boots the game and loads it
-before the first frame (a refused one leaves the game booted from its save,
-as Play, with the state notice); **Play** boots from the battery. Any boot
-of the game but Resume (Play, a tile, Reset, Open Recent, a drop) deletes
-the session, since it would put back the battery it was taken with over
-anything saved since; a Resume keeps it until the next Close Game replaces
-it. The hero checks every 2 s that it is still there (another window may
-have played the game). Tiles open from the save, as before: the desktop has
-no *Opening a game from the library* setting.
+taken after the battery is written, with that battery's signature beside it
+(`<session>.battery`: its FNV-1a, or `none` for no save yet; the web's
+`saveSig`). It is taken whenever a game is left, as the web's: Close Game,
+another game loaded or a Reset (`load_rom`, for the outgoing game), and
+quitting with a game open; never in a link. A session **counts** only while
+the battery on disk is the one it was taken with (`session_counts`, the
+web's `resumeSessionFor`): once the game has saved since, it would put the
+older save back, so it is never resumed or offered, and a session with no
+signature (an older build's) never counts. No boot deletes it; the next one
+taken replaces it.
+
+**Resume** boots the game and loads it before the first frame (a refused
+one leaves the game booted from its save, with the state notice; one that
+stopped counting in the meantime boots from the save with a toast, *The
+game has saved since — starting from that save*); **Play**, on the hero or
+any tile's menu, boots from the battery and offers nothing. The hero shows
+Resume while the session counts, checked every 2 s (another window may have
+played the game).
+
+**Opening a game from a tile** follows Settings > General > *Opening a game
+from the library* (`library_open` in `dingbat.yml`, written only as
+`library_open: save`, so a file at the default is the one older builds
+wrote), as the web's Settings > Controls chips: **Resume** (default) goes
+back into the session where it counts, else boots from the save, with
+nothing offered; **From save** boots from the save and offers the session in
+a toast, *Last session saved 5m ago* with **Resume** (8 s; the web's
+`offerAutoResume`), which puts it back if the battery is still the
+session's when pressed (else *The game has saved since — that session is
+gone*). The setting is in General rather than the web's Controls because the
+desktop's Settings has no such tab: its Keybindings and Controller tabs are
+the two binding lists. **Open Recent** is a pick from the library, so it
+follows the setting as a tile does. A file handed in, **Add a Game…**, a
+**drop**, Finder or **the command line**, is the web's file picker or drop:
+it boots from the save and offers the session (the command line not when it
+starts a link). **Reset** boots from the save with nothing offered, its
+session the moment before it.
+
+The toasts are the web's (`#toast`), drawn over the game in ImGui on every
+platform (`library_view.nim` `show_toast`, `show_offer`): pills at the
+bottom centre, newest on top, three at most, a plain one gone after 2.2 s
+and taking no clicks, an offer after 8 s or when its game closes, the whole
+pill its button, × to dismiss.
 
 **The library** is `library.json` beside `dingbat.yml` (path, the ROM's
 file name, system, ROM identity, last opened), every game opened here, up
@@ -423,5 +456,10 @@ Tests: `tests/desktop_library_test.nim` (the file, order, search, marks,
 the grid's sizes against the web's, the hero's game, relinking),
 `tests/desktop_home_test.sh` (the app driven: tiles, a missing game, a
 click, keys and a pad, Close Game and the hero, Resume against the state
-taken, Play from the battery, Find the File), `tests/desktop_mac_menu_test.sh`
-(⌘W and ⇧⌘W).
+taken, Play from the battery, a tile's Resume and From save, the offer
+and its refusal, a drop, Open Recent, Find the File),
+`tests/desktop_persist_test.nim` (when a session counts),
+`tests/desktop_settings_test.nim` (`library_open` in the file),
+`tests/desktop_gui_test.sh` and `tests/desktop_mac_settings_test.sh` (the
+setting in each Settings window), `tests/desktop_mac_menu_test.sh` (⌘W and
+⇧⌘W).

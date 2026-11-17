@@ -38,7 +38,8 @@ proc same_settings(a, b: Config): bool =
     a.sgb_border == b.sgb_border and a.rewind == b.rewind and
     a.pitch_correct_ff == b.pitch_correct_ff and a.audio_lowpass == b.audio_lowpass and
     a.fifo_interp == b.fifo_interp and a.mp2k_hle == b.mp2k_hle and
-    a.frame_size == b.frame_size and a.fullscreen == b.fullscreen
+    a.frame_size == b.frame_size and a.fullscreen == b.fullscreen and
+    a.library_resume == b.library_resume
 
 echo "Key bindings survive a restart"
 block:
@@ -82,6 +83,7 @@ block:
   cfg.fifo_interp = false
   cfg.mp2k_hle = true
   cfg.fullscreen = true
+  cfg.library_resume = false
   cfg.keybindings = homerow_keybindings()
   cfg.keybindings[KP_8] = Input.SELECT
   cfg.controller_bindings = {cint(0): Input.B, cint(1): Input.A}.toTable
@@ -398,6 +400,32 @@ block:
         "turned off at rev 2, they stay off"
   check new_config().pitch_correct_ff and new_config().audio_lowpass,
         "a fresh install starts with both on"
+
+echo "Opening a game from the library: written only when From save"
+block:
+  # web "library-open": a file from before the setting reads as Resume, and
+  # a file at Resume is the one a build without it writes
+  let path = dir / "library.yml"
+  let cfg = new_config()
+  check cfg.library_resume, "Resume by default"
+  save_config_file(cfg, path)
+  let text = readFile(path)
+  check "library_open" notin text, "at Resume the file names nothing of it"
+  check load_config_file(path).library_resume, "and reads back Resume"
+  cfg.library_resume = false
+  save_config_file(cfg, path)
+  check "\nlibrary_open: save\n" in readFile(path), "From save: library_open: save"
+  let back = load_config_file(path)
+  check not back.library_resume, "and reads back From save"
+  back.library_resume = true
+  save_config_file(back, path)
+  check readFile(path) == text, "back at Resume: the file as it was, byte for byte"
+  writeFile(path, "---\nlibrary_open: resume\n")
+  check load_config_file(path).library_resume, "library_open: resume reads as Resume"
+  let reset = new_config()
+  reset.library_resume = false
+  reset.reset_to_defaults()
+  check reset.library_resume, "Reset to Defaults: Resume"
 
 removeDir(dir)
 
