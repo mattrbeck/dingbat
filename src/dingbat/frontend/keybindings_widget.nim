@@ -1,6 +1,6 @@
 import std/[tables, options, strutils]
 import sdl3
-import imguin/[cimgui, impl_opengl]
+import imguin/cimgui
 import ../common/[input, config]
 import held_input
 import util

@@ -1,5 +1,5 @@
 import std/options
-import imguin/[cimgui, impl_opengl]
+import imguin/cimgui
 import ../common/[config, input]
 import file_explorer
 import notice

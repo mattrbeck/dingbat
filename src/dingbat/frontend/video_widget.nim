@@ -1,4 +1,4 @@
-import imguin/[cimgui, impl_opengl]
+import imguin/cimgui
 import ../common/config
 import util
 

@@ -5,7 +5,7 @@
 ## frontend needs.
 
 import sdl3
-import imguin/impl_opengl  # puts imgui's include dirs on the C++ path
+import imgui_paths  # imgui's include dirs, for the C++ backend
 
 # Found on the search path, which holds the imguin package root
 {.compile: "imguin/private/cimgui/imgui/backends/imgui_impl_sdl3.cpp".}
