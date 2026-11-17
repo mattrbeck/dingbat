@@ -1055,13 +1055,13 @@ the no-switch `sound/*_ds_{2,4,6}`); on E it is the mirror image (22/46).
 ## I. DocBoy (`docboy/*`, first scored 2026-10-14)
 
 DocBoy's own suite, scored by its own runner's rules on DMG ABC and CPU CGB E
-(`tests/README.md`, "The DocBoy suite"): 8,758 / 9,186 at `DocboyRev` (49
+(`tests/README.md`, "The DocBoy suite"): 8,759 / 9,186 at `DocboyRev` (49
 more not scored, `DocboyNotScored`). Every failing ROM is in
 [`tests/results_docboy.md`](../../tests/results_docboy.md); every group that is
 not scored is in the "Deliberately not scored" ledger at the end of
-`tests/results.md`. The 428 failing tests are I1 79, I2 13, I3 180, I4 1,
-I5 10, I6 49, I9 22, I11 15, I12 36, I13 10 and "Small" 13. I7, I8 and I10
-are closed. The 9,186 include DocBoy's rebuilds of 7 SameSuite channel 1 ROMs
+`tests/results.md`. The 427 failing tests are I1 79, I2 13, I3 180, I5 10,
+I6 49, I9 22, I11 15, I12 36, I13 10 and "Small" 13. I4's scored rows all
+pass; I7, I8 and I10 are closed. The 9,186 include DocBoy's rebuilds of 7 SameSuite channel 1 ROMs
 (`cgb/samesuite/apu/channel_1/*-cgbE`), which pass; the eighth,
 `channel_1_sweep_restart_2-cgbE`, is not scored (its expectation and
 SameSuite's both claim CGB E).
@@ -1315,9 +1315,8 @@ hardware question. Families:
     `mealybug_shift*`, 24 `mealybug_var*`, 6 `sprites_nops*`). Not known: the
     CGB E's glitch at the phases only DocBoy's variations reach; no capture
     from a console covers them.
-* **I4. HDMA / GDMA (1 left; 3 not scored).** `cgb/hdma` is 639/640 and
-  `double_speed/hdma` 50/50; the one left and the three not scored are
-  marked below. The rules, by group:
+* **I4. HDMA / GDMA (0 left; 3 not scored).** `cgb/hdma` is 640/640 and
+  `double_speed/hdma` 50/50; the three not scored are marked below. The rules, by group:
   * The LCD-enable line (95 tests in this and the next three points; 89
     here, `gb.nim` knobs, and the six double-speed tests with I7). The
     LCD-enable line has no OAM scan, so the VRAM DMA's HBlank input sees the
@@ -1356,7 +1355,7 @@ hardware question. Families:
     fetch (`HDMA_BOUNDARY_ACQUIRE`, the split `HDMA_OVERHEAD_LEADS` already
     records for gambatte `oamdmasrcC000_hdmasrc0000`); SameBoy passes 6 of
     the 16.
-  * 81 of the 82 `gdma_ppu_on_pixel_transfer_conflict_relaxed_*`
+  * All 83 `gdma_ppu_on_pixel_transfer_conflict_relaxed_*`
     (`VDMA_M3_PORT`, gb.nim; `vdma_port_busy`, fifo_ppu.nim): a 128-byte
     GDMA (SCX 0..7), or 32..80 bytes beside a window (WX 16..23) or one or
     two objects (X 1..50), started 110 M-cycles after an LCD enable so it
@@ -1380,15 +1379,20 @@ hardware question. Families:
     instructions -0.03..-0.16% on Crystal, LADX DX, Shantae, Pokemon Blue,
     frames and states identical). Three-way from byte 32 on: on 22 tests all
     agree (all 8 SCX, all 8 window, 6 object tests), on 60 object tests
-    SameBoy differs from both around the object fetch, and one test is
-    SameBoy's and dingbat's against DocBoy:
-    `..._64_bytes_sprite_y16_x07` (left, scored again 2026-11-16): an
-    object at X = 7 has the same 6-dot penalty as X = 5 and 6 (Pan Docs' OBJ
-    penalty algorithm), and DocBoy puts its plane reads where X = 5, 6 have
-    them at X = 1..6 but two dots later at X = 7 alone; SameBoy (and dingbat)
-    give X = 7 the X = 6 map, byte for byte from byte 7 (the row checks 16
-    on). No spec text places the reads. Hardware question 21 (gbedge p21
-    bytes 00-0F) covers the background map, not this object case.
+    SameBoy differs from both around the object fetch, and on one SameBoy
+    differs from DocBoy and dingbat now follows DocBoy:
+    `..._64_bytes_sprite_y16_x07` (closed 2026-11-17, `OBJ_HEAD_SLIDE`). The
+    head arm (X < 8) read its planes on T + 2 and T + 4 for every X; DocBoy's
+    maps put X = 7's two dots later and X = 5, 6 where X = 1..4 have them.
+    The tail arm has that shape already: its reads stay put while Pan Docs'
+    wait `max(0, 5 - sub)` shrinks, then walk a dot per pixel with the
+    trigger once the wait is clamped at sub 5, and DocBoy's own X = 13, 14,
+    15 maps are X = 5, 6, 7's four bytes later (one tile). The head's first
+    object now slides its reads `max(0, sub - 5)` dots; the stall is Pan
+    Docs' as before, so no mode-3 length moves (X = 6's one dot is below the
+    DMA's two-dot resolution). SameBoy (09674ebf) gives X = 7 the X = 6 map,
+    the old model's. No spec text places the reads; hardware question 21
+    (gbedge p21 bytes 00-0F) covers the background map, not this case.
   * 3 `gdma_source_wram_dma_source_ram_{160,256,480_bytes_overflow}`: the
     ROMs `Memcmp` all of `$FE00-$FEFF`; dingbat's OAM matches byte for byte
     and only the `$FEA0-$FEFF` readback differs (SameBoy fails all three).

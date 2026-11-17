@@ -779,11 +779,12 @@ const VDMA_M3_PORT* {.intdefine.} = 1
   ## but the head's discarded one, plus one more step on the dot after the
   ## last pixel; and an object's two plane reads, on the dots its LCDC.2 reads
   ## sit on (OBJ_PLANE1_LAG: M and M + 2 on the tail arm, M the merge dot;
-  ## OBJ_PLANE1_HEAD: T + 2 and T + 4 on the head arm, T the trigger). A byte
-  ## whose slot starts on dot c meets the bus as it stands on pipeline dot
-  ## c - 1 (vdma_port_busy, fifo_ppu.nim), bracketed on both sides. Pinned by
-  ## DocBoy `cgb/hdma/gdma_ppu_on_pixel_transfer_conflict_relaxed_*` (82 of 83;
-  ## a reference run sides with dingbat on `_sprite_y16_x07`, docs/dev/oracles.md). Hardware
+  ## OBJ_PLANE1_HEAD: T + 2 and T + 4 on the head arm, T the trigger, moved
+  ## by OBJ_HEAD_SLIDE). A byte whose slot starts on dot c meets the bus as it
+  ## stands on pipeline dot c - 1 (vdma_port_busy, fifo_ppu.nim), bracketed on
+  ## both sides. Pinned by DocBoy
+  ## `cgb/hdma/gdma_ppu_on_pixel_transfer_conflict_relaxed_*` (all 83; a
+  ## reference run differs on `_sprite_y16_x07`, docs/dev/oracles.md). Hardware
   ## question 21 (gbedge p21 VDMABUS) photographs the SCX 0 map. 0 = every byte
   ## lands.
 const HDMA_LCD_OFF_EDGE* {.intdefine.} = 1

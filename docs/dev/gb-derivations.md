@@ -531,6 +531,25 @@ Dots are dingbat's line dots; W is the first dot of the writing M-cycle
   but moves every later BG VRAM read on the line; eleven mealybug `m3_*` rows
   refuse it, `m3_scy_change` most sharply.
 
+### A head object's plane reads walk with X past the wait's clamp
+- Default: `OBJ_HEAD_SLIDE = 1` (`fifo_ppu.nim`, `tick_shifter`), on
+  `OBJ_PLANE1_HEAD = 4`.
+- Rule: an object hanging off the left edge (X < 8, the head arm) reads its
+  two planes on T + 2 and T + 4 (T the trigger) up to sub = (X + SCX) & 7 =
+  5, and `sub - 5` dots later past it, when it is the head tile's first
+  object. The stall stays Pan Docs' `6 + max(0, 5 - sub)`. This is the tail
+  arm's shape: there the reads hold still while the wait shrinks and walk
+  a dot per pixel with the trigger once the wait is clamped.
+- Evidence: DocBoy `cgb/hdma/gdma_ppu_on_pixel_transfer_conflict_relaxed_
+  64_bytes_sprite_y16_x*` (which GDMA bytes the fetch refuses): the X = 5,
+  6, 7 maps are the X = 13, 14, 15 maps four bytes (one tile) earlier, and
+  only X = 7 differs from X = 6 at the DMA's two-dot resolution. 0 fails
+  `_x07` alone. mealybug `m3_lcdc_obj_size_change` bounds the head reads only
+  from above (before dot 101). SameBoy (black box) draws the 0 map for
+  `_x07`; no hardware capture covers it (hardware question 21 is the
+  background map).
+- Clean-room: derived from test ROM sources/outputs and dingbat's own trace runs; no emulator source consulted.
+
 ### The line the LCD is switched on with has no objects
 - Default: `LCD_ON_LINE_NO_SCAN = 1` (`fifo_ppu.nim`; applied at the mode
   2 -> 3 edge in `fifo_tick_slow`).

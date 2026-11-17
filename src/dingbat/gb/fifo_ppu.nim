@@ -1158,6 +1158,13 @@ const OBJ_PLANE1_HEAD {.intdefine.} = 4'i32
   ## steps end on T + 2 and T + 4, where DocBoy's VRAM DMA conflict tests
   ## `..._sprite_y16_x0*` find them (VDMA_M3_PORT, gb.nim). 5 passes those
   ## too (even dots only); 6 fails them.
+const OBJ_HEAD_SLIDE {.intdefine.} = 1
+  ## The head tile's first object reads its planes max(0, sub - 5) dots after
+  ## OBJ_PLANE1_HEAD (sub = (X + SCX) & 7), the tail arm's shape one tile left:
+  ## there the reads hold still while Pan Docs' wait shrinks to its clamp at
+  ## sub 5, then walk a dot per pixel with the trigger. The stall is unchanged.
+  ## DocBoy's conflict maps: X = 5/6/7 equal X = 13/14/15 four bytes earlier
+  ## (`_sprite_y16_x07` the only one to see it). 0 = T + 4 for every sub.
 
 # Hardware re-reads an object's tile and attributes from OAM at its mode-3
 # fetch; while an OAM DMA owns OAM that read gets the byte the unit has on its
@@ -1868,12 +1875,16 @@ proc tick_shifter*(ppu: GbFifoPpu; gb: GB) =
       let tile = int32(ppu.fetcher_x) + (if idx < 0: -1'i32 else: 0'i32)
       # This dot is the first of the penalty, so the countdown is one short.
       var pen = OBJ_FETCH_DOTS - 1
+      var slide = 0'i32
       if ppu.obj_tile_fx != tile:
         ppu.obj_tile_fx = tile
         # Pan Docs' X = 0 exception: a flat 11 regardless of SCX, charged as
         # index 0 of its tile (GBMicrotest ppu_spritex_vs_scx).
         let sub = if ppu.sprites[0].x == 0: 0'i32 else: idx and 7
         pen += max(0'i32, (7 - sub) - (OBJ_WAIT_SUB - 1))
+        # OBJ_HEAD_SLIDE: the head arm's reads past the clamp.
+        when OBJ_HEAD_SLIDE != 0:
+          if idx < 0: slide = max(0'i32, sub - (8 - OBJ_WAIT_SUB))
       when OBJ_TAIL_WALK_REFUND != 0:
         # The walk into the tail burst was paid at the head (OBJ_TAIL_WALK_REFUND).
         pen -= tail_walk
@@ -1889,7 +1900,7 @@ proc tick_shifter*(ppu: GbFifoPpu; gb: GB) =
       # The dot the high bitplane reads LCDC.2 on, per arm (OBJ_PLANE1_LAG);
       # `cycle_counter + pen` is the merge dot.
       ppu.obj_hi_dot =
-        (if idx < 0: ppu.cycle_counter + OBJ_PLANE1_HEAD
+        (if idx < 0: ppu.cycle_counter + OBJ_PLANE1_HEAD + slide
          else:       ppu.cycle_counter + pen + OBJ_PLANE1_LAG) -
         (if gb.cgb_enabled: int32(CGB_OBJ_SIZE_LATENCY) else: 0'i32)
       when defined(gb_m3_trace):
@@ -2428,8 +2439,8 @@ proc vdma_dot_busy(ppu: GbFifoPpu; gb: GB; dot: int32): bool {.noinline.} =
   # An object's two plane reads, OBJ_PLANE_GAP apart, end on the dots their
   # LCDC.2 reads sit on (`obj_hi_dot` is the high plane's, less the CGB's
   # register latency, which is not the fetch's): the tail arm's M and M + 2,
-  # the head arm's T + 2 and T + 4 (OBJ_PLANE1_HEAD). Steps, so the low one
-  # starts a dot before its read.
+  # the head arm's T + 2 and T + 4 (OBJ_PLANE1_HEAD, plus OBJ_HEAD_SLIDE).
+  # Steps, so the low one starts a dot before its read.
   let hi = ppu.obj_hi_dot +
            (if gb.cgb_enabled: int32(CGB_OBJ_SIZE_LATENCY) else: 0'i32)
   if dot >= hi - OBJ_PLANE_GAP - 1 and dot <= hi: return true
