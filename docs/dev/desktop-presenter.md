@@ -1,9 +1,10 @@
 # The desktop presenter: OpenGL and Metal
 
 How the desktop app (`src/dingbat.nim`) draws the game picture and the UI.
-Windows and Linux draw with OpenGL 3.3 core; macOS draws with Metal
-(prototype on branch `mac-metal`), and `DINGBAT_RENDERER=gl` keeps OpenGL
-there. A Mac without a Metal device falls back to OpenGL by itself.
+Windows and Linux draw with OpenGL 3.3 core; macOS draws with Metal only,
+chosen when building (every Mac that runs macOS 11, the app's minimum, has
+Metal; a Mac without a device says so and quits). The comparisons below
+were measured while macOS could still draw with OpenGL too.
 
 ## One design, two backends
 
@@ -103,4 +104,26 @@ Glass-to-glass pacing has to be measured with the window shown.
   and swap hold are kept as they are, so both backends pace alike.
   `DINGBAT_METAL_VSYNC=1` turns the layer's display sync on, for trying
   (in a hidden window it measures the same as off).
-- `-d:gputime` (GPU time of the game quad) is OpenGL only.
+- `-d:gputime` (GPU time of the game quad) is OpenGL only: Windows and
+  Linux. On macOS it is a build error.
+
+## CPU cost, Metal vs OpenGL on macOS
+
+Pokemon Emerald's overworld (Littleroot, from a quick save), one
+gui_driver binary, hidden and muted window, Apple M2, macOS 26.6; each
+figure is the difference between a 26 s and a 6 s run (20 s of steady
+state, boot excluded), two runs each; instructions and cycles from
+`/usr/bin/time -l`, CPU-side only:
+
+| | Metal | OpenGL |
+|---|---|---|
+| normal speed: share of one core | 8.1 % | 10.3-11.7 % |
+| normal speed: cycles per second | ~242 M | ~305 M |
+| normal speed: instructions per frame | 14.4 M | 15.7 M |
+| paused (62 presents/s, UI only): cycles per present | 1.6 M | 2.8 M |
+| fast-forward, uncapped | ~1220 fps | ~1230 fps |
+
+Fast-forward is emulation-bound: about 1220 frames are emulated a second
+but only about 60 presented, so presenting is ~4 % of the work there and
+Metal's saving (~2 %) is inside the runs' ±5 % spread. xBR changes neither
+backend's CPU figures (it runs on the GPU).

@@ -1,7 +1,6 @@
-## The OpenGL 3.3 core presenter (Windows, Linux, and macOS with
-## DINGBAT_RENDERER=gl): presenter.nim's backend calls, one GL context on the
-## SDL window. Textures take the core's BGR555 words as they are
-## (GL_UNSIGNED_SHORT_1_5_5_5_REV).
+## The OpenGL 3.3 core presenter (Windows and Linux): presenter.nim's
+## backend calls, one GL context on the SDL window. Textures take the core's
+## BGR555 words as they are (GL_UNSIGNED_SHORT_1_5_5_5_REV).
 
 import sdl3
 import imguin/[cimgui, impl_opengl]

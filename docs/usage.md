@@ -16,8 +16,7 @@ panel, and the app opens ROMs from Finder: Open With, or a drop on the Dock icon
 you open show in the Dock icon's and the Apple menu's recent items. The Edit menu's Cut,
 Copy, Paste and Undo work in any text field, the Cheats and Link Cable windows' too.
 `DINGBAT_IMGUI_MENU=1` brings back the in-window menu bar and Settings window.
-The Mac app draws with Metal; `DINGBAT_RENDERER=gl` draws with OpenGL instead, as
-Windows and Linux do.
+The Mac app draws with Metal; Windows and Linux draw with OpenGL.
 
 Zipped ROMs work in both: the first `.gba` / `.gb` / `.gbc` in the archive is loaded.
 
