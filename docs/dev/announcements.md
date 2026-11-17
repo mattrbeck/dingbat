@@ -20,12 +20,17 @@ file can't stop anyone playing. Both lists take any number of entries.
 
 ### Editing and checking it
 
-- **Editor:** `python3 -m http.server 8799` from the repo root, then
-  <http://localhost:8799/tools/status/editor.html>. It opens the current
-  `web/status.json`, drafts entries (toast / banner, web / iOS, link, window,
-  older builds only), previews them per device, checks them live, and in
-  Chrome saves straight back to the file (Save, then pick
-  `web/status.json`). Elsewhere, Download or Copy JSON.
+- **Post something:** `tools/status/edit` (from a checkout of main). It
+  opens the editor on the current `web/status.json`: draft entries (toast /
+  banner, web / iOS, link, window, older builds only, a build time from a
+  commit sha), preview them per device, and check them live. Save writes the
+  file. Done (or Enter in the terminal) checks it again, shows the diff and
+  asks before committing `web/status.json` alone and pushing. It then waits
+  until dingbat.gg serves the new file: the deploy takes about a minute, the
+  CDN up to ten more. Options: `--no-push`, `--no-open`, `--port N`.
+- The editor also opens on its own (`tools/status/editor.html` from any
+  static server of the repo root): in Chrome, Save goes through a file
+  picker; elsewhere, Download or Copy JSON.
 - **Check:** `node tools/status/validate.mjs [file]`. The web tests and the
   Pages deploy run it, so a bad file fails CI and never deploys. The rules
   live in `tools/status/rules.mjs`:

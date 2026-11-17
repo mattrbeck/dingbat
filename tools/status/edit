@@ -1,0 +1,3 @@
+#!/bin/sh
+# Post an announcement or a required update: see edit.mjs.
+exec node "$(dirname "$0")/edit.mjs" "$@"

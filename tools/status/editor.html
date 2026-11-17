@@ -5,10 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>status.json editor</title>
 <!-- Drafts web/status.json (docs/dev/announcements.md) with the same rules
-     the deploy checks (rules.mjs). Serve the repo root and open it:
-       python3 -m http.server 8799   then   http://localhost:8799/tools/status/editor.html
-     Chrome saves straight back to the file (File System Access); elsewhere,
-     Download or Copy and put the file in place. -->
+     the deploy checks (rules.mjs). Run tools/status/edit: it serves this page,
+     Save writes the checkout's web/status.json, and Done goes back to the
+     terminal to commit and push. Served any other way, Chrome saves through a
+     file picker (File System Access); elsewhere, Download or Copy. -->
 <style>
 :root {
   --bg: #0e0a16; --stage: #07050c; --s1: #171126; --s2: #201834; --s3: #2c2146;
@@ -137,6 +137,7 @@ pre.json { margin: 0; max-height: 360px; overflow: auto; padding: 10px; border-r
   <button type="button" class="btn" id="download">Download</button>
   <button type="button" class="btn" id="copy">Copy JSON</button>
   <button type="button" class="btn btn-primary" id="save">Save</button>
+  <button type="button" class="btn" id="done" hidden>Done</button>
 </header>
 <main>
   <div class="col">
@@ -183,6 +184,8 @@ let sel = null; // { kind: "ann" | "req", i }
 let fileHandle = null;
 let dirty = false;
 let device = "phone";
+// Served by tools/status/edit: Save and the commit lookup go to it.
+let toolMode = false;
 
 const DEVICES = {
   phone: { label: "Phone (web)", w: 390, h: 844, platform: "web", wide: false },
@@ -299,12 +302,18 @@ const remove = (list, i) => {
 let formFor = "";
 const checks = (name, legend, values, current, labels) => `<fieldset><legend>${legend}</legend>${values.map((v) =>
   `<label><input type="checkbox" name="${name}" value="${v}" ${current.includes(v) ? "checked" : ""}> ${labels[v]}</label>`).join("")}</fieldset>`;
-const timeField = (key, label, hint, value) => `<label class="f">${label}
+const timeField = (key, label, hint, value, commit = false) => `<div class="f" style="display:flex;flex-direction:column;gap:4px">
+    <label class="f">${label}
     <span class="when"><input type="datetime-local" step="1" data-time="${key}" value="${esc(toLocal(value))}">
-    <button type="button" class="btn btn-small btn-ghost" data-clear="${key}">Clear</button></span>
+    <button type="button" class="btn btn-small btn-ghost" data-clear="${key}">Clear</button></span></label>
     <span class="utc" data-utc="${key}">${esc(value || "not set")}</span>
-    ${hint ? `<span class="hint">${hint}</span>` : ""}</label>`;
-const COMMIT_HINT = 'A commit\'s build time: <code>TZ=UTC git show -s --date=format-local:%Y-%m-%dT%H:%M:%SZ --format=%cd &lt;sha&gt;</code>. Paste it into the box under the field.';
+    ${commit && toolMode ? `<span class="when"><input type="text" data-sha="${key}" placeholder="or a commit: sha, or HEAD" aria-label="${esc(label)}: from a commit">
+      <button type="button" class="btn btn-small" data-lookup="${key}">Use commit</button></span>
+      <span class="hint" data-subject="${key}"></span>` : ""}
+    ${hint ? `<span class="hint">${hint}</span>` : ""}</div>`;
+const COMMIT_HINT_TEXT = "The build time of the first commit with the fix.";
+const commitHint = () => toolMode ? COMMIT_HINT_TEXT
+  : COMMIT_HINT_TEXT + ' A commit\'s time: <code>TZ=UTC git show -s --date=format-local:%Y-%m-%dT%H:%M:%SZ --format=%cd &lt;sha&gt;</code>, pasted into the box under the field (or run tools/status/edit, which looks it up).';
 
 const renderForm = () => {
   const key = sel ? `${sel.kind}:${sel.i}` : "";
@@ -325,7 +334,7 @@ const renderForm = () => {
       <label class="f">Link label<input type="text" data-k="label" placeholder="Read more" value="${esc(a.label)}"></label>
       ${timeField("from", "Show from", "Your local time; saved as UTC. Empty: now.", a.from)}
       ${timeField("until", "Show until", "Empty: until you remove it.", a.until)}
-      ${timeField("builtBefore", "Only builds older than", COMMIT_HINT, a.builtBefore)}
+      ${timeField("builtBefore", "Only builds older than", commitHint(), a.builtBefore, true)}
       <label class="f">ID <span class="hint">what seen and dismissed remember: change it to show the message again</span>
         <input type="text" data-k="id" value="${esc(a.id)}"></label>
     </div>`;
@@ -334,7 +343,7 @@ const renderForm = () => {
     const plats = Array.isArray(q.platforms) && q.platforms.length ? q.platforms : [...PLATFORMS];
     form.innerHTML = `<div style="display:flex;flex-direction:column;gap:12px">
       ${checks("platforms", "Platforms", PLATFORMS, plats, { web: "Web", ios: "iOS" })}
-      ${timeField("minBuild", "Block builds older than", COMMIT_HINT + " Web only blocks once a deploy that meets it is live; iOS blocks at once.", q.minBuild)}
+      ${timeField("minBuild", "Block builds older than", commitHint() + " Web only blocks once a deploy that meets it is live; iOS blocks at once.", q.minBuild, true)}
       <label class="f">Message<textarea data-k="message" placeholder="This version of dingbat has a problem that the update fixes.">${esc(q.message)}</textarea></label>
       <label class="f">Update link <span class="hint">required for iOS: the App Store or TestFlight link</span>
         <input type="url" data-k="url" placeholder="https://apps.apple.com/app/id…" value="${esc(q.url)}"></label>
@@ -365,6 +374,22 @@ const renderForm = () => {
       if (v && v !== "not set") { set(obj(), k, v); form.querySelector(`[data-time="${k}"]`).value = toLocal(v); changed(); }
     });
   });
+  form.querySelectorAll("[data-lookup]").forEach((b) => b.addEventListener("click", async () => {
+    const k = b.dataset.lookup;
+    const sha = form.querySelector(`[data-sha="${k}"]`).value.trim();
+    const note = form.querySelector(`[data-subject="${k}"]`);
+    if (!sha) return;
+    try {
+      const res = await fetch(`/__status/commit?sha=${encodeURIComponent(sha)}`);
+      const j = await res.json();
+      if (!res.ok) { note.textContent = j.error || "not found"; return; }
+      set(obj(), k, j.time);
+      form.querySelector(`[data-time="${k}"]`).value = toLocal(j.time);
+      form.querySelector(`[data-utc="${k}"]`).textContent = j.time;
+      note.textContent = `${j.sha} ${j.subject}`;
+      changed();
+    } catch { note.textContent = "couldn't ask git"; }
+  }));
   form.querySelectorAll("[data-clear]").forEach((b) => b.addEventListener("click", () => {
     const k = b.dataset.clear; set(obj(), k, undefined);
     form.querySelector(`[data-time="${k}"]`).value = "";
@@ -450,7 +475,7 @@ const render = () => {
   const a = sel?.kind === "ann" ? doc.announcements[sel.i] : null;
   const count = $("count");
   if (count && a) { const n = (a.text || "").length; count.textContent = `${n} / ${TEXT_SOFT_MAX}`; count.classList.toggle("over", n > TEXT_SOFT_MAX); }
-  $("file-name").textContent = (fileHandle ? fileHandle.name : "Not saved anywhere yet") + (dirty ? " · unsaved changes" : "");
+  $("file-name").textContent = (fileHandle ? fileHandle.name : toolMode ? "web/status.json" : "Not saved anywhere yet") + (dirty ? " · unsaved changes" : "");
 };
 
 const load = (text, name) => {
@@ -486,13 +511,15 @@ document.addEventListener("input", (e) => {
   render();
 });
 
-$("load-repo").onclick = async () => {
+const repoName = () => (toolMode ? "web/status.json" : "web/status.json (read only: Save picks the file)");
+const loadRepo = async (quiet = false) => {
   try {
-    const res = await fetch("../../web/status.json", { cache: "no-store" });
+    const res = await fetch(toolMode ? "/__status/file" : "../../web/status.json", { cache: "no-store" });
     if (!res.ok) throw new Error(res.status);
-    load(await res.text(), "web/status.json (read only: Save picks the file)");
-  } catch { alert("Couldn't read ../../web/status.json: serve the repo root (python3 -m http.server 8799) and open tools/status/editor.html."); }
+    load(await res.text(), repoName());
+  } catch { if (!quiet) alert("Couldn't read web/status.json: run tools/status/edit."); }
 };
+$("load-repo").onclick = () => { if (!dirty || confirm("Drop the unsaved changes?")) loadRepo(); };
 $("open-file").onclick = async () => {
   if (window.showOpenFilePicker) {
     try {
@@ -506,7 +533,15 @@ $("open-file").onclick = async () => {
   input.onchange = async () => input.files[0] && load(await input.files[0].text(), input.files[0].name);
   input.click();
 };
+const saveToTool = async () => {
+  const res = await fetch("/__status/save", { method: "POST", headers: { "Content-Type": "application/json" }, body: serialize() });
+  if (res.ok) { dirty = false; render(); return true; }
+  const j = await res.json().catch(() => ({}));
+  alert("Not saved:\n" + (j.errors || []).map((e) => `${e.path}: ${e.msg}`).join("\n"));
+  return false;
+};
 $("save").onclick = async () => {
+  if (toolMode && !fileHandle) { await saveToTool(); return; }
   if (!window.showSaveFilePicker && !fileHandle) { $("download").click(); return; }
   try {
     if (!fileHandle) fileHandle = await showSaveFilePicker({ suggestedName: "status.json", types: [{ description: "JSON", accept: { "application/json": [".json"] } }] });
@@ -526,10 +561,21 @@ $("copy").onclick = async () => {
 window.addEventListener("beforeunload", (e) => { if (dirty) e.preventDefault(); });
 window.addEventListener("resize", renderPreview);
 
+$("done").onclick = async () => {
+  if (dirty) {
+    if (!confirm("Save first, then go back to the terminal to commit?")) return;
+    if (!(await saveToTool())) return;
+  }
+  await fetch("/__status/done", { method: "POST" }).catch(() => {});
+  document.body.innerHTML = '<main style="display:block;padding:48px;text-align:center"><h1>Back in the terminal</h1><p class="hint">It checks web/status.json, shows the diff, and asks before committing and pushing. You can close this tab.</p></main>';
+};
+
 render();
-// Served from the repo: start from the real file.
-fetch("../../web/status.json", { cache: "no-store" }).then((r) => (r.ok ? r.text() : null))
-  .then((t) => { if (t && !dirty) load(t, "web/status.json (read only: Save picks the file)"); }).catch(() => {});
+// Served by tools/status/edit, or from the repo: start from the real file.
+fetch("/__status/file", { cache: "no-store" }).then((r) => {
+  if (r.ok) { toolMode = true; $("done").hidden = false; }
+  return loadRepo(true);
+}).catch(() => loadRepo(true));
 </script>
 </body>
 </html>
