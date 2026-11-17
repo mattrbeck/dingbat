@@ -83,6 +83,9 @@
 ##                                     `@picture|...` as a tile and `@resume|x y
 ##                                     w h`, `@play|...`; an open game menu's
 ##                                     items `@menu <title>|x y w h`
+##   app cmd <MenuCmd> [arg]           run a menu item's command (mcSettings,
+##                                     mcCheats), on every platform
+##   app tab <n>                       the ImGui Settings window's tab n
 ##
 ## With the macOS menu bar, a `key ... down cmd` also goes through it, as a
 ## real Cmd shortcut does (the key handler leaves those to the menus).
@@ -121,6 +124,7 @@ var
   link_state*: proc(): string  ## set by the app: `link`'s answer
   imgui_menu_dump*: proc(): string  ## set by the app: the in-window bar's menus
   explorer_dump*: proc(): string    ## set by the app: the ImGui file dialog's rows
+  app_cmd*: proc(words: seq[string])  ## set by the app: `app ...`
   dropped* = ""       # a `drop` path for handle_input (a pushed SDL drop
                       # event cannot own its path)
   texts: seq[string]  # `text` strings, alive until handle_input has read them
@@ -394,6 +398,9 @@ proc run(window: Window; s: Step): bool =
   of "home":
     if w.len < 3 or w[1] != "dump": raise newException(ValueError, "home dump <path>")
     writeFile(w[2], if home_dump != nil: home_dump() else: "")
+  of "app":
+    if app_cmd == nil or w.len < 2: raise newException(ValueError, "app cmd|tab")
+    app_cmd(w[1 .. ^1])
   of "menu":
     if w.len >= 3 and w[1] == "imgui":
       writeFile(w[2], if imgui_menu_dump != nil: imgui_menu_dump() else: "")

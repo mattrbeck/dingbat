@@ -13,6 +13,8 @@ import util
 const INDENT = 106'f32   # rows under a label, in points
 const BUF_SIZE = 512
 
+var tab_request* = -1  ## a tab to show at the next frame (gui_driver `app tab`)
+
 # The text each path field edits; ImGui writes into it in place
 var path_bufs: Table[SettingId, array[BUF_SIZE, char]]
 
@@ -136,13 +138,15 @@ proc render*(ed: ConfigEditor) =
                              ImGuiChildFlags(0), ImGuiWindowFlags(0))
     if igBeginTabBar("SettingsTabBar", 0):
       for i, tab in ed.tabs():
-        if igBeginTabItem(cstring(tab.title), nil, 0):
+        let flags = if i == tab_request: cint(ImGui_TabItemFlags_SetSelected) else: 0
+        if igBeginTabItem(cstring(tab.title), nil, flags):
           ed.show_tab(i)
           igBeginGroup()
           ed.render_rows(tab.rows)
           igEndGroup()
           igEndTabItem()
       igEndTabBar()
+      tab_request = -1
     igEndChild()
 
     igSeparator()

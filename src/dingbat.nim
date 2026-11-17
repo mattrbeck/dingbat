@@ -2831,6 +2831,11 @@ proc main() =
           s.add "\n"
           if it.kind == mkSubmenu: walk(it.items, depth + 1, s)
       walk(menu_bar(native = false), 0, result)
+    gui_driver.app_cmd = proc(w: seq[string]) =
+      case w[0]
+      of "cmd": push_cmd(parseEnum[MenuCmd](w[1]), if w.len > 2: parseInt(w[2]) else: 0)
+      of "tab": imgui_settings.tab_request = parseInt(w[1])
+      else: raise newException(ValueError, "app cmd|tab")
   when defined(macosx):
     mac_while_blocked(link_while_blocked)
     if native_menu:
