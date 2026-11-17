@@ -174,6 +174,7 @@ $few"
 19 quit" "$g"
   run settings "1 frames 30
 2 app cmd mcSettings
+3 frames 10
 3 sleep 300
 4 shot $(shot settings-0)
 5 app tab 1

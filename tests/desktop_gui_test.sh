@@ -394,7 +394,9 @@ fits() {
   else echo "$room $(win "$1" scroll)"; fi
 }
 centre() { grep -F -m1 "$2|" "$1" | cut -d'|' -f3 | awk '{ print int($1 + $3 / 2), int($2 + $4 / 2) }'; }
+# (frames: its tabs are measured unseen first, a frame each)
 open_settings="2 app cmd mcSettings
+3 frames 10
 3 sleep 500"
 run "" "frame_size: 3
 " "1 sleep 300
