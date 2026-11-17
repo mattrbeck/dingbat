@@ -549,6 +549,44 @@ Dots are dingbat's line dots; W is the first dot of the writing M-cycle
 - Clean-room: derived from the test ROMs' frames and dingbat's own trace
   runs; no emulator source consulted.
 
+### The bytes a cut CGB window fetch leaves
+- Default: `CGB_WIN_CUT_PLANES = true` (`gb.nim`; `win_revoke_keep`, the
+  `fsGetTile` abort in `tick_bg_fetcher`). CGB, single speed.
+- Rule: an LCDC.5 fall reaches the fetcher `CGB_WE_DISABLE_LATE` (2) dots
+  after the write, so a revoked window restart (`CGB_WIN_REVOKE_KEEP`, landing
+  on the write's dot) has run its steps up to `fetch_counter` there, no
+  further. Its tile is pushed with the window map's index, the low plane if
+  step 3 ran (else the previous tile's low byte stays in the latch), and the
+  high plane if step 5 ran (else the tile index is the high byte). When the
+  fall reaches the fetcher on an idle step after a read (odd
+  `fetch_counter`), the map read that ends the window takes that read's byte
+  as the background tile's index instead of VRAM's. The same holds when the
+  fall reaches it on the idle dot just before the map read after the
+  window's first tile (WX < 7, the tile fetched in full): the byte is that
+  tile's high plane.
+- Per restart dot k of the write (k = W - match): 5 full tile, next index =
+  high plane; 4 low plane + index; 3 low plane + index, next index = low
+  plane; 2 previous low + index; 1 previous low + index, next index = the
+  window's own index (so a full window tile follows).
+- Evidence: DocBoy `cgb_dmg_mode/ppu/visual/m3_lcdc_win_en_change_multiple_
+  wx_bg_{0000,00ff,ff00,ffff}_win_{0000,00ff,ff00,ffff}`, `_win_afff` and
+  `_win_tilenum_02` decode every byte (the window map holds 1, the
+  background map 0, the rest of VRAM is 0, so tile $FF / $AF reads as
+  colour 0). mealybug's own CPU CGB C and CPU CGB D photographs of
+  `m3_lcdc_win_en_change_multiple_wx` (the repository's `photos/`; its
+  `expected/` CGB images are placeholders) show the same lines: the
+  one-pixel window remnant on k = 4 and 2, the colour-0 run after k = 3 and
+  after a head line's first tile, the nine-pixel run on k = 1. dingbat drew
+  a full window tile on every k before. DocBoy `cgb/ppu/visual/
+  window_bg_reprise_wx25` (CGB mode, k = 5) passes with it. A later window
+  tile met the same way (`_wx` line 25, the fall reaching the fetcher the dot
+  before the second tile's successor map read) keeps VRAM's index, hence the
+  first-tile condition, which only DocBoy pins.
+- Not modelled: a WX match on the write's own dot (k = 0; lines 10 and 38),
+  gb-failure-triage.md I3.
+- Clean-room: derived from the test ROMs' frames, the mealybug photographs
+  and dingbat's own trace runs; no emulator source consulted.
+
 ## 3. Objects
 
 ### An object costs 6 dots plus a per-tile wait, per Pan Docs

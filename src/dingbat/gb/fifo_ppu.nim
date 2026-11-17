@@ -66,7 +66,7 @@ proc new_gb_fifo_ppu*(gb: GB): GbFifoPpu =
     window_trigger: base.window_trigger,
     win_check_dot: -1, win_check_dot2: -1, wy_cmp: base.wy,
     current_window_line: -1,
-    win_lx: WIN_LX_OFF,
+    win_lx: WIN_LX_OFF, win_idx_residue: -1,
     stat_chg_dot: STAT_NO_HOLD,
     obj_fix_from: OBJ_FIX_OFF,
     obj_abort_last: OBJ_ABORT_LAST_OFF,
@@ -753,6 +753,7 @@ proc fifo_reset_sprite*(ppu: GbFifoPpu) =
   when VDMA_M3_PORT != 0: ppu.vdma_tail_busy = 0'u32
   ppu.win_pre_old = false          # WIN_HEAD_WX_SCAN, per line
   when WIN_ABORT_PUSH_POS: ppu.win_bg_push = int32.low
+  when CGB_WIN_CUT_PLANES: ppu.win_idx_residue = -1
   # `lcdc2_flip` is NOT cleared here: the OAM scan reads it a few statements
   # later on this dot and retires it (fifo_get_sprites). LCDC.4's dot is
   # per-line too; its ADDRESS latch is a bus register and survives
@@ -938,6 +939,8 @@ proc tick_bg_fetcher*(ppu: GbFifoPpu; gb: GB) =
       if ppu.head_cycle and not ppu.smooth_scroll_sampled:
         fifo_sample_smooth_scroll(ppu)
     var bg_col = ppu.fetcher_x
+    when CGB_WIN_CUT_PLANES:
+      var residue = -1'i16
     # A CGB window start is revocable (CGB_WIN_EN_DEFER, gb.nim): LCDC.5 going
     # low during the six-dot startup fetch abandons the start and the line
     # pays only the dots the fetch had run (gambatte window/late_disable*).
@@ -956,6 +959,16 @@ proc tick_bg_fetcher*(ppu: GbFifoPpu; gb: GB) =
            ppu.cycle_counter < gb.we_on_dot)) and
          (CGB_WE_DISABLE_LATE == 0 or not ppu.cgb or
           ppu.cycle_counter >= gb.we_off_dot):
+        when CGB_WIN_CUT_PLANES:
+          residue = ppu.win_idx_residue
+          ppu.win_idx_residue = -1
+          # The fall reached the fetcher on the idle dot before this read, the
+          # window's first tile just pushed: the last byte read was its high
+          # plane.
+          if residue < 0 and ppu.cgb and ppu.fetcher_x == 1 and
+             gb.memory.current_speed == 0'u8 and
+             ppu.cycle_counter == gb.we_off_dot + 1:
+            residue = int16(ppu.tile_data_high)
         bg_col = fetcher_window_abort(ppu)
     # The map-select bits as they stood CGB_MAP_LATENCY dots ago on a CGB
     # (gb.nim; the DMG is pixel-exact on both mealybug m3_lcdc_*_map_change).
@@ -987,6 +1000,8 @@ proc tick_bg_fetcher*(ppu: GbFifoPpu; gb: GB) =
     # Unconditional (a branch here measured +0.8%); outside CGB mode VBK is
     # not mapped, so bank 1 is never written and the attribute plane stays 0.
     ppu.tile_attrs = ppu.vram[1][map + offset]
+    when CGB_WIN_CUT_PLANES:
+      if unlikely(residue >= 0): ppu.tile_num = uint8(residue)
     inc ppu.fetch_counter
 
   of fsGetTileDataLow, fsGetTileDataHigh:
@@ -2112,8 +2127,23 @@ when WIN_EN_REVOKE_ANY and CGB_WIN_REVOKE_KEEP != 0:
     let bank = int((ppu.tile_attrs and 0b0000_1000) shr 3)
     var row = ppu.current_window_line and 7
     if (ppu.tile_attrs and 0b0100_0000) != 0: row = 7 - row
-    ppu.tile_data_low  = ppu.vram[bank][base + row * 2]
-    ppu.tile_data_high = ppu.vram[bank][base + row * 2 + 1]
+    when CGB_WIN_CUT_PLANES:
+      # The restart's steps up to `fetch_counter` (this dot's next) run before
+      # the fall reaches the fetcher: low plane on step 3, high on 5.
+      let fc = ppu.fetch_counter
+      if fc >= 3: ppu.tile_data_low = ppu.vram[bank][base + row * 2]
+      ppu.tile_data_high =
+        if fc >= 5: ppu.vram[bank][base + row * 2 + 1] else: ppu.tile_num
+      if (fc and 1) == 1:
+        # Reaching it on the idle step after a read: the ending map read takes
+        # that read's byte.
+        ppu.win_idx_residue = int16(
+          if fc >= 5: ppu.tile_data_high
+          elif fc >= 3: ppu.tile_data_low
+          else: ppu.tile_num)
+    else:
+      ppu.tile_data_low  = ppu.vram[bank][base + row * 2]
+      ppu.tile_data_high = ppu.vram[bank][base + row * 2 + 1]
     discard try_push_bg_pixels(ppu, gb)
     ppu.fetch_counter = 0
     when defined(gb_win_trace):

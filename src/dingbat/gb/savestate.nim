@@ -1269,6 +1269,7 @@ proc gb_apply_state(gb: GB; payload: string; rev: uint32;
   when SERIAL_CPU_SAMPLE_T < 4: gb.serial.edge_cycle = high(CycleCount)
   # Per-line window records, reset at every mode-3 entry (fifo_ppu.nim)
   gb.we_off_dot = int32.low
+  gb.fifo_ppu.win_idx_residue = -1
   gb.wd_ds_push = false
   gb.cpu.wl_head = -1
   gb.cpu.wl_edge = false

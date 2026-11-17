@@ -1012,6 +1012,18 @@ const CGB_WIN_REVOKE_KEEP*    {.intdefine.} = 1
   ## object's penalty fits only on the window's tile grid,
   ## `11 - min(5, (x - (WX - 7)) mod 8)`). Double speed keeps the undo (no
   ## test measures it).
+const CGB_WIN_CUT_PLANES*     {.booldefine.} = true
+  ## The bytes a cut CGB window fetch leaves (single speed). The fall reaches
+  ## the fetcher CGB_WE_DISABLE_LATE dots after the write, so a revoked
+  ## restart's tile (CGB_WIN_REVOKE_KEEP) has only the planes read before
+  ## then: an unread low plane keeps the previous tile's, an unread high plane
+  ## is the tile index. A fall reaching the fetcher on an idle dot, with the
+  ## map read after the window's first tile next, leaves that read the last
+  ## byte read as the background tile's index. Pinned by DocBoy `cgb_dmg_mode/
+  ## ppu/visual/m3_lcdc_win_en_change_multiple_wx_*` (16 tile-data pairs
+  ## decode each byte); mealybug's CPU CGB C and D photos of `m3_lcdc_win_en_
+  ## change_multiple_wx` show the same picture. false = the tile fetched in
+  ## full. docs/dev/gb-derivations.md, "The bytes a cut CGB window fetch leaves".
 const CGB_WIN_REVOKE_LAG*     {.intdefine.} = 1
   ## Shifter dots between the LCDC.5 write that revokes a CGB window start and
   ## the dot the undo lands on. Not free: the undo restores the match dot's
@@ -2310,6 +2322,9 @@ type
     # WIN_ABORT_PUSH_POS: where the background's pushes had reached when a
     # mid-line window start emptied the FIFO. Per-line; int32.low = none.
     win_bg_push*:         int32
+    # CGB_WIN_CUT_PLANES: the tile index the next map read takes instead of
+    # VRAM's (the bus's last byte). Per-line; -1 = none.
+    win_idx_residue*:     int16
 
   # ---- APU channels: the shared PSG (common/psg.nim) ----
   GbSoundChannel* = PsgChannel

@@ -1305,10 +1305,10 @@ hardware question. Families:
 
   blargg, SameSuite APU 70/70, gambatte `sound`/`speedchange` and the GBA PSG
   tests are unchanged by these rules.
-* **I3. CGB compatibility-mode picture (180 left of 233).**
+* **I3. CGB compatibility-mode picture (176 left of 233).**
   Three groups: the boot ROM's palette table, and two kinds of mid-mode-3
   LCDC write in compat mode, `m3_lcdc_win_en_change_multiple_wx_*` (timing
-  tests closed, 51 frames left) and `change_{bg,win}_tile_data_glitch_*` (63
+  tests closed, 47 frames left) and `change_{bg,win}_tile_data_glitch_*` (63
   left; their 10 CGB-mode twins are counted in I12).
   * Left (66, the palette table, which Matt keeps failing): 63
     `palettes_checksum_*`, `palettes_old_license_33_new_license_01_checksum_
@@ -1342,27 +1342,46 @@ hardware question. Families:
     rise lands on a window map read (WX = 2, 3, 22, 23, 30, 31) end the
     window where DocBoy and SameBoy both end it. Those frames still do not
     match (next point).
-  * Left (51; scored again 2026-11-16), the
-    `visual/m3_lcdc_win_en_change_multiple_wx_*` frames: mealybug's ROM (WX =
-    LY, LCDC.5 pulsed low twice in mode 3) with DocBoy's tile data, on a CPU
-    CGB E with a DMG cart. Per line, dingbat matches SameBoy (CGB E) on all
-    but 18 of the 51 x 144 rows; on about 520 DocBoy alone draws other bytes
-    for a window tile cut short by LCDC.5 k <= 4 dots after the WX match (low
-    plane fetched, high plane the tile index; k = 0: two tiles of colour 0),
-    on 87 SameBoy alone differs. mealybug upstream ships CGB C and CGB D
-    references for `m3_lcdc_win_en_change_multiple_wx` (the
-    game-boy-test-roms bundle carries only the DMG ones) and none for CGB E;
-    its README calls its references "screenshots from my Game Boy emulator
-    (which I believe to be correct)", with blurry photos of real devices
-    alongside. Not known: which bytes a CGB E fetches for the cut tile;
-    checking dingbat against the CGB C/D references is the next step. One
-    more difference, which no test scores: on a k = 0 line (the match on the
-    fall's own dot, `ly10`/`ly38` timing: no charge, background grid) DocBoy
-    and SameBoy both still count a window line (the `_wly` frame's window
-    rows run one ahead of dingbat's from line 10), and SameBoy draws one
-    window tile at the next background tile; dingbat does not take the match
-    at all. DocBoy disables two signed-addressing variants itself ("glitch
-    is different").
+  * The `visual/m3_lcdc_win_en_change_multiple_wx_*` frames: mealybug's ROM
+    (WX = LY, LCDC.5 pulsed low twice in mode 3: written on dots 93 and 121,
+    back on 101 and 129) with DocBoy's tile data, on a CPU CGB E with a DMG
+    cart. Hardware: mealybug's `photos/CPU CGB C` and `photos/CPU CGB D`
+    `m3_lcdc_win_en_change_multiple_wx.jpg` (its `expected/` CGB C/D PNGs are
+    placeholder text, the bundle carries neither). Both photos show DocBoy's
+    picture of the mealybug ROM, not dingbat's old one: lines 6 and 8 keep one
+    window pixel, lines 5, 7 and 33, 35 a colour-0 run after the window, line
+    10 colour 0 at x = 3..7, line 9 nine window pixels. Closed 4 with
+    `CGB_WIN_CUT_PLANES` (docs/dev/gb-derivations.md, "The bytes a cut CGB
+    window fetch leaves"): `bg_0000_win_{0000,00ff,ff00,ffff}`; it is also
+    what DocBoy draws on lines 4..9 and 32..37 of all 70 frames, the
+    unscored `nops5`/`nops7` ones included.
+  * Left (47; scored again 2026-11-16): every one differs on line 10 and/or
+    38 only (plus one line per object variant, the same event moved by the
+    object), the lines whose WX match lands on the write's own dot (k = 0).
+    dingbat refuses that match; DocBoy (and SameBoy, which also counts the
+    window line: the `_wly` frame's window rows run one ahead of dingbat's
+    from line 10, and `nops6_sprites_x16` line 47) takes it. What DocBoy
+    draws, decoded from the `ly10_*` and `ly38_lx31_extra_pixel_{a..f}` tile
+    variants:
+    * Line 10 (match at x = 3, mid background tile; tile 1's map byte m read
+      on dot 92): x = 3..7 are pixels 0..4 of a tile whose high plane is m
+      and whose low plane is the byte at $8000 + 16 m + 2 row (`ly10_first_
+      tile_*`: m = $AA, all VRAM $FF, gives `31313`; with m = 0 every variant
+      draws colour 0, so it is not the background's signed $9000 tile).
+      x = 8..15 are tile 1 as fetched; x = 16..23 take tile 1's high plane as
+      their index (`ly10_second_tile_source*`: tile $FF row 2 = $AA shows
+      `30303030`).
+    * Line 38 (match at x = 31, the background tile 4 already fetched): x =
+      32..39 are tile 4 with its own low plane and its index as the high
+      plane, x = 40..47 tile 4 again in full (column 5 is skipped), and
+      x = 31 shows tile 4's pixel 0 (`_b`, `_e`, `_f`).
+    A k = 0 start revoked at once with nothing read (the restart rule above
+    at `fetch_counter` 0) gives line 38's x = 32..39 but not x = 31, 40..47,
+    nor line 10's low plane from the $8000 address. Not modelled: no photo
+    resolves these pixels (the mealybug tile data hide them but for line
+    10's colour 0 at x = 3..7, which the photos show), and the line-10 low
+    plane has no mechanism yet. DocBoy disables two signed-addressing
+    variants itself ("glitch is different").
   * Left (63 here, 10 in I12; scored again 2026-11-16),
     `change_{bg,win}_tile_data_glitch_*` (63 compat + 10 CGB): LCDC.4 flipped
     across a bitplane read with objects and windows at other phases. Per line,
@@ -1860,7 +1879,7 @@ hardware question. Families:
   OPRI itself (`$FF6C` bit 0, Pan Docs "FF6C — OPRI") is a register in CGB
   mode, $FF in compatibility mode (`cgb/ppu/opri_write_read`,
   `boot_regs_cgb`; the AGS read $FE at hand-off).
-* **I12. CGB pictures (36 left of 46), and CGB PPU timing.**
+* **I12. CGB pictures (35 left of 46), and CGB PPU timing.**
   * Left (13; scored again 2026-11-16): `ppu/visual/turn_off_y*`. The ROMs'
     own comment: "Depending on the timing, the next lines are either kept,
     rendered, or cleared": the references keep rows drawn before LCDC.7 went
@@ -1940,21 +1959,12 @@ hardware question. Families:
     already pushed on the re-trigger's dot on the startup fetch alone and
     leaves the 111 push-dot lines of the six tests as they are. SameBoy differs from DocBoy (and now
     dingbat) on 6 to 13 other lines of five of the tests.
-  * Left (1; scored again 2026-11-16): `window_bg_reprise_wx25`, the window
-    disabled on the WY line, the background resuming where the fetcher
-    stood. On line 12 DocBoy draws x = 26..33 in colour 0 where dingbat draws
-    BG tile $A3: the BG fetch for column 3 read its map byte at dot 108, the
-    window starts at dot 110 and LCDC.5 aborts it at dot 115. The 17 CGB
-    siblings (`_wx8`..`_wx24`) pass. Not known: whether a CGB keeps the
-    aborted fetch's tile there; no spec text says. Traced 2026-11-17 against
-    `_wx24`: there the window starts on dot 107, before column 3's map read,
-    and column 3 follows the window tile in both pictures; on `_wx25` the
-    window starts on dot 108, the dot column 3's map byte ($A3) is read, the
-    fall on 113 revokes it after its low plane (CGB_WIN_REVOKE_KEEP), and
-    DocBoy then draws column 3's eight pixels as colour 0 and resumes at
-    column 4, where the DMG twin (passing, WIN_ABORT_PUSH_POS) draws column
-    3. The distinguishing event is a map read on the window start's own dot,
-    reached by this one row; no hardware or second reference covers it.
+  * Closed (2026-11-17): `window_bg_reprise_wx25`, the window disabled on the
+    WY line. On line 12 DocBoy draws x = 26..33 in colour 0 where dingbat drew
+    BG tile $A3: the window starts at dot 108 and LCDC.5, written on 113
+    (k = 5), reaches the fetcher on the idle step after the restart's
+    high-plane read ($00), so the ending map read takes $00 as its index
+    (`CGB_WIN_CUT_PLANES`, the I3 `m3_lcdc_win_en_change_multiple_wx` rule).
   * Closed, `double_speed/ppu/double_speed_ppu_vram_write_block_
     timing_ly0_{1,3}_out_of_4` (2): VRAM writes one double-speed M-cycle
     apart across the LCD-on line's mode 3. The CGB write lock there closes
