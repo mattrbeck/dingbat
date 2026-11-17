@@ -130,10 +130,12 @@ proc wasm_set_gba_bios_mode(mode: cint) {.exportc.} =
 proc wasm_set_gba_run_bios(on: cint) {.exportc.} =
   optGbaRunBios = on != 0
 
-proc make_gba(rom_path: string): GBA =
+var rbBiosHle = false  ## the link session's cores on HLE, no image (rollback_set_bios_hle)
+
+proc make_gba(rom_path: string; force_hle = false): GBA =
   ## The real-BIOS modes and the boot intro fall back to HLE when no bios.bin
   ## exists.
-  let have_bios = fileExists("bios.bin")
+  let have_bios = fileExists("bios.bin") and not force_hle
   let bios = if have_bios: "bios.bin" else: ""
   let mode = if have_bios: optGbaBiosMode else: 0
   result = new_gba(bios, rom_path,
@@ -1570,7 +1572,7 @@ proc rollback_init(rom1_path, rom2_path: cstring; localPlayer: cint;
   var cores: seq[GBA] = @[]
   for path in [$rom1_path, $rom2_path]:
     if not fileExists(path): return 0
-    let core = make_gba(path)
+    let core = make_gba(path, rbBiosHle)
     core.post_init()
     core.enable_deterministic_rtc(int64(epoch))
     cores.add(core)
@@ -1692,6 +1694,19 @@ proc rollback_fingerprint_live(outRaw: pointer): cint {.exportc.} =
   outp[0] = uint32(h shr 32)
   outp[1] = uint32(h and 0xFFFFFFFF'u64)
   1
+
+proc rollback_bios_identity(outRaw: pointer) {.exportc.} =
+  ## This build's GBA BIOS for the HELLO (linksync.bios_identity) into
+  ## outp[0..1] = mode, image hash.
+  let outp = cast[ptr UncheckedArray[uint32]](outRaw)
+  let id = bios_identity("bios.bin", int(optGbaBiosMode))
+  outp[0] = uint32(id.mode)
+  outp[1] = id.hash
+
+proc rollback_set_bios_hle(on: cint) {.exportc.} =
+  ## The next rollback_init's GBA cores on HLE without an image: the friend's
+  ## BIOS differs (linksync.bios_force_hle).
+  rbBiosHle = on != 0
 
 proc core_id(outRaw: pointer) {.exportc.} =
   ## linksync.CORE_ID into outp[0..1] (high, low): sent in the rollback HELLO.

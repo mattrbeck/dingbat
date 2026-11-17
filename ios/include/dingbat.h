@@ -429,6 +429,12 @@ int dingbat_rollback_dump_packed(int player);
 int dingbat_rollback_sync_poll(uint32_t out[3]);
 /* This build's emulation-core id {high, low}, sent in the rollback HELLO. */
 void dingbat_core_id(uint32_t out[2]);
+/* The GBA BIOS a link session's cores run, for the HELLO: out[0] mode,
+   out[1] the image's hash (0 none). */
+void dingbat_rollback_bios_identity(uint32_t out[2]);
+/* The next dingbat_rollback_init's GBA cores on HLE without an image (the
+   friend's BIOS differs). */
+void dingbat_rollback_set_bios_hle(int on);
 
 /* Local 2P: two cores of one ROM on the cable. Player 1 on rom0 (the
  * game's own file: its save, its sound), player 2 on rom1 (its own .sav,

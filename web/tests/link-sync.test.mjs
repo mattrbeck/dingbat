@@ -354,3 +354,86 @@ test("the side that restarts first waits for the friend's restart before it play
     `both play on after the re-sync: ${before} -> ${after}`);
   assert.equal(a.rb("rb.syncMismatches"), 1, "and stay in step");
 });
+
+test("short, stray and malformed sync messages are ignored; an oversized state ends the session", async () => {
+  const [a, b] = await pair();
+  run(a, b, 300);
+  const before = [a.rb("rb.syncChecks"), a.rb("rb.syncMismatches")];
+  // Too short for their kind, a chunk with no begin, a ready for no re-sync.
+  for (const m of [[16], [16, 0, 0, 0], [17, 1], [18, 1, 0], [19, 1, 2, 3], [20], [20, 1]]) a.recv(m);
+  run(a, b, 300);
+  assert.equal(a.rb("rb.syncMismatches"), before[1], "nothing taken for a mismatch");
+  assert.ok(a.rb("rb.syncChecks") > before[0], "and the checks go on");
+  assert.equal(a.rb("rb.resync"), null);
+  // A re-sync whose state claims 4 GB: the session ends, nothing allocated.
+  a.app.runIn("rbResyncBegin(net.rb); 0"); // as a mismatch would
+  assert.ok(a.rb("rb.resync") !== null, "A is in a re-sync");
+  a.recv([18, a.rb("rb.resync.gen"), 0xff, 0xff, 0xff, 0xff]);
+  assert.equal(a.app.runIn("net && !net.ending ? 1 : 0"), 0, "the session is over");
+  assert.match(a.app.toasts.join("\n") + a.app.runIn("String(document.getElementById('net-status')?.textContent ?? '')"),
+    /Couldn't re-sync/);
+});
+
+test("the generation counter wraps after 255 re-syncs", async () => {
+  const [a, b] = await pair();
+  for (const s of [a, b]) s.app.runIn("net.rb.resyncGen = 255; 0");
+  run(a, b, 200);
+  b.eng.poke = b.eng.head;
+  run(a, b, 400);
+  assert.equal(a.rb("rb.resyncs"), 1);
+  assert.equal(b.rb("rb.resyncs"), 1);
+  assert.equal(a.rb("rb.resyncGen"), 0, "255 + 1 is 0 on the wire and here");
+  const checks = a.rb("rb.syncChecks");
+  run(a, b, 400);
+  assert.ok(a.rb("rb.syncChecks") > checks, "generation 0's fingerprints are compared");
+  assert.equal(a.rb("rb.syncMismatches"), 1, "and agree");
+});
+
+test("a dropped link resumed after a re-sync: the input logs are the new session's", async () => {
+  const [a, b] = await pair();
+  run(a, b, 200);
+  b.eng.poke = b.eng.head;
+  run(a, b, 400);
+  assert.equal(a.rb("rb.resyncs"), 1);
+  run(a, b, 100);
+  // The connection drops with inputs in flight both ways; both redial and
+  // each tells the other the last input it has (rsAdopt's RESUME).
+  a.wire.q = [[], []];
+  for (const s of [a, b]) {
+    s.app.runIn(`net.rb.resume = { sid: 77, code: "RSABCDEFGHJKLMNP" }; net.rb.resumeOk = true;
+      net.rb.reconnecting = true; net.rb.rsDcOpen = true; 0`);
+  }
+  const resume = (s) => {
+    const m = new Uint8Array(10);
+    const v = new DataView(m.buffer);
+    v.setUint8(0, 13); v.setUint32(1, 77); v.setInt32(5, s.rb("rb.lastRx")); v.setUint8(9, 0);
+    return [...m];
+  };
+  const [ra, rb] = [resume(a), resume(b)];
+  assert.ok(a.rb("rb.lastRx") < b.eng.head - 1 && b.rb("rb.lastRx") < a.eng.head - 1, "each missed some");
+  b.recv(ra);
+  a.recv(rb);
+  assert.equal(a.rb("rb.reconnecting"), false, "A resumed");
+  assert.equal(b.rb("rb.reconnecting"), false, "B resumed");
+  assert.equal(a.app.runIn("net && !net.ending ? 1 : 0"), 1, "no 'gap older than the log'");
+  // The resent inputs (now on the wire) are the new session's frames.
+  const checks = a.rb("rb.syncChecks");
+  run(a, b, 500);
+  assert.ok(a.rb("rb.syncChecks") > checks + 2, "checks go on after the resume");
+  assert.equal(a.rb("rb.syncMismatches"), 1, "no new difference");
+  assert.equal(b.rb("rb.syncMismatches"), 1);
+  assert.equal(a.rb("rb.resyncs"), 1, "no second re-sync");
+});
+
+test("the GBA BIOS: both on HLE when the two HELLOs name different ones, each its own otherwise", async () => {
+  const [a] = await pair();
+  const hle = (own, peer) => a.app.runIn(`rbBiosHle({ ownBios: ${JSON.stringify(own)}, peerBios: ${JSON.stringify(peer)} })`);
+  const none = { mode: 0, hash: 0 }, real = { mode: 1, hash: 0xb105 };
+  assert.equal(hle(none, none), false, "both HLE, no image");
+  assert.equal(hle(real, real), false, "the same real BIOS");
+  assert.equal(hle(real, none), true, "one real, one HLE");
+  assert.equal(hle(none, real), true, "and from the other side");
+  assert.equal(hle(real, { mode: 2, hash: 0xb105 }), true, "same image, other mode");
+  assert.equal(hle(real, { mode: 1, hash: 0xb106 }), true, "another image");
+  assert.equal(hle(real, null), false, "an older friend names none: each its own");
+});

@@ -81,3 +81,21 @@ const BUILD_TIME* = block:
   var v = 0'u32
   if t.len > 0 and t.allCharsInSet(Digits): v = uint32(parseBiggestInt(t))
   v
+
+proc bios_identity*(path: string; mode: int): tuple[mode: uint8; hash: uint32] =
+  ## The GBA BIOS a link session's cores run, as the HELLO says it: mode (0
+  ## HLE, 1 the real BIOS, 2 HLE after it) and the image's FNV-1a (0: none,
+  ## and then HLE, as the cores fall back to it). Two sides that differ run
+  ## different code on every BIOS call and drift apart at once.
+  if path.len == 0 or not fileExists(path): return (0'u8, 0'u32)
+  var h = 0x811C9DC5'u32
+  for c in readFile(path):
+    h = (h xor uint32(ord(c))) * 0x01000193'u32
+  (uint8(clamp(mode, 0, 2)), h)
+
+proc bios_force_hle*(mine, theirs: tuple[mode: uint8; hash: uint32]): bool =
+  ## Both sides' session cores on HLE without an image unless both run the
+  ## same mode on the same image: the same answer on both sides. Without the
+  ## image too: HLE hands some calls to an image when there is one (Golden
+  ## Sun with and without one differ from the first frame).
+  mine != theirs

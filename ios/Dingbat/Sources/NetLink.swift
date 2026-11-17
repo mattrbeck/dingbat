@@ -154,6 +154,9 @@ final class NetLink: ObservableObject {
         var peerSync = false
         var peerCore: (UInt32, UInt32)?
         var peerBuilt: UInt32 = 0
+        /// The GBA BIOS our HELLO named and the friend's (nil: an older build).
+        var ownBios: (mode: UInt32, hash: UInt32) = (0, 0)
+        var peerBios: (mode: UInt32, hash: UInt32)?
         var syncMine: [Int32: (UInt32, UInt32)] = [:]
         var syncTheirs: [Int32: (UInt32, UInt32)] = [:]
         var syncChecks = 0
@@ -263,9 +266,13 @@ final class NetLink: ObservableObject {
     /// ... and the build (web RB_HELLO_BUILD_LEN): [21] core id, [29] build
     /// time, [33] capabilities (bit 0: sync checks).
     private static let helloBuildLen = 34
+    /// ... and the GBA BIOS: [34] mode, [35] image hash (web RB_HELLO_BIOS_LEN).
+    private static let helloBiosLen = 39
     private static let chunk = 16384
     private static let highWater = 4 * 1024 * 1024
     private static let romMax = 48 * 1024 * 1024
+    /// ... and on a state's (a GBA or GB one is under 0.5 MB).
+    private static let stateMax = 8 * 1024 * 1024
 
     // MARK: the sheet
 
@@ -818,6 +825,11 @@ final class NetLink: ObservableObject {
         hello += Self.be32(rb.romId.len) + Self.be32(rb.romId.crc) + Self.be32(rb.romId.fnv)
         hello += Self.be32(own.hi) + Self.be32(own.lo) + Self.be32(own.built)
         hello.append(1)  // checks sync
+        var bios: [UInt32] = [0, 0]
+        bios.withUnsafeMutableBufferPointer { dingbat_rollback_bios_identity($0.baseAddress) }
+        rb.ownBios = (bios[0], bios[1])
+        hello.append(UInt8(truncatingIfNeeded: bios[0]))
+        hello += Self.be32(bios[1])
         send(hello, s)
         send([Self.stateBegin] + Self.be32(UInt32(state.count)), s)
         var off = 0
@@ -934,6 +946,9 @@ final class NetLink: ObservableObject {
                 rb.peerBuilt = Self.read32(data, 29)
                 rb.peerSync = data[data.startIndex + 33] & 1 == 1
             }
+            if data.count >= Self.helloBiosLen {
+                rb.peerBios = (UInt32(data[data.startIndex + 34]), Self.read32(data, 35))
+            }
             if answers ? rb.remoteRomId != rb.romId : rb.remoteRomHash != rb.romHash {
                 rb.needRom = true
                 showTransfer(rb)
@@ -942,6 +957,10 @@ final class NetLink: ObservableObject {
         case Self.stateBegin:
             guard data.count >= 5 else { return }
             rb.stateLen = Int(Self.read32(data, 1))
+            guard rb.stateLen > 0 && rb.stateLen <= Self.stateMax else {
+                fail("Your friend's game state looks invalid — try again")
+                return
+            }
             rb.stateBuf = Data()
             rb.stateBuf.reserveCapacity(rb.stateLen)
         case Self.stateChunk:
@@ -1025,6 +1044,7 @@ final class NetLink: ObservableObject {
         rb.rom0Path = rom0
         rb.rom1Path = rom1
         GameSession.shared.linkWillStart()
+        dingbat_rollback_set_bios_hle(Self.biosHle(rb) ? 1 : 0)
         guard dingbat_rollback_init(rom0, rom1, Int32(rb.localPlayer), Double(rb.epoch)) == 1 else {
             let state = rb.localState
             fail("Couldn't start the link session")
@@ -1101,6 +1121,14 @@ final class NetLink: ObservableObject {
         id.withUnsafeMutableBufferPointer { dingbat_core_id($0.baseAddress) }
         let built = AppStatus.buildTime.map { UInt32(max(0, $0.timeIntervalSince1970)) } ?? 0
         return (id[0], id[1], built)
+    }
+
+    /// The friend's GBA BIOS differs: both sides' session cores run HLE
+    /// without an image (the same answer on both). An older friend names
+    /// none: each runs its own, as before.
+    private static func biosHle(_ rb: RB) -> Bool {
+        guard let t = rb.peerBios else { return false }
+        return t.mode != rb.ownBios.mode || t.hash != rb.ownBios.hash
     }
 
     /// The session the engine is in: a re-sync's once this side restarted.
@@ -1198,6 +1226,7 @@ final class NetLink: ObservableObject {
     /// The session again from the two states, as tryInit starts it (the
     /// ROMs are still where it put them); frame counts start over at 0.
     private func resyncApply(_ rb: RB, _ r: Resync, _ s: Session) {
+        dingbat_rollback_set_bios_hle(Self.biosHle(rb) ? 1 : 0)
         guard let mine = r.mine,
               dingbat_rollback_init(rb.rom0Path, rb.rom1Path, Int32(rb.localPlayer), Double(rb.epoch)) == 1 else {
             peerGone("Couldn't re-sync with your friend")
@@ -1258,6 +1287,10 @@ final class NetLink: ObservableObject {
         case Self.resyncBeginKind:
             guard let r = rb.resync, data.count >= 6, data[b + 1] == r.gen else { return }
             r.inLen = Int(Self.read32(data, 2))
+            guard r.inLen > 0 && r.inLen <= Self.stateMax else {
+                peerGone("Couldn't re-sync with your friend")
+                return
+            }
             r.inBuf = Data()
             r.inBuf.reserveCapacity(r.inLen)
         case Self.resyncChunkKind:

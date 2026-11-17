@@ -62,7 +62,7 @@ const until = async (cond, what, ms) => {
   }
 };
 
-const page_player = async (game, drift = 0) => {
+const page_player = async (game, drift = 0, bios = null) => {
   const ctx = await browser.newContext({ viewport: { width: 1000, height: 800 } });
   const page = await ctx.newPage();
   await page.goto(web.url + "?signal=ws://127.0.0.1:" + SIGNAL_PORT);
@@ -101,6 +101,15 @@ const page_player = async (game, drift = 0) => {
       return tick(localButtons);
     };
   }, [STOP, drift]);
+  // A real GBA BIOS on this side only, the real-BIOS mode: the session's
+  // cores must still run what the friend's do (HLE, rbBiosHle).
+  if (bios) {
+    await page.evaluate(([b, fallback]) => {
+      writeToFS("bios.bin", new Uint8Array(b));
+      Module._wasm_set_gba_bios_mode(1);
+      if (!fallback) Module._rollback_set_bios_hle = () => {}; // the control: no agreement
+    }, [[...bios.bytes], bios.fallback]);
+  }
   return { ctx, page };
 };
 
@@ -139,7 +148,7 @@ const CHECKS = STOP / 120;
 // `opts.peerArgs` go to the peer; `opts.pageDrift` sets the page's copy back.
 const link = async (page_game, peer_rom, code, peer_first, opts = {}) => {
   await setup();
-  const pl = await page_player(page_game, opts.pageDrift ?? 0);
+  const pl = await page_player(page_game, opts.pageDrift ?? 0, opts.pageBios ?? null);
   let peer = null;
   const extra = opts.peerArgs ?? [];
   if (peer_first) { peer = run_peer(peer_rom, code, extra); await sleep(1500); }
@@ -147,6 +156,15 @@ const link = async (page_game, peer_rom, code, peer_first, opts = {}) => {
   await pl.page.locator("#net-code-input").fill(code);
   await pl.page.locator("#net-join-go").click();
   if (!peer_first) { await sleep(1500); peer = run_peer(peer_rom, code, extra); }
+  if (opts.until) {
+    // Only until the page's sync checks say what was wanted, then end.
+    await until(async () => (await pl.page.evaluate(() => !!net?.started)) && opts.until(await page_sync(pl.page)),
+      async () => "page sync " + JSON.stringify(await page_sync(pl.page).catch(() => null)), 60000);
+    const sync = { page: await page_sync(pl.page), hle: await pl.page.evaluate(() => rbBiosHle(net.rb)) };
+    peer.p.kill("SIGKILL");
+    await pl.ctx.close();
+    return { sync };
+  }
   const done = () => pl.page.evaluate((stop) => {
     if (!net?.started || Module._rollback_head() < stop) return false;
     if (Module._rollback_confirmed() < stop - 1) Module._rollback_feed(stop + 60, 0);
@@ -163,7 +181,8 @@ const link = async (page_game, peer_rom, code, peer_first, opts = {}) => {
   await until(async () => (await page_sync(pl.page)).checks >= CHECKS && peer_sync(peer.log()).checks >= CHECKS,
     async () => "every sync check: page " + JSON.stringify(await page_sync(pl.page)) +
       " | peer " + JSON.stringify(peer_sync(peer.log())), 20000);
-  const sync = { page: await page_sync(pl.page), peer: peer_sync(peer.log()) };
+  const sync = { page: await page_sync(pl.page), peer: peer_sync(peer.log()),
+                 hle: await pl.page.evaluate(() => rbBiosHle(net.rb)) };
   // The page's Disconnect (two taps): the peer hears the BYE and exits.
   await pl.page.evaluate(() => document.getElementById("rb-disconnect").click());
   await pl.page.evaluate(() => document.getElementById("rb-disconnect").click());
@@ -250,4 +269,28 @@ test("browser copy set back, native hosts: caught, re-synced, both agree after",
   const r = await link(game, path, "NATT" + process.pid, true, { pageDrift: 300 });
   assert.equal(r.host, false, "the peer hosts");
   resynced(r);
+});
+
+// A player with the real GBA BIOS (real-BIOS mode) and one without: before
+// the HELLO named it, the two copies of each game ran different code on
+// every BIOS call. DINGBAT_GBA_BIOS=a gba_bios.bin, DINGBAT_BIOS_GAME=a game
+// whose run differs with an image and without (Golden Sun does from the
+// first frame; attachtest.gba doesn't); neither is in the repo.
+const biosPath = process.env.DINGBAT_GBA_BIOS, biosGame = process.env.DINGBAT_BIOS_GAME;
+const biosSkip = skip || ((!biosPath || !biosGame) && "DINGBAT_GBA_BIOS / DINGBAT_BIOS_GAME not set");
+const biosRom = () => ({ name: "biosgame.gba", bytes: readFileSync(biosGame) });
+test("a real BIOS on the browser, none on the native side: both run HLE and stay in step", { skip: biosSkip, timeout: 240000 }, async () => {
+  const bios = { bytes: readFileSync(biosPath), fallback: true };
+  const r = await link(biosRom(), biosGame, "NATBIOS" + process.pid, false, { pageBios: bios });
+  assert.equal(r.sync.hle, true, "the page saw the BIOSes differ");
+  assert.equal(r.page_dump, r.peer_dump, "page and native peer agree");
+  in_step(r);
+});
+
+test("control: the same pair without the agreement drifts at once", { skip: biosSkip, timeout: 240000 }, async () => {
+  const bios = { bytes: readFileSync(biosPath), fallback: false };
+  const r = await link(biosRom(), biosGame, "NATBIOC" + process.pid, false,
+    { pageBios: bios, until: (st) => st.mismatches >= 1 });
+  console.log("    control:", JSON.stringify(r.sync));
+  assert.ok(r.sync.page.mismatches >= 1, "the real BIOS and HLE drift apart");
 });

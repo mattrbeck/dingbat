@@ -133,6 +133,8 @@ interface EmscriptenModule {
   _rollback_sync_poll?(outRaw: number): number;
   _rollback_set_sync_every?(frames: number): void;
   _rollback_fingerprint_live?(outRaw: number): number;
+  _rollback_bios_identity?(outRaw: number): void;
+  _rollback_set_bios_hle?(on: number): void;
   _core_id?(outRaw: number): void;
   _rollback_transfers?(): number;
   _load_cheats?(text: number): number;

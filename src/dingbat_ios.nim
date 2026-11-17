@@ -65,6 +65,7 @@ var stateGb:   GB      = nil
 var stateNds:  NDS     = nil
 var romPath:   string  = ""
 var biosPath:  string  = ""
+var rbBiosHle = false  ## the next link session's GBA cores on HLE, no image
 var statePrinter: GbPrinter = nil      # always attached on a GB core
 var rewindHistory: Rewind = nil
 
@@ -2272,7 +2273,7 @@ proc dingbat_rollback_init(rom0, rom1: cstring; local_player: cint;
       rb_mute_replays(cores[rbLocal])
       rbGb = gbrb.new_gb_rollback_session(new_gb_link(cores), rbLocal, 12)
     else:
-      let haveBios = biosPath.len > 0 and fileExists(biosPath)
+      let haveBios = biosPath.len > 0 and fileExists(biosPath) and not rbBiosHle
       let mode = if haveBios: optGbaBiosMode else: 0
       var cores: seq[GBA] = @[]
       for path in rbRomPaths:
@@ -2440,6 +2441,17 @@ proc dingbat_rollback_sync_poll(outp: ptr UncheckedArray[uint32]): cint {.export
   outp[1] = uint32(h shr 32)
   outp[2] = uint32(h and 0xFFFFFFFF'u64)
   1
+
+proc dingbat_rollback_bios_identity(outp: ptr UncheckedArray[uint32]) {.exportc, cdecl.} =
+  ## This build's GBA BIOS for the HELLO (linksync.bios_identity): mode, hash.
+  let id = bios_identity(biosPath, int(optGbaBiosMode))
+  outp[0] = uint32(id.mode)
+  outp[1] = id.hash
+
+proc dingbat_rollback_set_bios_hle(on: cint) {.exportc, cdecl.} =
+  ## The next dingbat_rollback_init's GBA cores on HLE without an image: the
+  ## friend's BIOS differs (linksync.bios_force_hle).
+  rbBiosHle = on != 0
 
 proc dingbat_core_id(outp: ptr UncheckedArray[uint32]) {.exportc, cdecl.} =
   ## linksync.CORE_ID (high, low): sent in the rollback HELLO.

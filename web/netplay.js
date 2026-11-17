@@ -1178,11 +1178,17 @@ const RB_HELLO_LEN = 21; // with the whole-ROM identity
 // ... and the build: [21] core id u64, [29] build time u32 (s, 0 = unknown),
 // [33] capabilities (bit 0: sync checks). Older builds read the first 21.
 const RB_HELLO_BUILD_LEN = 34;
+// ... and the GBA BIOS the cores run: [34] mode (0 HLE, 1 real, 2 HLE after
+// it), [35] the image's hash u32 (0 none). Two that differ both run HLE
+// without one (rbBiosHle): every BIOS call would otherwise drift them apart.
+const RB_HELLO_BIOS_LEN = 39;
 const RB_CHUNK = 16384; // DataChannel-safe chunk size for state + ROM frames
 // Send-buffer high water while streaming a ROM; well under Chrome's ~16 MB
 // cap, past which send() throws and the dropped chunk corrupts the ROM.
 const RB_SEND_HIGH_WATER = 4 * 1024 * 1024;
 const RB_ROM_MAX = 48 * 1024 * 1024; // sanity cap on an announced ROM length
+// ... and on a state's (a GBA or GB one is under 0.5 MB)
+const RB_STATE_MAX = 8 * 1024 * 1024;
 // FS extension of the session's ROMs; rollback_init dispatches GB/GBA on it.
 let rbExt = ".gba";
 
@@ -1504,6 +1510,8 @@ const rbConnect = async () => {
     peerSync: false,    // the friend's HELLO says it checks
     peerCore: null,     // the friend's core id [hi, lo]
     peerBuilt: 0,       // the friend's build time (s)
+    ownBios: null,      // the GBA BIOS our HELLO named (rbOwnBios)
+    peerBios: null,     // the friend's, from its HELLO
     syncMine: new Map(),   // frame -> our fingerprint [hi, lo], until the friend's
     syncTheirs: new Map(), // frame -> the friend's
     syncChecks: 0,
@@ -1516,7 +1524,7 @@ const rbConnect = async () => {
     resyncWarned: false,
   };
   netSetStatus("Syncing…");
-  const h = new ArrayBuffer(RB_HELLO_BUILD_LEN);
+  const h = new ArrayBuffer(RB_HELLO_BIOS_LEN);
   const hv = new DataView(h);
   hv.setUint8(0, RB_HELLO);
   hv.setUint32(1, net.rb.epoch);
@@ -1529,6 +1537,9 @@ const rbConnect = async () => {
   hv.setUint32(25, own.core[1]);
   hv.setUint32(29, own.built);
   hv.setUint8(33, rbCanSync() ? 1 : 0);
+  net.rb.ownBios = rbOwnBios();
+  hv.setUint8(34, net.rb.ownBios.mode);
+  hv.setUint32(35, net.rb.ownBios.hash);
   rbSend(h);
   rbSendState(localState);
 };
@@ -1614,6 +1625,7 @@ const rbMessage = (data) => {
       rb.peerBuilt = v.getUint32(29);
       rb.peerSync = (v.getUint8(33) & 1) === 1 && rbCanSync();
     }
+    if (data.byteLength >= RB_HELLO_BIOS_LEN) rb.peerBios = { mode: v.getUint8(34), hash: v.getUint32(35) };
     if (answers ? !rbSameRom(rb.remoteRomId, rb.romId) : rb.remoteRomHash !== rb.romHash) {
       rb.needRom = true;
       rbShowXferProgress();
@@ -1621,7 +1633,12 @@ const rbMessage = (data) => {
       else rbSendOurRom();
     }
   } else if (kind === RB_STATE_BEGIN) {
-    rb.stateBuf = new Uint8Array(v.getUint32(1));
+    const len = v.getUint32(1);
+    if (len <= 0 || len > RB_STATE_MAX) {
+      netFail("Your friend's game state looks invalid — try again");
+      return;
+    }
+    rb.stateBuf = new Uint8Array(len);
     rb.stateGot = 0;
   } else if (kind === RB_STATE_CHUNK) {
     if (!rb.stateBuf) return;
@@ -1682,6 +1699,7 @@ const rbTryInit = () => {
   const rom0 = "rbrom0" + rbExt, rom1 = "rbrom1" + rbExt;
   writeToFS(rom0, hostRom);
   writeToFS(rom1, guestRom);
+  Module._rollback_set_bios_hle?.(rbBiosHle(rb) ? 1 : 0);
   const ok = Module.ccall(
     "rollback_init",
     "number",
@@ -1768,6 +1786,22 @@ const rbOwnBuild = () => {
   return { core, built: Number.isNaN(t) ? 0 : Math.floor(t / 1000) >>> 0 };
 };
 const rbCanSync = () => !!(Module._rollback_sync_poll && Module._rollback_dump_packed);
+
+// The GBA BIOS this build's session cores run (rollback_bios_identity).
+const rbOwnBios = () => {
+  const p = rbScratch();
+  if (!p || !Module._rollback_bios_identity) return { mode: 0, hash: 0 };
+  Module._rollback_bios_identity(p);
+  const a = new Uint32Array(Module.memory.buffer, p, 2);
+  return { mode: a[0], hash: a[1] };
+};
+// The friend's differs: both sides run HLE without an image (the same
+// answer on both, linksync.bios_force_hle). An older friend says nothing:
+// each runs its own, as before.
+const rbBiosHle = (rb) => {
+  const m = rb.ownBios, t = rb.peerBios;
+  return !!(m && t && (m.mode !== t.mode || m.hash !== t.hash));
+};
 
 // The session the engine is in: a re-sync's once this side has restarted
 // (its fingerprints and inputs are that session's from then on).
@@ -1878,6 +1912,7 @@ const rbResyncStep = () => {
 // are still in MEMFS, and every frame count starts over at 0 on both sides.
 const rbResyncApply = (rb, rs) => {
   const rom0 = "rbrom0" + rbExt, rom1 = "rbrom1" + rbExt;
+  Module._rollback_set_bios_hle?.(rbBiosHle(rb) ? 1 : 0);
   const ok = Module.ccall("rollback_init", "number", ["string", "string", "number", "number"],
     [rom0, rom1, rb.localPlayer, rb.epoch]);
   const host = net.isHost ? rs.mine : rs.inBuf;
@@ -1933,6 +1968,10 @@ const rbSyncMessage = (rb, kind, v, data) => {
     const rs = rb.resync;
     if (!rs || data.byteLength < 6 || v.getUint8(1) !== rs.gen) return;
     rs.inLen = v.getUint32(2);
+    if (rs.inLen <= 0 || rs.inLen > RB_STATE_MAX) {
+      netPeerGone("Couldn't re-sync with your friend");
+      return;
+    }
     rs.inBuf = new Uint8Array(rs.inLen);
     rs.inGot = 0;
   } else if (kind === RB_RESYNC_CHUNK) {

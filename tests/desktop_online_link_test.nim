@@ -230,7 +230,12 @@ proc main() =
     echo "== sync checks, ", label, ": in step, then a copy set back and re-synced =="
     let a = make_side("s" & label, rom, tmp, sync_port)
     let b = make_side("t" & label, rom, tmp, sync_port)
+    if label == "GB":
+      # A names a real-BIOS setup, B none: both sessions on HLE (the same answer).
+      a.ol.hooks.bios = proc(): tuple[mode: uint8; hash: uint32] = (1'u8, 0xB105'u32)
     check pair(a, b, "SYNC" & label & $sync_port), label & " pair started"
+    check a.ol.session_bios_hle == (label == "GB") and b.ol.session_bios_hle == (label == "GB"),
+      (if label == "GB": "BIOSes differ: both on HLE" else: "BIOSes the same: each its own")
     check run_frames(a, b, 150), "to frame 150"
     let old = a.ol.debug_remote_state()
     check run_frames(a, b, 300), "to frame 300"

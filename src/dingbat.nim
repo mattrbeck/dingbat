@@ -9,6 +9,7 @@ import dingbat/common/atomicfile
 import dingbat/common/lcd_response
 import dingbat/common/input
 import dingbat/common/rewind
+import dingbat/common/linksync
 import dingbat/gba/gba
 import dingbat/gba/netlink
 import dingbat/gb/gb
@@ -2579,7 +2580,13 @@ proc init_online(signal_url: string) =
                 bios_path: boot.bios_path, run_bios: boot.run_bios,
                 use_hle: boot.use_hle, hle_after_bios: boot.hle_after_bios)
   h.make_gba = proc(rom: string): GBA =
-    let built = build_core(rom, options())
+    var opts = options()
+    if app.online.session_bios_hle:  # the friend's BIOS differs: both on HLE
+      opts.bios_path = ""
+      opts.use_hle = true
+      opts.run_bios = false
+      opts.hle_after_bios = false
+    let built = build_core(rom, opts)
     if built.gba == nil: return nil
     built.gba.mp2k_hle = app.cfg.mp2k_hle
     built.gba.apu.set_fifo_interp(app.cfg.fifo_interp)
@@ -2602,6 +2609,9 @@ proc init_online(signal_url: string) =
     app.online_moved_at = getTicks()
     link_auto_stop()
     link_cancel_setup()
+  h.bios = proc(): tuple[mode: uint8; hash: uint32] =
+    let o = options()
+    bios_identity(o.bios_path, if o.use_hle: 0 elif o.hle_after_bios: 2 else: 1)
   h.resynced = proc() =
     # A re-sync built fresh cores: the new local one plays on, at 2x if it was.
     online_session_cores_live()

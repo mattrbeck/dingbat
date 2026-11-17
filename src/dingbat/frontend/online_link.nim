@@ -21,7 +21,8 @@
 ##   20 resync-ready [gen u8]
 ## The hello then goes on: [21] core id u64, [29] build time u32, [33] bit 0
 ## "checks"; 16-20 go only to a friend whose hello says it checks (web
-## "Sync checks", docs/dev/multiplayer.md).
+## "Sync checks", docs/dev/multiplayer.md). Then [34] the GBA BIOS mode and
+## [35] its image's hash u32: two that differ both run HLE without one.
 ## Core 0 is the host's game, core 1 the guest's. When the ROMs differ (a
 ## cross-game trade) each side answers the friend's hello with have-rom (a
 ## copy is here) or need-rom, and a ROM goes over only on need-rom.
@@ -62,6 +63,7 @@ const
   SENT_LOG_MAX = 128  # the friend's gap is at most ~2x the prediction window
   HELLO_LEN = 21      # with the whole-ROM identity
   HELLO_BUILD_LEN = 34  # ... and the core id, build time, capabilities
+  HELLO_BIOS_LEN = 39   # ... and the GBA BIOS (linksync.bios_identity)
   RESYNC_MARGIN = 60  # frames ahead a re-sync proposes to stop
   RESYNC_WARN = 3     # re-syncs within RESYNC_WARN_MS before saying why
   RESYNC_WARN_MS = 10 * 60 * 1000
@@ -69,6 +71,7 @@ const
   CHUNK = 16384
   HIGH_WATER = 4 * 1024 * 1024
   ROM_MAX = 48 * 1024 * 1024
+  STATE_MAX = 8 * 1024 * 1024  # a GBA or GB state is under 0.5 MB
   LOOKUP_BUDGET_MS = 1500
   PREDICTION_WINDOW = 12
   SETUP_SILENCE_MS = 30000  # a friend mid-setup says something well within this
@@ -184,6 +187,9 @@ type
     peer_sync: bool      # the friend's hello says it checks
     peer_core: uint64
     peer_built: uint32
+    own_bios: tuple[mode: uint8; hash: uint32]
+    peer_bios: tuple[mode: uint8; hash: uint32]
+    has_peer_bios: bool
     sync_mine, sync_theirs: OrderedTable[uint32, uint64]
     sync_checks, sync_mismatches, resyncs: int
     resync: Resync
@@ -214,6 +220,7 @@ type
     started*: proc()                 ## the cores run: present the local one
     ended*: proc()                   ## the session is over: take back the solo core
     resynced*: proc()                ## a re-sync built new cores: present the local one
+    bios*: proc(): tuple[mode: uint8; hash: uint32]  ## linksync.bios_identity of the app's GBA BIOS (nil: none)
     remote_pause*: proc(on: bool)
     remote_speed*: proc(on: bool)
     paused*: proc(): bool
@@ -255,6 +262,7 @@ type
     rb_paths: array[2, string]
     mute: ReplayMute
     resume_give_up*: int
+    session_bios_hle*: bool  ## make_gba: build on HLE without an image (the friend's BIOS differs)
 
 # The network's objects by id, for every link in the process: the event
 # queue (rtc_shim.c) is one for all.
@@ -689,6 +697,7 @@ proc rb_connect(ol: OnlineLink; s: Session) =
   rb.rom_hash = fnv_head(rom)
   rb.rom_id = rom_identity(rom)
   rb.local_state = state
+  rb.own_bios = if ol.hooks.bios != nil: ol.hooks.bios() else: (0'u8, 0'u32)
   rb.last_msg_at = ol.now()
   s.rb = rb
   ol.watch_setup(s)
@@ -696,7 +705,8 @@ proc rb_connect(ol: OnlineLink; s: Session) =
   ol.send(s, msg(K_HELLO, be32(rb.epoch) & be32(rb.rom_hash) & be32(rb.rom_id.len) &
                           be32(rb.rom_id.crc) & be32(rb.rom_id.fnv) &
                           be32(uint32(CORE_ID shr 32)) & be32(uint32(CORE_ID and 0xFFFFFFFF'u64)) &
-                          be32(BUILD_TIME) & char(1)))
+                          be32(BUILD_TIME) & char(1) &
+                          char(rb.own_bios.mode) & be32(rb.own_bios.hash)))
   ol.send(s, msg(K_STATE_BEGIN, be32(uint32(state.len))))
   var off = 0
   while off < state.len:
@@ -907,6 +917,8 @@ proc try_init(ol: OnlineLink; s: Session) =
   let rom0 = if rb.local_player == 0: rb.game_path else: remote
   let rom1 = if rb.local_player == 0: remote else: rb.game_path
   ol.rb_paths = [rom0, rom1]
+  # An older friend names no BIOS: each runs its own, as before.
+  ol.session_bios_hle = rb.has_peer_bios and bios_force_hle(rb.own_bios, rb.peer_bios)
   if not ol.build_cores(rom0, rom1, rb.local_player, int64(rb.epoch)):
     ol.fail("Couldn't start the link session")
     return
@@ -1111,6 +1123,9 @@ proc rb_message(ol: OnlineLink; data: string; s: Session) =
       rb.peer_core = (uint64(read32(data, 21)) shl 32) or uint64(read32(data, 25))
       rb.peer_built = read32(data, 29)
       rb.peer_sync = (uint8(data[33]) and 1) == 1
+    if data.len >= HELLO_BIOS_LEN:
+      rb.peer_bios = (uint8(data[34]), read32(data, 35))
+      rb.has_peer_bios = true
     if (if answers: rb.remote_rom_id != rb.rom_id else: rb.remote_rom_hash != rb.rom_hash):
       rb.need_rom = true
       ol.show_transfer(rb)
@@ -1118,6 +1133,9 @@ proc rb_message(ol: OnlineLink; data: string; s: Session) =
   of K_STATE_BEGIN:
     if data.len < 5: return
     rb.state_len = int(read32(data, 1))
+    if rb.state_len <= 0 or rb.state_len > STATE_MAX:
+      ol.fail("Your friend's game state looks invalid - try again")
+      return
     rb.state_buf = newStringOfCap(rb.state_len)
   of K_STATE_CHUNK:
     rb.state_buf.add data[1 .. ^1]
@@ -1399,6 +1417,9 @@ proc sync_message(ol: OnlineLink; kind: uint8; data: string; rb: RB; s: Session)
     let rs = rb.resync
     if rs == nil or data.len < 6 or uint8(data[1]) != rs.gen: return
     rs.in_len = int(read32(data, 2))
+    if rs.in_len <= 0 or rs.in_len > STATE_MAX:
+      ol.peer_gone("Couldn't re-sync with your friend")
+      return
     rs.in_buf = newStringOfCap(rs.in_len)
     rs.has_in = true
   of K_RESYNC_CHUNK:
