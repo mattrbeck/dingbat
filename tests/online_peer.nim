@@ -5,7 +5,11 @@
 ## (the app's DINGBAT_LINK_STOP_AT logs its own).
 ##
 ##   online_peer ROM CODE [--signal=URL] [--frames=N] [--timeout=S] [--warmup=F]
-## (--warmup: frames the solo game runs before the snapshot)
+##               [--drift=F]
+## (--warmup: frames the solo game runs before the snapshot; --drift: at
+## frame F this side's copy of the friend's game goes back to its state 150
+## frames earlier, a divergence the sync checks must catch and re-sync.)
+## "ONLINE SYNC" lines give the sync checks so far.
 
 import std/[os, monotimes, parseopt, random, strutils, times]
 import dingbat/gba/gba
@@ -24,6 +28,7 @@ proc main() =
   var frames = 600
   var timeout = 90
   var warmup = 0
+  var drift = 0
   var p = initOptParser(commandLineParams())
   for kind, key, val in p.getopt():
     case kind
@@ -34,6 +39,7 @@ proc main() =
       of "frames": frames = parseInt(val)
       of "timeout": timeout = parseInt(val)
       of "warmup": warmup = parseInt(val)
+      of "drift": drift = parseInt(val)
       else: quit("unknown option --" & key, 2)
     of cmdEnd: discard
   if args.len != 2: quit("usage: online_peer ROM CODE [--signal URL] [--frames N]", 2)
@@ -74,6 +80,9 @@ proc main() =
   h.paused = proc(): bool = paused
   h.double = proc(): bool = double
   h.away = proc(): bool = false
+  h.resynced = proc() =
+    echo "peer: re-synced"
+    flushFile(stdout)
   let tmp = getTempDir() / ("dingbat-online-peer-" & $getCurrentProcessId())
   ol = new_online_link(h, tmp / "cache", "", signal)
   ol.connect(args[1])
@@ -82,18 +91,36 @@ proc main() =
   let t0 = now_ms()
   var next_frame = 0'i64
   var said = false
+  var old_image = ""
+  var drifted = drift <= 0
+  var last_sync = ""
   while now_ms() - t0 < timeout * 1000:
     ol.service()
     if not ol.active and not ol.started and ol.status_error:
       echo "peer: FAILED: ", ol.status
       quit(1)
     if ol.started:
+      let st = ol.sync_stats
+      let line = "ONLINE SYNC checks=" & $st.checks & " mismatches=" & $st.mismatches &
+                 " resyncs=" & $st.resyncs & " ms=" & $st.ms
+      if line != last_sync:
+        last_sync = line
+        echo line
+        flushFile(stdout)
+      if not drifted:
+        if old_image.len == 0 and ol.head >= drift - 150: old_image = ol.debug_remote_state()
+        # Only with every input in: a rollback before it would undo it.
+        if ol.head >= drift and ol.confirmed == ol.head - 1:
+          drifted = true
+          echo "peer: copy of the friend's game set back at frame ", ol.head, ": ",
+               ol.debug_load_remote(old_image)
       if ol.head < frames:
         let t = now_ms()
         if t >= next_frame:
           next_frame = max(next_frame + 16, t - 50)
           if rng.rand(15) == 0: bits = uint16(rng.rand(0x3ff))
-          if not paused: discard ol.tick(bits)
+          # At the drift frame, wait for the friend's inputs to catch up.
+          if not paused and (drifted or ol.head < drift): discard ol.tick(bits)
       elif not said and ol.confirmed >= frames - 1:
         said = true
         echo "ONLINE CHECKSUM ", frames, " ", toHex(ol.checksum())

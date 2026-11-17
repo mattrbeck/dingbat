@@ -602,7 +602,9 @@ jobs:
     # desktop's online link (tests/online_peer.nim, native) linked through a
     # local signaling server, each side running both players' cores: both
     # must hold byte-identical states, GBA either side hosting, GB, and a
-    # cross-game pair.
+    # cross-game pair; the sync checks' fingerprints agree across the two,
+    # and a copy set back on either side is caught and re-synced. Then two
+    # browsers' sync checks (e2e/link-sync.e2e.mjs, ~50 s).
     needs: wasm
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -650,7 +652,7 @@ jobs:
         working-directory: web
         env:
           ONLINE_PEER_BIN: ${{ github.workspace }}/online_peer
-        run: node --test --test-concurrency=1 e2e/link-native.e2e.mjs
+        run: node --test --test-concurrency=1 e2e/link-native.e2e.mjs e2e/link-sync.e2e.mjs
 
   wasm:
     # The web build, made once for the end-to-end jobs (the test job never

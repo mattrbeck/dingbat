@@ -2602,6 +2602,12 @@ proc init_online(signal_url: string) =
     app.online_moved_at = getTicks()
     link_auto_stop()
     link_cancel_setup()
+  h.resynced = proc() =
+    # A re-sync built fresh cores: the new local one plays on, at 2x if it was.
+    online_session_cores_live()
+    held.core_replaced()
+    discard held.take_changes()
+    set_online_turbo(app.online_turbo)
   h.ended = proc() =
     let (g, b) = app.online.take_solo()
     if g != nil:

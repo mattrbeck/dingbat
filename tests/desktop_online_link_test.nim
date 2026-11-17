@@ -5,7 +5,10 @@
 ## Checks: pairing, the rollback cores agreeing bit for bit, the link itself
 ## working through them (attachtest.gba's rounds), a cross-game ROM
 ## transfer, a dropped connection resuming, Disconnect handing each player
-## back a solo core, and a Game Boy pair.
+## back a solo core, and a Game Boy pair. And the sync checks
+## (docs/dev/multiplayer.md): fingerprints agree in step; one side's copy of
+## the friend's game set back is caught, both re-sync on fresh cores, and
+## they agree again after.
 
 import std/[os, osproc, monotimes, times, net, strutils, random]
 import dingbat/gba/gba
@@ -26,6 +29,7 @@ proc now_ms(): int64 = getMonoTime().ticks div 1_000_000
 const
   ATTACH_ROM = "tests/roms/attachtest.gba"
   GB_ROM = "tests/roms/gblinktest.gb"
+  SYNC_GBA_ROM = "tests/roms/inputrec.gba"  # no link traffic: a copy set back can't stall the cable
   ROUNDS = 16
 
 proc ew16(g: GBA; offset: int): uint16 =
@@ -46,7 +50,7 @@ type Side = ref object
   solo_gba: GBA
   solo_gb: GB
   ol: OnlineLink
-  started, ended: int
+  started, ended, resynced: int
   paused, double: bool
   rng: Rand
   bits: uint16
@@ -74,6 +78,7 @@ proc make_side(name, rom, tmp: string; port: int): Side =
     result = new_gb("", p, true, false)
     result.post_init()
   hooks.started = proc() = inc s.started
+  hooks.resynced = proc() = inc s.resynced
   hooks.ended = proc() =
     inc s.ended
     let (a, b) = s.ol.take_solo()
@@ -210,6 +215,47 @@ proc main() =
     a.ol.disconnect()
     check wait_until([a, b], 10000, proc(): bool = not b.ol.active), "GB friend saw the BYE"
     check a.solo_gb != nil and b.solo_gb != nil, "GB solo cores back"
+
+  # Sync checks. A's copy of B's game goes back 150 frames at frame 300
+  # (all inputs in, so no rollback undoes it): no input explains it. A
+  # server of their own: the pairings above use up the per-IP rendezvous
+  # allowance.
+  let sync_port = port + 1
+  let sync_server = start_server(sync_port)
+  defer:
+    sync_server.terminate()
+    discard sync_server.waitForExit()
+    sync_server.close()
+  for (rom, label) in [(GB_ROM, "GB"), (SYNC_GBA_ROM, "GBA")]:
+    echo "== sync checks, ", label, ": in step, then a copy set back and re-synced =="
+    let a = make_side("s" & label, rom, tmp, sync_port)
+    let b = make_side("t" & label, rom, tmp, sync_port)
+    check pair(a, b, "SYNC" & label & $sync_port), label & " pair started"
+    check run_frames(a, b, 150), "to frame 150"
+    let old = a.ol.debug_remote_state()
+    check run_frames(a, b, 300), "to frame 300"
+    let st0 = a.ol.sync_stats
+    check st0.checks == 2 and st0.mismatches == 0, "two fingerprints agreed (" & $st0.checks & ")"
+    check a.ol.debug_load_remote(old), "A's copy of B's game set back"
+    let t0 = now_ms()
+    while now_ms() - t0 < 30000 and (a.ol.sync_stats.resyncs < 1 or b.ol.sync_stats.resyncs < 1):
+      for x in [a, b]:
+        if x.ol.started: discard x.ol.tick(uint16(x.rng.rand(0x3ff)))
+      [a, b].service()
+      sleep(1)
+    let sa = a.ol.sync_stats
+    let sb = b.ol.sync_stats
+    check sa.mismatches == 1 and sb.mismatches == 1, "both caught it once"
+    check sa.resyncs == 1 and sb.resyncs == 1, "both re-synced once (" & $sa.ms & " ms)"
+    check a.resynced == 1 and b.resynced == 1, "fresh cores handed to each app"
+    check a.ol.started and b.ol.started, "the session goes on"
+    # The engine restarted at frame 0.
+    check run_frames(a, b, 360), "360 frames more"
+    check a.ol.checksum() == b.ol.checksum(), "both sides' cores agree after the re-sync"
+    let sa2 = a.ol.sync_stats
+    check sa2.mismatches == 1 and sa2.checks >= 4, "checks carried on and agreed (" & $sa2.checks & ")"
+    a.ol.disconnect()
+    check wait_until([a, b], 10000, proc(): bool = not b.ol.active), "friend saw the BYE"
 
   echo "== a bad code and an unreachable server fail in the window =="
   block:

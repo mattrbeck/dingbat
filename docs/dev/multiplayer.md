@@ -145,9 +145,13 @@ Both sides of an online link run both games (`gba/rollback.nim`,
 `gb/rollback.nim`) and only inputs cross, so two builds whose cores differ,
 or a determinism bug, can drift apart silently. Builds that check now say
 so in the HELLO: `[21]` core id (`common/linksync.nim CORE_ID`, the git trees
-of `gba/`, `gb/`, `common/`, the same on web and iOS when the core source
-is), `[29]` build time, `[33]` bit 0 "checks". Older builds read the first
-21 bytes and are sent none of the following.
+of `gba/`, `gb/`, `common/`, the same on web, iOS and desktop when the
+core source is), `[29]` build time (the commit's, `BUILD_TIME`), `[33]`
+bit 0 "checks". Older builds read the first 21 bytes and are sent none of
+the following. Web (`netplay.js`), iOS (`NetLink.swift`) and desktop
+(`frontend/online_link.nim`) each implement it; the desktop restarts on
+fresh cores as its session start builds them and hands the app the new
+local one (`OnlineHooks.resynced`).
 
 * **Fingerprint.** Every 120 frames the engine hashes both cores' portable
   state images (`state_bytes`; the in-process snapshot pads cycle counters
@@ -180,10 +184,16 @@ is), `[29]` build time, `[33]` bit 0 "checks". Older builds read the first
   (`web/tests/link-sync.test.mjs`), not proved.
 * **Tests:** `dingbat_test --mode=rollbacksync` (CI: real cores, agreement
   with ground truth, a poked copy caught, a re-sync from both own states);
-  `web/tests/link-sync.test.mjs` (the protocol on two pages);
-  `web/e2e/link-sync.e2e.mjs` (two real wasm cores in Chromium: agreement,
-  a set-back copy caught and re-synced, cost; `DINGBAT_SYNC_ROM=` for a real
-  game); `tests/linksync_bench.nim` (native cost).
+  `tests/gb_rollback_keys_test.nim` (GB fingerprints equal on two peers at
+  uneven latencies); `web/tests/link-sync.test.mjs` (the protocol on two
+  pages); `web/e2e/link-sync.e2e.mjs` (two real wasm cores in Chromium:
+  agreement, a set-back copy caught and re-synced, cost;
+  `DINGBAT_SYNC_ROM=` for a real game); `web/e2e/link-native.e2e.mjs` (a
+  browser and the desktop link: wasm and native fingerprints agree at every
+  check for GBA, GB and a cross-game pair, either side hosting, and a copy
+  set back on either side is caught, re-synced, identical after);
+  `tests/desktop_online_link_test.nim` (two desktop links, GB and GBA
+  re-syncs); `tests/linksync_bench.nim` (native cost).
 * **Cost** (M-series Mac): a fingerprint is 1.8 ms on Emerald in wasm, 0.4 ms
   on Crystal (native 1.76 / 0.39, of which serializing is ~85%), once every
   120 frames; sync messages are ~6 B/s against ~0.4 KB/s of inputs; a

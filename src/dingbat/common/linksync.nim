@@ -70,3 +70,14 @@ const CORE_ID* = block:
       if l.len != 40 or not l.allCharsInSet(HexDigits): ok = false
     if ok: id = fnv64(trees.strip())
   id
+
+const BUILD_TIME* = block:
+  ## The commit this build was made from, unix seconds (the web's
+  ## dingbat-build-time and iOS's DingbatBuildTime are the same commit time):
+  ## sent in the HELLO so a friend can tell which of two cores is older. 0
+  ## when git can't say.
+  let root = currentSourcePath().parentDir().parentDir().parentDir().parentDir()
+  let t = staticExec("git -C \"" & root & "\" show -s --format=%ct HEAD").strip()
+  var v = 0'u32
+  if t.len > 0 and t.allCharsInSet(Digits): v = uint32(parseBiggestInt(t))
+  v

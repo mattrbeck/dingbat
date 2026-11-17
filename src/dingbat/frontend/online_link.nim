@@ -16,6 +16,12 @@
 ##   12 resume-info [sid u32][retry code]
 ##   13 resume [sid u32][last frame u32][flags u8]
 ##   14 bye [why u8] (0 left, 1 gave up)   15 ping
+##   16 sync [gen u8][frame u32][hash u64]   17 resync [gen u8][stop frame u32]
+##   18 resync-begin [gen u8][len u32]       19 resync-chunk [bytes]
+##   20 resync-ready [gen u8]
+## The hello then goes on: [21] core id u64, [29] build time u32, [33] bit 0
+## "checks"; 16-20 go only to a friend whose hello says it checks (web
+## "Sync checks", docs/dev/multiplayer.md).
 ## Core 0 is the host's game, core 1 the guest's. When the ROMs differ (a
 ## cross-game trade) each side answers the friend's hello with have-rom (a
 ## copy is here) or need-rom, and a ROM goes over only on need-rom.
@@ -25,7 +31,7 @@
 
 import std/[json, os, random, strutils, sysrand, tables, math, times]
 import rtc
-import ../common/[linkproto, serialize, rom_exts]
+import ../common/[linkproto, serialize, rom_exts, linksync]
 import ../gba/gba
 import ../gba/link as gbalink
 import ../gba/rollback as gbarb
@@ -55,6 +61,11 @@ const
   LIVE_MAX_AGE = 600  # s: the server keeps a goodbye this long
   SENT_LOG_MAX = 128  # the friend's gap is at most ~2x the prediction window
   HELLO_LEN = 21      # with the whole-ROM identity
+  HELLO_BUILD_LEN = 34  # ... and the core id, build time, capabilities
+  RESYNC_MARGIN = 60  # frames ahead a re-sync proposes to stop
+  RESYNC_WARN = 3     # re-syncs within RESYNC_WARN_MS before saying why
+  RESYNC_WARN_MS = 10 * 60 * 1000
+  SYNC_KEEP = 8       # fingerprints held per side waiting for the friend's
   CHUNK = 16384
   HIGH_WATER = 4 * 1024 * 1024
   ROM_MAX = 48 * 1024 * 1024
@@ -80,6 +91,11 @@ const
   K_RESUME = 13'u8
   K_BYE = 14'u8
   K_PING = 15'u8
+  K_SYNC = 16'u8
+  K_RESYNC = 17'u8
+  K_RESYNC_BEGIN = 18'u8
+  K_RESYNC_CHUNK = 19'u8
+  K_RESYNC_READY = 20'u8
 
 type
   Timer = ref object
@@ -116,6 +132,14 @@ type
     on: bool
     n: uint32
     host: bool
+
+  Resync = ref object
+    gen: uint8
+    mine_t, target: int  # target: the later proposal, -1 until the friend's
+    mine, in_buf: string
+    in_len: int
+    has_in, sent, applied, friend_ready: bool
+    t0: int64
 
   RB = ref object
     local_player: int
@@ -156,6 +180,17 @@ type
     pause_reg, speed_reg: Press
     rs_attempt: int
     rs_timer, rs_rewait, disc_timer, give_up: Timer
+    # Sync checks
+    peer_sync: bool      # the friend's hello says it checks
+    peer_core: uint64
+    peer_built: uint32
+    sync_mine, sync_theirs: OrderedTable[uint32, uint64]
+    sync_checks, sync_mismatches, resyncs: int
+    resync: Resync
+    resync_gen: uint8
+    resync_ms: seq[int]
+    resync_at: seq[int64]
+    resync_warned: bool
 
   Session = ref object
     code: string
@@ -178,6 +213,7 @@ type
     make_gb*: proc(rom: string): GB
     started*: proc()                 ## the cores run: present the local one
     ended*: proc()                   ## the session is over: take back the solo core
+    resynced*: proc()                ## a re-sync built new cores: present the local one
     remote_pause*: proc(on: bool)
     remote_speed*: proc(on: bool)
     paused*: proc(): bool
@@ -658,7 +694,9 @@ proc rb_connect(ol: OnlineLink; s: Session) =
   ol.watch_setup(s)
   ol.set_status("Syncing...")
   ol.send(s, msg(K_HELLO, be32(rb.epoch) & be32(rb.rom_hash) & be32(rb.rom_id.len) &
-                          be32(rb.rom_id.crc) & be32(rb.rom_id.fnv)))
+                          be32(rb.rom_id.crc) & be32(rb.rom_id.fnv) &
+                          be32(uint32(CORE_ID shr 32)) & be32(uint32(CORE_ID and 0xFFFFFFFF'u64)) &
+                          be32(BUILD_TIME) & char(1)))
   ol.send(s, msg(K_STATE_BEGIN, be32(uint32(state.len))))
   var off = 0
   while off < state.len:
@@ -772,7 +810,6 @@ proc build_cores(ol: OnlineLink; rom0, rom1: string; local: int; epoch: int64): 
   ## Both players' cores, the friend's silent. The solo core is the app's
   ## until `started`.
   ol.rb_local = local
-  ol.rb_paths = [rom0, rom1]
   try:
     if rom0.splitFile().ext.toLowerAscii() in GB_ROM_EXTS:
       enable_deterministic_gb_rtc(epoch)  # applies to the cart and state loads
@@ -869,6 +906,7 @@ proc try_init(ol: OnlineLink; s: Session) =
     return
   let rom0 = if rb.local_player == 0: rb.game_path else: remote
   let rom1 = if rb.local_player == 0: remote else: rb.game_path
+  ol.rb_paths = [rom0, rom1]
   if not ol.build_cores(rom0, rom1, rb.local_player, int64(rb.epoch)):
     ol.fail("Couldn't start the link session")
     return
@@ -996,6 +1034,10 @@ proc send_pause*(ol: OnlineLink; on: bool) =
 # ───────────────────────── messages ─────────────────────────
 
 proc resume_in(ol: OnlineLink; data: string; rb: RB; s: Session)
+proc at_barrier*(ol: OnlineLink): bool
+proc sync_poll(ol: OnlineLink; s: Session)
+proc resync_step(ol: OnlineLink; s: Session)
+proc sync_message(ol: OnlineLink; kind: uint8; data: string; rb: RB; s: Session)
 
 proc rb_message(ol: OnlineLink; data: string; s: Session) =
   let rb = s.rb
@@ -1011,6 +1053,11 @@ proc rb_message(ol: OnlineLink; data: string; s: Session) =
     if frame >= 0:
       if ol.rb_gb != nil: gbrb.feed_remote(ol.rb_gb, int(frame), bits)
       elif ol.rb_gba != nil: gbarb.feed_remote(ol.rb_gba, int(frame), bits)
+      ol.sync_poll(s)
+      ol.resync_step(s)
+    return
+  of K_SYNC .. K_RESYNC_READY:
+    if rb.inited: ol.sync_message(kind, data, rb, s)
     return
   of K_RESUME_INFO:
     ol.resume_info_in(data, rb, s)
@@ -1060,6 +1107,10 @@ proc rb_message(ol: OnlineLink; data: string; s: Session) =
       rb.remote_rom_id = RomIdentity(len: read32(data, 9), crc: read32(data, 13),
                                      fnv: read32(data, 17))
       rb.has_remote_rom_id = true
+    if data.len >= HELLO_BUILD_LEN:
+      rb.peer_core = (uint64(read32(data, 21)) shl 32) or uint64(read32(data, 25))
+      rb.peer_built = read32(data, 29)
+      rb.peer_sync = (uint8(data[33]) and 1) == 1
     if (if answers: rb.remote_rom_id != rb.rom_id else: rb.remote_rom_hash != rb.rom_hash):
       rb.need_rom = true
       ol.show_transfer(rb)
@@ -1117,6 +1168,7 @@ proc tick*(ol: OnlineLink; local_bits: uint16): int =
   ## window waiting for the friend.
   let s = ol.session
   if s == nil or not s.started: return -1
+  if ol.at_barrier: return -1
   var frame = -1
   if ol.rb_gb != nil:
     if gbrb.tick(ol.rb_gb, local_bits) == grbStalled: return -1
@@ -1130,6 +1182,8 @@ proc tick*(ol: OnlineLink; local_bits: uint16): int =
   log_sent(rb, int32(frame), local_bits)
   if not rb.reconnecting:  # else resent once the friend says what it has
     ol.send_input_wire(int32(frame), local_bits, s)
+  ol.sync_poll(s)
+  if ol.session == s: ol.resync_step(s)
   frame
 
 proc transfers*(ol: OnlineLink): int =
@@ -1157,6 +1211,217 @@ proc head*(ol: OnlineLink): int =
   if ol.rb_gb != nil: ol.rb_gb.head
   elif ol.rb_gba != nil: ol.rb_gba.head
   else: -1
+
+# ───────────────────────── sync checks ─────────────────────────
+# web/netplay.js "Sync checks"; formal/WebState/LinkSync.lean. Every 120
+# frames the engine fingerprints both games once that frame is final; the
+# two sides' fingerprints cross (16). Different: each proposes to stop a
+# second ahead (17), both stop at the later, each sends its own game's state
+# there (18/19), and with the friend's in hand restarts the session from the
+# two states on fresh cores, as the start builds them, and says so (20).
+
+proc sync_stats*(ol: OnlineLink): tuple[checks, mismatches, resyncs: int; ms: seq[int]] =
+  let s = ol.session
+  if s != nil and s.rb != nil:
+    result = (s.rb.sync_checks, s.rb.sync_mismatches, s.rb.resyncs, s.rb.resync_ms)
+
+proc at_barrier*(ol: OnlineLink): bool =
+  ## No frame past the stop frame, or past our own proposal until the
+  ## friend's is in. Once restarted, a new session the old stop says nothing
+  ## about.
+  let s = ol.session
+  if s == nil or s.rb == nil or s.rb.resync == nil or s.rb.resync.applied: return false
+  let rs = s.rb.resync
+  ol.head > (if rs.target >= 0: rs.target else: rs.mine_t)
+
+proc session_gen(rb: RB): uint8 =
+  ## The session the engine is in: a re-sync's once this side has restarted.
+  if rb.resync != nil and rb.resync.applied: rb.resync.gen else: rb.resync_gen
+
+proc keep(t: var OrderedTable[uint32, uint64]) =
+  while t.len > SYNC_KEEP:
+    var first = 0'u32
+    for k in t.keys:
+      first = k
+      break
+    t.del(first)
+
+proc pop_sync(ol: OnlineLink; frame: var int; hash: var uint64): bool =
+  template take_first(q: untyped) =
+    if q.len > 0:
+      (frame, hash) = q[0]
+      q.delete(0)
+      return true
+  if ol.rb_gb != nil: take_first(ol.rb_gb.syncOut)
+  elif ol.rb_gba != nil: take_first(ol.rb_gba.syncOut)
+  false
+
+proc resync_begin(ol: OnlineLink; rb: RB; s: Session) =
+  if rb.resync != nil or not rb.inited or rb.reconnecting or not rb.peer_sync: return
+  let gen = rb.resync_gen + 1
+  let mine_t = ol.head + RESYNC_MARGIN
+  rb.resync = Resync(gen: gen, mine_t: mine_t, target: -1, t0: ol.now())
+  ol.send(s, msg(K_RESYNC, char(gen) & be32(uint32(mine_t))))
+
+proc sync_compare(ol: OnlineLink; rb: RB; s: Session; frame: uint32) =
+  if frame notin rb.sync_mine or frame notin rb.sync_theirs or
+     (rb.resync != nil and not rb.resync.applied): return
+  let mine = rb.sync_mine[frame]
+  let theirs = rb.sync_theirs[frame]
+  rb.sync_mine.del(frame)
+  rb.sync_theirs.del(frame)
+  inc rb.sync_checks
+  if mine == theirs: return
+  inc rb.sync_mismatches
+  ol.log("online: out of sync at frame " & $frame & " - re-syncing")
+  ol.resync_begin(rb, s)
+
+proc sync_poll(ol: OnlineLink; s: Session) =
+  ## Fingerprints the engine has made final: send each, compare.
+  let rb = s.rb
+  if rb == nil or not rb.inited: return
+  var f: int
+  var h: uint64
+  while ol.pop_sync(f, h):
+    let frame = uint32(f)
+    rb.sync_mine[frame] = h
+    keep(rb.sync_mine)
+    if rb.peer_sync and not rb.reconnecting:
+      ol.send(s, msg(K_SYNC, char(rb.session_gen) & be32(frame) &
+                             be32(uint32(h shr 32)) & be32(uint32(h and 0xFFFFFFFF'u64))))
+    ol.sync_compare(rb, s, frame)
+
+proc dump_packed(ol: OnlineLink; player: int): string =
+  if ol.rb_gb != nil: pack_state(ol.rb_gb.link.cores[player].state_bytes())
+  elif ol.rb_gba != nil: pack_state(ol.rb_gba.link.cores[player].state_bytes())
+  else: ""
+
+proc resync_warn(ol: OnlineLink; rb: RB) =
+  ## Several re-syncs close together: they will keep coming, so say why.
+  let now = ol.now()
+  var recent: seq[int64]
+  for t in rb.resync_at:
+    if now - t < RESYNC_WARN_MS: recent.add t
+  recent.add now
+  rb.resync_at = recent
+  if rb.resync_warned or recent.len < RESYNC_WARN: return
+  rb.resync_warned = true
+  var m = "The link keeps drifting out of sync with your friend's game. If it goes on, report a bug."
+  if rb.peer_core != 0 and CORE_ID != 0 and rb.peer_core != CORE_ID:
+    m = "You and your friend run different versions of dingbat's emulator, so your games keep drifting apart. " &
+      (if rb.peer_built != 0 and BUILD_TIME != 0:
+         (if rb.peer_built < BUILD_TIME: "Your friend's is older: updating it keeps you in step."
+          else: "Yours is older: updating it keeps you in step.")
+       else: "Updating the older one keeps you in step.")
+  ol.toast(m)
+
+proc resync_apply(ol: OnlineLink; rb: RB; rs: Resync; s: Session) =
+  ## The session again from the two states on fresh cores, as try_init
+  ## builds it (the web's rollback_init): every frame count starts over at 0
+  ## on both sides. The old cores stay until the new ones are up, so a
+  ## failure still ends with this player's own game.
+  let host = if rb.local_player == 0: rs.mine else: rs.in_buf
+  let guest = if rb.local_player == 0: rs.in_buf else: rs.mine
+  let (old_gba, old_gb, old_mute) = (ol.rb_gba, ol.rb_gb, ol.mute)
+  ol.rb_gba = nil
+  ol.rb_gb = nil
+  if old_mute != nil:  # the old local core's wrapper passes through from now
+    old_mute.gba = nil
+    old_mute.gb = nil
+  let ok = ol.build_cores(ol.rb_paths[0], ol.rb_paths[1], rb.local_player, int64(rb.epoch)) and
+    ol.load_core_state(0, host, int64(rb.epoch)) and ol.load_core_state(1, guest, int64(rb.epoch))
+  if not ok:
+    ol.unmute()
+    ol.rb_gba = old_gba
+    ol.rb_gb = old_gb
+    if old_gb != nil: enable_deterministic_gb_rtc(int64(rb.epoch))
+    ol.peer_gone("Couldn't re-sync with your friend")
+    return
+  rb.last_rx = -1
+  rb.sent_count = 0
+  rb.sync_mine.clear()
+  rb.sync_theirs.clear()
+  rs.applied = true
+  rs.mine = ""
+  rs.in_buf = ""
+  ol.send(s, msg(K_RESYNC_READY, $char(rs.gen)))
+  if ol.hooks.resynced != nil: ol.hooks.resynced()
+
+proc resync_step(ol: OnlineLink; s: Session) =
+  let rb = s.rb
+  if rb == nil: return
+  let rs = rb.resync
+  if rs == nil or rs.target < 0: return
+  # At the stop frame with every input to it: our own game's state is final.
+  if not rs.sent and ol.head == rs.target + 1 and ol.confirmed == rs.target:
+    let st = ol.dump_packed(rb.local_player)
+    if st.len == 0:
+      ol.peer_gone("Couldn't re-sync with your friend")
+      return
+    rs.mine = st
+    ol.send(s, msg(K_RESYNC_BEGIN, char(rs.gen) & be32(uint32(st.len))))
+    var off = 0
+    while off < st.len:
+      let e = min(off + CHUNK, st.len)
+      ol.send(s, msg(K_RESYNC_CHUNK, st[off ..< e]))
+      off = e
+    rs.sent = true
+  if rs.sent and not rs.applied and rs.has_in and rs.in_buf.len >= rs.in_len:
+    ol.resync_apply(rb, rs, s)
+    if ol.session != s or s.rb != rb: return
+  if rs.applied and rs.friend_ready:
+    let ms = int(ol.now() - rs.t0)
+    rb.resync_gen = rs.gen
+    rb.resync = nil
+    inc rb.resyncs
+    rb.resync_ms.add ms
+    ol.log("online: back in sync with the friend (" & $ms & " ms)")
+    ol.resync_warn(rb)
+
+proc read64(d: string; at: int): uint64 =
+  (uint64(read32(d, at)) shl 32) or uint64(read32(d, at + 4))
+
+proc sync_message(ol: OnlineLink; kind: uint8; data: string; rb: RB; s: Session) =
+  case kind
+  of K_SYNC:
+    if data.len < 14 or uint8(data[1]) != rb.session_gen: return
+    let frame = read32(data, 2)
+    rb.sync_theirs[frame] = read64(data, 6)
+    keep(rb.sync_theirs)
+    ol.sync_compare(rb, s, frame)
+    if ol.session != s: return
+  of K_RESYNC:
+    if data.len < 6 or uint8(data[1]) != rb.resync_gen + 1: return
+    if rb.resync == nil: ol.resync_begin(rb, s)
+    if rb.resync == nil: return
+    rb.resync.target = max(rb.resync.mine_t, int(read32(data, 2)))
+  of K_RESYNC_BEGIN:
+    let rs = rb.resync
+    if rs == nil or data.len < 6 or uint8(data[1]) != rs.gen: return
+    rs.in_len = int(read32(data, 2))
+    rs.in_buf = newStringOfCap(rs.in_len)
+    rs.has_in = true
+  of K_RESYNC_CHUNK:
+    let rs = rb.resync
+    if rs == nil or not rs.has_in: return
+    if rs.in_buf.len + data.len - 1 > rs.in_len: return
+    rs.in_buf.add data[1 .. ^1]
+  of K_RESYNC_READY:
+    let rs = rb.resync
+    if rs != nil and data.len >= 2 and uint8(data[1]) == rs.gen: rs.friend_ready = true
+  else: discard
+  ol.resync_step(s)
+
+# Tests: this side's copy of the friend's game, as it is now / set back to an
+# earlier image (a divergence no input explains).
+proc debug_remote_state*(ol: OnlineLink): string =
+  if ol.rb_gb != nil: ol.rb_gb.link.cores[1 - ol.rb_local].state_bytes()
+  elif ol.rb_gba != nil: ol.rb_gba.link.cores[1 - ol.rb_local].state_bytes()
+  else: ""
+
+proc debug_load_remote*(ol: OnlineLink; image: string): bool =
+  let s = ol.session
+  ol.load_core_state(1 - ol.rb_local, image, if s != nil and s.rb != nil: int64(s.rb.epoch) else: 0)
 
 # ───────────────────────── away ─────────────────────────
 
@@ -1300,8 +1565,12 @@ proc begin_resume(ol: OnlineLink; why: string) =
   ol.rs_dial(rb, s)
 
 proc dropped(ol: OnlineLink; why, end_msg: string) =
-  ## The connection is gone: redial if both sides can, else end.
-  if ol.can_resume: ol.begin_resume(why)
+  ## The connection is gone: redial if both sides can, else end. A re-sync's
+  ## frame counts and states don't survive a redial (the two sides may
+  ## already be on different sessions).
+  if ol.session != nil and ol.session.rb != nil and ol.session.rb.resync != nil:
+    ol.peer_gone("Lost the link while getting back in sync with your friend")
+  elif ol.can_resume: ol.begin_resume(why)
   else:
     let bye = ol.session != nil and ol.session.rb != nil and ol.session.rb.bye_in
     ol.peer_gone(if bye: "Your friend disconnected" else: end_msg)
@@ -1594,9 +1863,14 @@ proc pump_network*() =
   while poll_event(e): dispatch(e)
 
 proc service*(ol: OnlineLink) =
-  ## Once per main-loop iteration: network events, then due timers.
+  ## Once per main-loop iteration: network events, due timers, the sync
+  ## checks.
   pump_network()
   ol.run_timers()
+  let s = ol.session
+  if s != nil and s.started:
+    ol.sync_poll(s)
+    if ol.session == s: ol.resync_step(s)
 
 proc active*(ol: OnlineLink): bool = ol.session != nil
 

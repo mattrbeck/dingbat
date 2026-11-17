@@ -3,7 +3,10 @@
 // online: each side runs both players' cores, the wasm core in the page and
 // the native one in the peer, so both pages of state must come out
 // byte-identical at the same frame, whichever side hosts. A Game Boy pair
-// and a cross-game pair (each ROM crosses) too.
+// and a cross-game pair (each ROM crosses) too. Every pair also runs the
+// sync checks (docs/dev/multiplayer.md): the wasm and native fingerprints
+// must agree at every check, and a copy set back on either side must be
+// caught and re-synced, the two sides identical after.
 //
 //   ONLINE_PEER_BIN=path node --test e2e/link-native.e2e.mjs   # from web/
 //
@@ -19,6 +22,7 @@ import { readFileSync, writeFileSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { createRequire } from "node:module";
 import { serveWeb, builtWeb, sleep, WEB } from "./devices.mjs";
+import { synctestRom, SYNCTEST_NAME } from "./synctest-rom.mjs";
 
 const playwright = createRequire(join(WEB, "package.json"))("playwright");
 const PEER = process.env.ONLINE_PEER_BIN;
@@ -58,7 +62,7 @@ const until = async (cond, what, ms) => {
   }
 };
 
-const page_player = async (game) => {
+const page_player = async (game, drift = 0) => {
   const ctx = await browser.newContext({ viewport: { width: 1000, height: 800 } });
   const page = await ctx.newPage();
   await page.goto(web.url + "?signal=ws://127.0.0.1:" + SIGNAL_PORT);
@@ -70,15 +74,33 @@ const page_player = async (game) => {
     page.locator("#home-load, #lib-add, #home-solo-add").locator("visible=true").first().click()]);
   await chooser.setFiles({ name: game.name, mimeType: "application/octet-stream", buffer: game.bytes });
   await page.waitForFunction(() => document.body.classList.contains("running") && !paused, null, { timeout: 30000 });
-  await page.evaluate((stop) => {
+  await page.evaluate(([stop, drift]) => {
     const tick = Module._rollback_tick;
     Module._rollback_tick = () => {
       const h = Module._rollback_head();
+      // The page's copy of the friend's game, saved at drift - 150 and
+      // loaded back at drift with every input in (a rollback before it
+      // would undo it): it goes back in time, as no input could take it.
+      if (drift && !window.__drifted && net?.rb) {
+        const remote = 1 - net.rb.localPlayer;
+        if (!window.__old && h >= drift - 150) {
+          const n = Module._rollback_dump_size(remote);
+          window.__old = new Uint8Array(Module.memory.buffer, Module._rollback_dump_data(), n).slice();
+        }
+        if (window.__old && h >= drift) {
+          if (Module._rollback_confirmed() !== h - 1) return -1; // hold for the friend's inputs
+          window.__drifted = true;
+          const p = Module._malloc(window.__old.length);
+          new Uint8Array(Module.memory.buffer, p, window.__old.length).set(window.__old);
+          Module._rollback_load_state(remote, p, window.__old.length);
+          Module._free(p);
+        }
+      }
       if (h >= stop) return -1;
       localButtons = ((h / 29) | 0) % 2 ? 1 << 4 : ((h / 41) | 0) % 2 ? 1 << 7 : 0;
       return tick(localButtons);
     };
-  }, STOP);
+  }, [STOP, drift]);
   return { ctx, page };
 };
 
@@ -92,9 +114,9 @@ const dump = (page) => page.evaluate(() => {
   return out.join(" ");
 });
 
-const run_peer = (rom, code) => {
+const run_peer = (rom, code, extra = []) => {
   const p = spawn(PEER, [rom, code, `--signal=ws://127.0.0.1:${SIGNAL_PORT}`, `--frames=${STOP}`,
-    "--warmup=20", "--timeout=120"], { stdio: ["ignore", "pipe", "pipe"] });
+    "--warmup=20", "--timeout=120", ...extra], { stdio: ["ignore", "pipe", "pipe"] });
   let out = "";
   p.stdout.on("data", (d) => { out += d; });
   p.stderr.on("data", (d) => { out += d; });
@@ -102,16 +124,29 @@ const run_peer = (rom, code) => {
   return { p, log: () => out, done };
 };
 
+const SYNC_RE = /ONLINE SYNC checks=(\d+) mismatches=(\d+) resyncs=(\d+)/g;
+const peer_sync = (log) => {
+  const all = [...log.matchAll(SYNC_RE)];
+  const m = all[all.length - 1];
+  return m ? { checks: +m[1], mismatches: +m[2], resyncs: +m[3] } : { checks: 0, mismatches: 0, resyncs: 0 };
+};
+const page_sync = (page) => page.evaluate(() => ({
+  checks: net.rb.syncChecks, mismatches: net.rb.syncMismatches, resyncs: net.rb.resyncs, ms: net.rb.resyncMs }));
+// Fingerprints at 120, 240 ... STOP: each side compares every one.
+const CHECKS = STOP / 120;
+
 // The page and the native peer on `code`; `peer_first` picks who hosts.
-const link = async (page_game, peer_rom, code, peer_first) => {
+// `opts.peerArgs` go to the peer; `opts.pageDrift` sets the page's copy back.
+const link = async (page_game, peer_rom, code, peer_first, opts = {}) => {
   await setup();
-  const pl = await page_player(page_game);
+  const pl = await page_player(page_game, opts.pageDrift ?? 0);
   let peer = null;
-  if (peer_first) { peer = run_peer(peer_rom, code); await sleep(1500); }
+  const extra = opts.peerArgs ?? [];
+  if (peer_first) { peer = run_peer(peer_rom, code, extra); await sleep(1500); }
   await pl.page.evaluate(() => document.getElementById("net-connect").click());
   await pl.page.locator("#net-code-input").fill(code);
   await pl.page.locator("#net-join-go").click();
-  if (!peer_first) { await sleep(1500); peer = run_peer(peer_rom, code); }
+  if (!peer_first) { await sleep(1500); peer = run_peer(peer_rom, code, extra); }
   const done = () => pl.page.evaluate((stop) => {
     if (!net?.started || Module._rollback_head() < stop) return false;
     if (Module._rollback_confirmed() < stop - 1) Module._rollback_feed(stop + 60, 0);
@@ -124,13 +159,42 @@ const link = async (page_game, peer_rom, code, peer_first) => {
   const page_dump = await dump(pl.page);
   const peer_dump = peer.log().match(/ONLINE DUMP (.*)/)[1].trim();
   const host = await pl.page.evaluate(() => net.isHost);
+  // The last fingerprint (frame STOP) crosses just after both stop.
+  await until(async () => (await page_sync(pl.page)).checks >= CHECKS && peer_sync(peer.log()).checks >= CHECKS,
+    async () => "every sync check: page " + JSON.stringify(await page_sync(pl.page)) +
+      " | peer " + JSON.stringify(peer_sync(peer.log())), 20000);
+  const sync = { page: await page_sync(pl.page), peer: peer_sync(peer.log()) };
   // The page's Disconnect (two taps): the peer hears the BYE and exits.
   await pl.page.evaluate(() => document.getElementById("rb-disconnect").click());
   await pl.page.evaluate(() => document.getElementById("rb-disconnect").click());
   const rc = await Promise.race([peer.done, sleep(15000).then(() => "timeout")]);
   if (rc === "timeout") peer.p.kill("SIGKILL");
   await pl.ctx.close();
-  return { page_dump, peer_dump, host, rc, log: peer.log() };
+  return { page_dump, peer_dump, host, rc, sync, log: peer.log() };
+};
+
+// wasm and native fingerprints the same at every check: no re-sync.
+const in_step = (r) => {
+  console.log("    sync: page", JSON.stringify(r.sync.page), "peer", JSON.stringify(r.sync.peer));
+  for (const side of ["page", "peer"]) {
+    assert.equal(r.sync[side].checks, CHECKS, side + " compared every fingerprint");
+    assert.equal(r.sync[side].mismatches, 0, side + ": wasm and native fingerprints agree");
+    assert.equal(r.sync[side].resyncs, 0, side + ": no re-sync");
+  }
+};
+
+// One side's copy set back: both see it once, re-sync once, and carry on in
+// step (the session restarts at frame 0, so STOP frames more after it).
+const resynced = (r) => {
+  console.log("    sync: page", JSON.stringify(r.sync.page), "peer", JSON.stringify(r.sync.peer));
+  for (const side of ["page", "peer"]) {
+    assert.equal(r.sync[side].mismatches, 1, side + " caught it once; the peer said:\n" +
+      r.log.split("\n").filter((l) => !l.startsWith("ONLINE SYNC")).slice(-25).join("\n"));
+    assert.equal(r.sync[side].resyncs, 1, side + " re-synced once");
+    assert.ok(r.sync[side].checks >= CHECKS, side + " checks carried on after, and agreed");
+  }
+  assert.match(r.log, /peer: re-synced/, "the native side built its fresh cores");
+  assert.equal(r.page_dump, r.peer_dump, "every core identical on both sides after the re-sync");
 };
 
 const GBA = { name: "attachtest.gba", bytes: readFileSync(join(ROMS, "attachtest.gba")) };
@@ -140,6 +204,7 @@ test("browser hosts a native player: both sides' cores identical", { skip, timeo
   const r = await link(GBA, join(ROMS, "attachtest.gba"), "NATA" + process.pid, false);
   assert.equal(r.host, true, "the page arrived first and hosts");
   assert.equal(r.page_dump, r.peer_dump, "page and native peer agree");
+  in_step(r);
   assert.match(r.log, /linktest mark 0xCAFE[\s\S]*linktest mark 0xCAFE/, "link rounds done on both cores");
   assert.equal(r.rc, 0, "the peer heard the page's Disconnect and ended cleanly");
 });
@@ -148,11 +213,13 @@ test("native player hosts the browser: both sides' cores identical", { skip, tim
   const r = await link(GBA, join(ROMS, "attachtest.gba"), "NATB" + process.pid, true);
   assert.equal(r.host, false, "the peer arrived first and hosts");
   assert.equal(r.page_dump, r.peer_dump, "page and native peer agree");
+  in_step(r);
 });
 
 test("Game Boy: browser and native agree", { skip, timeout: 240000 }, async () => {
   const r = await link(GB, join(ROMS, "gblinktest.gb"), "NATGB" + process.pid, false);
   assert.equal(r.page_dump, r.peer_dump, "GB page and native peer agree");
+  in_step(r);
 });
 
 test("cross-game: each side's ROM crosses and both agree", { skip, timeout: 240000 }, async () => {
@@ -161,4 +228,26 @@ test("cross-game: each side's ROM crosses and both agree", { skip, timeout: 2400
   writeFileSync(other, Buffer.concat([GBA.bytes, Buffer.from([0xff, 0xff, 0xff, 0xff])]));
   const r = await link(GBA, other, "NATX" + process.pid, false);
   assert.equal(r.page_dump, r.peer_dump, "cross-game page and native peer agree");
+  in_step(r);
+});
+
+const synctest_rom = () => {
+  const dir = mkdtempSync(join(tmpdir(), "dingbat-native-sync-"));
+  const path = join(dir, SYNCTEST_NAME);
+  writeFileSync(path, Buffer.from(synctestRom()));
+  return { game: { name: SYNCTEST_NAME, bytes: readFileSync(path) }, path };
+};
+
+test("native copy set back: caught, re-synced, both agree after", { skip, timeout: 240000 }, async () => {
+  const { game, path } = synctest_rom();
+  const r = await link(game, path, "NATS" + process.pid, false, { peerArgs: ["--drift=300"] });
+  assert.match(r.log, /copy of the friend's game set back at frame \d+: true/);
+  resynced(r);
+});
+
+test("browser copy set back, native hosts: caught, re-synced, both agree after", { skip, timeout: 240000 }, async () => {
+  const { game, path } = synctest_rom();
+  const r = await link(game, path, "NATT" + process.pid, true, { pageDrift: 300 });
+  assert.equal(r.host, false, "the peer hosts");
+  resynced(r);
 });
