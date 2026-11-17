@@ -10,6 +10,9 @@
 #   choose    Pause from the menu, then Cmd+P through the menu bar, ticks
 #             and unticks it; Mute and Frame size from the menu change the
 #             setting and the window
+#   aspect    the window's aspect lock (SDL's and the NSWindow's): free on the
+#             home screen and in fullscreen (Fullscreen on the hidden window
+#             only sets the flag), 3:2 in a GBA game
 #   imgui     DINGBAT_IMGUI_MENU=1 keeps the in-window bar: no macOS menus
 #
 # macOS only. From the repo root:
@@ -94,6 +97,32 @@ check "Mute unticked (it started on)" "$(item "$work/after.txt" 'Mute')" present
 check "Frame size 2x ticked" "$(item "$work/after.txt" '2x [x]')" present
 check "the window is 2x" "$(ack 13 | sed 's/.*window=//')" "480x320"
 check "Quit from the menu ends the session" "$(ack 16)" ""
+
+echo "the window's aspect lock"
+# SDL's limits and AppKit's own: a content aspect ratio, or (free) none and
+# resize increments of 1, as a fresh window has
+run "" "1 frames 10
+2 aspect
+3 drop tests/roms/inputrec.gba
+4 frames 10
+5 aspect
+6 menu pick Audio/Video>Frame size>2x
+7 frames 5
+8 aspect
+9 menu pick Audio/Video>Frame size>Fullscreen
+10 frames 5
+11 aspect
+12 menu pick Audio/Video>Frame size>Fullscreen
+13 frames 5
+14 aspect
+15 state
+16 quit"
+check "home screen: free" "$(ack 2)" "ok min=0.0000 max=0.0000 ns=0:0 inc=1:1"
+check "a GBA game: 3:2" "$(ack 5 | cut -d' ' -f1-4)" "ok min=1.5000 max=1.5000 ns=3:2"
+check "Frame size keeps it" "$(ack 8 | cut -d' ' -f1-4)" "ok min=1.5000 max=1.5000 ns=3:2"
+check "fullscreen: free" "$(ack 11)" "ok min=0.0000 max=0.0000 ns=0:0 inc=1:1"
+check "back: 3:2" "$(ack 14 | cut -d' ' -f1-4)" "ok min=1.5000 max=1.5000 ns=3:2"
+check "the window as it was" "$(ack 15)" "ok fullscreen=0 window=480x320"
 
 echo "DINGBAT_IMGUI_MENU=1"
 run "" "1 frames 10

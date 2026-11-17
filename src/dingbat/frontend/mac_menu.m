@@ -295,6 +295,12 @@ void dbm_set_document(void *nswindow, const char *path) {
   w.representedURL = (path && *path) ? [NSURL fileURLWithPath:str(path)] : nil;
 }
 
+void dbm_free_aspect(void *nswindow) {
+  // SDL frees the ratio with a 0:0 content aspect ratio, which AppKit does
+  // not take as none; resize increments of 1 are its documented reset
+  ((__bridge NSWindow *)nswindow).contentResizeIncrements = NSMakeSize(1, 1);
+}
+
 // ── For the GUI driver (gui_driver.nim) ──
 
 int dbm_perform_key(const char *chars, int shift) {

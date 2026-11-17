@@ -14,6 +14,8 @@
 #             menu bar and the window half as big again
 #   rumble    an MBC5 rumble cart (generated: it switches its motor on and
 #             spins) buzzes the pad
+#   aspect    the window resizes only to the picture's shape: GBA, Game Boy,
+#             an SGB border, DS; free with Preserve aspect ratio off
 #   fullscreen (GUI_TEST_FULLSCREEN=1, macOS) a VISIBLE window taken
 #             fullscreen by AppKit's own toggle (the green button's), a Game
 #             Boy game loaded meanwhile, and back: the app's fullscreen flag
@@ -253,6 +255,45 @@ run "$work/mono.gb" "" "1 frames 60
 shade=$(python3 -I "$work/shot.py" "$work/mono.png" rgb 0.5 0.5 |
         awk '{ if ($3 > $2 + 6 && $3 >= $1) print "night"; else print }')
 check "shade 0 is Night's, not the core's grey" "$shade" "night"
+
+echo "a resize keeps the picture's shape"
+# SDL's aspect ratio limits on the window (min=max: locked), after each
+# picture change; the window still sized to 3x the picture. A DS ROM: the
+# header alone (it passes the logo check)
+python3 -I -c "
+import sys
+ds = bytearray(0x200); ds[0x15C] = 0x56; ds[0x15D] = 0xCF
+open(sys.argv[1], 'wb').write(ds)" "$work/ds.nds"
+run tests/roms/inputrec.gba "nds:
+  beta: true
+gb:
+  sgb: true
+" "1 frames 10
+2 aspect
+3 drop $work/mono.gb
+4 frames 10
+5 aspect
+6 state
+7 drop tests/roms/sgbtest.gb
+8 sleep 1500
+9 aspect
+10 state
+11 drop $work/ds.nds
+12 frames 10
+13 aspect
+14 quit"
+lim() { ack "$1" | cut -d' ' -f2-3; }
+check "GBA 3:2" "$(lim 2)" "min=1.5000 max=1.5000"
+check "Game Boy 10:9" "$(lim 5)" "min=1.1111 max=1.1111"
+check "Game Boy window 3x" "$(ack 6)" "ok fullscreen=0 window=480x432"
+check "SGB border 8:7" "$(lim 9)" "min=1.1429 max=1.1429"
+check "SGB window 3x" "$(ack 10)" "ok fullscreen=0 window=768x672"
+check "DS 2:3" "$(lim 13)" "min=0.6667 max=0.6667"
+run tests/roms/inputrec.gba "preserve_aspect: false
+" "1 frames 10
+2 aspect
+3 quit"
+check "Preserve aspect ratio off: free (it stretches)" "$(lim 2)" "min=0.0000 max=0.0000"
 
 if [ "${GUI_TEST_FULLSCREEN:-}" = 1 ]; then
   echo "fullscreen via AppKit (visible window)"
