@@ -114,10 +114,18 @@ proc sync_flush(sess: RollbackSession) =
     if f == sess.head:
       h = sess.fingerprint()
     else:
+      # A load drops the APU's half-filled buffer and, natively, the host's
+      # audio queue: the two loads here go unheard.
+      var audio: seq[(bool, int)]
+      for c in sess.link.cores:
+        audio.add((c.apu.owns_audio, c.apu.buffer_pos))
+        c.apu.owns_audio = false
       let live = sess.link.capture_state()
       sess.load_ckpt(f)
       h = sess.fingerprint()
       sess.link.restore_state(live)
+      for i, c in sess.link.cores:
+        (c.apu.owns_audio, c.apu.buffer_pos) = audio[i]
     sess.syncOut.add((f, h))
     sess.syncNext = f + sess.syncEvery
 

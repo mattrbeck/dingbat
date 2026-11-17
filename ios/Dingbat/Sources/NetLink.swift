@@ -1232,12 +1232,13 @@ final class NetLink: ObservableObject {
             peerGone("Couldn't re-sync with your friend")
             return
         }
-        let host = rb.localPlayer == 0 ? mine : r.inBuf
-        let guest = rb.localPlayer == 0 ? r.inBuf : mine
         func load(_ p: Int32, _ d: Data) -> Bool {
             d.withUnsafeBytes { dingbat_rollback_load_state(p, $0.baseAddress, Int32($0.count)) == 1 }
         }
-        guard load(0, host), load(1, guest) else {
+        // Our own game first: if the friend's then fails, the session ends
+        // with the core we keep holding it, not a fresh boot.
+        let own = Int32(rb.localPlayer)
+        guard load(own, mine), load(1 - own, r.inBuf) else {
             peerGone("Couldn't re-sync with your friend")
             return
         }

@@ -147,8 +147,9 @@ or a determinism bug, can drift apart silently. Builds that check now say
 so in the HELLO: `[21]` core id (`common/linksync.nim CORE_ID`, the git trees
 of `gba/`, `gb/`, `common/`, the same on web, iOS and desktop when the
 core source is), `[29]` build time (the commit's, `BUILD_TIME`), `[33]`
-bit 0 "checks". Older builds read the first 21 bytes and are sent none of
-the following. Web (`netplay.js`), iOS (`NetLink.swift`) and desktop
+bit 0 "checks", `[34]` the GBA BIOS mode and `[35]` its image's hash u32
+(`linksync.bios_identity`, 0 = none). Older builds read the first 21 bytes
+and are sent none of the following. Web (`netplay.js`), iOS (`NetLink.swift`) and desktop
 (`frontend/online_link.nim`) each implement it; the desktop restarts on
 fresh cores as its session start builds them and hands the app the new
 local one (`OnlineHooks.resynced`).
@@ -172,6 +173,25 @@ local one (`OnlineHooks.resynced`).
   Restarting the moment the friend's state is complete (if ours went) keeps
   every input in its session: the friend's new inputs travel behind its
   state. A drop during a re-sync ends the session.
+* **The GBA BIOS** is the one setting that changes emulated state: Golden
+  Sun with an image and without one differ from the first frame, even in
+  HLE mode (HLE hands some calls to an image when there is one; the mode
+  itself and Emerald, FireRed, Golden Sun TLA showed no difference over 900
+  frames). Two HELLOs that name different BIOSes both build their session
+  cores on HLE without an image (`bios_force_hle`, the same answer on both
+  sides); an older friend names none and each runs its own, as before.
+  Volume, filters, 2x, channel toggles, MP2K HLE, FIFO interpolation,
+  palettes and LCD effects stay out of the state (audited); MP2K HLE on one
+  side and off on the other is by design harmless but not tested.
+* **A state transfer's announced length** is capped at 8 MB (start and
+  re-sync): a bad one ends the session.
+* **A fingerprint read from the ring** loads a checkpoint and the live state
+  back; both go unheard (`owns_audio` off, `buffer_pos` kept), else the
+  native audio queue would be cleared every 120 frames.
+* **A drop just after a restart**, while the friend's READY is still on the
+  way, ends this side (its re-sync isn't finished) while the friend, done,
+  redials until the goodbye note ends it too. Rare (one round trip) and it
+  ends cleanly; resuming there would need the READY treated as implied.
 * **Three re-syncs in 10 minutes** show why: different core ids, "different
   versions of dingbat's emulator", naming the older by build time; the same
   core, "keeps drifting out of sync … report a bug".
@@ -193,7 +213,19 @@ local one (`OnlineHooks.resynced`).
   check for GBA, GB and a cross-game pair, either side hosting, and a copy
   set back on either side is caught, re-synced, identical after);
   `tests/desktop_online_link_test.nim` (two desktop links, GB and GBA
-  re-syncs); `tests/linksync_bench.nim` (native cost).
+  re-syncs, the BIOS rule); `tests/linksync_bench.nim` (native cost).
+  Opt-in, outside CI: `DINGBAT_GBA_BIOS=` + `DINGBAT_BIOS_GAME=` (a real
+  BIOS in the browser, none native: in step; the control without the rule
+  mismatches at the first check); `DINGBAT_SOAK_ROM=` [+ `DINGBAT_SOAK_MIN`]
+  in both e2e files (random buttons for N minutes, 40 ms late one way
+  between browsers). Measured 2026-11-17: Emerald 20 min between browsers
+  and Golden Sun 20 min browser vs native, 600/600 fingerprints agreeing
+  each, cores identical at the end. `tests/trade_repro.nim --resync-at=N`
+  (lockstep) rebuilds both cores as a re-sync does: the FireRed/Emerald
+  Cable Club trade went on without a communication error at all ten points
+  tried (frames 1200-4180, through the block exchange and both standby
+  barriers). A main build against this one (web-web both hosting, desktop
+  peer-web) links as before and is sent none of 16-20.
 * **Cost** (M-series Mac): a fingerprint is 1.8 ms on Emerald in wasm, 0.4 ms
   on Crystal (native 1.76 / 0.39, of which serializing is ~85%), once every
   120 frames; sync messages are ~6 B/s against ~0.4 KB/s of inputs; a

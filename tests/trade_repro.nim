@@ -36,6 +36,10 @@
 #             value.
 #   --shots   PPM screenshot of both cores every N frames (default 300).
 #   --no-shots   skip screenshots.
+#   --resync-at=N  (lockstep) at frame N do to both cores what an online
+#             link's re-sync does (docs/dev/multiplayer.md "Sync checks"):
+#             each core's state onto a fresh core and a fresh link. Whatever
+#             was on the cable at that moment is gone.
 #
 # VERDICT: one PASS/FAIL line per run. PASS = link negotiation reached AND
 # no comm error AND no deadlock. Comm error = FireRed core 0 SIOCNT
@@ -206,6 +210,7 @@ type Config = object
   shotEvery: int
   shots: bool
   delay: int
+  resyncAt: int                     # lockstep: -1 = never
 
 proc mk(rom: string; statePath = ""): GBA =
   result = new_gba("", rom, run_bios = false, use_hle = true)
@@ -227,9 +232,9 @@ proc shoot(cfg: Config; g0, g1: GBA; f: int) =
 
 proc runLockstep(cfg: Config): Verdict =
   result.path = "lockstep"
-  let g0 = mk(cfg.rom0, cfg.state0)
-  let g1 = mk(cfg.rom1, cfg.state1)
-  let lnk = new_link(@[g0, g1])
+  var g0 = mk(cfg.rom0, cfg.state0)
+  var g1 = mk(cfg.rom1, cfg.state1)
+  var lnk = new_link(@[g0, g1])
   # Optional assertion: the multi-mode drain fix must leave zero coalescing
   # (an unserviced serial IRQ at the next transfer). Available under -d:linkTrace.
   var coalesce = 0
@@ -257,6 +262,19 @@ proc runLockstep(cfg: Config): Verdict =
   var prev: array[2, set[Input]]
   for f in 0 ..< cfg.frames:
     curFrame = f
+    if f == cfg.resyncAt:
+      let images = [g0.state_bytes(), g1.state_bytes()]
+      var fresh: seq[GBA]
+      for c, rom in [cfg.rom0, cfg.rom1]:
+        let g = mk(rom)
+        doAssert g.load_state_bytes(images[c]), "re-sync load"
+        g.enable_deterministic_rtc(1_700_000_000'i64)
+        fresh.add g
+      g0 = fresh[0]
+      g1 = fresh[1]
+      lnk = new_link(fresh)
+      prev = [{}, {}]
+      echo "re-sync at frame ", f, ": cores rebuilt"
     for c in 0 .. 1:
       applyHeld(lnk.cores[c], prev[c], cfg.held[c][f]); prev[c] = cfg.held[c][f]
     lnk.step_frame()
@@ -440,6 +458,7 @@ when isMainModule:
   var delay = 0
   var shotEvery = 300
   var shots = true
+  var resyncAt = -1
   for a in commandLineParams():
     if a.startsWith("--path="): pathSel = a[7 .. ^1]
     elif a.startsWith("--state0="): state0 = a[9 .. ^1]
@@ -447,6 +466,7 @@ when isMainModule:
     elif a.startsWith("--delay="): delay = parseInt(a[8 .. ^1])
     elif a.startsWith("--shots="): shotEvery = parseInt(a[8 .. ^1])
     elif a == "--no-shots": shots = false
+    elif a.startsWith("--resync-at="): resyncAt = parseInt(a[12 .. ^1])
     elif a.startsWith("--"):
       echo "unknown flag: ", a
       quit 1
@@ -462,7 +482,7 @@ when isMainModule:
     state0: state0, state1: state1,
     frames: parseInt(pos[3]),
     shotdir: pos[4],
-    shotEvery: shotEvery, shots: shots, delay: delay)
+    shotEvery: shotEvery, shots: shots, delay: delay, resyncAt: resyncAt)
   cfg.held = expandHeld(loadScript(pos[2]), cfg.frames)
   if cfg.shots: createDir(cfg.shotdir)
 

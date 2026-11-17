@@ -334,7 +334,7 @@
     "web/index.js#writeDriveLibrary": "e4647bbf3e38b1c0",
     "web/index.js#on:online": "63f941a3d3c97f08",
     "web/index.js#on:offline": "db420addfda3b592",
-    "web/index.js#on:visibilitychange": "01833bec283bbf8d"
+    "web/index.js#on:visibilitychange": "feb34e732d8601af"
   },
   "WebState/GameLifecycle": {
     "web/index.js#addRecentRom": "3d67bafc31d0d0bc",
@@ -375,7 +375,7 @@
     "web/index.js#unloadGame": "885b08e7c8679e62",
     "web/index.js#writeSyncBytes": "8600eb56d28bf3d3",
     "web/index.js#on:drop": "4d6475ffeec469d7",
-    "web/index.js#on:visibilitychange": "01833bec283bbf8d",
+    "web/index.js#on:visibilitychange": "feb34e732d8601af",
     "web/netplay.js#launchNetRom": "e5e590277a2381ff"
   },
   "WebState/Handoff": {
@@ -406,19 +406,19 @@
     "web/index.js#takeCheckpoint": "b45bbeff39fb82cf",
     "web/index.js#storeCheckpoint": "e27852dc54eeacd0",
     "web/index.js#noteCrashedRuns": "ab8de243e8f2f61c",
-    "web/index.js#on:visibilitychange": "01833bec283bbf8d"
+    "web/index.js#on:visibilitychange": "feb34e732d8601af"
   },
   "WebState/LinkPairing": {
     "web/netplay.js#armManualFallback": "e828b02230fae0b7",
     "web/netplay.js#makeSession": "19b65df3e15ac612",
     "web/netplay.js#netFail": "3f640b7a103c25c3",
     "web/netplay.js#netShutdown": "3fcd62c80fcc3d9c",
-    "web/netplay.js#onSigMessage": "b3b5189e66043124",
+    "web/netplay.js#onSigMessage": "3e41feef8b7d195b",
     "web/netplay.js#rtcGaveUp": "4776773d1d3589f1",
     "web/netplay.js#sigConnect": "853b0f646f6069ee",
     "web/netplay.js#sigDialAgain": "cff7c483d1325041",
     "web/netplay.js#sigRedial": "e9371954fd95729a",
-    "web/netplay.js#sigRendezvous": "d711b1213e6c5c2b",
+    "web/netplay.js#sigRendezvous": "c2fc99ec2583df45",
     "web/netplay.js#sigRewait": "51ffd27f7b170e65",
     "web/netplay.js#startRtc": "bc03a3008c3b2c8a",
     "web/netplay.js#wireChannel": "62eab40e9f74b607",
@@ -472,7 +472,7 @@
     "web/netplay.js#rsAdopt": "da39b1405764cd72",
     "web/netplay.js#rsResumeIn": "6159bd892372d2a0",
     "web/netplay.js#rbResumeState": "d8039e528593b2a3",
-    "web/netplay.js#rbStartIfReady": "6573a7d9daaea71d",
+    "web/netplay.js#rbStartIfReady": "7e274b6d91d15e3b",
     "web/netplay.js#rbSendInput": "8f4fdd8d3423fcef",
     "web/netplay.js#rbSendInputWire": "2c0d742cfce7209a",
     "web/netplay.js#rbSend": "db913c562890eb1c",
@@ -502,8 +502,8 @@
     "web/netplay.js#rbResyncBegin": "e300618a0d45202b",
     "web/netplay.js#rbAtBarrier": "188c6ab0d172c5d0",
     "web/netplay.js#rbResyncStep": "3e5923e09de8b827",
-    "web/netplay.js#rbResyncApply": "c1c628c2a0d48304",
-    "web/netplay.js#rbSyncMessage": "3622b77ce4fccecd",
+    "web/netplay.js#rbResyncApply": "042fb863861c7139",
+    "web/netplay.js#rbSyncMessage": "59a3bc954231db3b",
     "web/netplay.js#rbOnFrame": "4691518c6455221e",
     "web/netplay.js#rbDropped": "d8185303e24c8235"
   },
@@ -546,11 +546,11 @@
     "web/netplay.js#netFail": "3f640b7a103c25c3",
     "web/netplay.js#netHoldsCore": "b0c6bd03e2494189",
     "web/netplay.js#netShutdown": "3fcd62c80fcc3d9c",
-    "web/netplay.js#onSigMessage": "b3b5189e66043124",
+    "web/netplay.js#onSigMessage": "3e41feef8b7d195b",
     "web/netplay.js#openNetConnect": "9e46c6a839ff31fe",
     "web/netplay.js#rbConnect": "326e7475ddd35928",
     "web/netplay.js#rbStartIfReady": "4038cfe15f8b4067",
-    "web/netplay.js#rbTeardown": "4ceb27d05b7db28f",
+    "web/netplay.js#rbTeardown": "931f678465c89d34",
     "web/netplay.js#rbTryInit": "3366c5f9c18999f9",
     "web/netplay.js#sigConnect": "853b0f646f6069ee",
     "web/netplay.js#sigRedial": "e9371954fd95729a",
@@ -559,7 +559,7 @@
     "web/netplay.js#wireChannel": "62eab40e9f74b607",
     "web/netplay.js#sigRewait": "51ffd27f7b170e65",
     "web/netplay.js#sigDialAgain": "cff7c483d1325041",
-    "web/netplay.js#sigRendezvous": "d711b1213e6c5c2b",
+    "web/netplay.js#sigRendezvous": "c2fc99ec2583df45",
     "web/netplay.js#rtcGaveUp": "4776773d1d3589f1"
   },
   "WebState/RunPause": {
@@ -589,7 +589,7 @@
     "web/index.js#takePlayerPause": "17fb0f462aa6b284",
     "web/index.js#togglePause": "3f50fa80ab5be0cd",
     "web/index.js#unloadGame": "885b08e7c8679e62",
-    "web/index.js#on:visibilitychange": "01833bec283bbf8d",
+    "web/index.js#on:visibilitychange": "feb34e732d8601af",
     "web/index.js#on:pointerup": "c16034631d933086",
     "web/netplay.js#acquireWakeLock": "4573f59545e962d4",
     "web/netplay.js#closeNetModal": "4f5191128998d4c6",
@@ -597,9 +597,9 @@
     "web/netplay.js#netFail": "3f640b7a103c25c3",
     "web/netplay.js#netShutdown": "753c7a0a64d080f8",
     "web/netplay.js#openNetConnect": "9e46c6a839ff31fe",
-    "web/netplay.js#rbConnect": "8609b583b29dd48a",
-    "web/netplay.js#rbStartIfReady": "6573a7d9daaea71d",
-    "web/netplay.js#rbTeardown": "4ceb27d05b7db28f",
+    "web/netplay.js#rbConnect": "7370d6f44e82bfd1",
+    "web/netplay.js#rbStartIfReady": "7e274b6d91d15e3b",
+    "web/netplay.js#rbTeardown": "931f678465c89d34",
     "web/netplay.js#releaseWakeLock": "a1646d82e4e71995"
   },
   "WebState/SavePersistence": {
@@ -644,7 +644,7 @@
     "web/index.js#takeCheckpoint": "b45bbeff39fb82cf",
     "web/index.js#unloadGame": "885b08e7c8679e62",
     "web/index.js#writeSyncBytes": "8600eb56d28bf3d3",
-    "web/index.js#on:visibilitychange": "01833bec283bbf8d"
+    "web/index.js#on:visibilitychange": "feb34e732d8601af"
   },
   "WebState/ServiceWorker": {
     "web/index.js#applyUpdate": "760405296156b9e1",
@@ -662,7 +662,7 @@
     "web/index.js#showUpdateButton": "87fa3a16c582312b",
     "web/index.js#startForceUpdate": "a236f1fc72727158",
     "web/index.js#updateForNewerState": "5a4d7d5869a759f8",
-    "web/index.js#on:visibilitychange": "01833bec283bbf8d",
+    "web/index.js#on:visibilitychange": "feb34e732d8601af",
     "web/sw.js#hex": "4b38c6ced0bb00bd",
     "web/sw.js#sha256": "cc37f8abc9a25360",
     "web/sw.js#digest": "c336b15cc68c5eb3",
@@ -723,7 +723,7 @@
     "web/index.js#copyFramebuffer": "86a63b03669304b8",
     "web/index.js#pullSyncInner": "7a22cb6dcf8c7f77",
     "web/index.js#writeSyncBytes": "8600eb56d28bf3d3",
-    "web/index.js#on:visibilitychange": "01833bec283bbf8d",
+    "web/index.js#on:visibilitychange": "feb34e732d8601af",
     "web/index.js#on:contextmenu": "79fc8c1028ad6e76"
   }
 }

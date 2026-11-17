@@ -1915,12 +1915,15 @@ const rbResyncApply = (rb, rs) => {
   Module._rollback_set_bios_hle?.(rbBiosHle(rb) ? 1 : 0);
   const ok = Module.ccall("rollback_init", "number", ["string", "string", "number", "number"],
     [rom0, rom1, rb.localPlayer, rb.epoch]);
-  const host = net.isHost ? rs.mine : rs.inBuf;
-  const guest = net.isHost ? rs.inBuf : rs.mine;
-  if (ok !== 1 || !rbLoadState(0, host) || !rbLoadState(1, guest)) {
+  // Our own game first: if the friend's then fails, the session ends with
+  // the core we keep (rbTeardown) holding it, not a fresh boot.
+  const own = rb.localPlayer;
+  if (ok !== 1 || !rbLoadState(own, rs.mine) || !rbLoadState(1 - own, rs.inBuf)) {
     netPeerGone("Couldn't re-sync with your friend");
     return;
   }
+  // The fresh cores never saw 2x or its pitch correction (enterRollbackMode).
+  if (typeof setSpeed2x === "function") setSpeed2x(speed2x, true);
   pushLinkShades([rom0, rom1]);
   rb.lastRx = -1;
   rb.sentCount = 0;

@@ -62,7 +62,7 @@ const until = async (cond, what, ms) => {
   }
 };
 
-const page_player = async (game, drift = 0, bios = null) => {
+const page_player = async (game, drift = 0, bios = null, stop = STOP, random = false) => {
   const ctx = await browser.newContext({ viewport: { width: 1000, height: 800 } });
   const page = await ctx.newPage();
   await page.goto(web.url + "?signal=ws://127.0.0.1:" + SIGNAL_PORT);
@@ -74,7 +74,7 @@ const page_player = async (game, drift = 0, bios = null) => {
     page.locator("#home-load, #lib-add, #home-solo-add").locator("visible=true").first().click()]);
   await chooser.setFiles({ name: game.name, mimeType: "application/octet-stream", buffer: game.bytes });
   await page.waitForFunction(() => document.body.classList.contains("running") && !paused, null, { timeout: 30000 });
-  await page.evaluate(([stop, drift]) => {
+  await page.evaluate(([stop, drift, random]) => {
     const tick = Module._rollback_tick;
     Module._rollback_tick = () => {
       const h = Module._rollback_head();
@@ -97,10 +97,21 @@ const page_player = async (game, drift = 0, bios = null) => {
         }
       }
       if (h >= stop) return -1;
-      localButtons = ((h / 29) | 0) % 2 ? 1 << 4 : ((h / 41) | 0) % 2 ? 1 << 7 : 0;
+      if (random) {
+        // A new set every 8 frames, never the soft-reset chord.
+        if (h % 8 === 0) {
+          window.__r = (Math.imul(window.__r ?? 0x5eed, 1664525) + 1013904223) >>> 0;
+          const x = window.__r;
+          window.__held = (x & 3) === 0 ? 0 : (x >>> 8) & 0x3ff;
+          if ((window.__held & 0xf) === 0xf) window.__held &= ~0x8;
+        }
+        localButtons = window.__held ?? 0;
+      } else {
+        localButtons = ((h / 29) | 0) % 2 ? 1 << 4 : ((h / 41) | 0) % 2 ? 1 << 7 : 0;
+      }
       return tick(localButtons);
     };
-  }, [STOP, drift]);
+  }, [stop, drift, random]);
   // A real GBA BIOS on this side only, the real-BIOS mode: the session's
   // cores must still run what the friend's do (HLE, rbBiosHle).
   if (bios) {
@@ -123,9 +134,9 @@ const dump = (page) => page.evaluate(() => {
   return out.join(" ");
 });
 
-const run_peer = (rom, code, extra = []) => {
-  const p = spawn(PEER, [rom, code, `--signal=ws://127.0.0.1:${SIGNAL_PORT}`, `--frames=${STOP}`,
-    "--warmup=20", "--timeout=120", ...extra], { stdio: ["ignore", "pipe", "pipe"] });
+const run_peer = (rom, code, extra = [], stop = STOP) => {
+  const p = spawn(PEER, [rom, code, `--signal=ws://127.0.0.1:${SIGNAL_PORT}`, `--frames=${stop}`,
+    "--warmup=20", `--timeout=${120 + Math.ceil(stop / 50)}`, ...extra], { stdio: ["ignore", "pipe", "pipe"] });
   let out = "";
   p.stdout.on("data", (d) => { out += d; });
   p.stderr.on("data", (d) => { out += d; });
@@ -148,14 +159,15 @@ const CHECKS = STOP / 120;
 // `opts.peerArgs` go to the peer; `opts.pageDrift` sets the page's copy back.
 const link = async (page_game, peer_rom, code, peer_first, opts = {}) => {
   await setup();
-  const pl = await page_player(page_game, opts.pageDrift ?? 0, opts.pageBios ?? null);
+  const stop = opts.stop ?? STOP;
+  const pl = await page_player(page_game, opts.pageDrift ?? 0, opts.pageBios ?? null, stop, !!opts.random);
   let peer = null;
   const extra = opts.peerArgs ?? [];
-  if (peer_first) { peer = run_peer(peer_rom, code, extra); await sleep(1500); }
+  if (peer_first) { peer = run_peer(peer_rom, code, extra, stop); await sleep(1500); }
   await pl.page.evaluate(() => document.getElementById("net-connect").click());
   await pl.page.locator("#net-code-input").fill(code);
   await pl.page.locator("#net-join-go").click();
-  if (!peer_first) { await sleep(1500); peer = run_peer(peer_rom, code, extra); }
+  if (!peer_first) { await sleep(1500); peer = run_peer(peer_rom, code, extra, stop); }
   if (opts.until) {
     // Only until the page's sync checks say what was wanted, then end.
     await until(async () => (await pl.page.evaluate(() => !!net?.started)) && opts.until(await page_sync(pl.page)),
@@ -169,16 +181,19 @@ const link = async (page_game, peer_rom, code, peer_first, opts = {}) => {
     if (!net?.started || Module._rollback_head() < stop) return false;
     if (Module._rollback_confirmed() < stop - 1) Module._rollback_feed(stop + 60, 0);
     return Module._rollback_confirmed() === stop - 1;
-  }, STOP);
-  await until(async () => (await done()) && /ONLINE DUMP/.test(peer.log()),
-    async () => "both at the stop | page: " +
+  }, stop);
+  await until(async () => {
+    if (opts.onWait) await opts.onWait(pl.page, peer.log());
+    return (await done()) && /ONLINE DUMP/.test(peer.log());
+  }, async () => "both at the stop | page: " +
       (await pl.page.evaluate(() => document.getElementById("net-status")?.textContent)) +
-      " | peer: " + peer.log().slice(-600), 120000);
+      " | peer: " + peer.log().slice(-600), 120000 + stop * 40);
   const page_dump = await dump(pl.page);
   const peer_dump = peer.log().match(/ONLINE DUMP (.*)/)[1].trim();
   const host = await pl.page.evaluate(() => net.isHost);
   // The last fingerprint (frame STOP) crosses just after both stop.
-  await until(async () => (await page_sync(pl.page)).checks >= CHECKS && peer_sync(peer.log()).checks >= CHECKS,
+  const checks = Math.floor(stop / 120);
+  await until(async () => (await page_sync(pl.page)).checks >= checks && peer_sync(peer.log()).checks >= checks,
     async () => "every sync check: page " + JSON.stringify(await page_sync(pl.page)) +
       " | peer " + JSON.stringify(peer_sync(peer.log())), 20000);
   const sync = { page: await page_sync(pl.page), peer: peer_sync(peer.log()),
@@ -293,4 +308,32 @@ test("control: the same pair without the agreement drifts at once", { skip: bios
     { pageBios: bios, until: (st) => st.mismatches >= 1 });
   console.log("    control:", JSON.stringify(r.sync));
   assert.ok(r.sync.page.mismatches >= 1, "the real BIOS and HLE drift apart");
+});
+
+// A real game for a while against the native core, random buttons on both
+// sides: every fingerprint agrees. DINGBAT_SOAK_ROM=path, DINGBAT_SOAK_MIN (15).
+const soakRom = process.env.DINGBAT_SOAK_ROM;
+const soakMin = Number(process.env.DINGBAT_SOAK_MIN || 15);
+test(`soak: a real game for ${soakMin} min, browser and native, random buttons`,
+     { skip: skip || (!soakRom && "DINGBAT_SOAK_ROM not set"), timeout: (soakMin * 60 * 2 + 600) * 1000 }, async () => {
+  const game = { name: "soak.gba", bytes: readFileSync(soakRom) };
+  const stop = soakMin * 3600;
+  let last = 0;
+  const r = await link(game, soakRom, "NATSOAK" + process.pid, false, {
+    stop, random: true,
+    onWait: async (page, log) => {
+      if (Date.now() - last < 60000) return;
+      last = Date.now();
+      const st = await page_sync(page).catch(() => null);
+      console.log("    page", JSON.stringify(st), "peer", JSON.stringify(peer_sync(log)));
+      assert.equal((st?.mismatches ?? 0) + peer_sync(log).mismatches, 0, "a mismatch");
+    },
+  });
+  console.log("    end: page", JSON.stringify(r.sync.page), "peer", JSON.stringify(r.sync.peer));
+  for (const side of ["page", "peer"]) {
+    assert.equal(r.sync[side].mismatches, 0, side + ": every fingerprint agreed");
+    assert.equal(r.sync[side].resyncs, 0);
+    assert.ok(r.sync[side].checks >= Math.floor(stop / 120), side + " compared them all");
+  }
+  assert.equal(r.page_dump, r.peer_dump, "page and native peer identical at the end");
 });

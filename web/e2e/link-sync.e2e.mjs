@@ -40,9 +40,9 @@ const until = async (cond, what, ms) => {
   }
 };
 
-const player = async (ctx, game) => {
+const player = async (ctx, game, query = "") => {
   const page = await ctx.newPage();
-  await page.goto(web.url + "?signal=ws://127.0.0.1:" + signalPort);
+  await page.goto(web.url + "?signal=ws://127.0.0.1:" + signalPort + query);
   await page.waitForFunction(() => typeof Module !== "undefined" && runtimeReady &&
     typeof db !== "undefined" && !!db, null, { timeout: 60000 });
   await page.evaluate(() => dbPut(THUMBS_OFFER_KEY, Date.now()));
@@ -64,7 +64,7 @@ const player = async (ctx, game) => {
 };
 
 let codes = 0;
-const pair = async (game) => {
+const pair = async (game, { queryB = "" } = {}) => {
   web ??= await serveWeb();
   if (!signal) {
     signalPort = 20000 + Math.floor(Math.random() * 20000);
@@ -78,7 +78,7 @@ const pair = async (game) => {
   browser ??= await playwright.chromium.launch({ headless: true, args: ["--mute-audio"] });
   // One context: the two tabs share a BroadcastChannel and link through it.
   const ctx = await browser.newContext({ viewport: { width: 1000, height: 800 } });
-  const a = await player(ctx, game), b = await player(ctx, game);
+  const a = await player(ctx, game), b = await player(ctx, game, queryB);
   const code = "SYNCE2E" + ++codes;
   for (const p of [a, b]) {
     await p.page.evaluate(() => document.getElementById("net-connect").click());
@@ -251,5 +251,66 @@ test("the cost with a real game", { skip: skip || (!romPath && "DINGBAT_SYNC_ROM
   await atStop(a, stop2);
   await atStop(b, stop2);
   await cost(a, game.name + " with the checks off");
+  await done();
+});
+
+// A real game played for a while: random buttons (a new set every 8
+// frames, never the soft-reset chord), B's sends 40 ms late, every
+// fingerprint must agree. DINGBAT_SOAK_ROM=path, DINGBAT_SOAK_MIN (15).
+const soakRom = process.env.DINGBAT_SOAK_ROM;
+const soakMin = Number(process.env.DINGBAT_SOAK_MIN || 15);
+const soakScript = ({ page }, stop, seed) => page.evaluate(([stop, seed]) => {
+  let r = seed >>> 0;
+  const rnd = () => (r = (Math.imul(r, 1664525) + 1013904223) >>> 0);
+  let held = 0;
+  const tick = Module._rollback_tick;
+  window.__ticks = [];
+  window.__stop = stop;
+  Module._rollback_tick = () => {
+    const h = Module._rollback_head();
+    if (h >= window.__stop) return -1;
+    if (h % 8 === 0) {
+      const x = rnd();
+      held = (x & 3) === 0 ? 0 : (x >>> 8) & 0x3ff;
+      if ((held & 0xf) === 0xf) held &= ~0x8; // A+B+Select+Start resets
+    }
+    localButtons = held;
+    const t = performance.now();
+    const f = tick(localButtons);
+    if (f >= 0) window.__ticks.push([f, performance.now() - t]);
+    return f;
+  };
+}, [stop, seed]);
+
+test(`soak: a real game for ${soakMin} min, random buttons, 40 ms late one way`,
+     { skip: skip || (!soakRom && "DINGBAT_SOAK_ROM not set"), timeout: (soakMin * 60 + 600) * 1000 }, async () => {
+  const game = { name: basename(soakRom), bytes: readFileSync(soakRom) };
+  const { a, b, done } = await pair(game, { queryB: "&linkdelay=40" });
+  const start = Math.max(await a.page.evaluate(() => Module._rollback_head()),
+                         await b.page.evaluate(() => Module._rollback_head()));
+  const stop = start + soakMin * 3600;
+  await soakScript(a, stop, 0xa11ce);
+  await soakScript(b, stop, 0xb0b);
+  const t0 = Date.now();
+  let lastLog = 0;
+  for (;;) {
+    const [sa, sb] = [await stats(a), await stats(b)];
+    if (Date.now() - lastLog > 60000) {
+      lastLog = Date.now();
+      console.log(`    ${Math.round((Date.now() - t0) / 60000)} min: A`, JSON.stringify(sa), "B", JSON.stringify(sb));
+    }
+    assert.equal(sa.mismatches + sb.mismatches, 0, "a mismatch: " + JSON.stringify([sa, sb]));
+    if (sa.head >= stop && sb.head >= stop && sa.confirmed === stop - 1 && sb.confirmed === stop - 1) break;
+    if (Date.now() - t0 > (soakMin * 60 + 480) * 1000) assert.fail("never reached the stop: " + JSON.stringify([sa, sb]));
+    await sleep(2000);
+  }
+  await sleep(3000); // the last fingerprint crosses
+  const [sa, sb] = [await stats(a), await stats(b)];
+  console.log("    end: A", JSON.stringify(sa), "B", JSON.stringify(sb));
+  assert.equal(sa.mismatches + sb.mismatches, 0);
+  assert.equal(sa.resyncs + sb.resyncs, 0);
+  assert.ok(sa.checks >= Math.floor((stop - start) / 120) - 2, "every fingerprint compared: " + sa.checks);
+  assert.equal(await dumps(a), await dumps(b), "every core identical at the end");
+  await cost(a, game.name + " soak");
   await done();
 });

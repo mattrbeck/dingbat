@@ -137,7 +137,13 @@ proc sync_flush(sess: GbRollbackSession) =
       h = sess.fingerprint()
     else:
       # The live HeldKeys go back too: load_ckpt puts frame f's in, and the
-      # next frame's joypad interrupt edge reads them.
+      # next frame's joypad interrupt edge reads them. And the APU's output
+      # (a load drops its half-filled buffer and, natively, the host's audio
+      # queue): the two loads here go unheard.
+      var audio: seq[(bool, int)]
+      for c in sess.link.cores:
+        audio.add((c.apu.owns_audio, c.apu.buffer_pos))
+        c.apu.owns_audio = false
       let live = sess.link.capture_state()
       var keys: array[2, HeldKeys]
       for p in 0 .. 1:
@@ -153,6 +159,8 @@ proc sync_flush(sess: GbRollbackSession) =
         j.down = k.down; j.up = k.up; j.left = k.left; j.right = k.right
         j.start = k.start; j.jselect = k.jselect; j.b = k.b; j.a = k.a
         j.prev_lines = k.prev_lines
+      for i, c in sess.link.cores:
+        (c.apu.owns_audio, c.apu.buffer_pos) = audio[i]
     sess.syncOut.add((f, h))
     sess.syncNext = f + sess.syncEvery
 

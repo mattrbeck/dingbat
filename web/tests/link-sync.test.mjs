@@ -437,3 +437,25 @@ test("the GBA BIOS: both on HLE when the two HELLOs name different ones, each it
   assert.equal(hle(real, { mode: 1, hash: 0xb106 }), true, "another image");
   assert.equal(hle(real, null), false, "an older friend names none: each its own");
 });
+
+test("a re-sync at 2x: the fresh cores are told 2x again", async () => {
+  const [a, b] = await pair();
+  const turbo = [];
+  a.eng.module._wasm_set_turbo = (on) => turbo.push(on);
+  a.app.runIn("speed2x = true; 0");
+  run(a, b, 200);
+  b.eng.poke = b.eng.head;
+  turbo.length = 0;
+  run(a, b, 400);
+  assert.equal(a.rb("rb.resyncs"), 1);
+  assert.deepEqual(turbo, [1], "2x pushed into the new cores once, after the restart");
+});
+
+test("a re-sync loads our own game first", async () => {
+  const [a, b] = await pair();
+  run(a, b, 200);
+  b.eng.poke = b.eng.head;
+  run(a, b, 400);
+  assert.equal(b.eng.loads[0], 1, "B (the guest) loaded its own game, core 1, first");
+  assert.equal(a.eng.loads[0], 0, "and A its own, core 0");
+});
