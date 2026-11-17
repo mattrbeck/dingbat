@@ -38,12 +38,7 @@ proc skip_boot*(cpu: GbCpu; gb: GB) =
       # "Power-Up Sequence" [^cgbdmg_b]/[^cgbdmg_hl]/[^agbdmg_f]). B: title
       # sum for a Nintendo-licensee cart; the AGB's `inc b` sets Z/H in F.
       # HL = $991A marks the two logo-animation palette IDs.
-      let rom = gb.cartridge.rom
-      var b = 0'u8
-      if rom.len > 0x0145 and
-         (rom[0x014B] == 0x01 or
-          (rom[0x014B] == 0x33 and rom[0x0144] == 0x30 and rom[0x0145] == 0x31)):
-        for i in 0x0134 .. 0x0143: b = b + rom[i]
+      var b = nintendo_title_sum(gb.cartridge.rom)
       if gb.boot_model == bmAgb:
         let half = (b and 0x0F) == 0x0F
         b = b + 1

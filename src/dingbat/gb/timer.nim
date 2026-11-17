@@ -27,6 +27,15 @@ proc cgb_boot_header_t(rom: seq[uint8]): int =
     else: 32 + CGB_BOOT_LICENSED_T
   else: 0
 
+proc nintendo_title_sum(rom: seq[uint8]): uint8 =
+  ## The CGB boot ROM's title checksum: the 16 title bytes summed for a
+  ## Nintendo licensee (old $01, or $33 with new "01"), else 0. Pan Docs,
+  ## "Power Up Sequence" (Compatibility palettes; [^cgbdmg_b]).
+  if rom.len > 0x0145 and
+     (rom[0x014B] == 0x01 or
+      (rom[0x014B] == 0x33 and rom[0x0144] == 0x30 and rom[0x0145] == 0x31)):
+    for i in 0x0134 .. 0x0143: result = result + rom[i]
+
 proc skip_boot*(t: GbTimer; gb: GB) =
   # Internal 16-bit divider at PC=0x100 per boot model, pinned by mooneye
   # boot_div-* (both bytes); DMG-ABC also by boot_sclk_align (serial.nim).

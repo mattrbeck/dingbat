@@ -1055,12 +1055,12 @@ the no-switch `sound/*_ds_{2,4,6}`); on E it is the mirror image (22/46).
 ## I. DocBoy (`docboy/*`, first scored 2026-10-14)
 
 DocBoy's own suite, scored by its own runner's rules on DMG ABC and CPU CGB E
-(`tests/README.md`, "The DocBoy suite"): 8,763 / 9,186 at `DocboyRev` (49
+(`tests/README.md`, "The DocBoy suite"): 8,765 / 9,186 at `DocboyRev` (49
 more not scored, `DocboyNotScored`). Every failing ROM is in
 [`tests/results_docboy.md`](../../tests/results_docboy.md); every group that is
 not scored is in the "Deliberately not scored" ledger at the end of
-`tests/results.md`. The 423 failing tests are I1 79, I2 13, I3 180, I5 6,
-I6 49, I9 22, I11 15, I12 36, I13 10 and "Small" 13. I4's scored rows all
+`tests/results.md`. The 421 failing tests are I1 79, I2 13, I3 180, I5 6,
+I6 49, I9 20, I11 15, I12 36, I13 10 and "Small" 13. I4's scored rows all
 pass; I7, I8 and I10 are closed. The 9,186 include DocBoy's rebuilds of 7 SameSuite channel 1 ROMs
 (`cgb/samesuite/apu/channel_1/*-cgbE`), which pass; the eighth,
 `channel_1_sweep_restart_2-cgbE`, is not scored (its expectation and
@@ -1662,10 +1662,10 @@ hardware question. Families:
     and dingbat agree on.
 
   The 33 double-speed CH4 shift/divider tests closed with I1.
-* **I9. Boot hand-off state (22 left of 46; 4 not scored).** Measured by
+* **I9. Boot hand-off state (20 left of 46; 4 not scored).** Measured by
   running Matt's CGB and DMG boot ROMs through dingbat (a local instrument,
   never committed): the hand-off per header path, beside the skip-boot state.
-  * Closed (20, and `cgb/ppu/turn_off_read_stat` with the STAT bit): DIV at
+  * Closed (22, and `cgb/ppu/turn_off_read_stat` with the STAT bit): DIV at
     `$0100` per licensee path (`cgb_boot_header_t`, timer.nim: every old
     licensee but $01/$33 one time, $33 with a new code not starting '0' 4 T
     earlier, '0x' 32 T later, a licensed cart 4,360 T later when its title
@@ -1678,19 +1678,24 @@ hardware question. Families:
     which also needed OPRI, I11); the HRAM the boot ROMs leave (the cart's
     logo at `$FF80`, their stack residue). `cgb/boot/boot_regs_joypad`
     (P1 = $CF with a CGB cart) closed with I13's P1 hand-off.
+    `cgb_dmg_mode` `boot_vram_nintendo_logo_checksum_{43,58}` (2026-11-17):
+    the logo tile map over a Nintendo-licensed DMG cart with title checksum
+    $43/$58, a two-value rule in Pan Docs that needs no table
+    (docs/dev/gb-derivations.md section 8).
   * dingbat's own boot-ROM run handed off 4 T short of mooneye
     `boot_div-dmgABCmgb` and `boot_div-cgbABCDE` with the PPU phase already
     right, so the divider starts 4 T on when a boot ROM runs
     (`BOOT_ROM_DIV_START_T`). With Nintendo's boot ROMs the run then passes
     both mooneye tests and every DocBoy `boot` test, the table-dependent
     ones included, but `boot_hram` ($FFFE, below).
-  * Left on the skip-boot (22): 20 `cgb/boot` `boot_div_title_*` tests whose
+  * Left on the skip-boot (20): the `cgb/boot` `boot_div_title_*` tests whose
     DIV is set by WHERE the title checksum sits in Nintendo's
     compatibility-palette table (REDUCTIONS, checksum $00, is in it; so are
-    16/46A/46E/46R/6F/BF/F4), and `cgb_dmg_mode`
-    `boot_vram_nintendo_logo_checksum_{43,58}` (the boot ROM leaves the
-    logo's tile map for those two entries). The table is not carried, as for
-    I3's 63 palette tests.
+    16/46A/46E/46R/6F/BF/F4; the 4th-letter ones also by the letter table).
+    All are Nintendo-licensed DMG-flagged carts (CGB flag $00), so the
+    "cgb" rows run in compatibility mode. The index is an arbitrary order,
+    so no formula stands in for the table, which is not carried (Matt,
+    2026-10-14), as for I3's 63 palette tests.
   * Not scored (4; ledger "DocBoy: `boot_hram`"): three ROMs (the dmg
     manifest lists its ROM twice) match in every byte but `$FFFE`, which no
     boot ROM writes and they expect as $4C (dmg) or $C0 (cgb, cgb_dmg_mode);

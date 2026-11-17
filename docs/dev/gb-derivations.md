@@ -1698,6 +1698,19 @@ Dots are dingbat's line dots; W is the first dot of the writing M-cycle
   the boot ROM uses for any cart without a Nintendo licensee); the per-title
   table is not reproduced.
 
+### The CGB boot ROM leaves the logo map only for title checksums $43 and $58
+- Site: `skip_boot` (`ppu.nim`), `nintendo_title_sum` (`timer.nim`, shared
+  with the B and HL hand-off in `cpu.nim`).
+- Claim: over a DMG cart with a Nintendo licensee and title checksum $43 or
+  $58, the CGB/AGB boot ROM writes the DMG boot ROM's logo tile map ($9904-
+  $990F, $9910, $9924-$992F); any other cart, and every CGB cart, gets no
+  map. A two-value rule, not the palette table.
+- Evidence: Pan Docs, "Power Up Sequence", Compatibility palettes ("If the ID
+  is either $43 or $58, then the Nintendo logo's tilemap is written to VRAM")
+  and [^cgbdmg_hl] (HL = $991A exactly when B, the title checksum, is
+  $43/$58). DocBoy `cgb_dmg_mode/boot/boot_vram_nintendo_logo_checksum_
+  {43,58}` compare $9900-$997F against that map; `_1a` against zeros.
+
 ### VBK is locked outside CGB mode; FF4F reads $FE
 - Claim: VBK leaves the register map with the rest of the CGB set when KEY0 is
   set, so bank 1 is unwritable and the attribute plane is all zero by

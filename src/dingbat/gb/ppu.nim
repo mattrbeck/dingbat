@@ -123,10 +123,14 @@ proc skip_boot*(ppu: GbPpu; gb: GB) =
   write_boot_logo(gb.cartridge.rom, ppu.vram[0])
   for i in 0 ..< POST_BOOT_RA_TILE.len:
     ppu.vram[0][0x190 + i] = POST_BOOT_RA_TILE[i]  # tile $19 = byte offset 400
-  if not gb.cgb_enabled:
+  # The CGB boot ROM writes the same map over a DMG cart whose title checksum
+  # is $43 or $58 (Pan Docs, "Power Up Sequence", Compatibility palettes;
+  # DocBoy cgb_dmg_mode/boot/boot_vram_nintendo_logo_checksum_{43,58}), and
+  # no map otherwise.
+  if not gb.cgb_enabled or (gb.cgb_flag == cgbNone and
+                            nintendo_title_sum(gb.cartridge.rom) in [0x43'u8, 0x58'u8]):
     # The DMG boot ROM's tile map: $9910 = tile $19, $992F..$9924 = $18..$0D,
-    # $990F..$9904 = $0C..$01 (BullyGB initmap reads it back). The CGB map is
-    # not seeded; nothing measures it.
+    # $990F..$9904 = $0C..$01 (BullyGB initmap reads it back).
     ppu.vram[0][0x1910] = 0x19
     for i in 0 ..< 12:
       ppu.vram[0][0x1904 + i] = uint8(0x01 + i)
