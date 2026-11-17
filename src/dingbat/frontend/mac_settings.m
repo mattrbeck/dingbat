@@ -190,6 +190,7 @@ static NSMutableArray<DbsRow *> *rows[MAX_TABS];
 static NSString *sigs[MAX_TABS];
 static int ntabs, cur_tab, counter;
 static BOOL building;
+static NSPopover *help_pop;  // the open "?" explanation
 static BOOL asking;   // the hidden window's discard question, for dbs_do
 
 static NSString *str(const char *s) { return s ? [NSString stringWithUTF8String:s] : @""; }
@@ -292,24 +293,25 @@ static DbsRow *row_of(NSInteger tag) {
 }
 
 - (void)help:(NSButton *)b {
+  // The row's explanation, wrapped to 320 points. Sized here: a wrapping
+  // label under Auto Layout alone gave the popover no width.
   NSTextField *t = [NSTextField wrappingLabelWithString:b.toolTip ?: @""];
-  t.preferredMaxLayoutWidth = 320;
-  t.translatesAutoresizingMaskIntoConstraints = NO;
-  NSViewController *vc = [NSViewController new];
-  NSView *v = [NSView new];
+  t.selectable = NO;
+  NSSize fit = [t.cell cellSizeForBounds:NSMakeRect(0, 0, 320, CGFLOAT_MAX)];
+  fit = NSMakeSize(ceil(fit.width), ceil(fit.height));
+  t.frame = NSMakeRect(14, 12, fit.width, fit.height);
+  NSView *v = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, fit.width + 28, fit.height + 24)];
   [v addSubview:t];
-  [NSLayoutConstraint activateConstraints:@[
-    [t.leadingAnchor constraintEqualToAnchor:v.leadingAnchor constant:14],
-    [t.trailingAnchor constraintEqualToAnchor:v.trailingAnchor constant:-14],
-    [t.topAnchor constraintEqualToAnchor:v.topAnchor constant:12],
-    [t.bottomAnchor constraintEqualToAnchor:v.bottomAnchor constant:-12],
-    [t.widthAnchor constraintLessThanOrEqualToConstant:320],
-  ]];
+  NSViewController *vc = [NSViewController new];
   vc.view = v;
-  NSPopover *pop = [NSPopover new];
-  pop.behavior = NSPopoverBehaviorTransient;
-  pop.contentViewController = vc;
-  [pop showRelativeToRect:b.bounds ofView:b preferredEdge:NSRectEdgeMaxX];
+  [help_pop close];
+  help_pop = [NSPopover new];
+  help_pop.behavior = NSPopoverBehaviorTransient;
+  help_pop.contentViewController = vc;
+  help_pop.contentSize = v.frame.size;
+  // (The GUI driver's window is never shown: there it is only built)
+  if (b.window.visible)
+    [help_pop showRelativeToRect:b.bounds ofView:b preferredEdge:NSRectEdgeMaxX];
 }
 
 - (void)footer:(NSButton *)b {
@@ -717,6 +719,11 @@ char *dbs_dump(void) {
                       tab_view.selectedTabViewItem == [tab_view tabViewItemAtIndex:i] ? @" [x]" : @""];
     dump_rows(i, out);
   }
+  if (help_pop) {
+    NSTextField *t = help_pop.contentViewController.view.subviews.firstObject;
+    [out appendFormat:@"help %.0fx%.0f %@\n", help_pop.contentSize.width,
+                      help_pop.contentSize.height, t.stringValue];
+  }
   return strdup(out.UTF8String);
 }
 
@@ -752,6 +759,16 @@ int dbs_do(const char *tab_name, const char *item, const char *value) {
   if ([want isEqualToString:@""]) {
     [tab_view selectTabViewItemAtIndex:t];
     return 1;
+  }
+  if ([str(value) isEqualToString:@"?"]) {
+    // The row's "?" button
+    for (DbsRow *r in rows[t]) {
+      if (r.view.hidden || !r.help) continue;
+      NSString *name = r.label ? r.label.stringValue
+                     : [r.control isKindOfClass:NSButton.class] ? ((NSButton *)r.control).title : @"";
+      if ([name isEqualToString:want]) return press(r.help) ? 1 : -1;
+    }
+    return 0;
   }
   for (DbsRow *r in rows[t]) {
     if (r.view.hidden) continue;

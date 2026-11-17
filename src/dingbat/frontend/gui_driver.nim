@@ -18,6 +18,9 @@
 ##   down <x> <y> [right] / up <x> <y> [right]
 ##   click <x> <y> [right]             move, down, a few frames, up
 ##   wheel <dy>
+##   scroll <dy> pt|line               macOS: a trackpad's scroll of dy points,
+##                                     or a wheel mouse's of dy lines, as
+##                                     AppKit hands it over (not through SDL)
 ##   drop <path>                       a file dropped on the window
 ##   drag over|leave                   a file dragged over the window, or away
 ##   window focus_lost|focus_gained|close
@@ -55,7 +58,9 @@
 ##                                     greyed, [waiting] for a key, [invalid])
 ##   settings do <Tab>[><Title>[><text>]]  pick a tab, or click the row titled
 ##                                     so in it; a path row takes <text> as
-##                                     typed. Tab "" is the button row (">OK")
+##                                     typed. Tab "" is the button row (">OK");
+##                                     <text> "?" clicks the row's "?" button
+##                                     (the dump then ends `help WxH <text>`)
 ##   settings key <mac key code>       a key let go in the window (kVK_*: 0x06 Z)
 ##   settings close                    the window's close button
 ##   settings shot <path.png>          the window as drawn (shown or not)
@@ -113,6 +118,7 @@ import stb_image/write as stbiw
 when defined(macosx):
   import mac_menu
   import mac_settings
+  import mac_scroll
   import mac_alert
 
 type
@@ -353,6 +359,13 @@ proc run(window: Window; s: Step): bool =
     e.wheel.windowID = window.getWindowID()
     e.wheel.y = cfloat(parseInt(w[1]))
     push(e)
+  of "scroll":
+    when defined(macosx):
+      let precise = w[2] == "pt"
+      if dbsc_feed(cdouble(parseFloat(w[1])), cint(precise)) != cint(precise):
+        raise newException(ValueError, "precise flag not as asked")
+    else:
+      raise newException(ValueError, "macOS only")
   of "drop":
     dropped = s.rest  # handle_input takes it where SDL's drop would arrive
   of "drag":          # drag over | drag leave: a file hovering, or gone

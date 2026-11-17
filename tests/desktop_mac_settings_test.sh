@@ -9,6 +9,7 @@
 #             they are not; a missing file is marked invalid
 #   edit      a toggle, a filter, a path and a key capture (A takes J, then
 #             B waits), Apply: the settings file has them
+#   help      a row's "?" opens its explanation, wrapped, not an empty sliver
 #   close     an unapplied edit asks first; Discard leaves the file as it was;
 #             Revert puts the edit back
 #   ds beta   unticking DS Beta takes the DS rows away, before Apply
@@ -89,6 +90,21 @@ check "applied: LCD response" "$(grep -c '^lcd_response: true' "$yml")" 1
 check "applied: xBR" "$(grep -c '^video_filter: xbr' "$yml")" 1
 check "applied: the BIOS file" "$(grep -c "bios: $work/bios.bin" "$yml")" 1
 check "applied: J is A" "$(grep -c '^  j: a' "$yml")" 1
+
+echo "a row's ? button"
+run "" "1 sleep 200
+2 menu pick dingbat>Settings...
+3 sleep 300
+4 settings do Video>Preserve aspect ratio>?
+5 settings dump $work/help.txt
+6 quit"
+help=$(grep '^help ' "$work/help.txt")
+w=$(echo "$help" | cut -d' ' -f2 | cut -dx -f1)
+h=$(echo "$help" | cut -d' ' -f2 | cut -dx -f2)
+check "the explanation is the row's" "$(echo "$help" | cut -d' ' -f3-5)" "Letterbox the picture"
+check "wrapped at most 320 points wide" \
+      "$([ "${w:-0}" -ge 200 ] && [ "${w:-0}" -le 348 ] && echo yes)" yes
+check "and tall enough for its lines" "$([ "${h:-0}" -ge 60 ] && echo yes)" yes
 
 echo "closing, Revert, DS Beta"
 run "" "1 sleep 200
