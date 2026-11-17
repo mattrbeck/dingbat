@@ -5,7 +5,10 @@
 ## frontend needs.
 
 import sdl3
-import imgui_paths  # imgui's include dirs, for the C++ backend
+# imgui's include dirs, for the C++ backend. Windows and Linux draw with
+# OpenGL, whose imguin module puts them there along with ImGui's GL backend.
+when defined(macosx): import imgui_paths
+else: import imguin/impl_opengl
 
 # Found on the search path, which holds the imguin package root
 {.compile: "imguin/private/cimgui/imgui/backends/imgui_impl_sdl3.cpp".}
