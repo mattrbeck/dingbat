@@ -1027,6 +1027,29 @@ Dots are dingbat's line dots; W is the first dot of the writing M-cycle
   "The OAM DMA unit under a HALT", above). With both the test is green.
 - Clean-room: derived from test ROM sources/outputs and dingbat's own trace runs; no emulator source consulted.
 
+### DMG OAM bug: a word-3 write after the scan's last row also corrupts word 2
+- Site: `oam_bug_scan_end` (`ppu.nim`), the row-20 M-cycle (cc 77..80) of
+  "The DMG OAM corruption bug" table there; the rest of that table is
+  `docs/dev/gb-failure-triage.md` I5.
+- Rule: a CPU write to word 3 of row X on that M-cycle gives X's word 3
+  maj(X w3, 19 w3, 19 w2), as for every word, and X's word 2 maj(X w2,
+  19 w2, that word 3) (taken before the CPU's byte lands) where every other
+  word is a plain copy of row 19. Reads and writes of words 0-2 are
+  unchanged. Word 3 is already the odd one out at row 20: a read of it is
+  `19 w3 | (X w3 & 19 w2)`, not the majority.
+- Evidence: DocBoy `dmg/oam_bug/oam_bug_ld_{hl,hli}_a_round23_fe46/fe47`
+  (byte 0 or 1 of row 8's word 3 written with $00; expected word 2 $11 $0F
+  where row 19 has $55 $0F and row 8 had $AA $0F; the low byte, $AA against
+  $55, shows all eight bits of the third input, $11 = the word-3 value, and
+  the high byte is equal in both rows so the majority keeps it). Words 0-2
+  at round 23 (`_fe40`..`_fe45`, `_fe48`) leave word 2 a copy of row 19
+  under the same pattern, so the rule is word 3's alone; `push_round21`
+  writes word 3 at round 23 with words 2 already equal. The fit is not
+  unique: `19 w2 & 19 w3` as the third input gives the same $11; the
+  word-3 value is the quantity the row-20 rule already computes. SameBoy (DMG B, black box) fails all four.
+  DocBoy's author runs the suite on his DMG; no hardware claim per row.
+- Clean-room: derived from test ROM sources/outputs and dingbat's own trace runs; no emulator source consulted.
+
 ## 7. CPU
 
 ### The eleven undefined opcodes lock the CPU until reset

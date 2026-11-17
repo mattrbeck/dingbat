@@ -703,8 +703,9 @@ proc cpu_oam_open*(ppu: GbPpu; is_write: bool; mcycle_dots: int32 = 0;
 #   row 20, the M-cycle after the scan's last row (cc 77..80; CPU only): the
 #     scan's row 19 is still on the bit lines; X takes row 19's words with
 #     word k = maj(X wk, 19 wk, 19 w2) (a read of word 3: 19 w3 | (X w3 &
-#     19 w2)), then a write's byte lands; a read leaves the same word k in
-#     row 19 too.
+#     19 w2)), and a write of word 3 also gives X's word 2 maj(X w2, 19 w2,
+#     that word 3) (DocBoy `ld_{hl,hli}_a_round23_fe46/47`); then a write's
+#     byte lands. A read leaves the same word k in row 19 too.
 #
 # maj is Pan Docs' write formula `((a ^ c) & (b ^ c)) ^ c`, the bitwise
 # majority. The rules not from Pan Docs are DocBoy's measured dmg/oam_bug
@@ -780,14 +781,17 @@ proc oam_bug_scan_end(ppu: GbPpu; address: uint16; kind: OamBugKind) =
   let x = int(address and 0xFF) shr 3
   if x >= 20: return
   let k = int(address shr 1) and 3
-  var v: array[2, uint8]
+  var v, w2: array[2, uint8]
   for i in 0 .. 1:
     let a = ppu.oam_byte(x, k, i)
     let b = ppu.oam_byte(19, k, i)
     let c = ppu.oam_byte(19, 2, i)
     v[i] = if kind == obRead and k == 3: b or (a and c) else: oam_maj(a, b, c)
+    w2[i] = if kind == obWrite and k == 3: oam_maj(ppu.oam_byte(x, 2, i), c, v[i])
+            else: c
   oam_copy_row(ppu, x, 19)
   for i in 0 .. 1:
+    ppu.oam_byte(x, 2, i) = w2[i]
     ppu.oam_byte(x, k, i) = v[i]
     if kind == obRead: ppu.oam_byte(19, k, i) = v[i]
 
