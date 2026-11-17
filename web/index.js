@@ -12316,27 +12316,12 @@ const boundInput = (code) => {
 // i), handed to rollback_tick and shipped to the peer each frame.
 var rollbackMode = false;
 var localButtons = 0;
-var rbWasLinked = false;  // the games have actually communicated over the link
-var rbLastTransfers = 0;  // last-seen SIO transfer count (activity probe)
-var rbLastActivity = 0;   // timestamp of the last transfer-count change
+// An online link ends only by a player (Disconnect, closing the page) or
+// the network (the friend gone for good): never by the cable falling quiet,
+// as no game's cable pattern can be told from outside (FireRed's Cable
+// Club probes it, then it is silent through the menus; Gen 2 bursts, with
+// minutes between).
 var rbStallSince = 0;     // when rollback_tick began returning "stalled", or 0
-// Auto-end of an online link keys only off serial-cable activity
-// (_rollback_transfers), never game knowledge: once the cable has carried
-// traffic, RB_IDLE_MS of silence ends it; before any, nothing does (players
-// link early and walk to the game's link spot). The window resets on every
-// transfer and is long because a game probes the cable and then waits on
-// its players: FireRed's Cable Club counter clocks ~480 transfers, then none
-// through the menus and the save until both are in the Trade Center.
-// It doesn't run while the clock is stalled on the friend's inputs: their
-// tab is hidden (rAF stops) or the network is slow, and a frozen game makes
-// no transfers without the link being done. A dead network ends the
-// session through the peer connection's own state instead.
-const RB_IDLE_MS = 90000;
-var rbIdleMs = RB_IDLE_MS;  // e2e tests shorten it
-// When the idle check last ran: it runs only in an unpaused, visible tick,
-// so a gap since (a pause, a hidden tab with no rAF) restarts the clock
-// instead of counting as idle time.
-var rbLastIdleCheck = 0;
 const noteLocalButton = (inputId, down) => {
   if (down) localButtons |= 1 << inputId;
   else localButtons &= ~(1 << inputId);
@@ -15209,11 +15194,7 @@ window.enterRollbackMode = () => {
   localButtons = 0;
   gpPrev.fill(false);
   rollbackMode = true;
-  rbWasLinked = false;
-  rbLastTransfers = 0;
-  rbLastActivity = performance.now();
   rbStallSince = 0;
-  rbLastIdleCheck = rbLastActivity;
   paused = false;
   document.body.classList.remove("paused");
   // openNetConnect froze the game and lit the pause button; clear it.
@@ -20134,27 +20115,6 @@ var Module = {
         blitRollbackCanvas();
         if (typeof window.rbNoteStall === "function") {
           window.rbNoteStall(rbStallSince ? timestamp - rbStallSince : 0);
-        }
-        // Auto-end via serial-cable inactivity (RB_IDLE_MS). Skip
-        // while the tab is hidden or stalled on the friend: neither is "link
-        // done"; reset the clock so the timer restarts once frames flow.
-        if (Module._rollback_transfers) {
-          const t = Module._rollback_transfers();
-          const idleLimit = rbIdleMs;
-          if (timestamp - rbLastIdleCheck > 1000) rbLastActivity = timestamp;
-          rbLastIdleCheck = timestamp;
-          if (t !== rbLastTransfers) {
-            rbLastTransfers = t;
-            rbLastActivity = timestamp;
-            if (t > 0) rbWasLinked = true;
-          } else if (document.hidden || rbStallSince) {
-            rbLastActivity = timestamp; // don't accrue idle time while frozen
-          } else if (rbWasLinked && timestamp - rbLastActivity > idleLimit) {
-            rbWasLinked = false;
-            log(`netplay: link idle ${Math.round(idleLimit / 1000)} s (no serial transfers) — disconnecting`);
-            if (typeof netShutdown === "function") netShutdown();
-            showToast("Link idle — disconnected");
-          }
         }
       } else if (netMode) {
         // Online link: driveNet consumes the accumulator (also called from

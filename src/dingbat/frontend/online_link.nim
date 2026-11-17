@@ -63,11 +63,6 @@ const
   SETUP_SILENCE_MS = 30000  # a friend mid-setup says something well within this
   SETUP_CHECK_MS = 5000
   CODE_MAX* = 12  ## the web's and iOS's code box hold this many
-  LINK_IDLE_MS* = 90_000
-    ## Once the cable has carried traffic, this much silence ends the link
-    ## (web RB_IDLE_MS); before any, nothing does. Long because a game probes
-    ## the cable and then waits on its players: FireRed's Cable Club counter
-    ## clocks ~480 transfers, then none through the menus and the save.
 
   K_HELLO = 0'u8
   K_INPUT = 1'u8
@@ -224,10 +219,6 @@ type
     rb_paths: array[2, string]
     mute: ReplayMute
     resume_give_up*: int
-    idle_limit*: int          ## LINK_IDLE_MS (tests shorten it)
-    idle_transfers: int
-    cable_used: bool
-    idle_activity, idle_check: int64
 
 # The network's objects by id, for every link in the process: the event
 # queue (rtc_shim.c) is one for all.
@@ -250,7 +241,7 @@ proc new_online_link*(hooks: OnlineHooks; cache_dir, live_path: string;
   OnlineLink(hooks: hooks, signal_url: signal_url, cache_dir: cache_dir,
              live_path: live_path, page_id: random_hex(16),
              peer_away_at: -1, reconnecting_since: -1,
-             resume_give_up: RESUME_GIVE_UP, idle_limit: LINK_IDLE_MS)
+             resume_give_up: RESUME_GIVE_UP)
 
 # ───────────────────────── timers ─────────────────────────
 
@@ -955,10 +946,6 @@ proc start_if_ready(ol: OnlineLink; s: Session) =
   if rb == nil or not rb.inited or not rb.local_ready or not rb.remote_ready or s.started: return
   s.started = true
   s.setup.cancel()
-  ol.cable_used = false
-  ol.idle_transfers = 0
-  ol.idle_activity = ol.now()
-  ol.idle_check = ol.idle_activity
   ol.linked = true
   ol.connecting = false
   ol.set_status("")
@@ -1150,29 +1137,6 @@ proc transfers*(ol: OnlineLink): int =
   if ol.rb_gb != nil: ol.rb_gb.link.transfers
   elif ol.rb_gba != nil: ol.rb_gba.link.transfers
   else: 0
-
-proc idle_disconnect*(ol: OnlineLink)
-
-proc watch_idle*(ol: OnlineLink; running: bool) =
-  ## Once per main-loop iteration of a started session: the cable's own
-  ## activity decides, never game knowledge (web's idle watch). `running`:
-  ## frames are advancing. Paused, or stalled on the friend's inputs, the
-  ## game makes no transfers without the link being done, so that time
-  ## doesn't count; nor does a gap between calls.
-  if not ol.started: return
-  let t0 = ol.now()
-  if t0 - ol.idle_check > 1000: ol.idle_activity = t0
-  ol.idle_check = t0
-  let t = ol.transfers
-  if t != ol.idle_transfers:
-    ol.idle_transfers = t
-    ol.idle_activity = t0
-    if t > 0: ol.cable_used = true
-  elif not running:
-    ol.idle_activity = t0
-  elif ol.cable_used and t0 - ol.idle_activity > ol.idle_limit:
-    ol.cable_used = false
-    ol.idle_disconnect()
 
 proc reconnecting*(ol: OnlineLink): bool =
   ol.session != nil and ol.session.rb != nil and ol.session.rb.reconnecting
@@ -1590,11 +1554,6 @@ proc disconnect*(ol: OnlineLink) =
   ol.shutdown()
   ol.set_status("")
   if started: ol.toast("Disconnected")
-
-proc idle_disconnect*(ol: OnlineLink) =
-  ol.log("link idle (no serial transfers) - disconnecting")
-  ol.shutdown()
-  ol.toast("Link idle - disconnected")
 
 proc shutdown*(ol: OnlineLink; why = "left") =
   ## End everything. A session that built its cores hands this player's

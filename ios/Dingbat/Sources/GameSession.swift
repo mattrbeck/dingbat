@@ -499,7 +499,7 @@ final class GameSession: NSObject, ObservableObject {
                     checkSaveChanged()
                 }
             }
-            watchLinkIdle(now)
+            watchLinkStall(now)
             fpsAccount(now, ran: ran)
             onTick?()
             return
@@ -749,26 +749,8 @@ final class GameSession: NSObject, ObservableObject {
 
     // MARK: online link
 
-    /// The link idle watch (web RB_IDLE_MS): only the emulated cable's
-    /// activity counts, never game knowledge. Once the cable has carried
-    /// traffic, `linkIdleLimit` of silence ends the link; before any,
-    /// nothing does. It resets on every transfer.
-    /// It doesn't run while the clock is stalled on the friend's inputs
-    /// (their app or tab is away, or the network is slow): a frozen game
-    /// makes no transfers without the link being done. A dead network ends
-    /// the session through the peer connection instead.
-    private var linkUsed = false
-    /// web RB_IDLE_MS. DEBUG builds take `-link-idle S` (ios/e2e/link-away.mjs).
-    static let linkIdleLimit: CFTimeInterval = {
-        #if DEBUG
-        let a = ProcessInfo.processInfo.arguments
-        if let i = a.firstIndex(of: "-link-idle"), i + 1 < a.count, let v = Double(a[i + 1]) { return v }
-        #endif
-        return 90
-    }()
-    private var linkTransfers: Int32 = 0
-    private var linkActivity: CFTimeInterval = 0
-    private var linkLastWatch: CFTimeInterval = 0
+    // A link ends only by a player or the network, never by the cable
+    // falling quiet (web index.js, rbStallSince).
     /// When rollback_tick began answering "stalled", or 0.
     private var linkStallSince: CFTimeInterval = 0
     /// Whole seconds of a stall nothing explains (no away message), from
@@ -804,9 +786,6 @@ final class GameSession: NSObject, ObservableObject {
                 return false
             }
             linkStallSince = 0
-            #if DEBUG
-            if let n = Self.linkBusyFrames, f < n { linkFakeTransfers += 9 }
-            #endif
             NetLink.shared.sendInput(frame: f, bits: bits)
             ran += 1
             return true
@@ -837,17 +816,6 @@ final class GameSession: NSObject, ObservableObject {
         return Int32(a[i + 1])
     }()
     static let linkPress = ProcessInfo.processInfo.arguments.contains("-link-press")
-    /// `-link-busy-cable N`: the idle watch counts nine serial transfers per
-    /// linked frame below frame N, then none, as a GBA link game clocks its
-    /// cable and then stops (ios/e2e/link-away.mjs: the test ROMs settle
-    /// their link roles unlinked, at boot, and stay quiet).
-    static let linkBusyFrames: Int32? = {
-        let a = ProcessInfo.processInfo.arguments
-        guard let i = a.firstIndex(of: "-link-busy-cable"), i + 1 < a.count else { return nil }
-        return Int32(a[i + 1])
-    }()
-    private var linkFakeTransfers: Int32 = 0
-
     /// `-link-script NAME`: this player's buttons by linked frame, from
     /// NAME.p<player>.txt in Documents: "<frame> <mask>" lines, each held
     /// until the next (the cores' bit order: Up Down Left Right A B Select
@@ -920,27 +888,8 @@ final class GameSession: NSObject, ObservableObject {
     }
     #endif
 
-    private func watchLinkIdle(_ now: CFTimeInterval) {
-        // No ticks while the app was in the background (the display link
-        // stops): restart the clock rather than count the time away as idle.
-        if now - linkLastWatch > 1 { linkActivity = now }
-        linkLastWatch = now
-        #if DEBUG
-        let t = Self.linkBusyFrames != nil ? linkFakeTransfers : dingbat_rollback_transfers()
-        #else
-        let t = dingbat_rollback_transfers()
-        #endif
-        if t != linkTransfers {
-            linkTransfers = t
-            linkActivity = now
-            if t > 0 { linkUsed = true }
-        } else if linkStallSince > 0 {
-            linkActivity = now
-        } else if linkUsed && now - linkActivity > Self.linkIdleLimit {
-            linkUsed = false
-            NetLink.shared.idleDisconnect()
-            return
-        }
+    /// The "Waiting for your friend" badge: a stall nothing explains.
+    private func watchLinkStall(_ now: CFTimeInterval) {
         let explained = NetLink.shared.peerIsAway || NetLink.shared.reconnectingSince != nil
         let waited = linkStallSince > 0 && !explained ? Int(now - linkStallSince) : 0
         let shown = waited >= 2 ? waited : 0
@@ -957,10 +906,6 @@ final class GameSession: NSObject, ObservableObject {
 
     /// Linked: the session's core is the game now (web enterRollbackMode).
     func enterLinked() {
-        linkUsed = false
-        linkTransfers = 0
-        linkActivity = CACurrentMediaTime()
-        linkLastWatch = linkActivity
         linkStallSince = 0
         linkWaiting = 0
         lastTick = 0

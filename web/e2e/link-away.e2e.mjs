@@ -2,17 +2,15 @@
 // the real signaling server and real WebRTC; then one hides
 // (visibilitychange) and its rAF stops, as a background tab's does. The
 // other stalls at the prediction limit, shows the "Friend switched away"
-// card and keeps the session past the 20 s idle window that used to end it.
-// The edge cases: a quick alt-tab, a cable that really goes quiet (the idle
-// window must still end that), a Disconnect or a closed page while away, a
-// stall with no away message (an older build), both players away at once,
-// away during a shared pause, and a shared pause past the idle window.
+// card and keeps the session. The edge cases: a quick alt-tab, a cable that
+// goes quiet (nothing ends the link but a player or the network), a
+// Disconnect or a closed page while away, a stall with no away message (an
+// older build), both players away at once, away during a shared pause, and
+// a long shared pause.
 //
 // The test ROM never touches the serial port, so each page counts nine
-// transfers per simulated frame, as a GBA link game clocks its cable: the
-// idle window sees a busy link that goes quiet only when told to, or when
-// the core stalls. The window is shortened to 20 s here (rbIdleMs; the app's
-// is RB_IDLE_MS, 90 s).
+// transfers per simulated frame, as a GBA link game clocks its cable, until
+// told to go quiet.
 //
 //   node --test e2e/link-away.e2e.mjs      # from web/, after the wasm build
 //
@@ -29,7 +27,7 @@ import { synctestRom, SYNCTEST_NAME as GAME } from "./synctest-rom.mjs";
 const playwright = createRequire(join(WEB, "package.json"))("playwright");
 const skip = !builtWeb() ? "web/em.wasm not built (nim c -d:emscripten src/dingbat_wasm.nim)" : false;
 const SIGNAL_PORT = 8795;
-const AWAY_MS = 26000; // past the 20 s window a busy link idles out in
+const AWAY_MS = 26000; // a long time away (an idle window, when there was one, was 20 s)
 
 let web = null, signal = null, browser = null;
 after(async () => {
@@ -105,11 +103,10 @@ const pair = async () => {
   await sleep(500);
   await connect(b, code);
   await until(async () => (await linked(a)) && (await linked(b)), "both linked", 60000);
-  for (const s of [a, b]) await s.page.evaluate(() => { rbIdleMs = 20000; });
   await busyCable(a);
   await busyCable(b);
-  await until(async () => (await a.page.evaluate(() => rbWasLinked)) &&
-                          (await b.page.evaluate(() => rbWasLinked)), "both cables in use", 10000);
+  await until(async () => (await a.page.evaluate(() => Module._rollback_transfers() > 0)) &&
+                          (await b.page.evaluate(() => Module._rollback_transfers() > 0)), "both cables in use", 10000);
   return { a, b, done: async () => { await a.ctx.close(); await b.ctx.close(); } };
 };
 
@@ -147,7 +144,7 @@ const cardShown = (p) => p.page.evaluate(() => !document.getElementById("net-awa
 const badgeShown = (p) => p.page.evaluate(() => !document.getElementById("net-stall").hidden);
 const stalled = (p) => p.page.evaluate(() => rbStallSince > 0);
 
-test("a friend's background tab shows the away card and the link outlives the idle window",
+test("a friend's background tab shows the away card and the link stays up",
      { skip, timeout: 180000 }, async () => {
   const { a, b, done } = await pair();
   await watchToasts(a); await watchToasts(b);
@@ -157,7 +154,7 @@ test("a friend's background tab shows the away card and the link outlives the id
   assert.ok(await stalled(a), "A is stalled on B");
   assert.ok(!(await badgeShown(a)), "the card, not the badge, explains the wait");
   await sleep(AWAY_MS);
-  assert.ok(await linked(a), "A kept the session past the idle window: " + (await netLog(a)).join(" | "));
+  assert.ok(await linked(a), "A kept the session: " + (await netLog(a)).join(" | "));
   assert.match(await a.page.evaluate(() => document.getElementById("net-away-time").textContent), /^Away 0:2\d$/);
   await setHidden(b, false);
   await until(async () => (await toastsSeen(b)).some((t) => t.startsWith("Your game was paused for 0:2")),
@@ -183,25 +180,17 @@ test("a quick alt-tab flashes no card and toasts nothing", { skip, timeout: 1200
   await done();
 });
 
-test("a cable that really goes quiet still ends the link at the idle window", { skip, timeout: 120000 }, async () => {
+test("a cable that goes quiet never ends the link by itself", { skip, timeout: 120000 }, async () => {
   const { a, b, done } = await pair();
   await watchToasts(a); await watchToasts(b);
   await a.page.evaluate(() => { window.__cableQuiet = true; });
   await b.page.evaluate(() => { window.__cableQuiet = true; });
-  const t0 = Date.now();
-  await until(async () => !(await linked(a)) || !(await linked(b)), "an idle disconnect", 30000);
-  const after = (Date.now() - t0) / 1000;
-  assert.ok(after > 18 && after < 25, `idled out after ${after.toFixed(1)} s`);
-  // Whichever side's idle check runs first ends it and says BYE; the other
-  // is told at once (it may have idled out in the same instant too).
-  await until(async () => !(await linked(a)) && !(await linked(b)), "both ended", 10000);
-  const idled = [];
-  for (const s of [a, b]) if ((await netLog(s)).some((t) => t.includes("link idle 20 s"))) idled.push(s);
-  assert.ok(idled.length >= 1, "a side idled out at the 20 s window");
-  for (const s of idled) assert.ok((await toastsSeen(s)).includes("Link idle — disconnected"));
+  await sleep(AWAY_MS);
+  assert.ok((await linked(a)) && (await linked(b)),
+            "still linked: " + (await netLog(a)).join(" | ") + " // " + (await netLog(b)).join(" | "));
   for (const s of [a, b]) {
-    const t = await toastsSeen(s);
-    assert.ok(t.includes("Link idle — disconnected") || t.some((m) => m.startsWith("Your friend disconnected")), t.join(" | "));
+    assert.ok(!(await netLog(s)).some((t) => t.includes("link idle")), (await netLog(s)).join(" | "));
+    assert.ok(!(await toastsSeen(s)).includes("Link idle — disconnected"));
   }
   await done();
 });
@@ -244,7 +233,7 @@ test("the friend closes the page while away: the card goes and the game plays on
   await done();
 });
 
-test("a stall with no away message shows the badge and still outlives the idle window",
+test("a stall with no away message shows the badge and the link stays up",
      { skip, timeout: 180000 }, async () => {
   const { a, b, done } = await pair();
   await setHidden(b, true, false);
@@ -299,15 +288,14 @@ test("away during a shared pause, then resumed", { skip, timeout: 120000 }, asyn
   await done();
 });
 
-test("a shared pause longer than the idle window resumes without ending the link",
+test("a long shared pause resumes without ending the link",
      { skip, timeout: 120000 }, async () => {
   const { a, b, done } = await pair();
   await watchToasts(a); await watchToasts(b);
   await a.page.evaluate(() => document.getElementById("pause").click());
   await until(() => b.page.evaluate(() => paused), "the pause reached B", 5000);
   await sleep(AWAY_MS);
-  // B resumes: the first ticks after a pause run no frames, which must not
-  // read as 26 s of quiet cable.
+  // B resumes: the first ticks after a pause run no frames.
   await b.page.evaluate(() => document.getElementById("pause").click());
   await until(async () => !(await a.page.evaluate(() => paused)), "resumed on A", 5000);
   await sleep(3000);

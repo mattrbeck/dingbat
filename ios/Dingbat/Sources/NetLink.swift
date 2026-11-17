@@ -1671,13 +1671,6 @@ final class NetLink: ObservableObject {
         AppModel.shared.toast("Disconnected")
     }
 
-    /// The link went quiet (GameSession's idle watch).
-    func idleDisconnect() {
-        NSLog("netlink: link idle (no serial transfers) — disconnecting")
-        shutdown()
-        AppModel.shared.toast("Link idle — disconnected")
-    }
-
     /// End everything. A session that built its cores hands this player's
     /// core back as the solo game, in whatever pause state it is in. `why`
     /// is the goodbye note's reason: "left" unless the session failed

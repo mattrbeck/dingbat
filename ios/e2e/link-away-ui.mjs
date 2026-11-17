@@ -102,8 +102,7 @@ try {
   await page.click("#net-join-go");
   await page.waitForFunction(() => rollbackMode && !!net?.started, null, { timeout: 120000 });
   console.log("linked");
-  await page.evaluate(() => { rbIdleMs = 20000; });
-  await until(() => page.evaluate(() => rbWasLinked), "cable in use", 10000);
+  await until(() => page.evaluate(() => Module._rollback_transfers() > 0), "cable in use", 10000);
   // BAR=1: the test pictures the bar's and the menu's armed Disconnect first.
   if (BAR) await sleep(25000);
   if (PAD) {

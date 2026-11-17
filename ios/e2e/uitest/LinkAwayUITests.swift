@@ -9,7 +9,7 @@ final class LinkAwayUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["-audio.muted", "YES", "-autoplay", env["DB_GAME"]!,
                                "-signal", env["DB_SIGNAL"]!, "-link", env["DB_CODE"]!,
-                               "-link-busy-cable", "1000000000", "-debug-events"]
+                               "-debug-events"]
         app.launch()
 
         // DB_PAD: the menu's Disconnect by a controller alone, armed and

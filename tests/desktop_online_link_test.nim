@@ -211,48 +211,6 @@ proc main() =
     check wait_until([a, b], 10000, proc(): bool = not b.ol.active), "GB friend saw the BYE"
     check a.solo_gb != nil and b.solo_gb != nil, "GB solo cores back"
 
-  echo "== the idle window: only once the cable has carried traffic =="
-  block:
-    # A server of its own: the server takes 10 rendezvous a minute per IP.
-    let port = port + 1
-    let server = start_server(port)
-    defer:
-      server.terminate()
-      discard server.waitForExit()
-      server.close()
-    proc play(sides: openArray[Side]; ms: int): bool =
-      ## Both play (held buttons) for `ms`; false once either session ended.
-      let t0 = now_ms()
-      while now_ms() - t0 < ms:
-        for s in sides:
-          if s.ol.started: discard s.ol.tick(0)
-          s.ol.watch_idle(running = true)
-        sides.service()
-        if not sides[0].ol.started or not sides[1].ol.started: return false
-        sleep(16)
-      true
-    # attachtest.gba runs its 16 rounds, then leaves the cable quiet.
-    let a = make_side("i", ATTACH_ROM, tmp, port)
-    let b = make_side("j", ATTACH_ROM, tmp, port)
-    check pair(a, b, "IDLE" & $port), "busy-then-quiet pair started"
-    for s in [a, b]: s.ol.idle_limit = 3000
-    check not play([a, b], 20000), "a cable that went quiet ended the link"
-    var idled = false
-    for t in a.ol.toasts & b.ol.toasts:
-      if "Link idle" in t: idled = true
-    check idled, "as the idle window, said so"
-    check a.ol.transfers == 0 and b.ol.transfers == 0 and a.solo_gba != nil and b.solo_gba != nil,
-      "both back on their own games"
-    # linktest.gba settles its link roles at boot, unlinked: it never clocks
-    # the cable once linked.
-    let c = make_side("k", "tests/roms/linktest.gba", tmp, port)
-    let d = make_side("l", "tests/roms/linktest.gba", tmp, port)
-    check pair(c, d, "UNUSED" & $port), "never-used pair started"
-    for s in [c, d]: s.ol.idle_limit = 3000
-    check play([c, d], 6000), "a cable never used stays linked past the window"
-    c.ol.disconnect()
-    discard wait_until([c, d], 10000, proc(): bool = not d.ol.active)
-
   echo "== a bad code and an unreachable server fail in the window =="
   block:
     let a = make_side("g", ATTACH_ROM, tmp, port)
