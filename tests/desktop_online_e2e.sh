@@ -36,14 +36,26 @@ code="E2E$$"
 mkdir -p "$work/home/.config/dingbat" "$work/drive"
 printf -- '---\nmute: true\n' > "$work/home/.config/dingbat/dingbat.yml"
 shot=${OUT_SHOT:-$work/shot.png}
-# The app plays to the stop frame by itself; the driver waits, shoots, quits.
-printf '1 sleep %s\n2 shot %s\n3 quit\n' "$(( (frames / 60 + 12) * 1000 ))" "$shot" > "$work/drive/cmd"
+# The app plays to the stop frame by itself. Once both sides have logged
+# their checksum (however slow the runner), the driver shoots and quits it:
+# the driver reads commands as they are appended.
+: > "$work/drive/cmd"
 HOME="$work/home" DINGBAT_DRIVE="$work/drive" DINGBAT_LINK_STOP_AT="$frames" SDL_AUDIO_DRIVER=dummy \
   "$bin" --signal "ws://127.0.0.1:$port" --online "$code" tests/roms/attachtest.gba \
   > "$work/app.log" 2>&1 &
 app=$!
 "$peer" tests/roms/attachtest.gba "$code" --signal="ws://127.0.0.1:$port" --frames="$frames" \
-  --timeout=$((frames / 60 + 40)) --warmup=20 > "$work/peer.log" 2>&1
+  --timeout=$((frames / 60 + 150)) --warmup=20 > "$work/peer.log" 2>&1 &
+peer_pid=$!
+i=0
+while [ $i -lt 1500 ]; do  # 150 s
+  grep -q '^ONLINE CHECKSUM' "$work/app.log" && grep -q '^ONLINE CHECKSUM' "$work/peer.log" && break
+  kill -0 $peer_pid 2>/dev/null || break
+  sleep 0.1
+  i=$((i + 1))
+done
+printf '1 shot %s\n2 quit\n' "$shot" >> "$work/drive/cmd"
+wait $peer_pid
 peer_rc=$?
 wait $app
 app_rc=$?
