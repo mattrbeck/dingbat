@@ -1,6 +1,6 @@
 import std/math
 import imguin/cimgui
-import imguin/glad/gl
+from presenter as pr import nil
 import ../gb/gb
 import util
 
@@ -10,8 +10,8 @@ type
     palette_window*: bool
     tiles_window*:   bool
     bgmap_window*:   bool
-    tiles_tex:       GLuint
-    bgmap_tex:       GLuint
+    tiles_tex:       uint64  # ImTextureIDs, 0 = none
+    bgmap_tex:       uint64
     tiles_buf:       seq[uint32]
     bgmap_buf:       seq[uint32]
 
@@ -82,25 +82,14 @@ proc render_palette_window(d: GbDebug) =
       dmg_palette_row("OBP1", ppu.obp1, ppu.obj_pram, 8)
   igEnd()
 
-proc upload_texture(tex: var GLuint; buf: pointer; w, h: int) =
-  # Preserve the GL_TEXTURE_2D binding: the game render path never re-binds
-  # its texture.
-  var prev: GLint
-  glGetIntegerv(GL_TEXTURE_BINDING_2D, addr prev)
-  if tex == 0:
-    glGenTextures(1, addr tex)
-    glBindTexture(GL_TEXTURE_2D, tex)
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GLint(GL_NEAREST))
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GLint(GL_NEAREST))
-  else:
-    glBindTexture(GL_TEXTURE_2D, tex)
-  glTexImage2D(GL_TEXTURE_2D, 0, GLint(GL_RGBA8), GLsizei(w), GLsizei(h), 0,
-               GL_RGBA, GL_UNSIGNED_BYTE, buf)
-  glBindTexture(GL_TEXTURE_2D, GLuint(prev))
+proc upload_texture(tex: var uint64; buf: pointer; w, h: int) =
+  pr.ui_texture(tex, buf, w, h, bgr555 = false, linear = false)
 
-proc debug_image(tex: GLuint; w, h: float32) =
+proc debug_image(tex: uint64; w, h: float32) =
+  pr.ui_nearest_begin()
   igImage(ImTextureRef(internal_TexData: nil, internal_TexID: ImTextureID(tex)),
           ImVec2(x: w, y: h), ImVec2(x: 0, y: 0), ImVec2(x: 1, y: 1))
+  pr.ui_nearest_end()
 
 proc bgr555_to_rgba8(c: uint16): uint32 =
   let r = (uint32(c) and 0x1F) * 255 div 31
