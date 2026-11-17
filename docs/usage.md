@@ -10,6 +10,8 @@ tap).
 Native: run `dingbat`, pass a ROM path (`./dingbat /path/to/rom`), or drag a file onto
 the window.
 
+The Mac app draws with Metal; Windows and Linux draw with OpenGL.
+
 Zipped ROMs work in both: the first `.gba` / `.gb` / `.gbc` in the archive is loaded.
 
 Nintendo DS games (`.nds`) load in the native app only with Settings > General >
