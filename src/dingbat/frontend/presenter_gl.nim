@@ -216,6 +216,10 @@ proc gl_ui_texture*(tex: var uint64; px: pointer; w, h: int; bgr555, linear: boo
   let f = GLint(if linear: GL_LINEAR else: GL_NEAREST)
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, f)
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, f)
+  # Linear filtering at an image's edge would blend in the opposite edge's
+  # texels under the default REPEAT (a thumbnail's bottom row on its top)
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GLint(GL_CLAMP_TO_EDGE))
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GLint(GL_CLAMP_TO_EDGE))
   if bgr555:
     glTexImage2D(GL_TEXTURE_2D, 0, GLint(GL_RGB5), GLsizei(w), GLsizei(h), 0,
                  GL_RGBA, GL_UNSIGNED_SHORT_1_5_5_5_REV, px)
