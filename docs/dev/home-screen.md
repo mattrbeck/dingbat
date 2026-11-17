@@ -3,7 +3,8 @@
 What the home screen shows in each state, what its buttons do, and the
 records behind them. Code: `web/index.js` (search the section names below),
 `web/styles.css`, tests in `web/tests/home-current.test.mjs`,
-`home-brand.test.mjs`, `game-switch.test.mjs` and `home-signin.test.mjs`.
+`home-brand.test.mjs`, `game-switch.test.mjs`, `home-signin.test.mjs` and
+`zip-title.test.mjs` (+ `web/e2e/zip-title.e2e.mjs`).
 
 ## Two rules
 
@@ -217,6 +218,29 @@ download joins it and opens it when it lands; nothing is fetched twice.
 The hero's game has its tile stood down, so when the hero shows a
 Drive-only game its button says it instead: *Signing in…*, *Checking Drive…*, *Opening… 38%*,
 *Starting…*, *Try again*.
+
+## A game from a zip
+
+A game added from a zip is shown under the zip's name, as on the desktop:
+*Pokemon Collection* for `Pokemon Collection.zip`, whatever the ROM in it
+is called. The name is the library entry's `title` (`"recent"`, and so
+Drive's `library` file), and display only (`displayName`): the tile, the
+hero, the tile menu, toasts, search, A–Z and the cartridge's initials. The
+game itself is still the ROM's name - its ROM, save, states, session,
+pictures and Drive files are all kept under it - so a zip of a game already
+in the library is that game, saves and all. The tile's tooltip still names
+the file.
+
+The title goes with the import that set it (mergeLibrary keeps the newest
+`imp`'s): adding the bare ROM again drops it, a play keeps it, and a build
+that knows no titles writing the same entry back without one does not drop
+it. A zip named as its ROM sets none. A rename drops it (the typed name is
+the name now); the rename box still starts from the file's name. A dingbat
+export carries it in `info.json` (`title`), so adding the export back keeps
+the game's title rather than taking the export's file name.
+
+Games added from a zip before titles existed have none (the zip's name was
+never kept) and show the ROM's name until the zip is added again.
 
 ## Pictures
 
