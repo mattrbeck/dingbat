@@ -2166,11 +2166,13 @@ if (libSortSel) libSortSel.addEventListener("change", () => setRomsSort(libSortS
 const SYSTEM_ORDER = { GBA: 0, GBC: 1, GB: 2, DS: 3 };
 // Rows carry .name; "recent" keeps the order given (the index's).
 const sortRoms = (rows) => {
-  if (romsSort === "alpha") return [...rows].sort((a, b) => a.name.localeCompare(b.name));
+  // A titled game sorts as a file of its title would.
+  const key = (n) => (gameTitles.has(n) ? gameTitles.get(n) + splitRomName(n).ext : n);
+  const byName = (a, b) => key(a.name).localeCompare(key(b.name));
+  if (romsSort === "alpha") return [...rows].sort(byName);
   if (romsSort === "system") {
     return [...rows].sort((a, b) =>
-      (SYSTEM_ORDER[systemOf(a.name)] - SYSTEM_ORDER[systemOf(b.name)]) ||
-      a.name.localeCompare(b.name));
+      (SYSTEM_ORDER[systemOf(a.name)] - SYSTEM_ORDER[systemOf(b.name)]) || byName(a, b));
   }
   return rows;
 };
@@ -3382,7 +3384,7 @@ const renderGdriveSection = () => {
 // ============================================================================
 // Google Drive sync. Signing in is turning sync on. The library lives in
 // one Drive file, "library":
-//     { recents: [{ name, ts, imp?, gen? }], tomb: [{ name, ts, gen? }],
+//     { recents: [{ name, ts, imp?, gen?, title? }], tomb: [{ name, ts, gen? }],
 //       ren: [{ from, to, ts }] }
 // `recents` is the merged cross-device play history (the home grid). `tomb`
 // are tombstones, so a union-merge cannot resurrect a deleted game; a
@@ -3816,12 +3818,20 @@ const mergeLibrary = (a, b) => {
     // play. The newest import claim from either side is kept alongside it,
     // whichever entry that was.
     let imp = Math.max(prev?.imp || 0, e.imp || 0);
+    // The title came with an import, so it goes with the newest import
+    // claim: a later import of the bare ROM drops it, and a build that
+    // knows no titles (writing the same claim without one) does not.
+    let ei = e.imp || 0, pi = prev?.imp || 0;
+    let title = ei > pi ? titleOf(e.title) : ei < pi ? prev.title : prev?.title || titleOf(e.title);
     let g = genOf(e);
     let pg = prev ? genOf(prev) : -1;
     if (!prev || g > pg || (g === pg && (e.ts || 0) > (prev.ts || 0))) {
       byName.set(e.name, withGen({ name: e.name, ts: e.ts || 0 }, g));
     }
-    if (imp) byName.get(e.name).imp = imp;
+    let at = byName.get(e.name);
+    if (imp) at.imp = imp;
+    if (title) at.title = title;
+    else delete at.title;
   }
   // Newest marker per old name wins.
   let ren = new Map();
@@ -5235,7 +5245,7 @@ const renameNameError = (base, oldName, taken) => {
   if (full.endsWith("-p2")) return "Names can't end in “-p2” — that ending is reserved for 2-player link saves.";
   if (full === oldName) return "That's already this game's name.";
   if (taken && taken.has(full))
-    return "“" + displayName(full) + "” is already in your library. Pick another name.";
+    return "“" + fileTitle(full) + "” is already in your library. Pick another name.";
   return null;
 };
 
@@ -5293,7 +5303,7 @@ const renameGame = async (oldName, newName) => {
   let taken = await libraryNames();
   if (taken.has(newName) || allPerGameKeys(newName).some((k) => existing.has(k))) {
     return { ok: false,
-             error: "“" + displayName(newName) + "” already exists in your library. Nothing was changed." };
+             error: "“" + fileTitle(newName) + "” already exists in your library. Nothing was changed." };
   }
 
   renamedAway.add(oldName);
@@ -5912,6 +5922,7 @@ const exportPackage = (name, chosen, now = Date.now()) => {
     app: "dingbat",
     format: 1,
     game: name,
+    ...(gameTitles.has(name) ? { title: gameTitles.get(name) } : {}),
     system: systemOf(name),
     exported: new Date(now).toISOString(),
     files: files.map((f) => ({ path: f.path, kind: f.kind })),
@@ -7058,7 +7069,9 @@ const postSaveToHook = (game, data) => {
 };
 
 // --- Recent ROMs ---
-//   "recent"      metadata index: [{ name, ts }], most-recent-first, capped
+//   "recent"      metadata index: [{ name, ts }], most-recent-first, capped;
+//                 `title` is the name shown for a game imported from a zip
+//                 (the zip's), display only: every record stays under `name`
 //   "rom:<name>"  { name, data: Uint8Array }, fetched only at launch/backup
 //   "art:<name>"  Blob, fetched lazily by the grid
 //   "frame:<name>" Blob (JPEG), the last screen the game showed; the grid's
@@ -7283,8 +7296,16 @@ const dbPutRoomy = async (key, value, keep, superseded = () => false) => {
   return put;
 };
 
+// name -> title, as the index last read or written had them (displayName).
+let gameTitles = new Map();
+const titleOf = (t) => (typeof t === "string" && t.trim() ? t.trim().slice(0, RENAME_MAX_LEN) : null);
+const noteTitles = (list) => {
+  gameTitles = new Map((Array.isArray(list) ? list : [])
+    .filter((r) => r?.name && titleOf(r.title)).map((r) => [r.name, titleOf(r.title)]));
+  return list;
+};
 const getRecentMeta = async () => {
-  return (await dbGet("recent")) || [];
+  return noteTitles((await dbGet("recent")) || []);
 };
 
 // "recent" is read, changed and written back by an import, a play, a delete,
@@ -7301,7 +7322,7 @@ let recentChain = Promise.resolve();
 const updateRecent = (fn) => {
   const run = recentChain.then(async () => {
     let next = await fn(await getRecentMeta());
-    if (next) await dbPut("recent", next);
+    if (next) await dbPut("recent", noteTitles(next));
     return next;
   });
   recentChain = run.catch(() => {}); // a failed change must not block the next
@@ -7482,7 +7503,7 @@ const enforceRomBudget = async (list) => {
 
 // Move `name` to the front of the index and spend the byte budget over the
 // result (ROM files only, never saves).
-const bumpRecentIndex = (name, { fresh = false, gen: atLeast = 0 } = {}) => updateRecent(async (all) => {
+const bumpRecentIndex = (name, { fresh = false, gen: atLeast = 0, title = null } = {}) => updateRecent(async (all) => {
   // Any game under the name claims it again - an import, a Drive-only
   // tile's download, a launch - and a pull may write under it once more
   // (bug_download_into_away_name_skips_saves).
@@ -7511,7 +7532,11 @@ const bumpRecentIndex = (name, { fresh = false, gen: atLeast = 0 } = {}) => upda
     let t = syncState.tomb.find((x) => x?.name === name);
     if (t) gen = Math.max(gen, genOf(t) + 1);
   }
-  list.unshift(withGen(imp ? { name, ts, imp } : { name, ts }, gen));
+  let entry = withGen(imp ? { name, ts, imp } : { name, ts }, gen);
+  // A play keeps the title; an import sets it, or drops it (a bare ROM).
+  let shown = fresh ? titleOf(title) : prev?.title;
+  if (shown) entry.title = shown;
+  list.unshift(entry);
   await enforceRomBudget(list);
   return list;
 });
@@ -7529,7 +7554,7 @@ const requestPersistentStorage = () => {
     .catch(() => {});
 };
 
-const addRecentRom = async (name, bytes, art) => {
+const addRecentRom = async (name, bytes, art, title = null) => {
   // Bytes first, index second: an interruption leaves at worst an orphan.
   if (!(await dbPutRoomy(romKey(name), { name, data: new Uint8Array(bytes) }, name))) {
     // The game still plays - it is in the emulator's own filesystem already.
@@ -7542,7 +7567,7 @@ const addRecentRom = async (name, bytes, art) => {
   await noteRomSize(name, bytes.byteLength ?? bytes.length);
   if (art) await dbPut(artKey(name), art); // Blob (box art from a zip)
   await clearThumbsBlank([name]); // a new file: the next run may picture it
-  await bumpRecentIndex(name, { fresh: true });
+  await bumpRecentIndex(name, { fresh: true, title });
   refreshHomeRecent();
   requestPersistentStorage();
   markGameUpload(name);
@@ -8765,7 +8790,9 @@ document.getElementById("export-save").addEventListener("click", async () => {
 });
 
 const stripExt = (name) => name.substring(0, name.lastIndexOf("."));
-const displayName = (name) => stripExt(name) || name;
+const fileTitle = (name) => stripExt(name) || name;
+// What the library calls a game: its title (a zip's name) or its file's.
+const displayName = (name) => gameTitles.get(name) || fileTitle(name);
 
 // --- Cartridge labels ------------------------------------------------------
 // A game with no picture yet gets a cartridge of its system's shape, and on
@@ -8778,7 +8805,7 @@ const displayName = (name) => stripExt(name) || name;
 //   "GoodboyGalaxy.gba" -> GG   "advance_wars_2.gba" -> AW2
 //   "Final Fantasy VI Advance (J)" -> FF6   "TETRIS.gb" -> Te
 const cartTitle = (name) => {
-  let s = stripExt(name) || name;
+  let s = displayName(name);
   s = s.replace(/\s*[([][^)\]]*[)\]]/g, "");            // (U) [!] (Rev 1) (En,Fr)
   s = s.replace(/^\s*\d{3,5}\s*-\s*/, "");                // "0412 - "
   s = s.replace(/^([^,]+),\s*(The|A|An)\b/i, "$2 $1");     // "Zelda, The"
@@ -13556,15 +13583,16 @@ romWarnModal.addEventListener("click", (e) => {
 });
 
 // A dingbat export's map of path -> kind, from its info.json; null for any
-// other zip (or an info.json that is not ours).
+// other zip (or an info.json that is not ours). `title`: the export's game's.
 const exportKinds = async (zip) => {
   let e = zip.entries.find((x) => x.name === "info.json");
   if (!e) return null;
   try {
     let info = JSON.parse(new TextDecoder().decode(await zip.extract(e)));
     if (info?.app !== "dingbat" || !Array.isArray(info.files)) return null;
-    return new Map(info.files.filter((f) => typeof f?.path === "string")
-                             .map((f) => [f.path, f.kind]));
+    let kinds = new Map(info.files.filter((f) => typeof f?.path === "string")
+                                  .map((f) => [f.path, f.kind]));
+    return Object.assign(kinds, { title: titleOf(info.title) });
   } catch {
     return null;
   }
@@ -13613,6 +13641,11 @@ const handleZipFile = async (file) => {
 
   let innerName = baseName(romEntry.name);
   let innerExt = extOf(innerName);
+  // The library shows the zip's name (an export's: its game's), the game
+  // keeping the ROM's as its name in storage, so a zip of a game already
+  // here is the same game, saves and all.
+  let title = kinds ? kinds.title : titleOf(stripExt(file.name));
+  if (title === fileTitle(innerName)) title = null;
   if (!looksLikeValidRom(romBytes, innerExt) &&
       !(await confirmSuspectRom(innerName, innerExt))) return;
   // Into the library first: that is storage only, so a game picked before
@@ -13621,7 +13654,7 @@ const handleZipFile = async (file) => {
   // initStorage (DOMContentLoaded) opens the database and reads the sync
   // state - the tombstones a re-imported game's generation is judged by.
   await storageReady;
-  await addRecentRom(innerName, romBytes, art);
+  await addRecentRom(innerName, romBytes, art, title);
   await ensureRuntimeReady(); // a zip dropped before the wasm runtime is up
   // In the library either way; booted only if nothing was opened since.
   if (gen !== loadGen) return;
