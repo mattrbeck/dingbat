@@ -7,11 +7,12 @@ import std/[compilesettings, os]
 
 const CIMGUI_DIR = block:
   var dir = ""
-  # nimble's package directories are lazy paths
+  # nimble's package directories are lazy paths; a --path may also name the
+  # imguin directory itself
   for p in querySettingSeq(searchPaths) & querySettingSeq(lazyPaths):
-    if fileExists(p / "imguin/private/cimgui/imgui/imgui.h"):
-      dir = p / "imguin/private/cimgui"
-      break
+    for root in [p / "imguin", p]:
+      if dir.len == 0 and fileExists(root / "private/cimgui/imgui/imgui.h"):
+        dir = root / "private/cimgui"
   doAssert dir.len > 0, "imguin's imgui sources are not on the search path"
   dir
 
