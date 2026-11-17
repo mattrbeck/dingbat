@@ -8,8 +8,12 @@
 static NSWindow *game;
 static id monitor;
 static double px_x, px_y, lines_x, lines_y;
+static int touching;  // fingers on the trackpad, not yet lifted
 
 static void add(NSEvent *e) {
+  if (e.phase & (NSEventPhaseMayBegin | NSEventPhaseBegan | NSEventPhaseChanged)) touching = 1;
+  if (e.phase & (NSEventPhaseEnded | NSEventPhaseCancelled)) touching = 0;
+  if (e.momentumPhase != NSEventPhaseNone) touching = 0;
   if (e.hasPreciseScrollingDeltas) {
     px_x += e.scrollingDeltaX;
     px_y += e.scrollingDeltaY;
@@ -37,6 +41,8 @@ int dbsc_take(double *px, double *py, double *lx, double *ly) {
   px_x = px_y = lines_x = lines_y = 0;
   return any;
 }
+
+int dbsc_touching(void) { return touching; }
 
 int dbsc_feed(double dy, int precise) {
   // For the GUI driver: a scroll as the trackpad (points) or a wheel mouse

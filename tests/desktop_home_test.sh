@@ -29,7 +29,8 @@
 #             keeps its save states; another game's file is refused
 #   labels    the in-window bar says Add a game and Close Game, never Open ROM
 #   scrolling macOS: a trackpad's points scroll the page as many points, a
-#             wheel mouse's line 40 (mac_scroll.nim)
+#             wheel mouse's line 40 (mac_scroll.nim); pulled past the top it
+#             stretches and springs back
 #
 # Needs SDL 3 and a display. From the repo root:
 #   tests/desktop_home_test.sh           (builds ./dingbat_gui_test)
@@ -594,12 +595,20 @@ json.dump(dict(version=1, sort='recent', games=g), open(sys.argv[1], 'w'))" "$cf
 11 scroll 37 pt
 12 sleep 150
 13 home dump $work/s3.txt
-14 quit"
+14 scroll 2000 pt
+15 sleep 30
+16 home dump $work/s4.txt
+17 sleep 1000
+18 home dump $work/s5.txt
+19 quit"
   y() { grep -m1 '^Game 01|' "$1" | cut -d'|' -f2 | cut -d' ' -f2; }
   y0=$(y "$work/s0.txt") y1=$(y "$work/s1.txt") y2=$(y "$work/s2.txt") y3=$(y "$work/s3.txt")
   check "a trackpad's 100 points scroll 100" "$((y0 - y1))" "100"
   check "a wheel mouse's 3 lines scroll 120" "$((y1 - y2))" "120"
   check "37 points back up scroll 37" "$((y3 - y2))" "37"
+  y4=$(y "$work/s4.txt") y5=$(y "$work/s5.txt")
+  check "past the top the page stretches down" "$([ "$y4" -gt "$y0" ] && echo yes)" yes
+  check "and springs back" "$y5" "$y0"
 fi
 
 if [ "$fails" -gt 0 ]; then echo "$fails failed"; exit 1; fi

@@ -15,6 +15,8 @@
 import std/[math, os, strutils, tables, times]
 import imguin/cimgui
 import library, util, ui_fonts
+when defined(macosx):
+  import mac_scroll
 from presenter import ui_nearest_begin, ui_nearest_end
 from save_states_widget import calc_text_size
 
@@ -46,6 +48,9 @@ type
     focus: string             ## the focused game's path; "" none
     ring: bool                ## focus moved by keys or a pad: draw it
     scroll_to_focus: bool
+    scroll_y, scroll_max: float32  ## the page's, as last drawn
+    stretch: float32          ## macOS: how far past an end it was pulled
+    bounce: float32           ## the page drawn that far down (up if < 0)
     query: array[96, char]
     systems: seq[string]      ## chips pressed
     last_check: float
@@ -1092,6 +1097,40 @@ proc draw_bar(v: LibraryView; dl: ptr ImDrawList; x0, y, width: float32; wrap: b
 
 # ──────────────────────────── The page ────────────────────────────
 
+when defined(macosx):
+  proc elastic(v: LibraryView; h: float32) =
+    ## The page's trackpad scroll, as a Mac scroll view takes it: past an end
+    ## it stretches against a growing pull, and springs back once the fingers
+    ## lift; a glide that runs into an end bounces off it. A wheel mouse's
+    ## lines stop at the ends.
+    let (px, lines) = (home_px, home_lines)
+    home_px = 0
+    home_lines = 0
+    let touching = mac_touching()
+    let top = max(0'f32, v.scroll_max)
+    var y = v.scroll_y
+    var moved = false
+    if lines != 0:
+      y = clamp(y - lines * LINE_PT, 0, top)
+      v.stretch = 0
+      moved = true
+    if px != 0:
+      let p = y + v.stretch
+      var d = -px
+      # The glide runs out fast past the end
+      if not touching and ((p + d < 0 and d < 0) or (p + d > top and d > 0)):
+        d *= 0.35
+      y = clamp(p + d, 0, top)
+      v.stretch = p + d - y
+      moved = true
+    if not touching and v.stretch != 0:
+      v.stretch *= exp(-igGetIO_Nil().DeltaTime * 12)
+      if abs(v.stretch) < 0.5: v.stretch = 0
+    # How far it shows: the further pulled, the less it gives
+    let x = abs(v.stretch)
+    v.bounce = -sgn(v.stretch).float32 * (1 - 1 / (x * 0.55 / h + 1)) * h
+    if moved: igSetNextWindowScroll(v2(-1, y))
+
 proc draw*(v: LibraryView; rom_types: string) =
   ## The whole home screen, under whatever the app draws over it.
   ## `rom_types`: what the drop box says can be opened.
@@ -1105,6 +1144,7 @@ proc draw*(v: LibraryView; rom_types: string) =
   let size = vp[].WorkSize
   igSetNextWindowPos(pos, cint(ImGui_Cond_Always), v2(0, 0))
   igSetNextWindowSize(size, cint(ImGui_Cond_Always))
+  when defined(macosx): v.elastic(size.y)
   igPushStyleVar_Vec2(cint(ImGui_StyleVar_WindowPadding), v2(0, 0))
   igPushStyleVar_Float(cint(ImGui_StyleVar_WindowBorderSize), 0)
   igPushStyleVar_Float(cint(ImGui_StyleVar_WindowRounding), 0)
@@ -1128,11 +1168,13 @@ proc draw*(v: LibraryView; rom_types: string) =
   push_font(fRegular, PAGE_PX)
   let s = ui_scale
   let scroll = igGetScrollY()
+  v.scroll_y = scroll
+  v.scroll_max = igGetScrollMaxY()
   let inner_w = size.x - (if igGetScrollMaxY() > 0: ui_px(10) else: 0)
   let css_w = inner_w / s
   let avail = size.y / s
   template X(q: float32): float32 = pos.x + q * s
-  template Y(q: float32): float32 = pos.y - scroll + q * s
+  template Y(q: float32): float32 = pos.y - scroll + v.bounce + q * s
   let n = v.visible.len
   let gutter = if css_w < 360: 16'f32 else: LIB_PAD
   let hero = v.hero_shown

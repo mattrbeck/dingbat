@@ -12,9 +12,16 @@ import imguin/cimgui
 proc dbsc_install(nswindow: pointer)
 proc dbsc_take(px, py, lx, ly: var cdouble): cint
 proc dbsc_feed*(dy: cdouble; precise: cint): cint
+proc dbsc_touching(): cint
 {.pop.}
 
-const LINE_PT = 40.0
+const LINE_PT* = 40.0
+
+# The home page scrolls itself (library_view's elastic edges): its share,
+# taken there each frame
+var home_px*, home_lines*: float32
+
+proc mac_touching*(): bool = dbsc_touching() != 0
 
 proc mac_scroll_install*(window: Window) =
   dbsc_install(getPointerProperty(getWindowProperties(window),
@@ -28,6 +35,10 @@ proc mac_scroll_feed*() =
   if dbsc_take(px, py, lx, ly) == 0: return
   let g = igGetCurrentContext()
   let w = if g.WheelingWindow != nil: g.WheelingWindow else: g.HoveredWindow
+  if w != nil and $w.Name == "##home":
+    home_px += float32(py)
+    home_lines += float32(ly)
+    return
   let st = igGetStyle()
   let fs = if w != nil: w.FontRefSize else: st.FontSizeBase * st.FontScaleDpi
   var step_y = 5 * fs

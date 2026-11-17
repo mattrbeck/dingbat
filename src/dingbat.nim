@@ -2848,6 +2848,8 @@ proc main() =
     # menu bar for good; this keeps it at the top edge, as the green button does
     if native_menu:
       discard setHint("SDL_VIDEO_MAC_FULLSCREEN_MENU_VISIBILITY", "1")
+    # A trackpad's scroll glides on after the fingers lift (SDL turns it off)
+    discard setHint("SDL_MAC_SCROLL_MOMENTUM", "1")
   if not sdl3.init(INIT_VIDEO or INIT_AUDIO or INIT_GAMEPAD):
     echo "SDL init failed: ", $getError(); system.quit(1)
   defer: sdl3.quit()
