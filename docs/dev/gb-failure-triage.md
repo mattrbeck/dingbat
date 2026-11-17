@@ -1889,9 +1889,27 @@ hardware question. Families:
     32.768 kHz Quartz Oscillator, and an external battery"), so STOP mode
     moves its second on (`STOP_RTC_RUNS`, memory.nim).
 * **Small (13 left of 40; 4 not scored):**
-  * Left (6): HuC3 commands, `dmg/mbc/huc3` `huc3_command_{3x,4x,5x,10,62}`
-    and `huc3_scratchpad`. `$FFF0` is never written. SameBoy passes 5 of 6,
-    so the family is dingbat's.
+  * Left (6; contradicted by hardware, 2026-11-17): HuC3 commands,
+    `dmg/mbc/huc3` `huc3_command_{3x,4x,5x,10,62}` and `huc3_scratchpad`.
+    `$FFF0` is never written: every MCU wait in the six is `ld a,[$a000]` /
+    `cp $01` in mode $D, so they need the semaphore to read exactly $01.
+    dingbat reads $80 | mailbox bits 6-2 | ready, and the loop never ends.
+    With that read forced to $01 (experiment only) all six pass and nothing
+    else in them differs, so the command, address and scratchpad behaviour
+    they check is already dingbat's. Forcing $03 or $81 still fails all six.
+    Two hardware reports in Pan Docs' cited thread
+    (gbdev.gg8.se/forums/viewtopic.php?id=744) contradict $01. endrift
+    (2022): "The mode $D register bits 2-6 (I think) are directly leaked from
+    the mode $B register. Bit 7 is again always high." CasualPokePlayer, on
+    his Pocket Family GB2 cart (2024-12-17): "reading $D will just give you
+    whatever is in $B's bits 2-6 ... bit 1 appears to always be high
+    regardless". Pan Docs: D7 is not connected, so "the most significant bit
+    of reads always returns an open bus value (usually high)", and the
+    operand byte $A0 is last on the bus here. Not implemented; these rows
+    cannot pass on a model that matches either report. Candidates for the
+    not-scored ledger. (Unmodelled from the same posts, no scored row
+    behind them: $D bit 1 high, mode $E reading $C's bits 6-2, and commands
+    $0/$2 as $1/$3 without the address step.)
   * Left (6): the DMG STOP/HALT pictures `dmg/ppu/visual/halt_ppu_off`,
     `stop_during_{hblank,oam_scan,pixel_transfer,vblank}` and `stop_ppu_off`,
     whose reference is DocBoy's blank-panel colour (`$AD00`, Pan Docs'
