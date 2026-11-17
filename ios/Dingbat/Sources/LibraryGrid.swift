@@ -561,6 +561,8 @@ struct LibraryTile: View {
     @EnvironmentObject var model: AppModel
     @Environment(\.palette) var palette
     @ObservedObject private var drive = DriveSync.shared
+    /// Observed so a title a pull brings shows (RomEntry.name).
+    @ObservedObject private var library = RomLibrary.shared
     let entry: RomEntry
     /// Read only so the picture is redrawn when it changes.
     let pictureGen: Int

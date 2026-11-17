@@ -31,6 +31,12 @@ picture comes down with nothing sent; with Drive down at boot, a run's
 boot screen does not go up over Drive's picture when the app comes back to
 the front; and with Drive down while a game is open, the game's own picture
 does go up over Drive's once Drive is back, the game still open.
+`ios/e2e/zip-title.mjs` adds a zip in the app (`-import`, debug builds) beside
+a titled game a web device left on a fake Drive: both titles stay in the
+app's index and Drive's library, a quiet relaunch writes no library, and
+the bare ROM drops the zip's. `node ios/e2e/library-core.mjs` (no
+simulator) holds `LibraryCore.swift` to the web's mergeLibrary byte for
+byte and carries a web-written title through the app's pull, play and write.
 `ios/e2e/trade.mjs` plays a whole Pokémon trade, FireRed
 in Chromium against LeafGreen in the app from save states at the Cable Club
 counter, over a relay that delays, jitters and drops the WebRTC packets
