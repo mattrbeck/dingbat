@@ -1114,8 +1114,8 @@ proc psg_noise_on_grid(h: PsgHost; t: CycleCount): bool {.inline.} =
   let tick = psg_tick(h)
   ((t + 2 * tick - psg_noise_phase(h)) mod (2 * tick)) == tick
 
-proc psg_noise_first_inc(h: PsgHost; inc: CycleCount; divisor_code: uint8;
-                         counted: bool): CycleCount =
+proc psg_noise_first_inc(h: PsgHost; edge: CycleCount; inc: CycleCount;
+                         divisor_code: uint8; counted: bool): CycleCount =
   ## Absolute cycle of the divisor stage's first increment after a trigger:
   ## one increment period plus two ticks from the point the trigger restarts
   ## the stage. That point is the 1 MHz edge at or after the write, moved onto
@@ -1125,9 +1125,9 @@ proc psg_noise_first_inc(h: PsgHost; inc: CycleCount; divisor_code: uint8;
   ## channel_4_frequency_alignment; DocBoy double-speed ch4). A trigger
   ## leaves the counter alone. `counted`: the counter is not at zero; code 1
   ## rounds up only from a zero counter, and once it has counted rounds down
-  ## like codes >= 2 (DocBoy `retrigger_shift{1,2}_divider1_*`).
+  ## like codes >= 2 (DocBoy `retrigger_shift{1,2}_divider1_*`). `edge` is
+  ## the trigger's 1 MHz edge (ch4_restart_edge).
   let tick = psg_tick(h)
-  let edge = psg_edge(h)
   var extra = 2 * tick
   if divisor_code != 0 and not psg_noise_on_grid(h, edge):
     # Off the 512 kHz grid. Adjusting `extra` rather than `edge` keeps the
@@ -1135,7 +1135,7 @@ proc psg_noise_first_inc(h: PsgHost; inc: CycleCount; divisor_code: uint8;
     extra = (if divisor_code == 1 and not counted: extra + tick else: extra - tick)
   edge + inc + extra
 
-proc psg_noise_slow_restart(ch: PsgNoise; h: PsgHost): bool =
+proc psg_noise_slow_restart(ch: PsgNoise; h: PsgHost; edge: CycleCount): bool =
   ## Divisor code 0, a retrigger of a running channel. Code 0's half-period
   ## increments ride the 1 MHz grid, but a restart still goes through the
   ## 512 kHz stage: when the old stage's increment at the trigger's 1 MHz
@@ -1148,12 +1148,29 @@ proc psg_noise_slow_restart(ch: PsgNoise; h: PsgHost): bool =
   ## `ch4_retrigger_delay16_*`). Sets the counter and `div_next`; false
   ## leaves the ordinary restart to the caller.
   let tick = psg_tick(h)
-  let edge = psg_edge(h)
   let p = (if ch.div_next <= edge: edge else: ch.div_next)
   if p > edge + tick or psg_noise_on_grid(h, p): return false
   ch.div_counter += uint16(((p - ch.div_next) div tick + 1) and CycleCount(0xFFFF))
   ch.div_next = p + 17 * tick
   true
+
+proc ch4_restart_edge(ch: PsgNoise; h: PsgHost; running: bool): CycleCount =
+  ## The 1 MHz edge a trigger restarts the divisor stage on, or PSG_NO_STEP
+  ## when it does not. A restart holds the stage's restart input for two
+  ## ticks: a trigger one tick after the last restart joins it, and on the
+  ## 512 kHz stage (codes >= 1) one two ticks after is taken a tick late.
+  ## Only a retrigger of a running channel can be that close. DocBoy
+  ## double-speed ch4 `retrigger_*`, `double_retrigger_*` and probe (m)
+  ## `c0_pend_b` (CGB E; docs/dev/gb-failure-triage.md I1). Not modelled on
+  ## the AGB, which has no test of it.
+  result = psg_edge(h)
+  when not PSG_AGB:
+    if running and ch.restart_edge != PSG_NO_STEP:
+      let tick = psg_tick(h)
+      if result == ch.restart_edge + tick: return PSG_NO_STEP
+      if result == ch.restart_edge + 2 * tick and ch.divisor_code != 0:
+        result += tick
+    ch.restart_edge = result
 
 proc ch4_tap(ch: PsgNoise): uint16 {.inline.} =
   ## The counter bit the LFSR clock follows; shifts 14/15 tap nothing.
@@ -1247,11 +1264,15 @@ proc ch4_write(ch: PsgNoise; nr: int; val: uint8; h: PsgHost) =
       # tick past the write), so the LFSR waits for the tap's next rising
       # edge.
       let inc = ch4_inc_period(ch, h)
-      if was_running and ch.divisor_code == 0 and psg_noise_slow_restart(ch, h):
+      let edge = ch4_restart_edge(ch, h, was_running)
+      if edge == PSG_NO_STEP:
+        discard
+      elif was_running and ch.divisor_code == 0 and
+           psg_noise_slow_restart(ch, h, edge):
         discard
       elif was_running:
         ch4_advance_divisor(ch, h)
-        let first = psg_noise_first_inc(h, inc, ch.divisor_code,
+        let first = psg_noise_first_inc(h, edge, inc, ch.divisor_code,
                                         ch.div_counter != 0)
         let lead = inc + 2 * psg_tick(h)
         if ch.div_next + lead <= first:
@@ -1260,7 +1281,7 @@ proc ch4_write(ch: PsgNoise; nr: int; val: uint8; h: PsgHost) =
         ch.div_next = first
       else:
         ch.div_counter = 0
-        ch.div_next = psg_noise_first_inc(h, inc, ch.divisor_code, false)
+        ch.div_next = psg_noise_first_inc(h, edge, inc, ch.divisor_code, false)
       let deadline = ch4_next_shift(ch, h)
       # Shift 14/15: the divisor stage starts but the LFSR never fires.
       ch.next_step = if ch4_lfsr_frozen(ch): PSG_NO_STEP else: deadline

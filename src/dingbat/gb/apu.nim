@@ -134,6 +134,10 @@ proc apu_rebase*(apu: GbApu; gb: GB; base: CycleCount) {.inline.} =
   template adj(ch: untyped) =
     if ch.next_step != GB_NO_STEP: ch.next_step -= base
   if apu.channel4.div_next != GB_NO_STEP: apu.channel4.div_next -= base
+  if apu.channel4.restart_edge != GB_NO_STEP:
+    apu.channel4.restart_edge =
+      if apu.channel4.restart_edge >= base: apu.channel4.restart_edge - base
+      else: GB_NO_STEP
   template adj_sweep(field: untyped) =
     if apu.channel1.field != GB_NO_STEP: apu.channel1.field -= base
   adj_sweep(sweep_check_at)
@@ -253,6 +257,8 @@ proc apu_rescale_speed*(apu: GbApu; gb: GB; old_speed, new_speed: uint8) =
   ch4_advance_divisor(apu.channel4, gb)
   if apu.channel4.div_next != GB_NO_STEP:
     apu.channel4.div_next = conv(apu.channel4.div_next)
+  # A switch outlasts the two ticks restart_edge is read for.
+  apu.channel4.restart_edge = GB_NO_STEP
   # The tick grids are re-anchored, not rescaled: no test pins their phase
   # across a switch (SameSuite switches speed before the APU power-on).
   apu.tick_phase  = gb.scheduler.cycles mod (CycleCount(4) shl new_speed)

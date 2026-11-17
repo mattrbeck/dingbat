@@ -2047,3 +2047,38 @@ source consulted, no other emulator run.
   `gb/memory.nim`.
 - Evidence: none of its own. No scored test reads PCM12 on a channel 2 step on
   those revisions; every suite is identical with the knob off.
+
+### A noise restart holds for two ticks
+- Claim: a channel 4 trigger that restarts the divisor stage holds the
+  stage's restart for two 1 MHz ticks. A retrigger one tick after that
+  restart joins it: the stage keeps the earlier restart's timing (the LFSR
+  is still reset). On the 512 kHz stage (divisor codes >= 1) a retrigger two
+  ticks after is taken one tick late, and later triggers are measured from
+  that edge. A dropped retrigger is not; anything further away is an
+  ordinary restart.
+- Default: `ch4_restart_edge` (`common/psg_channels.nim`), the edge kept in
+  `PsgNoise.restart_edge` (GB only).
+- Evidence: DocBoy `cgb/double_speed/apu/ch4/double_speed_apu_ch4_
+  {retrigger,double_retrigger}_shift*_divider{0,1,3}_*` (CGB E). Each pair
+  of rounds reads PCM34 either side of the 15th LFSR clock after the last
+  trigger, so the ROM's write and read cycles give DocBoy's restart for
+  every trigger spacing at one-M-cycle phase (the `nops` pre-delay walks the
+  four phases of the 512 kHz grid). For code 3 with triggers on ticks
+  k0 < k1 < k2: (1, 2) keeps k0's timing and (1, 3) starts one grid step
+  late; (0, 2, 4) and (0, 3, 4) keep k1's, (0, 2, 5) and (0, 3, 5) start a
+  step late; (0, 4, 6) and (1, 4, 6) are ordinary, the k1 = 2 case taking
+  its window from the late edge 3. Codes 0 and 1: (0, 1) keeps k0's
+  timing, and for code 0 so does (1, 2).
+- Two-sided (round pairs, scored): the join alone fixes 29 and breaks 6;
+  the late pickup alone 30 and 6; measured from the last write instead of
+  the last restart 51 and 18; a pickup two ticks late 55 and 50. Code 0
+  with the late pickup draws probe (m) `c0_pend_b` 4 M-cycles later than
+  the DocBoy line recorded for it in tools/gbprobe/README.md (a black-box
+  run, the one input here from another emulator); no scored test sees code
+  0 there.
+- Open: all of it is DocBoy's word (SameBoy fails the 59 code-3 tests,
+  docs/dev/gb-failure-triage.md I1). No hardware-verified row (SameSuite,
+  blargg, gambatte) and no single-speed row moves with it; two `ld [hl],a`
+  stores are two ticks apart at single speed, so the late pickup reaches
+  there untested. Probe (m) `c1_absorb`, `c3_absorb`, `c3_defer` on a CGB
+  settle it (docs/dev/hwprobe-questions.md 20).

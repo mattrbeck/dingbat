@@ -1055,11 +1055,11 @@ the no-switch `sound/*_ds_{2,4,6}`); on E it is the mirror image (22/46).
 ## I. DocBoy (`docboy/*`, first scored 2026-10-14)
 
 DocBoy's own suite, scored by its own runner's rules on DMG ABC and CPU CGB E
-(`tests/README.md`, "The DocBoy suite"): 8,767 / 9,186 at `DocboyRev` (49
+(`tests/README.md`, "The DocBoy suite"): 8,838 / 9,186 at `DocboyRev` (49
 more not scored, `DocboyNotScored`). Every failing ROM is in
 [`tests/results_docboy.md`](../../tests/results_docboy.md); every group that is
 not scored is in the "Deliberately not scored" ledger at the end of
-`tests/results.md`. The 419 failing tests are I1 79, I2 11, I3 180, I5 6,
+`tests/results.md`. The 348 failing tests are I1 8, I2 11, I3 180, I5 6,
 I6 49, I9 20, I11 15, I12 36, I13 10 and "Small" 13. I4's scored rows all
 pass; I7, I8 and I10 are closed. The 9,186 include DocBoy's rebuilds of 7 SameSuite channel 1 ROMs
 (`cgb/samesuite/apu/channel_1/*-cgbE`), which pass; the eighth,
@@ -1079,7 +1079,7 @@ section. Where SameBoy agrees with DocBoy, the family is probably dingbat's.
 Where it fails too, the test encodes something only DocBoy models, or a
 hardware question. Families:
 
-* **I1. CH4 retrigger and NR43 changes (79 left).** The tests read PCM34 one
+* **I1. CH4 retrigger and NR43 changes (8 left).** The tests read PCM34 one
   M-cycle either side of the LFSR's 15th clock after the last write. The
   rules are in `psg_channels.nim` (notes above `ch4_lfsr_frozen`,
   `psg_noise_first_inc`, `psg_noise_slow_restart`). Each was checked against
@@ -1112,25 +1112,49 @@ hardware question. Families:
     edge (`change_divider0_to_3`, 12 tests SameBoy fails; probe (m)
     `c03_nr43` shows it 2 M-cycles early).
 
-  Left (79, all in `double_speed/apu/ch4`): every one has its last trigger
-  1 to 4 us after the previous one.
-  * 52 `double_retrigger_*` and 7 `retrigger_*` code-3 tests, where DocBoy
-    merges a retrigger one tick after an off-grid trigger with it and defers
-    one two ticks after by one grid step (SameBoy fails all 59 and matches
-    dingbat in probe (m) `c3_absorb`/`c3_defer`; DocBoy's own model has no
-    such window after an on-grid first trigger).
-  * 20 code-0/1 `retrigger_*` tests: 12 with a retrigger one tick after the
-    trigger, 8 with a code-1 retrigger a tick before the first increment of
-    an off-grid trigger (SameBoy passes 7 of the 20, DocBoy and SameBoy
-    disagree on the rest).
+  * A restart holds the divisor stage's restart input for two 1 MHz ticks
+    (2026-11-17, `ch4_restart_edge`): a trigger one tick after the last
+    restart joins it (every code), and on the 512 kHz stage (codes >= 1) one
+    two ticks after is taken a tick late, so it is the edge the next trigger
+    is measured from. Read from each test's write and read cycles
+    (disassembled ROMs: the round-2 read is the first M-cycle that sees the
+    15th LFSR clock), not from DocBoy's code. It closes 71 tests: the 52
+    `double_retrigger_*` and 7 `retrigger_*` code-3 tests and the 12
+    code-0/1 `retrigger_*` with a retrigger one tick after the trigger. One
+    rule where three were listed before: after an on-grid trigger the late
+    pickup lands on the same 512 kHz step for code 3, so only a third
+    trigger shows its window (`delay{0,1}_{2..5}_nops{0,1}`). Halves of it
+    fail (a model of the rule over the 1,028 trigger-only round pairs,
+    scored ones counted): the join alone fixes 29 pairs and breaks 6, the
+    late pickup alone fixes 30 and breaks 6, measuring from the last write
+    rather than the last restart fixes 51 and breaks 18, a pickup two ticks
+    late fixes 55 and breaks 50. Code 0 takes the two-tick retrigger at
+    once: DocBoy's own run of probe (m) `c0_pend_b` (tools/gbprobe/
+    README.md) has it there, and with the late pickup dingbat drew it 4
+    M-cycles later; no scored test sees it. All eight probe (m) builds now draw DocBoy's line
+    (`c1_absorb`, `c3_absorb`, `c3_defer` moved by -4, -4, +4). SameBoy
+    fails all 59 code-3 tests, and no hardware-verified test has two noise
+    triggers that close, so this is DocBoy's word alone
+    (docs/dev/hwprobe-questions.md 20). Not on the AGB.
 
-  What would close it: hardware. The `probe_m_*` photograph builds
-  (tools/gbprobe/README.md, "probe (m)") split DocBoy from SameBoy at each of
-  these. Proposed NotScored until then.
+  Left (8, all in `double_speed/apu/ch4`):
+  `retrigger_shift{1,4}_divider1_delay{5,6}_nops3` and `_delay{6,7}_nops2`,
+  a code-1 retrigger one tick before the first increment of a trigger from
+  off that was off the 512 kHz grid (the start code 1 rounds up). DocBoy's
+  timeline is the stage not restarted at all (or, the same timeline,
+  rounded down keeping the increment due a tick later), one increment
+  earlier than dingbat. The same retrigger one tick before an on-grid
+  trigger's first increment (`delay{4,5}_nops0`, `delay{3,4}_nops1`) wants
+  dingbat's round-up with that increment counted, which a rounded-down
+  restart would lose. No rule on the counter, the grid or the restart
+  window gives both; a "drop it" case for this one start would be a fit.
+  Probe (m) `c0_pend_*` asks the code-0 analogue of the question.
 
   DocBoy disables 640 `double_retrigger_*` tests (codes 0 and 1); its own
   build, run as a black box, fails 84 of them (SameBoy passes 37 of those
-  84), so those expectations are not DocBoy's output; dingbat passes 484.
+  84), so those expectations are not DocBoy's output; dingbat passes 584
+  (484 before the restart window: it turned 108 red ones green and 8 green
+  ones red).
 * **I2. CH1 frequency sweep (11 left of 380).**
   `period_sweep_*` on DMG, CGB and double speed. Second opinion: SameBoy
   (black box, DMG B / CGB E) passed 301 of the 380 tests dingbat failed, so
@@ -1641,7 +1665,7 @@ hardware question. Families:
     leaf takes the same rule with its own hold (`SPEED_SWITCH_LEAF_PPU_IME1`;
     no test reads the PPU after it).
 * **I8. Other APU (146; closed).** Closed. No test of this item fails: the
-  only failing APU tests are I1's 79 and I2's 11. Each rule was checked
+  only failing APU tests are I1's 8 and I2's 11. Each rule was checked
   against the test source, with SameBoy (black box, CGB E) as the second
   witness and probe ROMs run on both where the tests left a rule open:
   * CH3 stopped by NR30 in the half-cycle before a sample read

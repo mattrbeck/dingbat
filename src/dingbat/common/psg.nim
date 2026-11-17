@@ -213,6 +213,12 @@ type
     # from `next_step` (ch4_resync_divisor).
     div_counter*:  uint16
     div_next*:     CycleCount
+    # GB: the 1 MHz edge of the last trigger that restarted the divisor
+    # stage, PSG_NO_STEP if none; only ch4_restart_edge reads it, and only
+    # within two ticks of it. Not serialized (a state saved inside that
+    # window takes the next trigger as a plain restart): GB payload rev
+    # deferred list.
+    restart_edge*: CycleCount
 
 proc new_psg_square_sweep*(): PsgSweepSquare =
   PsgSweepSquare(next_step: PSG_NO_STEP, last_step_at: PSG_NO_STEP,
@@ -232,7 +238,7 @@ proc new_psg_wave*(banks: int): PsgWave =
     result.wave_ram[i] = if (i and 1) == 0: 0x00'u8 else: 0xFF'u8
 
 proc new_psg_noise*(): PsgNoise =
-  PsgNoise(next_step: PSG_NO_STEP, div_next: PSG_NO_STEP)
+  PsgNoise(next_step: PSG_NO_STEP, div_next: PSG_NO_STEP, restart_edge: PSG_NO_STEP)
 
 # ---- Host-free state machines ----
 

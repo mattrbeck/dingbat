@@ -666,6 +666,8 @@ proc ch1_sweep_from_rev8(ch: GbChannel1) =
 
 proc load_apu_state(apu: GbApu; gb: GB; r: var Reader; rev: uint32) =
   r.expect_tag(GB_SEC_APU)
+  # Not in the payload (psg.nim, PsgNoise.restart_edge).
+  apu.channel4.restart_edge = GB_NO_STEP
   apu.sound_enabled = r.read_bool()
   apu.frame_sequencer_stage = int(r.read_u8())
   apu.first_half_of_length_period = r.read_bool()

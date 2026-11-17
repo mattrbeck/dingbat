@@ -281,7 +281,8 @@ phases 0..3, one screen (phase p in rows 4p..4p+3, `F` = channel 4 high, row 17
 the parameters). `readout.py` reads it; interleave the four row blocks. Each
 build splits the three engines as below ("lag" = the engine's timeline against
 dingbat's, M-cycles, negative = earlier). The hardware question for each is
-simply which line the console draws (a CGB, or an AGB/AGS in CGB mode).
+simply which line the console draws (a CGB, or an AGB/AGS in CGB mode). Since
+2026-11-17 (`ch4_restart_edge`) dingbat draws DocBoy's line on all eight.
 
 | build | what it does | DocBoy | SameBoy |
 |---|---|---|---|
@@ -289,7 +290,7 @@ simply which line the console draws (a CGB, or an AGB/AGS in CGB mode).
 | `probe_m_c0_on` | the same on the grid (control) | = dingbat | -4 |
 | `probe_m_c0_pend_a` | divisor 0, retrigger one tick before the first increment, that increment off the grid | = dingbat (late) | -34 (not late) |
 | `probe_m_c0_pend_b` | the same with the first increment on the grid | = dingbat (not late) | +26 (late) |
-| `probe_m_c1_absorb` | divisor 1, retrigger one tick after the trigger | -4 (stage not restarted) | -4 |
-| `probe_m_c3_absorb` | divisor 3, retrigger one tick after an off-grid trigger | -4 (not restarted) | = dingbat |
-| `probe_m_c3_defer` | divisor 3, retrigger two ticks after an off-grid trigger | +4 (restart one grid step late) | = dingbat |
+| `probe_m_c1_absorb` | divisor 1, retrigger one tick after the trigger | = dingbat (stage not restarted) | = dingbat |
+| `probe_m_c3_absorb` | divisor 3, retrigger one tick after an off-grid trigger | = dingbat (not restarted) | +4 |
+| `probe_m_c3_defer` | divisor 3, retrigger two ticks after an off-grid trigger | = dingbat (restart one grid step late) | -4 |
 | `probe_m_c03_nr43` | NR43 divisor 0 -> 3 two dots before a code-0 increment off the grid | = dingbat (count finishes on the grid) | -2 |
