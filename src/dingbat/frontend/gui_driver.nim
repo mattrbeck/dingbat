@@ -50,6 +50,18 @@
 ##   settings key <mac key code>       a key let go in the window (kVK_*: 0x06 Z)
 ##   settings close                    the window's close button
 ##   settings shot <path.png>          the window as drawn (shown or not)
+##   alert dump <path.txt>             macOS notice alert: "none", or "sheet" (on
+##                                     the window) / "asking" (hidden window),
+##                                     then its title and the text below
+##   alert ok                          press its OK
+##   alert key <mac key code>          a key pressed while it is up (kVK_*:
+##                                     0x24 Return, 0x35 Escape)
+##   alert shot <path.png>             the alert as drawn (shown or not)
+##   aspect                            acked `ok min=<r> max=<r>`: the window's
+##                                     SDL aspect ratio limits (0 = none); on
+##                                     macOS also `ns=<w>:<h> inc=<w>:<h>`, the
+##                                     NSWindow's content aspect ratio and
+##                                     resize increments (free: 0:0 and 1:1)
 ##
 ## With the macOS menu bar, a `key ... down cmd` also goes through it, as a
 ## real Cmd shortcut does (the key handler leaves those to the menus).
@@ -66,6 +78,7 @@ import stb_image/write as stbiw
 when defined(macosx):
   import mac_menu
   import mac_settings
+  import mac_alert
 
 type
   Step = object
@@ -108,6 +121,17 @@ when defined(macosx):
                                 PROP_WINDOW_COCOA_WINDOW_POINTER, nil)
     if ns == nil: raise newException(IOError, "no NSWindow")
     cast[Send](objc_msgSend)(ns, sel_registerName("toggleFullScreen:"), nil)
+
+  type NsSize {.bycopy.} = object
+    w, h: float64
+
+  proc ns_size(window: Window; what: cstring): NsSize =
+    ## An NSSize property of the NSWindow
+    type Get = proc (self, op: pointer): NsSize {.cdecl.}
+    let ns = getPointerProperty(getWindowProperties(window),
+                                PROP_WINDOW_COCOA_WINDOW_POINTER, nil)
+    if ns == nil: raise newException(IOError, "no NSWindow")
+    cast[Get](objc_msgSend)(ns, sel_registerName(what))
 
 proc pad_cmd(w: seq[string]): string =
   ## A virtual gamepad, so hotplug, buttons, sticks and rumble go through
@@ -315,6 +339,16 @@ proc run(window: Window; s: Step): bool =
     let fs = (getWindowFlags(window) and WINDOW_FULLSCREEN) != 0
     ack(s.id, "ok fullscreen=" & $ord(fs) & " window=" & $ww & "x" & $wh)
     return true
+  of "aspect":
+    var lo, hi: cfloat
+    discard getWindowAspectRatio(window, lo, hi)
+    var msg = "ok min=" & formatFloat(lo, ffDecimal, 4) & " max=" & formatFloat(hi, ffDecimal, 4)
+    when defined(macosx):
+      let r = ns_size(window, "contentAspectRatio")
+      let inc = ns_size(window, "contentResizeIncrements")
+      msg.add " ns=" & $int(r.w) & ":" & $int(r.h) & " inc=" & $int(inc.w) & ":" & $int(inc.h)
+    ack(s.id, msg)
+    return true
   of "show":
     discard showWindow(window)
   of "fullscreen":
@@ -351,6 +385,18 @@ proc run(window: Window; s: Step): bool =
         if not mac_settings_snapshot(w[2]): raise newException(IOError, "no snapshot")
       else: raise newException(ValueError, "settings dump|do|key|close")
     else: raise newException(ValueError, "settings: macOS only")
+  of "alert":
+    when defined(macosx):
+      case w[1]
+      of "dump": writeFile(w[2], mac_alert_dump())
+      of "ok":
+        if not mac_alert_answer(): raise newException(ValueError, "no alert")
+      of "key":
+        if not mac_alert_key(parseHexInt(w[2])): raise newException(ValueError, "no alert")
+      of "shot":
+        if not mac_alert_snapshot(w[2]): raise newException(IOError, "no alert")
+      else: raise newException(ValueError, "alert dump|ok|key|shot")
+    else: raise newException(ValueError, "alert: macOS only")
   else: raise newException(ValueError, "unknown command " & w[0])
   true
 
@@ -377,7 +423,7 @@ proc driver_poll*(window: Window) =
     pending.delete(0)
     try:
       if run(window, s):
-        if s.id.len > 0 and s.words[0] notin ["click", "state", "pad"]: ack(s.id, "ok")
+        if s.id.len > 0 and s.words[0] notin ["click", "state", "pad", "aspect"]: ack(s.id, "ok")
       else:
         waiting = s
         is_waiting = true

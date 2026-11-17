@@ -679,8 +679,10 @@ buttons, stick, unplugged mid-press), the game picture filling the back buffer
 (twice the window's points on a Retina display), a picture that changed
 between fast-forward's presents and then held reaching the screen, the menus
 and window under `DINGBAT_UI_SCALE=1.5` (the app's stand-in for a Windows or
-X11 display at 150%: the menu bar and the window half as big again) and a
-generated MBC5 rumble cart buzzing it. `GUI_TEST_FULLSCREEN=1` adds a visible
+X11 display at 150%: the menu bar and the window half as big again), a
+generated MBC5 rumble cart buzzing it, and the window's aspect lock following
+the picture (GBA, Game Boy, an SGB border, DS; none with Preserve aspect ratio
+off). `GUI_TEST_FULLSCREEN=1` adds a visible
 macOS window taken fullscreen by AppKit's own toggle, as the green button does.
 
 `.github/scripts/smoke-desktop.sh` runs each release binary on its own OS

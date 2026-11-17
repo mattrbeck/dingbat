@@ -36,6 +36,7 @@ import dingbat/frontend/imgui_menu
 when defined(macosx):
   import dingbat/frontend/mac_menu
   import dingbat/frontend/mac_settings
+  import dingbat/frontend/mac_alert
 when defined(gui_driver):
   import dingbat/frontend/gui_driver
 import dingbat/common/cheats
@@ -175,6 +176,7 @@ type AppState = ref object
   link:            LinkCable  # pairing state (frontend/link_cable.nim)
   fullscreen:      bool
   fs_track:        FullscreenTrack  # the window's real state (window_restore.nim)
+  aspect:          float32  # the window's ratio lock as last set (0 = free)
   enable_overlay:  bool
   last_mouse_tick: uint64
   drag_hover:      bool  # a file is being dragged over the window
@@ -269,8 +271,29 @@ proc window_scale(): int =
                        40 * float(ui_scale) > float(r.h):
     dec result
 
+proc wanted_aspect(): float32 =
+  ## The width:height a resize keeps the window to: the picture's, so a drag
+  ## never letterboxes it. Free (0) on the home screen, in fullscreen, and
+  ## with Preserve aspect ratio off (the picture stretches to the window).
+  let fs = app.fullscreen or (getWindowFlags(app.window) and WINDOW_FULLSCREEN) != 0
+  if app.emu_kind == ekNone or fs or not app.cfg.preserve_aspect: return 0
+  let (w, h) = output_size()
+  float32(w) / float32(h)
+
+proc sync_aspect() =
+  ## Every loop iteration and before each resize. SDL fits the window to a
+  ## new ratio at once, and every later size to it (a size of exactly that
+  ## ratio is left as it is), so it is set before sizing for a new picture.
+  let a = wanted_aspect()
+  if a != app.aspect:
+    app.aspect = a
+    discard setWindowAspectRatio(app.window, a, a)
+    when defined(macosx):
+      if a == 0: mac_free_aspect(app.window)
+
 proc set_window_to(w, h, s: int) =
   ## Size the window to s times a native w x h picture (window_units).
+  sync_aspect()
   let k = window_units(app.window, s)
   discard setWindowSize(app.window, cint(round(float(w) * k)),
                         cint(round(float(h) * k)))
@@ -318,6 +341,7 @@ proc remember_fullscreen(on: bool) =
 proc set_fullscreen(on: bool) =
   ## Menu and Cmd/Ctrl+F.
   remember_fullscreen(on)
+  sync_aspect()   # free before going fullscreen
   discard setWindowFullscreen(app.window, on)
 
 proc window_is_fullscreen(): bool =
@@ -1206,6 +1230,32 @@ proc render_battery_notice() =
      app.load_notice.len > 0: return
   render_notice("Save file##battery", app.battery.text, app.battery.hint)
 
+when defined(macosx):
+  proc mac_notices() =
+    ## With the macOS menu bar the notices are alerts on the game's window
+    ## (mac_alert.nim), one at a time in render_*_notice's order; OK clears
+    ## the notice as the modal's does.
+    case mac_alert_take_ok()
+    of "State":
+      app.state_notice = ""
+      app.state_notice_hint = ""
+    of "Settings": app.cfg.notice = ""
+    of "Open ROM":
+      app.load_notice = ""
+      app.load_notice_hint = ""
+    of "Save file": app.battery.dismiss()
+    else: discard
+    if app.state_notice.len > 0:
+      mac_alert_show(app.window, "State", app.state_notice, app.state_notice_hint)
+    elif app.cfg.notice.len > 0:
+      mac_alert_show(app.window, "Settings", app.cfg.notice, "")
+    elif app.load_notice.len > 0:
+      mac_alert_show(app.window, "Open ROM", app.load_notice, app.load_notice_hint)
+    elif app.battery.text.len > 0:
+      mac_alert_show(app.window, "Save file", app.battery.text, app.battery.hint)
+    else:
+      mac_alert_show(app.window, "", "", "")
+
 # ──────────────────────────── Menus ────────────────────────────
 
 proc menu_state(cmd: MenuCmd; arg: int): MenuState =
@@ -1515,9 +1565,10 @@ proc render_imgui() =
      not app.link_window and not app.cheats.window and
      not app.save_states.window and not app.drag_hover and
      not app.open_rom_request and
-     # A notice must still draw with the menu bar idle-hidden (Quick Load key)
-     app.state_notice.len == 0 and app.cfg.notice.len == 0 and
-     app.load_notice.len == 0 and app.battery.text.len == 0:
+     # A notice must still draw with the menu bar idle-hidden (Quick Load
+     # key); with the macOS menu bar it is an alert (mac_notices)
+     (native_menu or app.state_notice.len == 0 and app.cfg.notice.len == 0 and
+      app.load_notice.len == 0 and app.battery.text.len == 0):
     # Only igNewFrame drains ImGui's input queue, a few events a frame, so a
     # long keyboard-only session would leave a backlog the menu waits behind.
     # Drop it, and clear held keys (a release may be among what is dropped).
@@ -1544,10 +1595,11 @@ proc render_imgui() =
                 proc(path: string) = load_rom(path))
   app.open_rom_request = false
 
-  render_state_notice()
-  render_config_notice()
-  render_load_notice()
-  render_battery_notice()
+  if not native_menu:   # else alerts (mac_notices)
+    render_state_notice()
+    render_config_notice()
+    render_load_notice()
+    render_battery_notice()
 
   app.ce.render()
 
@@ -2623,7 +2675,10 @@ proc main() =
     handle_input()
     lat_poll_input()
     run_menu_cmds()
-    when defined(macosx): mac_settings_tick()
+    when defined(macosx):
+      mac_settings_tick()
+      if native_menu: mac_notices()
+    sync_aspect()
     update_rumble()
     update_link_auto()
     service_link_setup()

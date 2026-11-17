@@ -28,6 +28,7 @@ proc dbm_open_panel(nswindow: pointer; exts_csv, dir: cstring)
 proc dbm_note_recent(path: cstring)
 proc dbm_clear_recents()
 proc dbm_set_document(nswindow: pointer; path: cstring)
+proc dbm_free_aspect(nswindow: pointer)
 proc dbm_perform_key(chars: cstring; shift: cint): cint
 proc dbm_dump(): cstring
 proc dbm_pick(path: cstring): cint
@@ -126,6 +127,10 @@ proc mac_clear_recents*() = dbm_clear_recents()
 proc mac_set_document*(window: Window; path: string) =
   ## The title bar's document icon (drag it, Cmd-click the title for its folder).
   dbm_set_document(nswindow(window), cstring(path))
+
+proc mac_free_aspect*(window: Window) =
+  ## After SDL_SetWindowAspectRatio(0, 0): resizing really is free again.
+  dbm_free_aspect(nswindow(window))
 
 proc mac_menu_key*(key: string; shift: bool): bool =
   ## A Cmd shortcut through the menu bar, as AppKit takes a real one.
