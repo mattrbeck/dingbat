@@ -134,7 +134,8 @@ $few"
       fresh "${extra}recents:
 $few"
     fi
-    run "$name" "1 frames 240
+    # Few frames: llvmpipe draws a frame_size 5 window at 1.5 slowly
+    run "$name" "1 frames 30
 2 app cmd mcCloseGame
 3 frames 10
 4 sleep 500

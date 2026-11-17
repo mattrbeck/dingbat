@@ -560,7 +560,7 @@ jobs:
         # For looking at, not compared: tests/desktop_ui_shots.sh. Inter is
         # Linux's UI font (ui_fonts.nim).
         if: always()
-        timeout-minutes: 5
+        timeout-minutes: 10
         env:
           SDL_AUDIO_DRIVER: dummy
         run: xvfb-run -a -s "-screen 0 1280x1024x24" tests/desktop_ui_shots.sh "$GITHUB_WORKSPACE/dingbat_gui_test" ui-shots
