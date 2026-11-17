@@ -34,8 +34,9 @@ struct RomEntry: Identifiable, Equatable, Hashable {
 
     var id: String { fileName }
     var stem: String { (fileName as NSString).deletingPathExtension }
-    /// What the person sees (web displayName).
-    var name: String { stem }
+    /// What the person sees (web displayName): the title of a game added
+    /// from a zip (the zip's name), else the file's.
+    var name: String { RomLibrary.titles[fileName] ?? stem }
     var ext: String { (fileName as NSString).pathExtension.lowercased() }
     /// web systemOf(): .gba GBA; .nds DS; .gbc/.cgb GBC; anything else GB.
     var system: String {
@@ -135,7 +136,7 @@ struct SessionMeta {
 }
 
 /// The library: the recency index ("recent" on the web: newest first,
-/// `{ name, ts, imp?, gen? }`, the list the Drive library merges), the ROM
+/// `{ name, ts, imp?, gen?, title? }`, the list the Drive library merges), the ROM
 /// files, and every per-game record. Main thread only.
 final class RomLibrary: ObservableObject {
     static let shared = RomLibrary()
@@ -168,6 +169,9 @@ final class RomLibrary: ObservableObject {
         (name as NSString).pathExtension.lowercased() == "nds"
     }
 
+    /// name -> title, as the index has them (RomEntry.name).
+    private(set) static var titles: [String: String] = [:]
+
     /// The recency index, newest first. Changed only through `updateRecent`.
     private(set) var recents: [JSObject] = []
     private var romSizes: [String: Int] = [:]
@@ -181,10 +185,7 @@ final class RomLibrary: ObservableObject {
         LegacyLayout.migrate()
         if let data = try? Data(contentsOf: Self.recentURL),
            let arr = JSValue.parse(data)?.arrayValue {
-            recents = arr.compactMap { v in
-                guard let o = v.objectValue, let n = o.string("name"), !n.isEmpty else { return nil }
-                return Lib.entry(name: n, ts: o.number("ts") ?? 0, imp: o.number("imp"), gen: Lib.gen(o))
-            }
+            recents = arr.compactMap { $0.objectValue.flatMap(Lib.stored) }
         }
         if let data = try? Data(contentsOf: Self.romSizesURL),
            let o = try? JSONDecoder().decode([String: Int].self, from: data) {
@@ -226,6 +227,9 @@ final class RomLibrary: ObservableObject {
         // DS games only with DS Beta on; off, they wait in the index.
         let ds = Settings.dsBetaOn
         let names = recents.compactMap { $0.string("name") }
+        Self.titles = Dictionary(recents.compactMap { o in
+            o.string("name").flatMap { n in Lib.titleOf(o.string("title")).map { (n, $0) } }
+        }, uniquingKeysWith: { a, _ in a })
         entries = names.map { RomEntry(fileName: $0) }.filter { ds || !$0.isNDS }
         AddPictures.pruneBlank(Set(names)) {
             FileManager.default.fileExists(atPath: RomEntry(fileName: $0).shotURL.path)
@@ -282,9 +286,10 @@ final class RomLibrary: ObservableObject {
     /// Move a game to the front (web bumpRecentIndex). `fresh` is a real
     /// import: a new claim on the name (`imp`), and the next generation after
     /// one this device deleted. `atLeast` raises the generation (a download of
-    /// files written for a newer one).
+    /// files written for a newer one). A play keeps the title; an import sets
+    /// it (`title`), or drops it (a bare ROM).
     @MainActor
-    func bump(_ name: String, fresh: Bool = false, gen atLeast: Int = 0) async {
+    func bump(_ name: String, fresh: Bool = false, gen atLeast: Int = 0, title: String? = nil) async {
         await updateRecent { all in
             DriveSync.shared.renamedAway.remove(name)
             let prev = all.first { $0.string("name") == name }
@@ -301,7 +306,7 @@ final class RomLibrary: ObservableObject {
             if fresh, let t = DriveSync.shared.state.tomb.first(where: { $0.name == name }) {
                 gen = max(gen, t.gen + 1)
             }
-            list.insert(Lib.entry(name: name, ts: ts, impFirst: imp, gen: gen), at: 0)
+            list.insert(Lib.bumped(name: name, ts: ts, imp: imp, gen: gen, prev: prev, fresh: fresh, title: title), at: 0)
             return list
         }
     }
@@ -398,7 +403,9 @@ final class RomLibrary: ObservableObject {
             guard let z = ZipReader.extractRom(from: data) else { throw ImportError.noRomInZip }
             let inner = (z.name as NSString).pathExtension.lowercased()
             guard await Self.confirmSuspect(z.rom, name: z.name, ext: inner) else { throw ImportError.declined }
-            let e = try await add(romData: z.rom, fileName: z.name)
+            let title = Lib.zipTitle(zipName: source.lastPathComponent, romName: z.name,
+                                     isExport: z.isExport, exportTitle: z.exportTitle)
+            let e = try await add(romData: z.rom, fileName: z.name, title: title)
             if let art = z.art, let img = UIImage(data: art), let png = img.pngData() {
                 try? Self.ensureDir(e.dir)
                 try? png.write(to: e.artURL)
@@ -415,14 +422,14 @@ final class RomLibrary: ObservableObject {
 
     /// Bytes first, index second (web addRecentRom).
     @MainActor
-    func add(romData: Data, fileName: String) async throws -> RomEntry {
+    func add(romData: Data, fileName: String, title: String? = nil) async throws -> RomEntry {
         let e = RomEntry(fileName: fileName)
         do { try romData.write(to: e.url, options: .atomic) } catch {
             throw ImportError.unreadable("Couldn't keep that file: \(error.localizedDescription)")
         }
         noteRomSize(fileName, romData.count)
         AddPictures.clearBlank([fileName])  // a new file: the next run may picture it
-        await bump(fileName, fresh: true)
+        await bump(fileName, fresh: true, title: title)
         DriveSync.shared.markGameUpload(fileName)
         return e
     }
@@ -692,32 +699,6 @@ final class RomLibrary: ObservableObject {
 
     /// The picture taken with the session (what a resume lands on).
     func sessionPicture(_ e: RomEntry) -> UIImage? { UIImage(contentsOfFile: e.sessionPicURL.path) }
-}
-
-/// Library entries (web `recent`), built in the web's key order so the
-/// shared library file serializes as the web's does.
-enum Lib {
-    static func gen(_ o: JSObject) -> Int {
-        guard let g = o.number("gen"), g > 0, g == g.rounded() else { return 0 }
-        return Int(g)
-    }
-
-    /// withGen({ name, ts }, gen) with `imp` set after (mergeLibrary's order).
-    static func entry(name: String, ts: Double, imp: Double?, gen: Int) -> JSObject {
-        var o = JSObject([("name", .string(name)), ("ts", .number(ts))])
-        if gen > 0 { o["gen"] = .number(Double(gen)) }
-        if let imp, imp != 0 { o["imp"] = .number(imp) }
-        return o
-    }
-
-    /// withGen(imp ? { name, ts, imp } : { name, ts }, gen) (bumpRecentIndex's
-    /// and renameGame's order).
-    static func entry(name: String, ts: Double, impFirst imp: Double?, gen: Int) -> JSObject {
-        var o = JSObject([("name", .string(name)), ("ts", .number(ts))])
-        if let imp, imp != 0 { o["imp"] = .number(imp) }
-        if gen > 0 { o["gen"] = .number(Double(gen)) }
-        return o
-    }
 }
 
 /// The layout before Drive (files keyed by the stem in Documents/states,

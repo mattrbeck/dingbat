@@ -191,6 +191,14 @@ struct DingbatApp: App {
         if let t = value("-toast") {
             DispatchQueue.main.asyncAfter(deadline: .now() + 3) { model.toast(t, duration: 60) }
         }
+        // `-import PATH`: that ROM or zip into the library, as Add a game
+        // does, without opening it (ios/e2e/zip-title.mjs).
+        if let p = value("-import") {
+            Task { @MainActor in
+                do { _ = try await RomLibrary.shared.importRom(from: URL(fileURLWithPath: p)) }
+                catch { model.toast(error.localizedDescription, duration: 4) }
+            }
+        }
         if let keys = value("-keys") {
             for (i, name) in keys.split(separator: " ").enumerated() {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 3 + Double(i) * 0.6) {

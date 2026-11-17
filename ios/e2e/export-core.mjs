@@ -67,7 +67,7 @@ const files = [{ path: "Crystal.gbc", kind: "rom" }, { path: 'odd "quote" \\ pat
 // library thumbnail, bigger, must not become the cover); anyone else's
 // gives the largest image.
 const addRom = random(4096), thumb = random(900), art = random(300);
-const addInfo = { app: "dingbat", format: 1, game: "Crystal.gbc", system: "GBC", exported: "x",
+const addInfo = { app: "dingbat", format: 1, game: "Crystal.gbc", title: "Johto Pack", system: "GBC", exported: "x",
                   files: [{ path: "Crystal.gbc", kind: "rom" }, { path: "pictures/Thumbnail.jpg", kind: "thumb" },
                           { path: "pictures/Box art.png", kind: "art" }] };
 const zipOf = (entries) => Buffer.concat(web.ZipWrite.build(entries, new Date(ms)).map((p) => Buffer.from(p)));
@@ -78,6 +78,7 @@ put("addback-other.zip", zipOf([{ name: "Crystal.gbc", data: addRom }, { name: "
   { name: "big.jpg", data: thumb }]));
 
 put("spec.json", JSON.stringify({ ms, zipNames: zipFiles.map((f) => f.name), names, game: "Pokémon \"Crystal\".gbc",
+                                  title: "Pokémon / Collection",
                                   system: "GBC", files }));
 
 // The Swift side.
@@ -120,7 +121,7 @@ check("zip", () => {
   execFileSync("unzip", ["-tq", join(dir, "check.zip")]);
 });
 check("info.json", () => {
-  const info = { app: "dingbat", format: 1, game: 'Pokémon "Crystal".gbc', system: "GBC",
+  const info = { app: "dingbat", format: 1, game: 'Pokémon "Crystal".gbc', title: "Pokémon / Collection", system: "GBC",
                  exported: new Date(ms).toISOString(), files };
   same(swift("info.json"), new TextEncoder().encode(JSON.stringify(info, null, 2) + "\n"), "info.json");
 });
@@ -133,9 +134,11 @@ check("names and stamps", () => {
 
 check("adding a zip back", () => {
   const p = JSON.parse(readFileSync(join(dir, "swift-addback.json"), "utf8"));
-  assert.deepEqual(p["addback-export"], { rom: "Crystal.gbc", romLen: addRom.length, artLen: art.length },
-                   "our export: its box art, not the bigger thumbnail");
-  assert.deepEqual(p["addback-other"], { rom: "Crystal.gbc", romLen: addRom.length, artLen: thumb.length },
+  assert.deepEqual(p["addback-export"], { rom: "Crystal.gbc", romLen: addRom.length, artLen: art.length,
+                                           isExport: true, exportTitle: "Johto Pack" },
+                   "our export: its box art, not the bigger thumbnail, and its game's title");
+  assert.deepEqual(p["addback-other"], { rom: "Crystal.gbc", romLen: addRom.length, artLen: thumb.length,
+                                          isExport: false, exportTitle: null },
                    "anyone else's zip: the largest image");
 });
 

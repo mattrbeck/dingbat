@@ -9,6 +9,9 @@ enum ZipReader {
         var name: String
         var rom: Data
         var art: Data?
+        /// One of our exports, and the title its info.json gives its game.
+        var isExport = false
+        var exportTitle: String?
     }
 
     private struct Entry {
@@ -69,14 +72,16 @@ enum ZipReader {
         // One of our own exports says what each file is (info.json): its box
         // art is the file it calls box art, or there is none; guessing would
         // make the library thumbnail or a printed photo the cover.
-        let kinds = ExportCore.exportKinds(entries.first { $0.name == "info.json" }.flatMap { data($0) })
+        let info = entries.first { $0.name == "info.json" }.flatMap { data($0) }
+        let kinds = ExportCore.exportKinds(info)
         let ofKind = { (k: String) in kinds.flatMap { kinds in entries.first { kinds[$0.name] == k } } }
         guard let romEntry = ofKind("rom") ?? visible.first(where: { romExts.contains(ext($0.name)) }),
               let rom = data(romEntry) else { return nil }
         // Anyone else's zip: the largest image is almost always the box art.
         let art = kinds != nil ? ofKind("art").flatMap { data($0) }
             : visible.filter { imgExts.contains(ext($0.name)) }.max { $0.size < $1.size }.flatMap { data($0) }
-        return Result(name: base(romEntry.name), rom: rom, art: art)
+        return Result(name: base(romEntry.name), rom: rom, art: art,
+                      isExport: kinds != nil, exportTitle: kinds != nil ? ExportCore.exportTitle(info) : nil)
     }
 
     /// Raw deflate (Apple's COMPRESSION_ZLIB is raw RFC 1951).
