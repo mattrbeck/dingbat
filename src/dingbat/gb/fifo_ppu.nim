@@ -996,7 +996,11 @@ proc tick_bg_fetcher*(ppu: GbFifoPpu; gb: GB) =
     let tile_data_tbl = if sel: 0x0000 else: 0x1000
     let tile_ptr = tile_data_tbl + 16 * tile_num
     let bank_num = int((ppu.tile_attrs and 0b0000_1000) shr 3)
-    var tile_row = if ppu.fetching_window:
+    # DMG: the row term follows LCDC.5 as it stands at this read, so a window
+    # tile whose map read came before a fall takes its planes from the
+    # background's row (WIN_OFF_BG_ROW, gb.nim).
+    var tile_row = if ppu.fetching_window and
+                      (not WIN_OFF_BG_ROW or ppu.cgb or window_enabled(ppu)):
                      ppu.current_window_line and 7
                    elif gb.quirks.scy_fetch_latch:
                      (int(ppu.ly) + int(ppu.fetch_scy)) and 7

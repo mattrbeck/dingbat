@@ -511,6 +511,25 @@ Dots are dingbat's line dots; W is the first dot of the writing M-cycle
   delayed. DocBoy `dmg/ppu/visual/window_retrigger_pixel_glitch_*` pin the
   insert (1, a replaced pixel, fails them).
 
+### LCDC.5 falling inside a window tile's fetch (DMG)
+- Default: `WIN_OFF_BG_ROW = true` (`gb.nim`; the plane reads in
+  `tick_bg_fetcher`).
+- Rule: each bitplane read takes its row term from LCDC.5 as it stands at
+  that read: the window line counter's low 3 bits while the bit is set,
+  `(LY + SCY) and 7` once it is clear. The tile index the window map read
+  latched stays, and the fetcher goes back to background tiles at its next
+  map read (`WIN_EN_ABORT`), so the tile's dots and position do not move;
+  only its row does.
+- Evidence: DocBoy `dmg/ppu/visual/window_turn_off_*`, the 40 whose write
+  lands between the window map read and the planes (false fails all 40).
+  mealybug `m3_lcdc_win_en_change_multiple_wx` reaches the rule on about
+  500 reads with the two rows different and its DMG frame is unchanged.
+  SameBoy (DMG B, black box) keeps the window row; no spec text or photo
+  separates the two (decider: gb-failure-triage.md I6). The CGB keeps the
+  window row; no test reaches it there.
+- Clean-room: derived from the test ROMs' frames and dingbat's own trace
+  runs; no emulator source consulted.
+
 ## 3. Objects
 
 ### An object costs 6 dots plus a per-tile wait, per Pan Docs

@@ -937,6 +937,15 @@ const WIN_ABORT_COL_LEAD*     {.intdefine.} = 1
   ## DocBoy `dmg/ppu/visual/window_bg_reprise_wx*`. The CGB keeps 0: its
   ## `cgb/` twins abort one tile later (CGB_WE_DISABLE_LATE) and want the
   ## column 0 gives.
+const WIN_OFF_BG_ROW*         {.booldefine.} = true
+  ## DMG: a window tile's bitplane reads take the row from LCDC.5 as it stands
+  ## at each read (window line counter if set, `(LY + SCY) and 7` if clear);
+  ## the tile index already read stays the window's, and the fetcher returns
+  ## to background tiles at the next map read (WIN_EN_ABORT). Pinned by 40
+  ## DocBoy `dmg/ppu/visual/window_turn_off_*` rows (a fall between the map
+  ## read and the planes); false fails all 40. The CGB keeps the window row:
+  ## no test reaches it there. docs/dev/gb-derivations.md, "LCDC.5 falling
+  ## inside a window tile's fetch".
 const WIN_EN_HOLD*            {.intdefine.} = 2
   ## Dots a WX match that LCDC.5 refused stays live waiting for the bit (0 =
   ## dropped). mealybug `m3_lcdc_win_en_change_multiple_wx` walks a match one

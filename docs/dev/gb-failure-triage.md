@@ -1537,7 +1537,7 @@ hardware question. Families:
   these are the DMG's columns or one unit's margin, since one console stands
   behind the tables. Hardware: the six ROMs on an MGB, pass/fail screens,
   with `ld_a_hl_round11` (row 0 at R = 8, DocBoy only) as a control.
-* **I6. DMG window glitches (49 left of 120).**
+* **I6. DMG window glitches (9 left of 120).**
   * Closed: `window_retrigger_pixel_glitch_*` (67) and
     `window_bg_reprise_wx{15,23}`. Each ROM turns the window off in the WY
     line's HBlank, so every later line has WX matching with LCDC.5 low.
@@ -1554,24 +1554,45 @@ hardware question. Families:
     pixel right of the push position on the DMG (`WIN_ABORT_COL_LEAD = 1`;
     values on both sides fail over the 18 WX of the family; DocBoy's and
     SameBoy's CGB keep 0).
-  * Left (43; scored again 2026-11-16): `window_turn_off_*`. LCDC.5 is cleared
-    during the window's first tile fetch on line 8, at 4-dot phases (an
-    object's X shifts the fetch, `nops21..25` the write). On 40 tests the
-    write lands between the window map read and its bitplane reads, and
-    DocBoy's reference reads that tile's data from the BACKGROUND's row,
-    `(LY + SCY) and 7`, where dingbat keeps the window row; SameBoy (DMG B)
-    draws dingbat's frame pixel for pixel on all 40. On the other 3
-    (`window_turn_off_nops22_sprite_x3_variation_{a,b}`,
-    `_alt_nops22_sprite_x3`: the write right after the WX match) all three
-    emulators differ, and SameBoy fails 17 further tests of the family that
-    dingbat and DocBoy pass. A note in mealybug's repository says the
-    disable "will take effect at the end of the current window tile", i.e.
-    that tile is drawn as a window tile, but the document it comes from is
-    based on mealybug's test ROMs and its emulator, not a console
-    measurement. Not known: what the DMG draws; no spec text covers it. The
-    decider is one photo on the MGB: `window_turn_off_nops22_sprite_x4`,
-    line 8, x = 9..16 reads `32222222` (shades; DocBoy) or `00000222`
-    (dingbat, SameBoy).
+  * Closed (40 of the 43 `window_turn_off_*` scored again 2026-11-16).
+    LCDC.5 is cleared during the window's first tiles on line 8 or 9, at
+    4-dot phases (an object's X shifts the fetch, `nops21..25` the write).
+    On these 40 the write lands between a window tile's map read and its
+    bitplane reads, and the reference draws that tile's index with the
+    background's row, `(LY + SCY) and 7`: on the DMG each plane read's row
+    term follows LCDC.5 as it stands at that read; the index already read
+    stays, and the switch to background tiles stays at the next map read
+    (`WIN_OFF_BG_ROW`, gb.nim; false fails all 40). SameBoy (DMG B) keeps the
+    window row on all 40. mealybug `m3_lcdc_win_en_change_multiple_wx`
+    reaches the rule on about 500 plane reads with the two rows different
+    and its frame (the DMG photo's) still passes, so its tiles do not
+    separate the rows; nothing else in the full runner moves. A note in
+    mealybug's repository says the disable "will take effect at the end of
+    the current window tile", i.e. that tile is drawn as a window tile; it
+    comes from mealybug's ROMs and its emulator, not a console measurement,
+    and the rule keeps the tile (index and the dots the fetch takes), only
+    its row moves. The decider is one photo on the MGB:
+    `window_turn_off_nops22_sprite_x4`, line 8, x = 9..16 reads `32222222`
+    (shades; DocBoy, dingbat now) or `00000222` (SameBoy, dingbat before).
+  * Left (3): `window_turn_off_nops22_sprite_x3_variation_{a,b}`,
+    `_alt_nops22_sprite_x3`. The WX match is on dot 107 of line 9 and the
+    write on dot 109, the window's first map read; dingbat aborts there and
+    resumes at the column under the pixel right of the push position,
+    `(9 + 0 + 1) div 8 = 1` (the start emptied the FIFO), so columns 1, 2, 3
+    follow from x = 9. The reference has 2, 2, 3: the column the
+    background's own fetch had reached (it pushed column 1 at x = 8), then
+    the screen-position column again. A model that passes all 43 and the
+    `window_bg_reprise_*` rows: the abort read takes `(P + 1) div 8`, P the
+    position the last pushed tile ended at (the background's, 16, while the
+    window has pushed nothing), and the counter continues from the screen
+    position. The 22 rows of the family whose fall lands on a map-read dot
+    separate it from the alternatives: a background counter frozen at the
+    window start fails `window_bg_reprise_wx{14,22}` and
+    `_alt_nops25_sprite_x{5,6,7}`, the window's pushes counted onto it fail
+    13. SameBoy (DMG B) draws neither picture and fails 17 more of the
+    family; no spec text or photo covers a fall on the window's first map
+    read. The decider: `window_turn_off_nops22_sprite_x3_variation_a` on the
+    MGB, line 9, x = 9..16: `30303030` (DocBoy) or `33333333` (dingbat).
   * Left (6): `window_wx0_scx{1..6}`. WX = 0 with SCX & 7 = s: DocBoy and
     SameBoy draw the window's 9-pixel black head as 9, 7, 6, 5, 4, 3, 2, 2
     for s = 0..7; dingbat draws 9, 8, 7, 6, 5, 4, 3, 2, which is Pan Docs,
