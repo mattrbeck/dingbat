@@ -7,7 +7,7 @@
 
 import imguin/cimgui
 import held_input
-import util
+import util, ui_fonts
 export ModalKey
 
 proc modal_key*(): ModalKey =
@@ -54,7 +54,8 @@ proc render_notice*(popup: string; text, hint: var string) =
       # Through "%s", not as the format string: the hint carries core wording
       # built from the FILE's own bytes, and a '%' in there would read
       # arguments that were never pushed.
-      igTextDisabled("%s", cstring(hint))
+      with_font(fRegular, SMALL_PX):
+        igTextDisabled("%s", cstring(hint))
     igPopTextWrapPos()
     igSpacing()
     # OK is the only button: Return and Escape both mean it

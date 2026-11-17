@@ -180,8 +180,9 @@ run "1 sleep 400
 3 quit"
 xy=$(tile "$work/before-remove.txt" "Gone (USA)" centre)
 # The tile's menu opens at the pointer; its last item, Remove from Library,
-# is the built-in font's lines below and right of it
-rx=$(( ${xy% *} + 70 )) ry=$(( ${xy#* } + 70 ))
+# is four lines of 14 px text below it (the name, the missing note, a
+# separator, Play: ~88 pt, each item ~22 pt tall) and right of it
+rx=$(( ${xy% *} + 70 )) ry=$(( ${xy#* } + 88 ))
 run "1 sleep 400
 2 move $xy
 3 sleep 100

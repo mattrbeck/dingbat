@@ -2,7 +2,7 @@
 ## the library (library.nim) as a grid of tiles, or with no games a box to
 ## drop one on. It follows the web's home screen (web/index.html `#home`,
 ## web/styles.css "home-tile", Night theme) in size, colour and behaviour:
-## sizes here are that page's CSS px, scaled by ui_px.
+## sizes here, text sizes too, are that page's CSS px, scaled by ui_px.
 ##
 ## No file reads or textures here. The app decodes pictures (`load_picture`)
 ## and owns textures (`make_texture`, `free_texture`); each is made once, the
@@ -10,7 +10,7 @@
 
 import std/[math, os, strutils, tables, times]
 import imguin/cimgui
-import library, util
+import library, util, ui_fonts
 from presenter import ui_nearest_begin, ui_nearest_end
 from save_states_widget import calc_text_size
 
@@ -71,6 +71,7 @@ const
   BRAND_SMALL_H = 19'f32   ## a small window's brand: the bat at 1x and the name beside it
   SMALL_WINDOW = 420'f32   ## narrower or shorter than this (CSS px), the small brand
   DROP_H = 185'f32
+  PAGE_PX = 13.5'f32  ## the page's text (web .button, #home-tagline)
 
 # ──────────────────────────── Colours (web Night theme) ────────────────────────────
 
@@ -175,17 +176,16 @@ proc fill_gradient(dl: ptr ImDrawList; a, b: ImVec2; top, bottom: uint32;
   ImDrawList_AddRectFilled(dl, a, b, top, rounding, dflags(corners))
   dl.shade(start, a, b, top, bottom)
 
-proc text_at(dl: ptr ImDrawList; p: ImVec2; col: uint32; s: string; bold = false) =
+proc text_at(dl: ptr ImDrawList; p: ImVec2; col: uint32; s: string) =
   ImDrawList_AddText_Vec2(dl, p, col, cstring(s), nil)
-  if bold: ImDrawList_AddText_Vec2(dl, v2(p.x + hairline(), p.y), col, cstring(s), nil)
 
 proc fit_text(s: string; avail: float32): string =
-  ## s, or as much of it as fits with "..." after
+  ## s, or as much of it as fits with "…" after
   if calc_text_size(s).x <= avail: return s
   result = s
   while result.len > 0:
     result.setLen(result.len - 1)
-    let t = result.strip(leading = false) & "..."
+    let t = result.strip(leading = false) & "…"
     if calc_text_size(t).x <= avail: return t
 
 proc dashed_rect(dl: ptr ImDrawList; a, b: ImVec2; r: float32; col: uint32;
@@ -211,21 +211,11 @@ proc dashed_rect(dl: ptr ImDrawList; a, b: ImVec2; r: float32; col: uint32;
   run(v2(b.x - r, b.y), v2(a.x + r, b.y))
   run(v2(a.x, b.y - r), v2(a.x, a.y + r))
 
-template with_size(size: float32; body: untyped) =
-  ## ImGui's font at `size` (its unscaled px; the UI scale applies on top)
-  igPushFont(nil, size)
-  body
-  igPopFont()
-
-template with_size_value(size: float32; e: untyped): untyped =
-  igPushFont(nil, size)
+template with_font_value(face: Face; css: float32; e: untyped): untyped =
+  push_font(face, css)
   let r = e
   igPopFont()
   r
-
-proc label_font(css: float32): float32 =
-  ## The built-in font is drawn crisp at 13 px and its multiples
-  if css >= 19.5: 26 else: 13
 
 # ──────────────────────────── The cartridge ────────────────────────────
 
@@ -283,10 +273,10 @@ proc draw_cart(dl: ptr ImDrawList; box_a, box_b: ImVec2; g: LibGame; alpha: floa
   if mark.len > 0:
     let css = (if gb_like: clamp(bw / ui_scale * 0.046, 8, 20)
                else: clamp(bw / ui_scale * 0.054, 9, 22))
-    with_size(label_font(css)):
+    with_font(fBold, css):
       let ts = calc_text_size(mark)
       dl.text_at(v2(round(cx - ts.x * 0.5), round((la.y + lb.y - ts.y) * 0.5)),
-                 rgb(0x0A0A14, 0.78 * alpha), mark, bold = true)
+                 rgb(0x0A0A14, 0.78 * alpha), mark)
 
 # ──────────────────────────── State ────────────────────────────
 
@@ -461,6 +451,7 @@ proc add_button(v: LibraryView; dl: ptr ImDrawList; id: string; right, mid_y: fl
 proc primary_button(v: LibraryView; dl: ptr ImDrawList; id, label: string;
                     cx, top: float32): bool =
   ## The empty state's pill (web .button-primary)
+  push_font(fBold, PAGE_PX)
   let ts = calc_text_size(label)
   let w = ts.x + ui_px(56)
   let h = ui_px(44)
@@ -478,7 +469,8 @@ proc primary_button(v: LibraryView; dl: ptr ImDrawList; id, label: string;
   ImDrawList_AddLine(dl, v2(a.x + h * 0.5, a.y + hairline()),
                      v2(b.x - h * 0.5, a.y + hairline()), rgb(WHITE, 0.35), hairline())
   dl.text_at(v2(round(cx - ts.x * 0.5), round(a.y + (h - ts.y) * 0.5)),
-             rgb(ACCENT_INK), label, bold = true)
+             rgb(ACCENT_INK), label)
+  igPopFont()
 
 # ──────────────────────────── One tile ────────────────────────────
 
@@ -563,13 +555,15 @@ proc draw_tile(v: LibraryView; dl: ptr ImDrawList; k: int; a: ImVec2;
     let lk = look(g.system)
     ImDrawList_AddRectFilled(dl, chip_a, v2(chip_a.x + chip_w, chip_a.y + chip_h),
                              fade(lk.bg, alpha), ui_px(5), dflags(ImDrawFlags_RoundCornersAll))
-    let cs = calc_text_size(g.system)
-    dl.text_at(v2(round(chip_a.x + (chip_w - cs.x) * 0.5), round(cy - cs.y * 0.5)),
-               fade(lk.fg, alpha), g.system)
+    with_font(fBold, 10):
+      let cs = calc_text_size(g.system)
+      dl.text_at(v2(round(chip_a.x + (chip_w - cs.x) * 0.5), round(cy - cs.y * 0.5)),
+                 fade(lk.fg, alpha), g.system)
   let name_x = pa.x + ui_px(10)
-  let name = fit_text(g.display_name, chip_a.x - ui_px(8) - name_x)
-  let ns = calc_text_size(name)
-  dl.text_at(v2(name_x, round(cy - ns.y * 0.5)), rgb(TEXT, alpha), name)
+  with_font(fRegular, 13):
+    let name = fit_text(g.display_name, chip_a.x - ui_px(8) - name_x)
+    let ns = calc_text_size(name)
+    dl.text_at(v2(name_x, round(cy - ns.y * 0.5)), rgb(TEXT, alpha), name)
   # The edge: dashed for a file that is not there, as the web's
   if missing:
     dl.dashed_rect(ta, tb, r, if lit: border2() else: rgb(WHITE, 0.12),
@@ -620,7 +614,8 @@ proc chip_counts(v: LibraryView): seq[(string, int)] =
   if result.len < 2: result.setLen(0)
 
 proc chip_w(s: string; n: int): float32 =
-  calc_text_size(s).x + calc_text_size($n).x + ui_px(20 + 6)
+  with_font_value(fBold, 11, calc_text_size(s).x) +
+    with_font_value(fRegular, 11, calc_text_size($n).x) + ui_px(20 + 6)
 
 proc sort_width(width: float32): float32 =
   ## Room for "Last played" and the combo's arrow, at most 40% of the bar
@@ -638,6 +633,7 @@ proc bar_wraps(v: LibraryView; width: float32): bool =
 
 proc draw_bar(v: LibraryView; dl: ptr ImDrawList; x0, y, width: float32; wrap: bool) =
   ## Search, a chip per system (when there are two or more), and the sort
+  push_font(fRegular, 13)
   let h = ui_px(BAR_H)
   let counts = v.chip_counts()
   var i = 0
@@ -677,7 +673,7 @@ proc draw_bar(v: LibraryView; dl: ptr ImDrawList; x0, y, width: float32; wrap: b
   block:
     for (s, n) in counts:
       let on = s in v.systems
-      let ls = calc_text_size(s)
+      let ls = with_font_value(fBold, 11, calc_text_size(s))
       let w = chip_w(s, n)
       if wrap and cx + w > x0 + width: break
       let ca = v2(cx, cy + ui_px(2))
@@ -691,9 +687,11 @@ proc draw_bar(v: LibraryView; dl: ptr ImDrawList; x0, y, width: float32; wrap: b
       dl.add_rect(ca, cb, if on: rgb(ACCENT, 0.5) elif hot: rgb(WHITE, 0.24)
                                      else: border2(), rr, 1)
       let ty = round(cy + (h - ls.y) * 0.5)
-      dl.text_at(v2(ca.x + ui_px(10), ty), if on: rgb(ACCENT) elif hot: rgb(TEXT) else: rgb(DIM),
-                 s, bold = true)
-      dl.text_at(v2(ca.x + ui_px(16) + ls.x, ty), if on: rgb(ACCENT, 0.8) else: rgb(FAINT), $n)
+      with_font(fBold, 11):
+        dl.text_at(v2(ca.x + ui_px(10), ty),
+                   if on: rgb(ACCENT) elif hot: rgb(TEXT) else: rgb(DIM), s)
+      with_font(fRegular, 11):
+        dl.text_at(v2(ca.x + ui_px(16) + ls.x, ty), if on: rgb(ACCENT, 0.8) else: rgb(FAINT), $n)
       cx += w + ui_px(6)
   # The sort
   const names = ["Last played", "A-Z", "System"]
@@ -717,6 +715,7 @@ proc draw_bar(v: LibraryView; dl: ptr ImDrawList; x0, y, width: float32; wrap: b
   igPopStyleVar(1)
   igPopStyleColor(6)
   igPopStyleVar(3)
+  igPopFont()
 
 # ──────────────────────────── The page ────────────────────────────
 
@@ -752,6 +751,7 @@ proc draw*(v: LibraryView; rom_types: string) =
     igEnd()
     return
   let dl = igGetWindowDrawList()
+  push_font(fRegular, PAGE_PX)
   let s = ui_scale
   let scroll = igGetScrollY()
   let inner_w = size.x - (if igGetScrollMaxY() > 0: ui_px(10) else: 0)
@@ -781,9 +781,9 @@ proc draw*(v: LibraryView; rom_types: string) =
 
   # The brand: the bat, the name and what it is, or in a small window the
   # bat and the name on one line
-  let name_w = with_size_value(26, calc_text_size("dingbat").x)
+  let name_w = with_font_value(fBold, 30, calc_text_size("dingbat").x)
   if small:
-    let ns = calc_text_size("dingbat")
+    let ns = with_font_value(fBold, 17, calc_text_size("dingbat"))
     let lw = v.logo_w * s
     let gap = ui_px(8)
     let x0 = round(X(mid) - (lw + gap + ns.x) * 0.5)
@@ -793,8 +793,9 @@ proc draw*(v: LibraryView; rom_types: string) =
                           v2(x0, round(Y(top))), v2(x0 + lw, round(Y(top)) + v.logo_h * s),
                           v2(0, 0), v2(1, 1), 0xFFFFFFFF'u32)
       ui_nearest_end()
-    dl.text_at(v2(x0 + lw + gap, round(Y(top + BRAND_SMALL_H * 0.5) - ns.y * 0.5)),
-               rgb(TEXT), "dingbat", bold = true)
+    with_font(fBold, 17):
+      dl.text_at(v2(x0 + lw + gap, round(Y(top + BRAND_SMALL_H * 0.5) - ns.y * 0.5)),
+                 rgb(TEXT), "dingbat")
   else:
     if v.logo_tex != 0:
       let lw = v.logo_w * 2
@@ -805,10 +806,10 @@ proc draw*(v: LibraryView; rom_types: string) =
                           v2(round(X(mid - lw * 0.5)) + lw * s, round(Y(top)) + lh * s),
                           v2(0, 0), v2(1, 1), 0xFFFFFFFF'u32)
       ui_nearest_end()
-    with_size(26):
+    with_font(fBold, 30):
       let ts = calc_text_size("dingbat")
       dl.text_at(v2(round(X(mid) - name_w * 0.5), round(Y(top + 55 + 17.5) - ts.y * 0.5)),
-                 rgb(TEXT), "dingbat", bold = true)
+                 rgb(TEXT), "dingbat")
     let tagline = "a game boy & game boy advance emulator"
     let tg = calc_text_size(tagline)
     dl.text_at(v2(round(X(mid) - tg.x * 0.5), round(Y(top + 96 + 8) - tg.y * 0.5)),
@@ -834,30 +835,34 @@ proc draw*(v: LibraryView; rom_types: string) =
     ImDrawList_PathLineTo(dl, v2(ic.x + 7 * k, ic.y + 2 * k))
     dl.path_stroke(ink, t)
     let title = "Drop a game file anywhere in this window"
-    let ts = calc_text_size(title)
-    dl.text_at(v2(round(X(mid) - ts.x * 0.5), round(Y(body + 60 + 8.5) - ts.y * 0.5)),
-               rgb(DIM), title)
+    with_font(fRegular, 14):
+      let ts = calc_text_size(title)
+      dl.text_at(v2(round(X(mid) - ts.x * 0.5), round(Y(body + 60 + 8.5) - ts.y * 0.5)),
+                 rgb(DIM), title)
     if v.primary_button(dl, "##add_first", "Add a game", X(mid), round(Y(body + 91))) and
        v.on_add != nil:
       v.on_add()
-    let hs = calc_text_size(rom_types)
-    dl.text_at(v2(round(X(mid) - hs.x * 0.5), round(Y(body + 149 + 8) - hs.y * 0.5)),
-               rgb(FAINT), rom_types)
+    with_font(fRegular, 13):
+      let hs = calc_text_size(rom_types)
+      dl.text_at(v2(round(X(mid) - hs.x * 0.5), round(Y(body + 149 + 8) - hs.y * 0.5)),
+                 rgb(FAINT), rom_types)
   else:
     # The head: "LIBRARY  3 games", and Add a game
     let x0 = mid - lay.width * 0.5
     let hy = Y(body + HEAD_H / 2)
     let label = "LIBRARY"
-    let ls = calc_text_size(label)
-    dl.text_at(v2(X(x0), round(hy - ls.y * 0.5)), rgb(FAINT), label, bold = true)
+    let ls = with_font_value(fBold, 11, calc_text_size(label))
+    with_font(fBold, 11):
+      dl.text_at(v2(X(x0), round(hy - ls.y * 0.5)), rgb(FAINT), label)
     let count = if n == v.games.len: $n & (if n == 1: " game" else: " games")
                 else: $n & " of " & $v.games.len
-    let cs = calc_text_size(count)
+    let cs = with_font_value(fRegular, 11, calc_text_size(count))
     # A narrow head keeps the label; the count, then the button's words, go
-    let room = lay.width * s - ls.x - ui_px(10)
+    let room = lay.width * s - ls.x - ui_px(6)
     let icon_only = room < add_button_w(false)
     if room - add_button_w(icon_only) >= cs.x + ui_px(10):
-      dl.text_at(v2(X(x0) + ls.x + ui_px(10), round(hy - ls.y * 0.5)), rgb(FAINT), count)
+      with_font(fRegular, 11):
+        dl.text_at(v2(X(x0) + ls.x + ui_px(6), round(hy - cs.y * 0.5)), rgb(FAINT), count)
     v.add_button(dl, "##add", X(x0 + lay.width), hy, icon_only)
     var gy = body + HEAD_H + 10
     if bar:
@@ -892,6 +897,7 @@ proc draw*(v: LibraryView; rom_types: string) =
   if igIsWindowHovered(0) and igIsMouseClicked_Bool(ImGuiMouseButton(ImGui_MouseButton_Left), false) and
      not igIsAnyItemHovered():
     v.ring = false
+  igPopFont()
   igEnd()
 
 proc dump*(v: LibraryView): string =
