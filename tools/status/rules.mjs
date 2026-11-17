@@ -11,11 +11,13 @@ export const SHOWS = ["toast", "banner"];
 // ends, a minBuild that never applies.
 export const TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/;
 export const ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
-const ANN_KEYS = ["id", "text", "show", "url", "label", "platforms", "from", "until", "builtBefore"];
+const ANN_KEYS = ["id", "text", "show", "url", "label", "platforms", "from", "until", "builtBefore", "builtAfter"];
 const REQ_KEYS = ["platforms", "minBuild", "message", "url"];
 // Past this a toast wraps to three lines on a phone, a banner to four.
 export const TEXT_SOFT_MAX = 140;
 export const LABEL_MAX = 24;
+// A template's [placeholder] left in the text.
+const PLACEHOLDER = /\[[^\]\n]{1,40}\]/;
 
 const isObj = (v) => !!v && typeof v === "object" && !Array.isArray(v);
 
@@ -69,6 +71,7 @@ export const validate = (doc, now = Date.now()) => {
       else if (ids.has(a.id)) err(`${p}.id`, `"${a.id}" is used twice: the second would never show`);
       else ids.add(a.id);
       if (typeof a.text !== "string" || !a.text.trim()) err(`${p}.text`, "must be non-empty text");
+      else if (PLACEHOLDER.test(a.text)) err(`${p}.text`, `still has a placeholder: ${a.text.match(PLACEHOLDER)[0]}`);
       else if (a.text.length > TEXT_SOFT_MAX) warn(`${p}.text`, `${a.text.length} characters: long for a toast or banner (aim under ${TEXT_SOFT_MAX})`);
       if (a.show !== undefined) list(`${p}.show`, a.show, SHOWS, "place");
       if (a.platforms !== undefined) list(`${p}.platforms`, a.platforms, PLATFORMS, "platform");
@@ -80,7 +83,9 @@ export const validate = (doc, now = Date.now()) => {
       }
       const from = a.from === undefined ? NaN : time(`${p}.from`, a.from);
       const until = a.until === undefined ? NaN : time(`${p}.until`, a.until);
-      if (a.builtBefore !== undefined) time(`${p}.builtBefore`, a.builtBefore);
+      const before = a.builtBefore === undefined ? NaN : time(`${p}.builtBefore`, a.builtBefore);
+      const after = a.builtAfter === undefined ? NaN : time(`${p}.builtAfter`, a.builtAfter);
+      if (after >= before) err(`${p}.builtAfter`, "is not before builtBefore: no build is in between, so nobody sees it");
       if (from >= until) err(`${p}.until`, "is not after from: it never shows");
       if (until <= now) warn(`${p}.until`, "is past: nobody sees it any more; remove it");
     });
@@ -113,4 +118,31 @@ export const validate = (doc, now = Date.now()) => {
     });
   }
   return { errors, warnings };
+};
+
+// --- who sees what: the clients' rules (web index.js announcementApplies /
+// enforceRequired, iOS AppStatus), for the editor's check. web/tests
+// status-json.test.mjs holds the web copy to this one. `built` is a build's
+// time in ms, or null for a development build (newer than everything).
+
+const t = (s) => (typeof s === "string" ? Date.parse(s) : NaN);
+const at = (built) => (built == null || Number.isNaN(built) ? Infinity : built);
+const names = { web: "web", ios: "iOS" };
+const fmt = (s) => s.replace("T", " ").replace(":00Z", " UTC").replace("Z", " UTC");
+
+export const announcementFor = (a, { platform, built, now }) => {
+  const b = at(built);
+  if (Array.isArray(a.platforms) && a.platforms.length && !a.platforms.includes(platform)) return { shows: false, why: `not for ${names[platform]}` };
+  if (t(a.from) > now) return { shows: false, why: `starts ${fmt(a.from)}` };
+  if (t(a.until) <= now) return { shows: false, why: `ended ${fmt(a.until)}` };
+  if (a.builtBefore !== undefined && !(b < t(a.builtBefore))) return { shows: false, why: `only builds older than ${fmt(a.builtBefore)}` };
+  if (a.builtAfter !== undefined && !(b >= t(a.builtAfter))) return { shows: false, why: `only builds from ${fmt(a.builtAfter)} on` };
+  const show = (Array.isArray(a.show) && a.show.length ? a.show : ["toast"]).filter((x) => SHOWS.includes(x));
+  return { shows: true, why: (show.length ? show : ["toast"]).join(" + ") };
+};
+
+export const requiredFor = (r, { platform, built }) => {
+  if (Array.isArray(r.platforms) && r.platforms.length && !r.platforms.includes(platform)) return { blocks: false, why: `not for ${names[platform]}` };
+  if (!(at(built) < t(r.minBuild))) return { blocks: false, why: built == null ? "a development build is never blocked" : `this build meets ${fmt(r.minBuild)}` };
+  return { blocks: true, why: platform === "web" ? "blocked, once a deploy that meets it is live" : "blocked at once" };
 };

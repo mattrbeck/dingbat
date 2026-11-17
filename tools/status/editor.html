@@ -124,6 +124,10 @@ pre.json { margin: 0; max-height: 360px; overflow: auto; padding: 10px; border-r
 .pv-full .go { align-self: center; width: 100%; max-width: 480px; padding: 15px; border-radius: 14px; background: var(--accent); color: var(--ink); font-weight: 600; font-size: 17px; }
 .pv-full .go.none { background: none; border: 1px dashed var(--danger); color: var(--danger); font-weight: 400; font-size: 14px; }
 .pv-note-off { color: var(--faint); font-size: 13px; text-align: center; margin: 0; }
+select.btn { padding-right: 8px; }
+.who-yes .k { color: var(--live); }
+.who-no .k { color: var(--faint); }
+.who-block .k { color: var(--danger); }
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
 </style>
 </head>
@@ -143,6 +147,14 @@ pre.json { margin: 0; max-height: 360px; overflow: auto; padding: 10px; border-r
   <div class="col">
     <section class="panel" aria-labelledby="ann-h">
       <div class="row"><h2 id="ann-h" style="flex:1">Announcements</h2>
+        <button type="button" class="btn btn-small btn-ghost" id="prune" hidden>Remove expired</button>
+        <label class="sr" for="template">New from a template</label>
+        <select id="template" class="btn btn-small" aria-label="New from a template">
+          <option value="">From a template…</option>
+          <option value="maintenance">Maintenance window</option>
+          <option value="bug">Bug in older builds</option>
+          <option value="feature">New feature</option>
+        </select>
         <button type="button" class="btn btn-small" id="add-ann">+ Announcement</button></div>
       <ul class="items" id="ann-list"></ul>
     </section>
@@ -163,6 +175,25 @@ pre.json { margin: 0; max-height: 360px; overflow: auto; padding: 10px; border-r
       <div class="stage" id="stage"></div>
       <p class="hint" id="pv-hint"></p>
     </section>
+    <section class="panel" aria-labelledby="who-h">
+      <h2 id="who-h">Who sees this</h2>
+      <div class="row" id="who-inputs">
+        <div class="tabs" role="group" aria-label="Platform" id="who-platform"></div>
+        <label class="f" style="flex:1 1 220px">Build
+          <span class="when"><input type="datetime-local" step="1" id="who-built" aria-describedby="who-built-utc">
+          <button type="button" class="btn btn-small btn-ghost" id="who-dev">Development build</button></span>
+          <span class="utc" id="who-built-utc"></span></label>
+        <label class="f" style="flex:1 1 220px">On
+          <span class="when"><input type="datetime-local" step="1" id="who-now">
+          <button type="button" class="btn btn-small btn-ghost" id="who-today">Now</button></span></label>
+      </div>
+      <div class="row" id="who-commit" hidden>
+        <input type="text" id="who-sha" placeholder="or a commit: sha, or HEAD" aria-label="Build from a commit" style="flex:1 1 200px">
+        <button type="button" class="btn btn-small" id="who-lookup">Use commit</button>
+        <span class="hint" id="who-subject"></span>
+      </div>
+      <ul class="issues" id="who"></ul>
+    </section>
     <section class="panel" aria-labelledby="iss-h">
       <h2 id="iss-h">Checks</h2>
       <ul class="issues" id="issues"></ul>
@@ -174,7 +205,7 @@ pre.json { margin: 0; max-height: 360px; overflow: auto; padding: 10px; border-r
   </div>
 </main>
 <script type="module">
-import { validate, PLATFORMS, SHOWS, TEXT_SOFT_MAX } from "./rules.mjs";
+import { validate, announcementFor, requiredFor, PLATFORMS, SHOWS, TEXT_SOFT_MAX } from "./rules.mjs";
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -205,7 +236,7 @@ const toLocal = (utc) => {
 };
 
 // Keys in the file's order, empties left out: a stable, readable diff.
-const ANN_ORDER = ["id", "text", "show", "url", "label", "platforms", "from", "until", "builtBefore"];
+const ANN_ORDER = ["id", "text", "show", "url", "label", "platforms", "from", "until", "builtBefore", "builtAfter"];
 const REQ_ORDER = ["platforms", "minBuild", "message", "url"];
 const ordered = (o, order) => {
   const out = {};
@@ -254,6 +285,7 @@ const renderLists = (r) => {
           ${plats.map((p) => `<span class="chip">${p === "ios" ? "iOS" : esc(p)}</span>`).join("")}
           <span class="chip ${cls}">${st}</span>
           ${a.builtBefore ? '<span class="chip">older builds</span>' : ""}
+          ${a.builtAfter ? '<span class="chip">newer builds</span>' : ""}
           ${iss.err ? '<span class="chip err">error</span>' : iss.warn ? '<span class="chip warn">check</span>' : ""}</span>
       </button>
       <button type="button" class="btn btn-small btn-ghost" data-move="-1" aria-label="Move up">↑</button>
@@ -334,7 +366,8 @@ const renderForm = () => {
       <label class="f">Link label<input type="text" data-k="label" placeholder="Read more" value="${esc(a.label)}"></label>
       ${timeField("from", "Show from", "Your local time; saved as UTC. Empty: now.", a.from)}
       ${timeField("until", "Show until", "Empty: until you remove it.", a.until)}
-      ${timeField("builtBefore", "Only builds older than", commitHint(), a.builtBefore, true)}
+      ${timeField("builtBefore", "Only builds older than", commitHint() + " For a bug: whoever lacks the fix.", a.builtBefore, true)}
+      ${timeField("builtAfter", "Only builds from", "The first commit with the feature: only those who have it hear about it. A development build counts as newer than everything.", a.builtAfter, true)}
       <label class="f">ID <span class="hint">what seen and dismissed remember: change it to show the message again</span>
         <input type="text" data-k="id" value="${esc(a.id)}"></label>
     </div>`;
@@ -471,6 +504,8 @@ const render = () => {
   renderDevices();
   renderPreview();
   renderIssues(r);
+  renderWho();
+  $("prune").hidden = !doc.announcements.some((a) => Date.parse(a.until) <= Date.now());
   $("json").textContent = serialize();
   const a = sel?.kind === "ann" ? doc.announcements[sel.i] : null;
   const count = $("count");
@@ -494,6 +529,74 @@ $("add-ann").onclick = () => {
   sel = { kind: "ann", i: doc.announcements.length - 1 }; changed();
   $("form").querySelector("textarea")?.focus();
 };
+const nowUtc = (plusMs = 0) => new Date(Date.now() + plusMs).toISOString().replace(/\.\d{3}Z$/, "Z");
+// [bracketed] text is for you to fill in: the checks refuse it until you do.
+const TEMPLATES = {
+  maintenance: () => ({ text: "Online link is down for maintenance on [day], [start]–[end] UTC.", show: ["toast", "banner"],
+    until: nowUtc(2 * 864e5) }),
+  bug: () => ({ text: "Builds before [date] can [lose saves]. Update dingbat to fix it.", show: ["banner"], builtBefore: nowUtc() }),
+  feature: () => ({ text: "New: [feature]. [Where to find it.]", show: ["toast"], builtAfter: nowUtc() }),
+};
+$("template").onchange = () => {
+  const make = TEMPLATES[$("template").value];
+  $("template").value = "";
+  if (!make) return;
+  const a = { id: newId(""), ...make() };
+  a.id = newId(a.text.replace(/\[[^\]]*\]/g, ""));
+  autoIds.add(a);
+  doc.announcements.push(a);
+  sel = { kind: "ann", i: doc.announcements.length - 1 }; changed();
+  const ta = $("form").querySelector("textarea");
+  if (ta) { ta.focus(); const i = ta.value.indexOf("["); if (i >= 0) ta.setSelectionRange(i, ta.value.indexOf("]", i) + 1); }
+};
+$("prune").onclick = () => {
+  const now = Date.now();
+  const gone = doc.announcements.filter((a) => Date.parse(a.until) <= now);
+  if (!gone.length || !confirm(`Remove ${gone.length} expired announcement${gone.length > 1 ? "s" : ""}?\n\n${gone.map((a) => "• " + a.text).join("\n")}`)) return;
+  doc.announcements = doc.announcements.filter((a) => !gone.includes(a));
+  sel = null; changed();
+};
+
+// --- who sees this ---
+const who = { platform: "web", built: null, now: null };
+const renderWho = () => {
+  $("who-platform").innerHTML = PLATFORMS.map((p) => `<button type="button" data-p="${p}" aria-pressed="${who.platform === p}">${p === "ios" ? "iOS" : "Web"}</button>`).join("");
+  $("who-platform").querySelectorAll("button").forEach((b) => b.onclick = () => { who.platform = b.dataset.p; renderWho(); });
+  $("who-built-utc").textContent = who.built == null ? "a development build: newer than every release" : new Date(who.built).toISOString().replace(/\.\d{3}Z$/, "Z");
+  $("who-commit").hidden = !toolMode;
+  const now = who.now ?? Date.now();
+  const ctx = { platform: who.platform, built: who.built, now };
+  const rows = [];
+  doc.announcements.forEach((a) => {
+    const r = announcementFor(a, ctx);
+    rows.push(`<li class="${r.shows ? "who-yes" : "who-no"}"><span class="k">${r.shows ? "Sees" : "Not"}</span><span>${esc(a.text || "(no text)")} <code>${esc(r.why)}</code></span></li>`);
+  });
+  const blocking = doc.required.map((q) => [q, requiredFor(q, ctx)]);
+  const first = blocking.find(([, r]) => r.blocks);
+  blocking.forEach(([q, r]) => {
+    const cls = r.blocks && q === first[0] ? "who-block" : "who-no";
+    rows.push(`<li class="${cls}"><span class="k">${r.blocks && q === first[0] ? "Blocked" : "Free"}</span><span>Required update, builds before ${esc(q.minBuild || "?")} <code>${esc(r.blocks && q !== first[0] ? "an earlier entry already blocks" : r.why)}</code></span></li>`);
+  });
+  $("who").innerHTML = rows.join("") || '<li><span class="k">—</span><span>Nothing in the file yet.</span></li>';
+};
+$("who-built").oninput = () => { const v = $("who-built").value; who.built = v ? new Date(v).getTime() : null; renderWho(); };
+$("who-dev").onclick = () => { who.built = null; $("who-built").value = ""; renderWho(); };
+$("who-now").oninput = () => { const v = $("who-now").value; who.now = v ? new Date(v).getTime() : null; renderWho(); };
+$("who-today").onclick = () => { who.now = null; $("who-now").value = ""; renderWho(); };
+$("who-lookup").onclick = async () => {
+  const sha = $("who-sha").value.trim();
+  if (!sha) return;
+  try {
+    const res = await fetch(`/__status/commit?sha=${encodeURIComponent(sha)}`);
+    const j = await res.json();
+    if (!res.ok) { $("who-subject").textContent = j.error || "not found"; return; }
+    who.built = Date.parse(j.time);
+    $("who-built").value = toLocal(j.time);
+    $("who-subject").textContent = `${j.sha} ${j.subject}`;
+    renderWho();
+  } catch { $("who-subject").textContent = "couldn't ask git"; }
+};
+
 $("add-req").onclick = () => {
   doc.required.push({ platforms: ["web"], minBuild: new Date().toISOString().replace(/\.\d{3}Z$/, "Z") });
   sel = { kind: "req", i: doc.required.length - 1 }; changed();

@@ -107,8 +107,13 @@ final class AppStatus: ObservableObject {
             guard let id = a["id"] as? String, let text = a["text"] as? String, Self.forIOS(a) else { continue }
             if let from = Self.parse(a["from"] as? String), from > now { continue }
             if let until = Self.parse(a["until"] as? String), until <= now { continue }
+            // A build made outside git (no time) is newer than every release.
             if a["builtBefore"] != nil {
                 guard let before = Self.parse(a["builtBefore"] as? String), let built, built < before else { continue }
+            }
+            if a["builtAfter"] != nil {
+                guard let after = Self.parse(a["builtAfter"] as? String) else { continue }
+                if let built, built < after { continue }
             }
             let url = (a["url"] as? String).flatMap(URL.init(string:)).flatMap { $0.scheme == "https" ? $0 : nil }
             let item = Announcement(id: id, text: text, url: url, label: a["label"] as? String,

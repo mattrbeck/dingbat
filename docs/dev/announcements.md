@@ -21,10 +21,19 @@ file can't stop anyone playing. Both lists take any number of entries.
 ### Editing and checking it
 
 - **Post something:** `tools/status/edit` (from a checkout of main). It
-  opens the editor on the current `web/status.json`: draft entries (toast /
-  banner, web / iOS, link, window, older builds only, a build time from a
-  commit sha), preview them per device, and check them live. Save writes the
-  file. Done (or Enter in the terminal) checks it again, shows the diff and
+  opens the editor on the current `web/status.json`.
+  - Draft entries: toast / banner, web / iOS, link, window, only older or
+    only newer builds, with a build time looked up from a commit sha.
+  - Start from a template (maintenance window, bug in older builds, new
+    feature). Its `[placeholders]` fail the checks until filled in.
+  - Preview per device, and check live.
+  - **Who sees this:** pick a platform, a build (a time, a commit, or a
+    development build) and a date, and see what that player gets and why
+    not. It uses the rules the web app uses; a web test holds the two to
+    each other.
+  - **Remove expired** clears entries whose `until` has passed.
+
+  Save writes the file. Done (or Enter in the terminal) checks it again, shows the diff and
   asks before committing `web/status.json` alone and pushing. It then waits
   until dingbat.gg serves the new file: the deploy takes about a minute, the
   CDN up to ten more. Options: `--no-push`, `--no-open`, `--port N`.
@@ -100,10 +109,13 @@ Everything except `id` and `text` is optional:
 - `from` / `until`: the window in which it shows.
 - `builtBefore`: only builds older than this see it, e.g. "your version has a
   bug, update". A development build never matches.
+- `builtAfter`: only builds from this one on see it, e.g. "New: …" for a
+  feature, heard only by those who have it. A development build counts as
+  newer than every release, so it always matches.
 
 ### Build times
 
-`minBuild` and `builtBefore` compare **build times**. A build time is the UTC
+`minBuild`, `builtBefore` and `builtAfter` compare **build times**. A build time is the UTC
 commit time of the commit the build came from:
 
 - web: deploy-pages.yml stamps it into `index.html`

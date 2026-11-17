@@ -62,7 +62,7 @@ const server = createServer(async (req, res) => {
     if (url.pathname === "/__status/commit" && req.method === "GET") {
       // A commit's build time, as deploy-pages.yml and the iOS build stamp it.
       const sha = url.searchParams.get("sha") || "";
-      if (!/^[0-9a-fA-F]{4,40}$/.test(sha) && sha !== "HEAD") return reply(res, 400, { error: "not a commit" });
+      if (!/^([0-9a-fA-F]{4,40}|HEAD(~\d{1,4})?)$/.test(sha)) return reply(res, 400, { error: "a sha, HEAD or HEAD~N" });
       try {
         const time = execFileSync("git", ["-C", ROOT, "show", "-s", "--date=format-local:%Y-%m-%dT%H:%M:%SZ", "--format=%cd %h %s", sha],
           { encoding: "utf8", env: { ...process.env, TZ: "UTC" } }).trim();

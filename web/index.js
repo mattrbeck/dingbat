@@ -9252,10 +9252,18 @@ const fetchLiveBuild = async () => {
 
 const forWeb = (e) => !Array.isArray(e.platforms) || e.platforms.includes("web");
 
+// This build's time; a development build has none and is newer than every
+// release (tools/status/rules.mjs announcementFor holds the same rules).
+const builtAt = () => {
+  const t = statusTime(BUILD_TIME);
+  return Number.isNaN(t) ? Infinity : t;
+};
+
 const announcementApplies = (a, now) =>
   !!a && typeof a.id === "string" && typeof a.text === "string" && forWeb(a) &&
   !(statusTime(a.from) > now) && !(statusTime(a.until) <= now) &&
-  (a.builtBefore == null || statusTime(BUILD_TIME) < statusTime(a.builtBefore));
+  (a.builtBefore == null || builtAt() < statusTime(a.builtBefore)) &&
+  (a.builtAfter == null || builtAt() >= statusTime(a.builtAfter));
 
 // Where an announcement goes; no place this build knows means a toast.
 const announcementShows = (a) => {
