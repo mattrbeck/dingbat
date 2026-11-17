@@ -1,6 +1,6 @@
 # DocBoy Test Suite - Detailed Results
 
-*Generated: 2026-11-17 10:03:11 · Docheinstein/docboy 01e04d3d*
+*Generated: 2026-11-17 12:36:30 · Docheinstein/docboy 01e04d3d*
 
 DocBoy's own ROMs (`docboy/` in its tests/config manifests), each
 scored by the verdict its manifest names, the way DocBoy's runner
@@ -11,15 +11,15 @@ run on a DMG ABC, the three CGB manifests on a CPU CGB E with the
 cart header picking the mode. See tests/README.md for the mechanism
 and docs/dev/gb-failure-triage.md for the failing families.
 
-**8838/9186 passed.**
+**8886/9186 passed.**
 
 ## docboy/dmg/cpu
 
 All 11 tests passed (DMG dmgABC).
 
-## docboy/dmg/ppu (1238/1303 passed)
+## docboy/dmg/ppu (1281/1303 passed)
 
-1238/1303 tests passed on DMG dmgABC, 65 failed:
+1281/1303 tests passed on DMG dmgABC, 22 failed:
 
 | Test | Result |
 |------|--------|
@@ -39,49 +39,6 @@ All 11 tests passed (DMG dmgABC).
 | dmg/docboy/ppu/visual/stop_during_pixel_transfer | timeout, last check: 23040/23040 pixels differ, first at row 0 col 0: got $84A0 want $AD00 |
 | dmg/docboy/ppu/visual/stop_during_vblank | timeout, last check: 23040/23040 pixels differ, first at row 0 col 0: got $84A0 want $AD00 |
 | dmg/docboy/ppu/visual/stop_ppu_off | timeout, last check: 23040/23040 pixels differ, first at row 0 col 0: got $84A0 want $AD00 |
-| dmg/docboy/ppu/visual/window_turn_off_alt_nops22_sprite_x3 | 4/23040 pixels differ at opcode $40 (tick 521868), first at row 9 col 10: got $1200 want $84A0 |
-| dmg/docboy/ppu/visual/window_turn_off_alt_nops22_sprite_x4 | 4/23040 pixels differ at opcode $40 (tick 521868), first at row 9 col 11: got $84A0 want $2AA0 |
-| dmg/docboy/ppu/visual/window_turn_off_alt_nops22_sprite_x5 | 4/23040 pixels differ at opcode $40 (tick 521868), first at row 9 col 11: got $84A0 want $2AA0 |
-| dmg/docboy/ppu/visual/window_turn_off_alt_nops22_sprite_x6 | 4/23040 pixels differ at opcode $40 (tick 521868), first at row 9 col 11: got $84A0 want $2AA0 |
-| dmg/docboy/ppu/visual/window_turn_off_alt_nops22_sprite_x7 | 4/23040 pixels differ at opcode $40 (tick 521868), first at row 9 col 11: got $84A0 want $2AA0 |
-| dmg/docboy/ppu/visual/window_turn_off_alt_nops23_sprite_x0 | 4/23040 pixels differ at opcode $40 (tick 521872), first at row 9 col 11: got $84A0 want $2AA0 |
-| dmg/docboy/ppu/visual/window_turn_off_alt_nops23_sprite_x1 | 4/23040 pixels differ at opcode $40 (tick 521872), first at row 9 col 11: got $84A0 want $2AA0 |
-| dmg/docboy/ppu/visual/window_turn_off_alt_nops23_sprite_x2 | 4/23040 pixels differ at opcode $40 (tick 521872), first at row 9 col 11: got $84A0 want $2AA0 |
-| dmg/docboy/ppu/visual/window_turn_off_alt_nops23_sprite_x3 | 4/23040 pixels differ at opcode $40 (tick 521872), first at row 9 col 11: got $84A0 want $2AA0 |
-| dmg/docboy/ppu/visual/window_turn_off_alt_nops24_sprite_x2 | 4/23040 pixels differ at opcode $40 (tick 521876), first at row 9 col 19: got $84A0 want $2AA0 |
-| dmg/docboy/ppu/visual/window_turn_off_alt_nops24_sprite_x3 | 4/23040 pixels differ at opcode $40 (tick 521876), first at row 9 col 19: got $84A0 want $2AA0 |
-| dmg/docboy/ppu/visual/window_turn_off_alt_nops24_sprite_x4 | 4/23040 pixels differ at opcode $40 (tick 521876), first at row 9 col 19: got $84A0 want $2AA0 |
-| dmg/docboy/ppu/visual/window_turn_off_alt_nops24_sprite_x5 | 4/23040 pixels differ at opcode $40 (tick 521876), first at row 9 col 19: got $84A0 want $2AA0 |
-| dmg/docboy/ppu/visual/window_turn_off_alt_nops24_sprite_x6 | 4/23040 pixels differ at opcode $40 (tick 521876), first at row 9 col 19: got $84A0 want $2AA0 |
-| dmg/docboy/ppu/visual/window_turn_off_alt_nops24_sprite_x7 | 4/23040 pixels differ at opcode $40 (tick 521876), first at row 9 col 19: got $84A0 want $2AA0 |
-| dmg/docboy/ppu/visual/window_turn_off_alt_nops25_sprite_x0 | 4/23040 pixels differ at opcode $40 (tick 521880), first at row 9 col 19: got $84A0 want $2AA0 |
-| dmg/docboy/ppu/visual/window_turn_off_alt_nops25_sprite_x1 | 4/23040 pixels differ at opcode $40 (tick 521880), first at row 9 col 19: got $84A0 want $2AA0 |
-| dmg/docboy/ppu/visual/window_turn_off_nops22_sprite_x3_variation_a | 4/23040 pixels differ at opcode $40 (tick 521868), first at row 9 col 10: got $1200 want $84A0 |
-| dmg/docboy/ppu/visual/window_turn_off_nops22_sprite_x3_variation_b | 4/23040 pixels differ at opcode $40 (tick 521868), first at row 9 col 10: got $1200 want $84A0 |
-| dmg/docboy/ppu/visual/window_turn_off_nops22_sprite_x4 | 5/23040 pixels differ at opcode $40 (tick 521892), first at row 8 col 9: got $84A0 want $1200 |
-| dmg/docboy/ppu/visual/window_turn_off_nops22_sprite_x4_variation_a | 4/23040 pixels differ at opcode $40 (tick 521868), first at row 9 col 11: got $84A0 want $2AA0 |
-| dmg/docboy/ppu/visual/window_turn_off_nops22_sprite_x4_variation_b | 6/23040 pixels differ at opcode $40 (tick 521868), first at row 9 col 11: got $84A0 want $2AA0 |
-| dmg/docboy/ppu/visual/window_turn_off_nops22_sprite_x5 | 5/23040 pixels differ at opcode $40 (tick 521892), first at row 8 col 9: got $84A0 want $1200 |
-| dmg/docboy/ppu/visual/window_turn_off_nops22_sprite_x5_variation_a | 4/23040 pixels differ at opcode $40 (tick 521868), first at row 9 col 11: got $84A0 want $2AA0 |
-| dmg/docboy/ppu/visual/window_turn_off_nops22_sprite_x5_variation_b | 6/23040 pixels differ at opcode $40 (tick 521868), first at row 9 col 11: got $84A0 want $2AA0 |
-| dmg/docboy/ppu/visual/window_turn_off_nops22_sprite_x6 | 5/23040 pixels differ at opcode $40 (tick 521892), first at row 8 col 9: got $84A0 want $1200 |
-| dmg/docboy/ppu/visual/window_turn_off_nops22_sprite_x6_variation_a | 4/23040 pixels differ at opcode $40 (tick 521868), first at row 9 col 11: got $84A0 want $2AA0 |
-| dmg/docboy/ppu/visual/window_turn_off_nops22_sprite_x6_variation_b | 6/23040 pixels differ at opcode $40 (tick 521868), first at row 9 col 11: got $84A0 want $2AA0 |
-| dmg/docboy/ppu/visual/window_turn_off_nops22_sprite_x7 | 5/23040 pixels differ at opcode $40 (tick 521892), first at row 8 col 9: got $84A0 want $1200 |
-| dmg/docboy/ppu/visual/window_turn_off_nops22_sprite_x7_variation_a | 4/23040 pixels differ at opcode $40 (tick 521868), first at row 9 col 11: got $84A0 want $2AA0 |
-| dmg/docboy/ppu/visual/window_turn_off_nops22_sprite_x7_variation_b | 6/23040 pixels differ at opcode $40 (tick 521868), first at row 9 col 11: got $84A0 want $2AA0 |
-| dmg/docboy/ppu/visual/window_turn_off_nops23_sprite_x0 | 5/23040 pixels differ at opcode $40 (tick 521864), first at row 8 col 9: got $84A0 want $1200 |
-| dmg/docboy/ppu/visual/window_turn_off_nops23_sprite_x0_variation_a | 4/23040 pixels differ at opcode $40 (tick 521872), first at row 9 col 11: got $84A0 want $2AA0 |
-| dmg/docboy/ppu/visual/window_turn_off_nops23_sprite_x0_variation_b | 6/23040 pixels differ at opcode $40 (tick 521872), first at row 9 col 11: got $84A0 want $2AA0 |
-| dmg/docboy/ppu/visual/window_turn_off_nops23_sprite_x1 | 5/23040 pixels differ at opcode $40 (tick 521864), first at row 8 col 9: got $84A0 want $1200 |
-| dmg/docboy/ppu/visual/window_turn_off_nops23_sprite_x1_variation_a | 4/23040 pixels differ at opcode $40 (tick 521872), first at row 9 col 11: got $84A0 want $2AA0 |
-| dmg/docboy/ppu/visual/window_turn_off_nops23_sprite_x1_variation_b | 6/23040 pixels differ at opcode $40 (tick 521872), first at row 9 col 11: got $84A0 want $2AA0 |
-| dmg/docboy/ppu/visual/window_turn_off_nops23_sprite_x2 | 5/23040 pixels differ at opcode $40 (tick 521864), first at row 8 col 9: got $84A0 want $2AA0 |
-| dmg/docboy/ppu/visual/window_turn_off_nops23_sprite_x2_variation_a | 4/23040 pixels differ at opcode $40 (tick 521872), first at row 9 col 11: got $84A0 want $2AA0 |
-| dmg/docboy/ppu/visual/window_turn_off_nops23_sprite_x2_variation_b | 6/23040 pixels differ at opcode $40 (tick 521872), first at row 9 col 11: got $84A0 want $2AA0 |
-| dmg/docboy/ppu/visual/window_turn_off_nops23_sprite_x3 | 5/23040 pixels differ at opcode $40 (tick 521864), first at row 8 col 9: got $84A0 want $2AA0 |
-| dmg/docboy/ppu/visual/window_turn_off_nops23_sprite_x3_variation_a | 4/23040 pixels differ at opcode $40 (tick 521872), first at row 9 col 11: got $84A0 want $2AA0 |
-| dmg/docboy/ppu/visual/window_turn_off_nops23_sprite_x3_variation_b | 6/23040 pixels differ at opcode $40 (tick 521872), first at row 9 col 11: got $84A0 want $2AA0 |
 | dmg/docboy/ppu/visual/window_wx0_scx1 | timeout, last check: 8/23040 pixels differ, first at row 0 col 7: got $1200 want $84A0 |
 | dmg/docboy/ppu/visual/window_wx0_scx2 | timeout, last check: 8/23040 pixels differ, first at row 0 col 6: got $1200 want $84A0 |
 | dmg/docboy/ppu/visual/window_wx0_scx3 | timeout, last check: 8/23040 pixels differ, first at row 0 col 5: got $1200 want $84A0 |
@@ -249,9 +206,9 @@ All 6 tests passed (CGB cgbE).
 
 All 4 tests passed (CGB cgbE).
 
-## docboy/cgb/ppu (391/427 passed)
+## docboy/cgb/ppu (392/427 passed)
 
-391/427 tests passed on CGB cgbE, 36 failed:
+392/427 tests passed on CGB cgbE, 35 failed:
 
 | Test | Result |
 |------|--------|
@@ -282,7 +239,6 @@ All 4 tests passed (CGB cgbE).
 | cgb/docboy/ppu/visual/turn_off_y48_skip_y16_stall_nops51 | 20346/23040 pixels differ at opcode $40 (tick 4738528), first at row 0 col 0: got $07FF want $FFE0 |
 | cgb/docboy/ppu/visual/turn_off_y50_stall_nops50 | 22765/23040 pixels differ at opcode $40 (tick 4735024), first at row 0 col 0: got $FFFF want $FFE0 |
 | cgb/docboy/ppu/visual/turn_off_y50_stall_nops51 | 8045/23040 pixels differ at opcode $40 (tick 4735640), first at row 0 col 0: got $FFFF want $FFE0 |
-| cgb/docboy/ppu/visual/window_bg_reprise_wx25 | timeout, last check: 3/23040 pixels differ, first at row 12 col 26: got $39C7 want $FFE0 |
 | cgb/docboy/ppu/visual/window_wx0_scx1 | timeout, last check: 64/23040 pixels differ, first at row 0 col 0: got $39C7 want $FFE0 |
 | cgb/docboy/ppu/visual/window_wx0_scx1_fancy_tile0 | timeout, last check: 1016/23040 pixels differ, first at row 0 col 0: got $39C7 want $F81F |
 | cgb/docboy/ppu/visual/window_wx0_scx2 | timeout, last check: 56/23040 pixels differ, first at row 0 col 0: got $39C7 want $FFE0 |
@@ -424,9 +380,9 @@ All 2 tests passed (CGB cgbE).
 
 All 6 tests passed (CGB cgbE).
 
-## docboy/cgb_dmg_mode/ppu (374/554 passed)
+## docboy/cgb_dmg_mode/ppu (378/554 passed)
 
-374/554 tests passed on CGB cgbE, 180 failed:
+378/554 tests passed on CGB cgbE, 176 failed:
 
 | Test | Result |
 |------|--------|
@@ -495,57 +451,53 @@ All 6 tests passed (CGB cgbE).
 | cgb_dmg_mode/docboy/ppu/visual/change_win_tile_data_glitch_window_nops28 | timeout, last check: 176/23040 pixels differ, first at row 16 col 50: got $0318 want $0000 |
 | cgb_dmg_mode/docboy/ppu/visual/change_win_tile_data_glitch_window_nops29 | timeout, last check: 176/23040 pixels differ, first at row 32 col 52: got $FFFF want $0318 |
 | cgb_dmg_mode/docboy/ppu/visual/change_win_tile_data_glitch_window_nops30 | timeout, last check: 176/23040 pixels differ, first at row 16 col 58: got $0318 want $0000 |
-| cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_0000_win_0000 | timeout, last check: 8/23040 pixels differ, first at row 6 col 6: got $FFFF want $0318 |
-| cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_0000_win_00ff | timeout, last check: 71/23040 pixels differ, first at row 6 col 0: got $0318 want $FFFF |
-| cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_0000_win_ff00 | timeout, last check: 52/23040 pixels differ, first at row 6 col 6: got $7FE6 want $0000 |
-| cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_0000_win_ffff | timeout, last check: 75/23040 pixels differ, first at row 6 col 0: got $0000 want $7FE6 |
-| cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_00ff_win_0000 | timeout, last check: 45/23040 pixels differ, first at row 6 col 6: got $FFFF want $0318 |
-| cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_00ff_win_00ff | timeout, last check: 92/23040 pixels differ, first at row 5 col 6: got $0318 want $FFFF |
-| cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_00ff_win_afff | timeout, last check: 124/23040 pixels differ, first at row 5 col 6: got $0318 want $FFFF |
-| cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_00ff_win_ff00 | timeout, last check: 89/23040 pixels differ, first at row 6 col 6: got $7FE6 want $0000 |
-| cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_00ff_win_ffff | timeout, last check: 128/23040 pixels differ, first at row 5 col 6: got $0318 want $FFFF |
-| cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_00ff_win_ffff_nops6_sprites_x16 | timeout, last check: 248/23040 pixels differ, first at row 5 col 6: got $0318 want $FFFF |
-| cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_00ff_win_ffff_nops6_sprites_x16_sources | timeout, last check: 239/23040 pixels differ, first at row 5 col 6: got $0318 want $0000 |
-| cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_00ff_win_ffff_nops6_sprites_x17 | timeout, last check: 120/23040 pixels differ, first at row 5 col 6: got $0318 want $FFFF |
-| cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_00ff_win_ffff_nops6_sprites_x17_sources | timeout, last check: 121/23040 pixels differ, first at row 5 col 6: got $0318 want $0000 |
-| cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_00ff_win_ffff_nops6_sprites_x17_sources_b | timeout, last check: 121/23040 pixels differ, first at row 5 col 6: got $0318 want $0000 |
-| cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_00ff_win_ffff_nops6_sprites_x17_sources_c | timeout, last check: 124/23040 pixels differ, first at row 5 col 6: got $0318 want $0000 |
-| cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_00ff_win_ffff_nops6_sprites_x18 | timeout, last check: 126/23040 pixels differ, first at row 5 col 6: got $0318 want $FFFF |
-| cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_00ff_win_ffff_nops6_sprites_x18_sources | timeout, last check: 124/23040 pixels differ, first at row 5 col 6: got $0318 want $0000 |
-| cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_00ff_win_ffff_nops6_sprites_x19 | timeout, last check: 133/23040 pixels differ, first at row 5 col 6: got $0318 want $FFFF |
-| cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_00ff_win_ffff_nops6_sprites_x19_sources | timeout, last check: 133/23040 pixels differ, first at row 5 col 6: got $0318 want $0000 |
-| cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_00ff_win_ffff_nops6_sprites_x19_sources_b | timeout, last check: 132/23040 pixels differ, first at row 5 col 6: got $0318 want $0000 |
-| cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_00ff_win_ffff_nops6_sprites_x19_wly | timeout, last check: 464/23040 pixels differ, first at row 5 col 6: got $0318 want $FFFF |
-| cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_00ff_win_ffff_nops6_sprites_x20 | timeout, last check: 132/23040 pixels differ, first at row 5 col 6: got $0318 want $FFFF |
-| cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_00ff_win_ffff_nops6_sprites_x20_sources | timeout, last check: 128/23040 pixels differ, first at row 5 col 6: got $0318 want $0000 |
-| cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_00ff_win_ffff_nops6_sprites_x21 | timeout, last check: 131/23040 pixels differ, first at row 5 col 6: got $0318 want $FFFF |
-| cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_00ff_win_ffff_nops6_sprites_x21_sources | timeout, last check: 128/23040 pixels differ, first at row 5 col 6: got $0318 want $0000 |
-| cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_00ff_win_ffff_nops6_sprites_x21_sources_b | timeout, last check: 134/23040 pixels differ, first at row 5 col 6: got $0318 want $0000 |
-| cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_00ff_win_ffff_nops6_sprites_x21_sources_c | timeout, last check: 134/23040 pixels differ, first at row 5 col 6: got $0318 want $0000 |
-| cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_00ff_win_ffff_nops6_sprites_x21_sources_d | timeout, last check: 121/23040 pixels differ, first at row 5 col 6: got $0318 want $0000 |
-| cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_00ff_win_ffff_nops6_sprites_x22 | timeout, last check: 131/23040 pixels differ, first at row 5 col 6: got $0318 want $FFFF |
-| cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_00ff_win_ffff_nops6_sprites_x22_sources | timeout, last check: 128/23040 pixels differ, first at row 5 col 6: got $0318 want $0000 |
-| cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_00ff_win_ffff_nops6_sprites_x23 | timeout, last check: 131/23040 pixels differ, first at row 5 col 6: got $0318 want $FFFF |
-| cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_00ff_win_ffff_nops6_sprites_x23_sources | timeout, last check: 128/23040 pixels differ, first at row 5 col 6: got $0318 want $0000 |
-| cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_00ff_win_ffff_nops6_sprites_x24 | timeout, last check: 248/23040 pixels differ, first at row 5 col 6: got $0318 want $FFFF |
-| cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_00ff_win_ffff_win_tilenum_02 | timeout, last check: 128/23040 pixels differ, first at row 5 col 6: got $0318 want $FFFF |
-| cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_ff00_win_0000 | timeout, last check: 57/23040 pixels differ, first at row 6 col 6: got $FFFF want $0318 |
-| cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_ff00_win_00ff | timeout, last check: 96/23040 pixels differ, first at row 5 col 6: got $7FE6 want $FFFF |
-| cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_ff00_win_ff00 | timeout, last check: 29/23040 pixels differ, first at row 6 col 6: got $7FE6 want $0000 |
-| cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_ff00_win_ffff | timeout, last check: 108/23040 pixels differ, first at row 5 col 6: got $7FE6 want $FFFF |
-| cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_ffff_win_0000 | timeout, last check: 73/23040 pixels differ, first at row 6 col 6: got $FFFF want $0318 |
-| cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_ffff_win_00ff | timeout, last check: 112/23040 pixels differ, first at row 5 col 6: got $0000 want $FFFF |
-| cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_ffff_win_ff00 | timeout, last check: 61/23040 pixels differ, first at row 6 col 6: got $7FE6 want $0000 |
-| cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_ffff_win_ffff | timeout, last check: 108/23040 pixels differ, first at row 5 col 6: got $0000 want $FFFF |
-| cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_ly10_second_tile_source_both_bytes | timeout, last check: 72/23040 pixels differ, first at row 6 col 0: got $0000 want $7FE6 |
-| cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_ly10_second_tile_source | timeout, last check: 72/23040 pixels differ, first at row 6 col 0: got $0000 want $7FE6 |
-| cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_ly32_to_40_tilenums | timeout, last check: 120/23040 pixels differ, first at row 5 col 6: got $0318 want $FFFF |
-| cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_ly38_lx31_extra_pixel_a | timeout, last check: 128/23040 pixels differ, first at row 5 col 6: got $0318 want $FFFF |
-| cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_ly38_lx31_extra_pixel_b | timeout, last check: 128/23040 pixels differ, first at row 5 col 6: got $0318 want $FFFF |
-| cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_ly38_lx31_extra_pixel_c | timeout, last check: 129/23040 pixels differ, first at row 5 col 6: got $0318 want $FFFF |
-| cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_ly38_lx31_extra_pixel_d | timeout, last check: 127/23040 pixels differ, first at row 5 col 6: got $0318 want $FFFF |
-| cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_ly38_lx31_extra_pixel_e | timeout, last check: 135/23040 pixels differ, first at row 5 col 6: got $0318 want $FFFF |
-| cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_ly38_lx31_extra_pixel_f | timeout, last check: 134/23040 pixels differ, first at row 5 col 6: got $0318 want $FFFF |
+| cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_00ff_win_0000 | timeout, last check: 21/23040 pixels differ, first at row 10 col 3: got $0318 want $FFFF |
+| cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_00ff_win_00ff | timeout, last check: 21/23040 pixels differ, first at row 10 col 3: got $0318 want $FFFF |
+| cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_00ff_win_afff | timeout, last check: 21/23040 pixels differ, first at row 10 col 3: got $0318 want $FFFF |
+| cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_00ff_win_ff00 | timeout, last check: 21/23040 pixels differ, first at row 10 col 3: got $0318 want $FFFF |
+| cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_00ff_win_ffff | timeout, last check: 21/23040 pixels differ, first at row 10 col 3: got $0318 want $FFFF |
+| cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_00ff_win_ffff_nops6_sprites_x16 | timeout, last check: 141/23040 pixels differ, first at row 10 col 3: got $0318 want $FFFF |
+| cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_00ff_win_ffff_nops6_sprites_x16_sources | timeout, last check: 140/23040 pixels differ, first at row 10 col 3: got $0318 want $FFFF |
+| cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_00ff_win_ffff_nops6_sprites_x17 | timeout, last check: 13/23040 pixels differ, first at row 10 col 3: got $0318 want $FFFF |
+| cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_00ff_win_ffff_nops6_sprites_x17_sources | timeout, last check: 14/23040 pixels differ, first at row 10 col 3: got $0318 want $FFFF |
+| cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_00ff_win_ffff_nops6_sprites_x17_sources_b | timeout, last check: 14/23040 pixels differ, first at row 10 col 3: got $0318 want $FFFF |
+| cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_00ff_win_ffff_nops6_sprites_x17_sources_c | timeout, last check: 17/23040 pixels differ, first at row 10 col 3: got $0318 want $FFFF |
+| cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_00ff_win_ffff_nops6_sprites_x18 | timeout, last check: 19/23040 pixels differ, first at row 10 col 3: got $0318 want $FFFF |
+| cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_00ff_win_ffff_nops6_sprites_x18_sources | timeout, last check: 17/23040 pixels differ, first at row 10 col 3: got $0318 want $FFFF |
+| cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_00ff_win_ffff_nops6_sprites_x19 | timeout, last check: 26/23040 pixels differ, first at row 10 col 3: got $0318 want $FFFF |
+| cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_00ff_win_ffff_nops6_sprites_x19_sources | timeout, last check: 26/23040 pixels differ, first at row 10 col 3: got $0318 want $FFFF |
+| cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_00ff_win_ffff_nops6_sprites_x19_sources_b | timeout, last check: 25/23040 pixels differ, first at row 10 col 3: got $0318 want $FFFF |
+| cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_00ff_win_ffff_nops6_sprites_x19_wly | timeout, last check: 369/23040 pixels differ, first at row 10 col 3: got $0318 want $FFFF |
+| cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_00ff_win_ffff_nops6_sprites_x20 | timeout, last check: 25/23040 pixels differ, first at row 10 col 3: got $0318 want $FFFF |
+| cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_00ff_win_ffff_nops6_sprites_x20_sources | timeout, last check: 21/23040 pixels differ, first at row 10 col 3: got $0318 want $FFFF |
+| cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_00ff_win_ffff_nops6_sprites_x21 | timeout, last check: 24/23040 pixels differ, first at row 10 col 3: got $0318 want $FFFF |
+| cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_00ff_win_ffff_nops6_sprites_x21_sources | timeout, last check: 21/23040 pixels differ, first at row 10 col 3: got $0318 want $FFFF |
+| cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_00ff_win_ffff_nops6_sprites_x21_sources_b | timeout, last check: 29/23040 pixels differ, first at row 10 col 3: got $0318 want $FFFF |
+| cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_00ff_win_ffff_nops6_sprites_x21_sources_c | timeout, last check: 29/23040 pixels differ, first at row 10 col 3: got $0318 want $FFFF |
+| cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_00ff_win_ffff_nops6_sprites_x21_sources_d | timeout, last check: 27/23040 pixels differ, first at row 10 col 3: got $0318 want $FFFF |
+| cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_00ff_win_ffff_nops6_sprites_x22 | timeout, last check: 24/23040 pixels differ, first at row 10 col 3: got $0318 want $FFFF |
+| cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_00ff_win_ffff_nops6_sprites_x22_sources | timeout, last check: 21/23040 pixels differ, first at row 10 col 3: got $0318 want $FFFF |
+| cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_00ff_win_ffff_nops6_sprites_x23 | timeout, last check: 24/23040 pixels differ, first at row 10 col 3: got $0318 want $FFFF |
+| cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_00ff_win_ffff_nops6_sprites_x23_sources | timeout, last check: 21/23040 pixels differ, first at row 10 col 3: got $0318 want $FFFF |
+| cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_00ff_win_ffff_nops6_sprites_x24 | timeout, last check: 141/23040 pixels differ, first at row 10 col 3: got $0318 want $FFFF |
+| cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_00ff_win_ffff_win_tilenum_02 | timeout, last check: 21/23040 pixels differ, first at row 10 col 3: got $0318 want $FFFF |
+| cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_ff00_win_0000 | timeout, last check: 5/23040 pixels differ, first at row 10 col 3: got $7FE6 want $FFFF |
+| cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_ff00_win_00ff | timeout, last check: 5/23040 pixels differ, first at row 10 col 3: got $7FE6 want $FFFF |
+| cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_ff00_win_ff00 | timeout, last check: 5/23040 pixels differ, first at row 10 col 3: got $7FE6 want $FFFF |
+| cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_ff00_win_ffff | timeout, last check: 5/23040 pixels differ, first at row 10 col 3: got $7FE6 want $FFFF |
+| cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_ffff_win_0000 | timeout, last check: 21/23040 pixels differ, first at row 10 col 3: got $0000 want $FFFF |
+| cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_ffff_win_00ff | timeout, last check: 21/23040 pixels differ, first at row 10 col 3: got $0000 want $FFFF |
+| cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_ffff_win_ff00 | timeout, last check: 21/23040 pixels differ, first at row 10 col 3: got $0000 want $FFFF |
+| cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_ffff_win_ffff | timeout, last check: 21/23040 pixels differ, first at row 10 col 3: got $0000 want $FFFF |
+| cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_ly10_second_tile_source_both_bytes | timeout, last check: 17/23040 pixels differ, first at row 10 col 3: got $0000 want $FFFF |
+| cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_ly10_second_tile_source | timeout, last check: 17/23040 pixels differ, first at row 10 col 3: got $0000 want $FFFF |
+| cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_ly32_to_40_tilenums | timeout, last check: 19/23040 pixels differ, first at row 10 col 3: got $0318 want $FFFF |
+| cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_ly38_lx31_extra_pixel_a | timeout, last check: 21/23040 pixels differ, first at row 10 col 3: got $0318 want $FFFF |
+| cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_ly38_lx31_extra_pixel_b | timeout, last check: 21/23040 pixels differ, first at row 10 col 3: got $0318 want $FFFF |
+| cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_ly38_lx31_extra_pixel_c | timeout, last check: 22/23040 pixels differ, first at row 10 col 3: got $0318 want $FFFF |
+| cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_ly38_lx31_extra_pixel_d | timeout, last check: 20/23040 pixels differ, first at row 10 col 3: got $0318 want $FFFF |
+| cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_ly38_lx31_extra_pixel_e | timeout, last check: 28/23040 pixels differ, first at row 10 col 3: got $0318 want $FFFF |
+| cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_ly38_lx31_extra_pixel_f | timeout, last check: 27/23040 pixels differ, first at row 10 col 3: got $0318 want $FFFF |
 | cgb_dmg_mode/docboy/ppu/visual/palettes_checksum_01 | timeout, last check: 2816/23040 pixels differ, first at row 8 col 0: got $7FE6 want $FD6C |
 | cgb_dmg_mode/docboy/ppu/visual/palettes_checksum_0c | timeout, last check: 2816/23040 pixels differ, first at row 8 col 0: got $7FE6 want $FD6C |
 | cgb_dmg_mode/docboy/ppu/visual/palettes_checksum_10 | timeout, last check: 2816/23040 pixels differ, first at row 8 col 0: got $7FE6 want $FD6C |

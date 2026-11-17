@@ -1055,12 +1055,12 @@ the no-switch `sound/*_ds_{2,4,6}`); on E it is the mirror image (22/46).
 ## I. DocBoy (`docboy/*`, first scored 2026-10-14)
 
 DocBoy's own suite, scored by its own runner's rules on DMG ABC and CPU CGB E
-(`tests/README.md`, "The DocBoy suite"): 8,838 / 9,186 at `DocboyRev` (49
+(`tests/README.md`, "The DocBoy suite"): 8,886 / 9,186 at `DocboyRev` (49
 more not scored, `DocboyNotScored`). Every failing ROM is in
 [`tests/results_docboy.md`](../../tests/results_docboy.md); every group that is
 not scored is in the "Deliberately not scored" ledger at the end of
-`tests/results.md`. The 348 failing tests are I1 8, I2 11, I3 180, I5 6,
-I6 49, I9 20, I11 15, I12 36, I13 10 and "Small" 13. I4's scored rows all
+`tests/results.md`. The 300 failing tests are I1 8, I2 11, I3 176, I5 6,
+I6 6, I9 20, I11 15, I12 35, I13 10 and "Small" 13. I4's scored rows all
 pass; I7, I8 and I10 are closed. The 9,186 include DocBoy's rebuilds of 7 SameSuite channel 1 ROMs
 (`cgb/samesuite/apu/channel_1/*-cgbE`), which pass; the eighth,
 `channel_1_sweep_restart_2-cgbE`, is not scored (its expectation and
