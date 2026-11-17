@@ -132,8 +132,9 @@ Glass-to-glass pacing has to be measured with the window shown.
 
 - A `CAMetalDisplayLink` or `presentsWithTransaction` loop: the scheduler
   and swap hold are kept as they are, so both backends pace alike.
-  `DINGBAT_METAL_VSYNC=1` turns the layer's display sync on, for trying
-  (in a hidden window it measures the same as off).
+  The layer's display sync is on (a present waits for the next refresh;
+  off, it tore badly in a scrolling overworld). `DINGBAT_METAL_VSYNC=0`
+  turns it off, for comparing; a hidden window measures the same either way.
 - `-d:gputime` (GPU time of the game quad) is OpenGL only: Windows and
   Linux. On macOS it is a build error.
 
