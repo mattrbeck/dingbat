@@ -1381,14 +1381,27 @@ proc gambatte_digit(t: array[8, uint8]): char =
 # (GbApu.probe_period = 2) and compares the pre-DC-blocker mix.
 const GambatteAudioProbePeriod = 2
 
+proc fresh_cart(gb: GB; rom: string) =
+  ## A batched row starts on a fresh chip. new_gb has already applied any
+  ## .sav beside the ROM (cart RAM, RTC, EEPROM), so load the cart again
+  ## from a copy with none beside it, and detach the battery file. Call it
+  ## before post_init, which wires the cart in.
+  if fileExists(rom.changeFileExt(".sav")):
+    let dir = getTempDir() / ("dingbat-fresh-cart-" & $getCurrentProcessId())
+    createDir(dir)
+    let copy = dir / rom.extractFilename
+    copyFile(rom, copy)
+    gb.cartridge = load_cartridge(copy)
+    removeDir(dir)
+  gb.cartridge.sav_path = ""
+
 proc gambatte_run(rom: string; cgb: bool; frames: int; audio = false): GB =
   result = new_gb("", rom, headless = true, run_bios = false,
                   force_cgb = cgb, force_dmg = not cgb)
+  # Read-only fixtures in a shared cache dir: no .sav in, none out.
+  result.fresh_cart(rom)
   result.test_output = new_test_output()
   result.post_init()
-  # Read-only fixtures in a shared cache dir: detach the battery file before
-  # a frame runs, or it becomes the next run's power-on state.
-  result.cartridge.sav_path = ""
   if not audio:
     for _ in 0 ..< frames - 1: result.step_frame()
     # The scored frame's palette transition pixels only (GbRacePx).
@@ -1827,10 +1840,10 @@ proc docboy_new_gb(rom: string; cgb: bool): GB =
   ## picks the CGB's operating mode, as DocBoy's CGB build does.
   result = new_gb("", rom, headless = true, run_bios = false,
                   force_cgb = cgb, force_dmg = not cgb)
+  result.fresh_cart(rom)
   result.gb_set_revision(if cgb: grCgbE else: grDmgABC)
   result.test_output = new_test_output()
   result.post_init()
-  result.cartridge.sav_path = ""
 
 proc docboy_end_frame(gb: GB) {.inline.} =
   ## step_frame's frame-boundary bookkeeping for a loop that steps the CPU
