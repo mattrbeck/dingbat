@@ -3,7 +3,7 @@
 ## closing. Windows, Linux, and macOS with DINGBAT_IMGUI_MENU=1.
 
 import std/[strutils, tables]
-import imguin/[cimgui, impl_opengl]
+import imguin/cimgui
 import config_editor
 import settings_model
 import file_explorer

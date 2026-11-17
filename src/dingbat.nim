@@ -997,10 +997,12 @@ proc upload_frame(fb: ptr uint16; w, h: int) =
   let upload = cast[pointer](lcd_resp.apply(src, w * h))
   pr.game_upload(0, w, h, upload)
 
+when defined(gputime) and defined(macosx):
+  {.error: "-d:gputime times OpenGL, which macOS does not draw with".}
 when defined(gputime):
   # Diagnostic, off by default (-d:gputime): GL_TIME_ELAPSED around the game
   # quad, to measure upscale filters at a real window size. Prints median/p90
-  # GPU ms every 2 s. OpenGL only (DINGBAT_RENDERER=gl on macOS).
+  # GPU ms every 2 s. Windows and Linux (OpenGL).
   import imguin/glad/gl
   var gpuq: array[8, GLuint]
   var gpuq_init = false
@@ -1010,7 +1012,6 @@ when defined(gputime):
   var gpu_sweep_step = 0
 
   proc gpu_begin() =
-    if pr.backend != pr.pbGL: return
     if not gpuq_init:
       glGenQueries(GLsizei(gpuq.len), addr gpuq[0])
       gpuq_init = true
@@ -1025,7 +1026,6 @@ when defined(gputime):
     glBeginQuery(GL_TIME_ELAPSED, gpuq[gpuq_slot])
 
   proc gpu_end() =
-    if pr.backend != pr.pbGL: return
     glEndQuery(GL_TIME_ELAPSED)
     gpuq_slot = (gpuq_slot + 1) mod gpuq.len
     let now = getTime()
@@ -2213,7 +2213,8 @@ proc main() =
     echo "SDL init failed: ", $getError(); system.quit(1)
   defer: sdl3.quit()
 
-  pr.choose_backend()
+  if not pr.choose_backend():
+    echo "No Metal device: dingbat draws with Metal on macOS"; system.quit(1)
 
   # Created hidden, then centred and shown: SDL_CreateWindow takes no position.
   # HIGH_PIXEL_DENSITY: on Retina (and Wayland, density = desktop scale) the
