@@ -22,6 +22,9 @@ out=$(cd "$out" && pwd)
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 export SDL_AUDIO_DRIVER=${SDL_AUDIO_DRIVER:-dummy}
+# A session that never quits (a message box on Windows) ends after a minute
+limit=""
+if command -v timeout > /dev/null; then limit="timeout 60"; fi
 
 # A path as the app takes it: Windows' own on Windows (Git Bash rewrites
 # only command-line arguments, not paths inside files)
@@ -42,7 +45,8 @@ run() {
   mkdir -p "$work/drive"
   printf '%s\n' "$2" > "$work/drive/cmd"
   APPDATA=$(native "$work/appdata") HOME="$home" DINGBAT_DRIVE=$(native "$work/drive") \
-    DINGBAT_IMGUI_MENU=1 "$bin" ${3:+"$3"} > "$work/out.log" 2>&1
+    DINGBAT_IMGUI_MENU=1 $limit "$bin" ${3:+"$3"} > "$work/out.log" 2>&1 \
+    || echo "  $1: exited $?"
   if grep -q ' error' "$work/drive/ack" 2> /dev/null; then
     echo "  $1: $(grep ' error' "$work/drive/ack" | head -3 | tr '\n' ' ')"
   fi

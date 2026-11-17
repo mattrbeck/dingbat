@@ -43,6 +43,7 @@ var
   face_names*: array[Face, string]   ## what loaded, for the log
   line_em: array[Face, float32] = [1'f32, 1, 1]
   proggy_mono = false
+  system_data: array[Face, string]  ## the files' bytes, which ImGui reads for as long as it runs
 
 proc ttf_table(data: string; tag: string): int =
   ## Where a TrueType/OpenType font's table is; -1 if `data` has none
@@ -84,8 +85,8 @@ proc stb_cmap_format*(data: string): int =
       result = data.u16(off)
 
 proc add_ttf*(atlas: ptr ImFontAtlas; data: string; name: string): ptr ImFont =
-  ## A font from its file's bytes (ImGui keeps a copy); nil if not one
-  ## stb_truetype can read
+  ## A font from its file's bytes, which must outlive the atlas (ImGui 1.92
+  ## reads them in place); nil if not one stb_truetype can read
   if ttf_line_em(data) <= 0: return nil
   let fmt = stb_cmap_format(data)
   if fmt notin [0, 4, 6, 12, 13]:
@@ -123,14 +124,16 @@ proc load_ui_fonts*(atlas: ptr ImFontAtlas) =
     for (f, file, name) in [(fRegular, "segoeui.ttf", "Segoe UI"),
                             (fBold, "seguisb.ttf", "Segoe UI Semibold"),
                             (fMono, "consola.ttf", "Consolas")]:
-      var data = ""
-      try: data = readFile(dir / file)
+      try: system_data[f] = readFile(dir / file)
       except IOError: discard
-      let font = atlas.add_ttf(data, name)
-      if font != nil: put(f, font, name, ttf_line_em(data))
-  for (f, data, name) in [(fRegular, INTER_REGULAR, "Inter"),
-                          (fBold, INTER_SEMIBOLD, "Inter SemiBold")]:
-    if faces[f] == nil: put(f, atlas.add_ttf(data, name), name, ttf_line_em(data))
+      let font = atlas.add_ttf(system_data[f], name)
+      if font != nil: put(f, font, name, ttf_line_em(system_data[f]))
+  # The globals themselves, not copies: ImGui reads them in place
+  if faces[fRegular] == nil:
+    put(fRegular, atlas.add_ttf(INTER_REGULAR, "Inter"), "Inter", ttf_line_em(INTER_REGULAR))
+  if faces[fBold] == nil:
+    put(fBold, atlas.add_ttf(INTER_SEMIBOLD, "Inter SemiBold"), "Inter SemiBold",
+        ttf_line_em(INTER_SEMIBOLD))
   if faces[fMono] == nil:
     put(fMono, atlas.add_proggy(), "ProggyClean", 1)
     proggy_mono = true
