@@ -85,7 +85,10 @@ for (const [kindA, kindB] of PAIRS) {
       eq(await saveByte(b), { live: save, stored: save }, "the download keeps the save");
       await mainMenu(b);
       assert.equal((await names(b)).hero, TITLE);
-      assert.deepEqual(a.errors.concat(b.errors), []);
+      // WebKit reports the requests a reload cuts off as errors.
+      const errors = [...a.errors, ...b.errors]
+        .filter((e) => !e.includes("due to access control checks"));
+      assert.deepEqual(errors, [], "no page errors: " + errors.join(" | "));
     });
   });
 }
