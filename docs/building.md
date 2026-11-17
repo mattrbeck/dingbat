@@ -34,6 +34,16 @@ with `.github/scripts/build-sdl3.sh /usr/local` (as root). SDL 3 is linked at bu
 everywhere: dynamically for a dev build, statically for the release builds (`-d:macdist`
 on macOS; CI's Linux and Windows builds have only `libSDL3.a` to link).
 
+Windows and Linux also need [FreeType](https://freetype.org), which draws the UI's text
+(macOS draws it with CoreText and needs none). The release builds link
+`.github/scripts/build-freetype.sh`'s static `libfreetype.a` (FreeType 2.15.0,
+checksummed): `ui_fonts.nim` takes `/usr/local/lib/libfreetype.a` where there is one
+(Linux), the mingw sysroot's for Windows, or `-d:freetype_prefix=DIR`'s, e.g.
+`.github/scripts/build-freetype.sh ~/.cache/dingbat-freetype` then
+`nim c -d:freetype_prefix=$HOME/.cache/dingbat-freetype ...`. Without one, a Linux dev
+build links the system's (`libfreetype-dev`, `freetype-devel`, `freetype2`).
+The test builds (`-d:test_harness`) need no FreeType.
+
 `nimble install --depsOnly` fails inside the checkout on nimble 0.22 ("Couldnt find a
 solution for the packages"); install from another directory instead, as CI does:
 `cd /tmp && nimble install -y "https://github.com/nim-lang/sdl3@#bb137829ff619b0a27a473628cb28fc1c86f3fe5" imguin@1.92.4.0 yaml stb_image zippy`
@@ -56,8 +66,8 @@ docker run --rm --platform linux/amd64 \
   dingbat-win-cross ./tools/docker/windows-cross/build.sh
 ```
 
-Produces a self-contained `dist/windows/dingbat.exe` (SDL 3 and the mingw C++ runtime
-linked statically). A different SDL 3 build can be substituted at runtime with
+Produces a self-contained `dist/windows/dingbat.exe` (SDL 3, FreeType and the mingw C++
+runtime linked statically). A different SDL 3 build can be substituted at runtime with
 `SDL_DYNAMIC_API=C:\path\to\SDL3.dll`.
 
 ## CI
@@ -71,4 +81,6 @@ The macOS build is signed and notarized when the repository has the signing secr
 ([dev/macos-signing.md](dev/macos-signing.md)); `tools/macos-release.sh` does the same locally. Linux builds on
 `ubuntu-22.04` for the glibc 2.34 floor. All three jobs build a static SDL 3 from source
 (`.github/scripts/build-sdl3.sh`, cached): Homebrew's `sdl3` and SDL's mingw devel package
-ship no `libSDL3.a`, and Ubuntu 22.04 has no SDL 3 package.
+ship no `libSDL3.a`, and Ubuntu 22.04 has no SDL 3 package. The Windows and Linux jobs
+build a static FreeType the same way (`.github/scripts/build-freetype.sh`, cached by
+version), and check the binary imports neither library.

@@ -8,10 +8,11 @@
 ## desktop_input_test).
 ## And every string the desktop draws has its characters in every UI font it
 ## may draw with (ui_fonts.nim): this platform's (SF on macOS, Segoe UI on
-## Windows) and the bundled Inter, which Linux and Windows' fallback use; a
-## character one lacks draws as "?". src/dingbat.nim and every file under
-## src/dingbat, found at compile time (the core's messages reach the
-## notices, the Cheats and Link Cable windows too).
+## Windows) and the bundled Inter and JetBrains Mono, which Linux and
+## Windows' fallback use; a character one lacks draws as "?" (stb_truetype
+## answers here; FreeType reads the same character map). src/dingbat.nim
+## and every file under src/dingbat, found at compile time (the core's
+## messages reach the notices, the Cheats and Link Cable windows too).
 ##
 ## Needs imguin (its C++ compiles into this binary; nothing else of the GUI:
 ## no SDL, no GL). CI's test job installs it (.github/scripts/
@@ -76,15 +77,20 @@ io.DeltaTime = 1.0 / 60.0
 # there; nothing here draws.
 io.BackendFlags = io.BackendFlags or cint(ImGui_BackendFlags_RendererHasTextures)
 load_ui_fonts(io.Fonts)
-# macOS builds no Inter in (SF is always there); it is read from its files
+# macOS builds no Inter or JetBrains Mono in (SF is always there); they are
+# read from their files
 when defined(macosx):
-  let inter_data = [readFile(INTER_DIR / "Inter-Regular.ttf"),
-                    readFile(INTER_DIR / "Inter-SemiBold.ttf")]
+  let inter_data = [readFile(FONT_DIR / "Inter-Regular.ttf"),
+                    readFile(FONT_DIR / "Inter-SemiBold.ttf")]
+  let mono_data = readFile(FONT_DIR / "JetBrainsMono-Regular.ttf")
 else:
   let inter_data = [INTER_REGULAR, INTER_SEMIBOLD]
+  let mono_data = JETBRAINS_MONO
 let inter = [io.Fonts.add_ttf(inter_data[0], "Inter"),
              io.Fonts.add_ttf(inter_data[1], "Inter SemiBold")]
+let mono = io.Fonts.add_ttf(mono_data, "JetBrains Mono")
 doAssert inter[0] != nil and inter[1] != nil, "the bundled Inter does not load"
+doAssert mono != nil, "the bundled JetBrains Mono does not load"
 igGetStyle().FontSizeBase = font_px(BODY_PX)
 
 var first, first_hint, second, second_hint: string
@@ -165,16 +171,17 @@ block every_ui_string_has_a_glyph:
   # whose messages it shows (a State notice, a cheat's error, the Link Cable
   # window's "Handshake failed: ..."), must have each character in the
   # regular and semibold faces loaded here and in Inter: "…", curly quotes
-  # and dashes are in all of them. The debug windows' text is drawn
-  # monospaced too (Linux: ProggyClean, U+0020-00FF and little else). Log
-  # lines (echo), GLSL sources ("""...""") and compile-time pragmas never
-  # reach ImGui and are skipped.
+  # and dashes are in all of them. The files that draw monospaced text (the
+  # debug windows, Cheats) are checked against this platform's monospaced
+  # face and JetBrains Mono too. Log lines (echo), GLSL sources
+  # ("""...""") and compile-time pragmas never reach ImGui and are skipped.
   frame()
-  echo "fonts: ", face_names.join(", "), ", Inter, Inter SemiBold"
+  echo "fonts: ", face_names.join(", "), ", Inter, Inter SemiBold, JetBrains Mono"
   var missing: seq[string]
   for (file, line, s) in ui_string_literals():
     var fonts = @[faces[fRegular], faces[fBold], inter[0], inter[1]]
-    if file.endsWith("_debug.nim"): fonts.add faces[fMono]
+    if file.endsWith("_debug.nim") or file.endsWith("cheats_widget.nim"):
+      fonts.add [faces[fMono], mono]
     block one:
       for r in s.runes:
         for f in fonts:
@@ -185,7 +192,7 @@ block every_ui_string_has_a_glyph:
   doAssert missing.len == 0,
     "characters a UI font can't draw:\n  " & missing.join("\n  ")
   # The check can fail: none of them has a CJK ideograph
-  for f in [faces[fRegular], inter[0]]:
+  for f in [faces[fRegular], inter[0], mono]:
     doAssert not ImFont_IsGlyphInFont(f, ImWchar(0x4E00))
 
 block the_fonts_load:
@@ -193,8 +200,15 @@ block the_fonts_load:
   for f in Face: doAssert faces[f] != nil, $f & " did not load"
   when defined(macosx): doAssert face_names[fRegular] == "SF", face_names[fRegular]
   elif defined(windows): doAssert face_names[fRegular] == "Segoe UI", face_names[fRegular]
-  else: doAssert face_names[fRegular] == "Inter", face_names[fRegular]
+  else:
+    doAssert face_names[fRegular] == "Inter", face_names[fRegular]
+    doAssert face_names[fMono] == "JetBrains Mono", face_names[fMono]
   doAssert ttf_line_em(inter_data[0]) > 1 and ttf_line_em("not a font") == 0
+  # Their capitals already sit in the middle of their lines (add_ttf moves
+  # a font's that do not)
+  for data in [inter_data[0], inter_data[1], mono_data]:
+    doAssert abs(ttf_cap_low_em(data)) < 0.01, $ttf_cap_low_em(data)
+  doAssert ttf_cap_low_em("not a font") == 0
 
 igDestroyContext(nil)
 echo "ok"

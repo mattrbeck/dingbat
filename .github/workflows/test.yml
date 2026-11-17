@@ -517,6 +517,20 @@ jobs:
           sudo apt-get -o Acquire::Retries=5 update
           sudo apt-get -o Acquire::Retries=5 install -y --no-install-recommends \
             libgl1-mesa-dev xvfb xauth libgl1-mesa-dri
+      - name: Cache the static FreeType build
+        id: freetype-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/freetype-prefix
+          # build-artifacts.yml's Linux key, as SDL 3's
+          key: freetype-static-${{ runner.os }}-22.04-2.15.0
+      - name: Build FreeType (static, from source)
+        if: steps.freetype-cache.outputs.cache-hit != 'true'
+        run: .github/scripts/build-freetype.sh "$HOME/freetype-prefix"
+      - name: Install FreeType where ui_fonts.nim looks
+        run: |
+          sudo cp -R "$HOME/freetype-prefix/lib/." /usr/local/lib/
+          sudo cp -R "$HOME/freetype-prefix/include/." /usr/local/include/
       - name: Install dependencies
         # As build-artifacts.yml: one at a time from outside the checkout,
         # each retried.
@@ -557,8 +571,8 @@ jobs:
           SDL_AUDIO_DRIVER: dummy
         run: xvfb-run -a -s "-screen 0 1280x1024x24" tests/desktop_home_test.sh
       - name: Screenshots of the UI (Xvfb)
-        # For looking at, not compared: tests/desktop_ui_shots.sh. Inter is
-        # Linux's UI font (ui_fonts.nim).
+        # For looking at, not compared: tests/desktop_ui_shots.sh. Inter and
+        # JetBrains Mono are Linux's UI fonts, drawn by FreeType (ui_fonts.nim).
         if: always()
         timeout-minutes: 10
         env:

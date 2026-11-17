@@ -13,7 +13,7 @@ FROM nimlang/nim:2.2.6-ubuntu-regular
 # Acquire::Retries rides out transient mirror 5xx.
 RUN apt-get -o Acquire::Retries=5 update \
     && apt-get -o Acquire::Retries=5 install -y --no-install-recommends \
-        mingw-w64 cmake make curl ca-certificates unzip \
+        mingw-w64 cmake make curl ca-certificates unzip xz-utils \
     && rm -rf /var/lib/apt/lists/*
 
 # SDL 3 for the mingw sysroot, built static from source (its mingw devel
@@ -23,5 +23,9 @@ RUN apt-get -o Acquire::Retries=5 update \
 # Docker.
 COPY build-sdl3.sh retry.sh /tmp/sdl3/
 RUN /tmp/sdl3/build-sdl3.sh /usr/x86_64-w64-mingw32 --mingw && rm -rf /tmp/sdl3
+
+# FreeType, the UI's text rasteriser (ui_fonts.nim), the same way
+COPY build-freetype.sh retry.sh /tmp/freetype/
+RUN /tmp/freetype/build-freetype.sh /usr/x86_64-w64-mingw32 --mingw && rm -rf /tmp/freetype
 
 WORKDIR /src

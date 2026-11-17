@@ -22,14 +22,21 @@ licence asks to be kept.
 | SDL 3 (static in the release builds) | zlib | Sam Lantinga |
 | imguin, cimgui, Dear ImGui and its SDL 3/OpenGL3 backends | MIT | the imguin authors; Stephan Dilly; Omar Cornut |
 | Dear ImGui's Metal backend (macOS; `src/dingbat/frontend/vendor/`, unmodified from v1.92.4-docking, which imguin does not ship) | MIT | Omar Cornut |
+| Dear ImGui's FreeType font loader, imgui_freetype (Windows and Linux; `src/dingbat/frontend/vendor/`, unmodified from v1.92.4-docking, which imguin does not ship) | MIT | Omar Cornut, Aleksei Skriabin, Mike Sartain |
+| FreeType 2.15.0 (static in the Windows and Linux builds, not in the macOS build; built by `.github/scripts/build-freetype.sh`) | FreeType License (FTL), the first of its dual licences (credit below) | David Turner, Robert Wilhelm, Werner Lemberg and the FreeType Project |
 | glad OpenGL loader | public domain / CC0 | David Herberth |
 | NimYAML | MIT | Felix Krause |
 | stb_image, stb_image_write | public domain / MIT | Sean Barrett |
 | Inter 4.1, Regular and SemiBold (`src/dingbat/frontend/vendor/fonts/`, unmodified from the v4.1 release), the UI font on Linux and Windows' fallback (not in the macOS build) | SIL Open Font License 1.1 (text below) | The Inter Project Authors |
+| JetBrains Mono 2.304, Regular (`src/dingbat/frontend/vendor/fonts/`, unmodified from the v2.304 release), the monospaced UI font on Linux and Windows' fallback (not in the macOS build) | SIL Open Font License 1.1 (text below) | The JetBrains Mono Project Authors |
 
 The UI's other fonts are the system's, read from it at run time and not
 distributed with dingbat: San Francisco and SF Mono on macOS, Segoe UI and
 Consolas on Windows.
+
+The Windows and Linux builds are based in part on the work of the FreeType
+Team (https://freetype.org). Portions of this software are copyright ©
+2026 The FreeType Project (https://freetype.org). All rights reserved.
 
 ## Compiled into the iOS build only
 
@@ -86,10 +93,11 @@ FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
 TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR
 THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-## SIL Open Font License 1.1 (Inter)
+## SIL Open Font License 1.1 (Inter, JetBrains Mono)
 
 ```
 Copyright (c) 2016 The Inter Project Authors (https://github.com/rsms/inter)
+Copyright 2020 The JetBrains Mono Project Authors (https://github.com/JetBrains/JetBrainsMono)
 
 This Font Software is licensed under the SIL Open Font License, Version 1.1.
 This license is copied below, and is also available with a FAQ at:
