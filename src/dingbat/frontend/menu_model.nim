@@ -21,10 +21,12 @@ type
     # Emulation
     mcReset, mcPause, mcFrameAdvance, mcRewind, mcTurbo, mcFastForward,
     mcCloseLid, mcCheats, mcLinkCable
-    # Audio/Video
-    mcVolume, mcVolumeDone, mcMute, mcPitchCorrect, mcAudioInterp,
-    mcAnalogFilter, mcMp2kHle, mcColorCorrection, mcChannel, mcFrameSize,
+    # View
+    mcFilter, mcPreserveAspect, mcLcdResponse, mcColorCorrection, mcFrameSize,
     mcFullscreen
+    # Audio
+    mcVolume, mcVolumeDone, mcMute, mcPitchCorrect, mcAudioInterp,
+    mcAnalogFilter, mcMp2kHle, mcChannel
     # Debug
     mcOverlay, mcGbaDebug, mcGbDebug
     # Edit (macOS): an ImGui text field's, when the game's window has the keyboard

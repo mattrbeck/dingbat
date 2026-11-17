@@ -152,6 +152,8 @@ static NSMenuItem *tagged(NSString *title, SEL action, int cmd, int arg) {
 void dbm_install(const char **titles, const int *fixed, int n, const char *version,
                  void *sdl_window) {
   if (controller == nil) controller = [DbmController new];
+  // View has its own Enter Full Screen: AppKit is not to add a second
+  [NSUserDefaults.standardUserDefaults registerDefaults:@{@"NSFullScreenMenuItemEverywhere" : @NO}];
   game_window = (__bridge NSWindow *)sdl_window;
   controller.version = str(version);
   NSMenu *bar = [NSMenu new];

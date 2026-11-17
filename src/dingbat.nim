@@ -1824,6 +1824,9 @@ proc menu_state(cmd: MenuCmd; arg: int): MenuState =
   of mcAudioInterp: (app.emu_kind == ekGBA, app.cfg.fifo_interp)
   of mcAnalogFilter: (app.emu_kind == ekGBA, app.cfg.audio_lowpass)
   of mcMp2kHle: (true, app.cfg.mp2k_hle)
+  of mcFilter: (true, arg == ord(app.cfg.video_filter))
+  of mcPreserveAspect: (true, app.cfg.preserve_aspect)
+  of mcLcdResponse: (true, app.cfg.lcd_response)
   # Models of the GBA and GBC panels: not a DS's
   of mcColorCorrection: (app.emu_kind != ekNDS, app.cfg.color_correction)
   of mcChannel:
@@ -1831,7 +1834,8 @@ proc menu_state(cmd: MenuCmd; arg: int): MenuState =
     elif gb and arg in 0 .. 3: (true, app.gb_emu.apu.channel_mask[arg])
     else: (false, false)
   of mcFrameSize: (true, arg == app.scale)
-  of mcFullscreen: (true, app.fullscreen)
+  # The macOS bar says Enter or Exit Full Screen instead of a tick
+  of mcFullscreen: (true, app.fullscreen and not native_menu)
   of mcOverlay: (true, app.enable_overlay)
   of mcGbaDebug: (app.dbg != nil, app.dbg != nil and app.dbg.window_flag(arg)[])
   of mcGbDebug: (app.gb_dbg != nil, app.gb_dbg != nil and app.gb_dbg.window_flag(arg)[])
@@ -1941,6 +1945,20 @@ proc run_menu(cmd: MenuCmd; arg: int) =
   # music stream
   of mcMp2kHle: toggle_saved(mp2k_hle, apply_mp2k_hle())
   of mcColorCorrection: toggle_saved(color_correction, apply_color_correction())
+  # Also Settings' rows: an open Settings window shows the change, and its
+  # Apply keeps it
+  of mcFilter:
+    app.cfg.video_filter = VideoFilter(arg)
+    app.ce.video.filter = cint(arg)
+    save_config(app.cfg)
+  of mcPreserveAspect:
+    app.cfg.preserve_aspect = not app.cfg.preserve_aspect
+    app.ce.video.preserve_aspect = app.cfg.preserve_aspect
+    save_config(app.cfg)
+  of mcLcdResponse:
+    app.cfg.lcd_response = not app.cfg.lcd_response
+    app.ce.video.lcd_resp = app.cfg.lcd_response
+    save_config(app.cfg)
   of mcChannel:
     if app.emu_kind == ekGBA:
       app.gba_emu.apu.channel_mask[arg] = not app.gba_emu.apu.channel_mask[arg]
@@ -2021,20 +2039,32 @@ proc menu_bar(native: bool): seq[MenuItem] =
       channels.add action(n, mcChannel, i, hint = $(i + 1))
   var sizes: seq[MenuItem]
   for s in 1 .. 8: sizes.add action($s & "x", mcFrameSize, s)
-  sizes.add separator()
-  sizes.add action("Fullscreen", mcFullscreen, key = "f")
-  let av = @[
+  var filters: seq[MenuItem]
+  for i, n in ["None (crisp)", "hq4x", "xBR", "LCD grid", "RGB subpixels"]:
+    filters.add action(n, mcFilter, i)
+  # Mac menus name it by what it will do; the ImGui bar ticks it
+  let fullscreen =
+    if not native: "Fullscreen"
+    elif app.fullscreen: "Exit Full Screen"
+    else: "Enter Full Screen"
+  let view = @[
+    submenu("Filter", filters),
+    action("Preserve Aspect Ratio", mcPreserveAspect),
+    action("LCD Response", mcLcdResponse),
+    action("LCD Color Correction", mcColorCorrection),
+    separator(),
+    submenu("Frame Size", sizes),
+    action(fullscreen, mcFullscreen, key = "f")]
+  let audio = @[
     slider("Volume", mcVolume, mcVolumeDone, app.cfg.volume, 0, 100),
     action("Mute", mcMute),
+    separator(),
     action("Pitch-correct fast-forward", mcPitchCorrect),
     action("Audio interpolation", mcAudioInterp),
     action("Analog filter", mcAnalogFilter),
     action("Enhanced music synthesis (HLE)", mcMp2kHle),
     separator(),
-    action("LCD Color Correction", mcColorCorrection),
-    submenu("Channels", channels, mcChannelsMenu),
-    separator(),
-    submenu("Frame size", sizes)]
+    submenu("Channels", channels, mcChannelsMenu)]
 
   var debug = @[action("Overlay", mcOverlay), separator()]
   if app.dbg != nil:
@@ -2065,8 +2095,9 @@ proc menu_bar(native: bool): seq[MenuItem] =
       edit("Copy", mcCopy, "copy:", "c"),
       edit("Paste", mcPaste, "paste:", "v"),
       edit("Select All", mcSelectAll, "selectAll:", "a")])
+  result.add submenu("View", view)
   result.add submenu("Emulation", emu)
-  result.add submenu("Audio/Video", av)
+  result.add submenu("Audio", audio)
   result.add submenu("Debug", debug)
   if native:
     result.add submenu("Window", @[
@@ -2433,7 +2464,7 @@ proc handle_input() =
         elif app.emu_kind == ekNDS and app.nds != nil:
           toggle(app.nds)
       of krChannel:
-        # Feedback is visible in the Audio/Video > Channels submenu
+        # Feedback is visible in the Audio > Channels submenu
         let ch = int(sym) - int(SDLK_1)
         if app.emu_kind == ekGBA and app.gba_emu != nil:
           app.gba_emu.apu.channel_mask[ch] = not app.gba_emu.apu.channel_mask[ch]
