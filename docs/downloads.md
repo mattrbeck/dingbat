@@ -19,8 +19,10 @@ Tagged `v*` releases publish the same three files on the [Releases](../../../rel
 page. For one specific commit, open its run under
 [Actions → Build](../../../actions/workflows/build.yml) and download from **Artifacts**.
 
-The binaries are unsigned: on macOS use **System Settings → Privacy & Security → Open
-Anyway**, on Windows **More info → Run anyway**, once.
+The macOS build is signed and notarized by Apple, so it opens like any other app; the
+release notes say so on each build that is. One that is not (a fork's, or one from
+before signing) needs **System Settings → Privacy & Security → Open Anyway** once. The
+Windows build is unsigned: **More info → Run anyway**, once.
 
 All three link SDL 3 statically. Linux needs glibc 2.34+ (Ubuntu 22.04+, Debian 12+,
 Fedora 35+).

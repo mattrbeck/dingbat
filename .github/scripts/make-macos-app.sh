@@ -4,7 +4,12 @@
 # already be a -d:macdist build (static SDL3, no Homebrew dependency).
 #
 # Usage: .github/scripts/make-macos-app.sh <binary> <version> <out_dir>
+#
+# Unsigned unless MACOS_SIGN_IDENTITY is set: then the app and the .dmg are
+# signed, and notarized and stapled given notary credentials (macos-sign.sh).
 set -euo pipefail
+
+SIGN="$(dirname "$0")/macos-sign.sh"
 
 BIN="${1:?binary path}"
 VERSION="${2:-0.0.0}"
@@ -88,9 +93,21 @@ PLIST
 
 plutil -lint "$APP/Contents/Info.plist" >/dev/null
 
+if [ -n "${MACOS_SIGN_IDENTITY:-}" ]; then
+  "$SIGN" app "$APP"
+  # Stapled before it goes in the .dmg, so a copy dragged out of it opens
+  # offline too.
+  "$SIGN" notarize "$APP"
+fi
+
 # Read-only compressed .dmg containing the .app.
 DMG="$OUT/dingbat-macos.dmg"
 rm -f "$DMG"
 hdiutil create -quiet -volname "dingbat" -srcfolder "$APP" -ov -format UDZO "$DMG"
+
+if [ -n "${MACOS_SIGN_IDENTITY:-}" ]; then
+  "$SIGN" dmg "$DMG"
+  "$SIGN" notarize "$DMG"
+fi
 
 echo "Built $APP and $DMG"
