@@ -688,6 +688,13 @@ macOS window taken fullscreen by AppKit's own toggle, as the green button does.
 recents an older build wrote taken in (a zip, a missing file, a DS game only
 with DS Beta), a click on a missing tile and on a game, the last screen kept
 as the tile's picture, and Return and a pad's A opening the most recent game.
+`desktop_gui_test.sh` also checks that a game key and Cmd/Ctrl+S act the moment an
+ImGui notice closes. On macOS (test.yml's `desktop-gui-macos` job, Metal, a
+hidden window): `desktop_mac_menu_test.sh` (the system menu bar),
+`desktop_mac_settings_test.sh` (the native Settings window),
+`desktop_mac_alert_test.sh` (notices as alerts) and `desktop_mac_link_test.sh`
+(two windows linked over 127.0.0.1, one held in AppKit's menu-tracking run
+loop for 35 s: the other sees a pause and keeps the link, and both run on).
 
 `.github/scripts/smoke-desktop.sh` runs each release binary on its own OS
 before the Build and Release workflows can publish it (Linux under Xvfb,

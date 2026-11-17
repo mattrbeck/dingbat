@@ -73,7 +73,10 @@ emulation; it cannot desync it. `NetLink.stalled` is the flag behind the
 The native stall clock (`NetLink.stall_timeout_ms`, 30 s) ends a link whose
 peer went silent. A paused side keeps reading its socket and sets CLOCK's
 paused bit, and the other side's stall clock does not run while that bit is
-set, so a pause never drops the link. The desktop steps a linked frame with
+set, so a pause never drops the link. On macOS, while AppKit holds the
+main loop (a menu open, a live resize, a modal panel), a timer in those
+run-loop modes does the same (`link_while_blocked` in `src/dingbat.nim`):
+the game stops and the peer sees a pause. The desktop steps a linked frame with
 `step_frame_for` (hands back to the UI loop after a few ms parked on the
 peer, resuming the frame next call) rather than the blocking `step_frame`,
 so waiting on the peer never freezes the window. Unplugging the core
