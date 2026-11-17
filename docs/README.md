@@ -40,6 +40,7 @@ design notes, hardware evidence and test triage for people working on dingbat.
 - [hle-bios-shortcomings.md](dev/hle-bios-shortcomings.md) — what the built-in GBA HLE BIOS does not do. GBA maintainers.
 - [gba-rtc.md](dev/gba-rtc.md) — the GBA cartridge clock: host time unless a game sets it, the battery-save RTC trailer, behaviour next to mGBA and real carts. GBA maintainers, anyone moving saves between emulators.
 - [ios-app.md](dev/ios-app.md) — the native iOS app: what matches the web front-end, native differences, what is left off. iOS maintainers.
+- [desktop-presenter.md](dev/desktop-presenter.md) — how the desktop app draws: OpenGL 3.3, Metal on macOS, one shader for both, how they compare. Desktop maintainers.
 - [ios-display-link.md](dev/ios-display-link.md) — iOS display pacing: CADisplayLink against CAMetalDisplayLink, measured. iOS maintainers.
 - [ios-feasibility.md](dev/ios-feasibility.md) — the iOS core build and what is proven. Anyone reviving the iOS port.
 - [performance.md](dev/performance.md) — harnesses, measurement rules, what is known about cost. Anyone doing perf work.
