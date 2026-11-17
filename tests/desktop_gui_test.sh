@@ -4,6 +4,8 @@
 #
 #   keys      z, and 'Z' as SDL 3 reports z under Shift or Caps Lock, all
 #             press the button bound to z (GBA A), read from the input log
+#   notice    after an ImGui notice closes (Return), the next game key and
+#             Cmd/Ctrl+S act at once, with no mouse move to draw a frame
 #   gamepad   a virtual SDL gamepad: plugged in mid-game, a button, the left
 #             stick, Start, then unplugged while held (everything lets go)
 #   pixels    the game picture fills the whole back buffer, which on a
@@ -131,6 +133,35 @@ else:
     while n < h and sum(rows[n][x:x + 3]) < 300: n += 1
     print(n)
 EOF
+
+echo "keys after a notice (ImGui modal closed by Return)"
+# With the menu bar hidden, the frame after a modal closes draws no ImGui,
+# and ImGui's keyboard capture from the modal's last frame must not outlive
+# it: the next game key and shortcut act at once, with no mouse move.
+mod=cmd
+[ "$(uname)" = Darwin ] || mod=ctrl
+rm -f "$work/input.log"
+run tests/roms/inputrec.gba "" "1 frames 60
+2 key L down $mod
+3 frames 3
+4 key L up $mod
+5 sleep 300
+6 key Return down
+7 frames 3
+8 key Return up
+9 sleep 300
+10 key z down
+11 sleep 150
+12 key z up
+13 sleep 150
+14 key S down $mod
+15 frames 3
+16 key S up $mod
+17 sleep 500
+18 quit"
+check "z presses A after the notice" "$(masks)" "1 0"
+check "Quick Save after the notice writes a state" \
+      "$(ls "$work/home/.config/dingbat/states" 2>/dev/null | grep -c .)" "1"
 
 echo "picture fills the back buffer (pixels, not points)"
 # A hwverified ROM paints a verdict block in its bottom-right corner over a

@@ -1726,11 +1726,16 @@ proc render_imgui() =
     # Only igNewFrame drains ImGui's input queue, a few events a frame, so a
     # long keyboard-only session would leave a backlog the menu waits behind.
     # Drop it, and clear held keys (a release may be among what is dropped).
+    # Nothing shows, so nothing captures: the flags igNewFrame set while a
+    # modal or field was up would otherwise keep keys from the game.
     if app.io != nil:
       if not imgui_skipped:
         ImGuiIO_ClearInputKeys(app.io)
         ImGuiIO_ClearInputMouse(app.io)
       ImGuiIO_ClearEventsQueue(app.io)
+      app.io[].WantCaptureKeyboard = false
+      app.io[].WantCaptureMouse = false
+      app.io[].WantTextInput = false
     imgui_skipped = true
     return
   imgui_skipped = false
