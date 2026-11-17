@@ -530,6 +530,25 @@ Dots are dingbat's line dots; W is the first dot of the writing M-cycle
 - Clean-room: derived from the test ROMs' frames and dingbat's own trace
   runs; no emulator source consulted.
 
+### The background column after a window abort (DMG)
+- Default: `WIN_ABORT_COL_LEAD = 1`, `WIN_ABORT_PUSH_POS = true` (`gb.nim`;
+  `fetcher_window_abort`).
+- Rule: the abort's map read takes the background column under the pixel
+  one right of where the last pushed tile ended, `(P + 1) div 8`; while the
+  window has pushed nothing, P is where the background's own pushes had
+  reached before the start emptied the FIFO. The column counter restarts
+  from the screen position, `(lx + FIFO size + 1) div 8`, which is the same
+  number once the window has pushed and one less when it has not, so in
+  that case the read's column is fetched twice.
+- Evidence: DocBoy `dmg/ppu/visual/window_bg_reprise_wx*` (the lead) and
+  `window_turn_off_*` (all 43; three put the fall on the window's first map
+  read and need P; the 22 rows of both families whose fall lands on a
+  map-read dot fail a background counter frozen at the window start, or one
+  the window's pushes advance). SameBoy (DMG B, black box) draws neither the old nor the new
+  picture of the three. No hardware capture (gb-failure-triage.md I6).
+- Clean-room: derived from the test ROMs' frames and dingbat's own trace
+  runs; no emulator source consulted.
+
 ## 3. Objects
 
 ### An object costs 6 dots plus a per-tile wait, per Pan Docs

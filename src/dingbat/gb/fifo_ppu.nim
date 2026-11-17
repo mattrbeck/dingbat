@@ -689,6 +689,8 @@ proc fifo_reset_bg*(ppu: GbFifoPpu; fetching_window: bool) =
     if fetching_window:
       echo "WINSTART ly=", ppu.ly, " dot=", ppu.cycle_counter, " lx=", ppu.lx,
            " wx=", ppu.wx, " scx=", ppu.scx
+  when WIN_ABORT_PUSH_POS:
+    if fetching_window: ppu.win_bg_push = ppu.lx + int32(ppu.fifo.size)
   fifo_clear(ppu.fifo)
   # A stop like an object fetch is (mixer_note_stop).
   mixer_note_stop(ppu)
@@ -750,6 +752,7 @@ proc fifo_reset_sprite*(ppu: GbFifoPpu) =
   ppu.obj_hi_dot = OBJ_HI_DOT_OFF
   when VDMA_M3_PORT != 0: ppu.vdma_tail_busy = 0'u32
   ppu.win_pre_old = false          # WIN_HEAD_WX_SCAN, per line
+  when WIN_ABORT_PUSH_POS: ppu.win_bg_push = int32.low
   # `lcdc2_flip` is NOT cleared here: the OAM scan reads it a few statements
   # later on this dot and retires it (fifo_get_sprites). LCDC.4's dot is
   # per-line too; its ADDRESS latch is a bus register and survives
@@ -900,13 +903,21 @@ proc fifo_wx_store_head*(ppu: GbFifoPpu; old_wx: uint8) {.noinline.} =
     # The pre-pixel slot was compared before the store, with the old value.
     ppu.win_lx = WIN_LX_OFF
 
-proc fetcher_window_abort(ppu: GbFifoPpu) {.noinline.} =
-  ## WIN_EN_ABORT's switch back to the background (see tick_bg_fetcher). Out
-  ## of line: rare, and inlined into the dot loop the DMG's column lead below
-  ## costs +0.1% retired instructions on every game.
+proc fetcher_window_abort(ppu: GbFifoPpu): int {.noinline.} =
+  ## WIN_EN_ABORT's switch back to the background (see tick_bg_fetcher);
+  ## returns the column this map read takes. Out of line: rare, and inlined
+  ## into the dot loop the DMG's column lead below costs +0.1% retired
+  ## instructions on every game.
   ppu.fetching_window = false
-  ppu.fetcher_x = int((ppu.lx + int32(ppu.fifo.size) +
-                       (if ppu.cgb: 0'i32 else: int32(WIN_ABORT_COL_LEAD))) div 8)
+  let lead = if ppu.cgb: 0'i32 else: int32(WIN_ABORT_COL_LEAD)
+  let pushed = ppu.fetcher_x > 0
+  ppu.fetcher_x = int((ppu.lx + int32(ppu.fifo.size) + lead) div 8)
+  result = ppu.fetcher_x
+  when WIN_ABORT_PUSH_POS:
+    # No window tile pushed yet: the read takes the column the background's
+    # own pushes reached; the counter above restarts from the screen.
+    if not pushed and not ppu.cgb and ppu.win_bg_push != int32.low:
+      result = max(result, int((ppu.win_bg_push + lead) div 8))
   fifo_arm_window(ppu)
   when WIN_EN_HOLD > 0:
     # `lx` has not moved since the start this undoes; re-arming WX - 7 on it
@@ -926,6 +937,7 @@ proc tick_bg_fetcher*(ppu: GbFifoPpu; gb: GB) =
       # The B of the first B01s cycle: latch SCX before the map offset reads it.
       if ppu.head_cycle and not ppu.smooth_scroll_sampled:
         fifo_sample_smooth_scroll(ppu)
+    var bg_col = ppu.fetcher_x
     # A CGB window start is revocable (CGB_WIN_EN_DEFER, gb.nim): LCDC.5 going
     # low during the six-dot startup fetch abandons the start and the line
     # pays only the dots the fetch had run (gambatte window/late_disable*).
@@ -944,7 +956,7 @@ proc tick_bg_fetcher*(ppu: GbFifoPpu; gb: GB) =
            ppu.cycle_counter < gb.we_on_dot)) and
          (CGB_WE_DISABLE_LATE == 0 or not ppu.cgb or
           ppu.cycle_counter >= gb.we_off_dot):
-        fetcher_window_abort(ppu)
+        bg_col = fetcher_window_abort(ppu)
     # The map-select bits as they stood CGB_MAP_LATENCY dots ago on a CGB
     # (gb.nim; the DMG is pixel-exact on both mealybug m3_lcdc_*_map_change).
     var map_bits = ppu.lcd_control and 0x48'u8
@@ -962,7 +974,7 @@ proc tick_bg_fetcher*(ppu: GbFifoPpu; gb: GB) =
         # Latched unconditionally: gating the store on scy_fetch_latch costs
         # more than the store (+0.56% on cgb-acid-hell). Only the read is gated.
         ppu.fetch_scy = ppu.scy
-        let o = ((ppu.fetcher_x + ppu.scx_tile) and 0x1F) +
+        let o = ((bg_col + ppu.scx_tile) and 0x1F) +
                 (((int(ppu.ly) + int(ppu.scy)) shr 3) * 32) and 0x3FF
         (m, o)
     when defined(gb_px_trace):

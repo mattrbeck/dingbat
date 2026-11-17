@@ -69,6 +69,7 @@ const
     ("ppu.obj_fix_*", "read only inside obj_fix_from..obj_hi_dot, both off after a load and per line"),
     ("ppu.map_old", "read only while the dot < map_dot, int32.low after a load and per line"),
     ("ppu.win_pad_lx", "read only while win_pad != 0; the load zeroes it"),
+    ("ppu.win_bg_push", "int32.low at every mode-3 entry, written by a mid-line window start before its abort reads it"),
     ("ppu.read_mode", "rewritten at the start of every PPU tick, before a CPU read samples it"),
     ("ppu.stat_wr_dot", "read only while a STAT write is parked (deferred_reg $FF41)"),
     ("ppu.stat_prev_mode", "read only within stat_chg_dot's window (-1024 after a load) or after a mode change"),

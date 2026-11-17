@@ -1537,7 +1537,7 @@ hardware question. Families:
   these are the DMG's columns or one unit's margin, since one console stands
   behind the tables. Hardware: the six ROMs on an MGB, pass/fail screens,
   with `ld_a_hl_round11` (row 0 at R = 8, DocBoy only) as a control.
-* **I6. DMG window glitches (9 left of 120).**
+* **I6. DMG window glitches (6 left of 120).**
   * Closed: `window_retrigger_pixel_glitch_*` (67) and
     `window_bg_reprise_wx{15,23}`. Each ROM turns the window off in the WY
     line's HBlank, so every later line has WX matching with LCDC.5 low.
@@ -1574,25 +1574,26 @@ hardware question. Families:
     its row moves. The decider is one photo on the MGB:
     `window_turn_off_nops22_sprite_x4`, line 8, x = 9..16 reads `32222222`
     (shades; DocBoy, dingbat now) or `00000222` (SameBoy, dingbat before).
-  * Left (3): `window_turn_off_nops22_sprite_x3_variation_{a,b}`,
-    `_alt_nops22_sprite_x3`. The WX match is on dot 107 of line 9 and the
-    write on dot 109, the window's first map read; dingbat aborts there and
-    resumes at the column under the pixel right of the push position,
-    `(9 + 0 + 1) div 8 = 1` (the start emptied the FIFO), so columns 1, 2, 3
-    follow from x = 9. The reference has 2, 2, 3: the column the
-    background's own fetch had reached (it pushed column 1 at x = 8), then
-    the screen-position column again. A model that passes all 43 and the
-    `window_bg_reprise_*` rows: the abort read takes `(P + 1) div 8`, P the
-    position the last pushed tile ended at (the background's, 16, while the
-    window has pushed nothing), and the counter continues from the screen
-    position. The 22 rows of the family whose fall lands on a map-read dot
-    separate it from the alternatives: a background counter frozen at the
-    window start fails `window_bg_reprise_wx{14,22}` and
-    `_alt_nops25_sprite_x{5,6,7}`, the window's pushes counted onto it fail
-    13. SameBoy (DMG B) draws neither picture and fails 17 more of the
-    family; no spec text or photo covers a fall on the window's first map
-    read. The decider: `window_turn_off_nops22_sprite_x3_variation_a` on the
-    MGB, line 9, x = 9..16: `30303030` (DocBoy) or `33333333` (dingbat).
+  * Closed (3): `window_turn_off_nops22_sprite_x3_variation_{a,b}`,
+    `_alt_nops22_sprite_x3`, the rest of that family. The WX match is on
+    dot 107 of line 9 and the write on dot 109, the window's first map read,
+    before the window has pushed anything. dingbat used to resume at the
+    column under the pixel right of the push position, `(9 + 0 + 1) div 8 =
+    1` (the start had emptied the FIFO), giving columns 1, 2, 3 from x = 9;
+    the reference has 2, 2, 3. The abort's read now takes the column the
+    background's own pushes had reached (its last tile ended at x = 16, so
+    `(16 + 1) div 8 = 2`) and the counter restarts from the screen position
+    as before, so column 2 is fetched twice (`WIN_ABORT_PUSH_POS`, gb.nim;
+    once the window has pushed, the two positions are one). The 22 rows
+    whose fall lands on a map-read dot (20 of this family, 2
+    `window_bg_reprise_*`) separate it from the alternatives: a background counter frozen at the window start fails
+    `window_bg_reprise_wx{14,22}` and `_alt_nops25_sprite_x{5,6,7}`, the
+    window's pushes counted onto it fail 13. Weaker than the 40 above: these
+    three rows are the only ones that reach it, SameBoy (DMG B) draws
+    neither picture (it fails 17 more of the family), and no spec text or
+    photo covers a fall on the window's first map read. The decider:
+    `window_turn_off_nops22_sprite_x3_variation_a` on the MGB, line 9, x =
+    9..16: `30303030` (DocBoy, dingbat now) or `33333333` (dingbat before).
   * Left (6): `window_wx0_scx{1..6}`. WX = 0 with SCX & 7 = s: DocBoy and
     SameBoy draw the window's 9-pixel black head as 9, 7, 6, 5, 4, 3, 2, 2
     for s = 0..7; dingbat draws 9, 8, 7, 6, 5, 4, 3, 2, which is Pan Docs,

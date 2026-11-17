@@ -937,6 +937,16 @@ const WIN_ABORT_COL_LEAD*     {.intdefine.} = 1
   ## DocBoy `dmg/ppu/visual/window_bg_reprise_wx*`. The CGB keeps 0: its
   ## `cgb/` twins abort one tile later (CGB_WE_DISABLE_LATE) and want the
   ## column 0 gives.
+const WIN_ABORT_PUSH_POS*     {.booldefine.} = true
+  ## DMG: an abort before the window has pushed a tile reads the background
+  ## column the background's own pushes had reached (the end of its last
+  ## pushed tile, `win_bg_push`, plus WIN_ABORT_COL_LEAD), while the column
+  ## counter still restarts from the screen position, so that column is
+  ## fetched twice. Once the window has pushed, the two positions are the
+  ## same. Pinned by DocBoy `dmg/ppu/visual/window_turn_off_nops22_sprite_x3_
+  ## variation_{a,b}` and `_alt_nops22_sprite_x3` (LCDC.5 falling on the
+  ## window's first map read); false fails those three.
+  ## docs/dev/gb-derivations.md, "The background column after a window abort".
 const WIN_OFF_BG_ROW*         {.booldefine.} = true
   ## DMG: a window tile's bitplane reads take the row from LCDC.5 as it stands
   ## at each read (window line counter if set, `(LY + SCY) and 7` if clear);
@@ -2297,6 +2307,9 @@ type
     # owes (fifo_pad_unpop), and the `lx` it settles them on. Per-line.
     win_pad*:             int32
     win_pad_lx*:          int32
+    # WIN_ABORT_PUSH_POS: where the background's pushes had reached when a
+    # mid-line window start emptied the FIFO. Per-line; int32.low = none.
+    win_bg_push*:         int32
 
   # ---- APU channels: the shared PSG (common/psg.nim) ----
   GbSoundChannel* = PsgChannel
