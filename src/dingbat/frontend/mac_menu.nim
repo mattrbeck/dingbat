@@ -32,6 +32,8 @@ proc dbm_free_aspect(nswindow: pointer)
 proc dbm_perform_key(chars: cstring; shift: cint): cint
 proc dbm_dump(): cstring
 proc dbm_pick(path: cstring): cint
+proc dbm_watch_blocked()
+proc dbm_track_for(ms: cint)
 {.pop.}
 proc c_free(p: pointer) {.importc: "free", header: "<stdlib.h>".}
 
@@ -40,6 +42,7 @@ var
   build_bar: proc(): seq[MenuItem]
   state_of: proc(cmd: MenuCmd; arg: int): MenuState
   opened = ""   # what the Open panel returned, until taken
+  on_blocked: proc()
 
 proc populate(menu: pointer; items: seq[MenuItem]) =
   for it in items:
@@ -85,6 +88,12 @@ proc dingbat_menu_action(cmd, arg: cint) {.exportc, cdecl.} =
 
 proc dingbat_open_panel_done(path: cstring) {.exportc, cdecl.} =
   if path != nil: opened = $path
+
+proc dingbat_main_loop_blocked() {.exportc, cdecl.} =
+  if on_blocked == nil: return
+  try: on_blocked()
+  except CatchableError as e:
+    echo "blocked: ", e.msg
 
 # ── For dingbat.nim ──
 
@@ -135,6 +144,18 @@ proc mac_free_aspect*(window: Window) =
 proc mac_menu_key*(key: string; shift: bool): bool =
   ## A Cmd shortcut through the menu bar, as AppKit takes a real one.
   dbm_perform_key(cstring(key), cint(ord(shift))) != 0
+
+proc mac_while_blocked*(cb: proc()) =
+  ## `cb` about every 100 ms while AppKit holds the main loop in a run loop of
+  ## its own: a menu open (inside SDL's event pump), a live resize, a modal
+  ## panel. Only what is safe between two loop iterations belongs in it.
+  on_blocked = cb
+  dbm_watch_blocked()
+
+proc mac_track_for*(ms: int) =
+  ## The GUI driver's stand-in for a menu held open: the run loop in AppKit's
+  ## menu-tracking mode for `ms`.
+  dbm_track_for(cint(ms))
 
 proc mac_menu_dump*(): string =
   ## Every menu as it would show now, one item a line.

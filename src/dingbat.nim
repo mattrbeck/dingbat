@@ -178,6 +178,8 @@ type AppState = ref object
   link_window:     bool
   link_window_min_h: float32  # its content's height last frame
   link:            LinkCable  # pairing state (frontend/link_cable.nim)
+  # Why the link failed while AppKit held the main loop; ended by the loop
+  link_lost:       string
   fullscreen:      bool
   fs_track:        FullscreenTrack  # the window's real state (window_restore.nim)
   aspect:          float32  # the window's ratio lock as last set (0 = free)
@@ -1705,6 +1707,7 @@ proc run_menu_cmds() =
       app.cfg.explorer_dir = parentDir(path)  # the panel opens there next time
       load_rom(path)
 
+var frames_run = 0  # frames emulated (the GUI driver's `link`)
 var imgui_skipped = false  # the last render_imgui returned before igNewFrame
 
 proc render_imgui() =
@@ -2245,6 +2248,8 @@ proc service_netlink() =
   ## link stays up).
   if app.netlink == nil: return
   try:
+    if app.link_lost.len > 0:
+      raise newException(NetLinkError, move app.link_lost)
     app.netlink.set_paused(app.paused)
     if app.paused: app.netlink.idle()
   except NetLinkError as e:
@@ -2254,6 +2259,18 @@ proc service_netlink() =
   if app.netlink.peer_done:
     echo "NETLINK: peer disconnected — continuing single-player"
     teardown_netlink("your friend disconnected")
+
+proc link_while_blocked() =
+  ## AppKit holds the main loop (a menu open, a live resize): the game stops
+  ## as for a pause, and the link goes on as a paused one does, answering
+  ## and telling the peer. The loop resumes it (service_netlink). Called
+  ## from inside SDL's event pump, where no link step is under way.
+  if app.netlink == nil or app.link_lost.len > 0: return
+  try:
+    app.netlink.set_paused(true)
+    app.netlink.idle()
+  except NetLinkError as e:
+    app.link_lost = e.msg
 
 proc link_mid_frame(): bool =
   ## The linked core stopped inside a frame, parked on the peer: states wait.
@@ -2520,7 +2537,13 @@ proc main() =
   when defined(gui_driver):
     gui_driver.home_dump = proc(): string =
       if app.home != nil and app.emu_kind == ekNone: app.home.dump() else: "none\n"
+    gui_driver.link_state = proc(): string =
+      let nl = app.netlink
+      "linked=" & $ord(nl != nil) &
+        " peer_paused=" & $ord(nl != nil and nl.peer_paused) &
+        " frames=" & $frames_run
   when defined(macosx):
+    mac_while_blocked(link_while_blocked)
     if native_menu:
       mac_menu_install(window, proc(): seq[MenuItem] = menu_bar(native = true),
                        menu_state, VERSION)
@@ -2761,6 +2784,7 @@ proc main() =
         trace_due = next_frame_due
         if trace_path.len > 0: trace_end = getPerformanceCounter()
         scheduler_frame_ran()
+      if emulated: inc frames_run
       if emulated and app.emu_kind == ekGBA and app.gba_emu != nil:
         note_gba_frame()
       if emulated and app.cfg.rewind and app.netlink == nil:

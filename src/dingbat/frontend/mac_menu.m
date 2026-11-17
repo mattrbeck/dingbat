@@ -15,6 +15,7 @@ extern void dingbat_menu_populate(void *menu, int top);
 extern int dingbat_menu_state(int cmd, int arg, int *checked);
 extern void dingbat_menu_action(int cmd, int arg);
 extern void dingbat_open_panel_done(const char *path);
+extern void dingbat_main_loop_blocked(void);
 
 // menu_model.ShownKey
 enum { SK_NONE, SK_TAB, SK_SHIFT_TAB, SK_F12 };
@@ -301,7 +302,26 @@ void dbm_free_aspect(void *nswindow) {
   ((__bridge NSWindow *)nswindow).contentResizeIncrements = NSMakeSize(1, 1);
 }
 
+// While AppKit runs its own loop (a menu open, a live resize, a modal panel)
+// the main loop stands still; this timer runs only in those modes.
+void dbm_watch_blocked(void) {
+  NSTimer *t = [NSTimer timerWithTimeInterval:0.1 repeats:YES block:^(NSTimer *timer) {
+    dingbat_main_loop_blocked();
+  }];
+  [NSRunLoop.mainRunLoop addTimer:t forMode:NSEventTrackingRunLoopMode];
+  [NSRunLoop.mainRunLoop addTimer:t forMode:NSModalPanelRunLoopMode];
+}
+
 // ── For the GUI driver (gui_driver.nim) ──
+
+// The main loop held in the run loop's menu-tracking mode for `ms`, as
+// while a menu is open
+void dbm_track_for(int ms) {
+  NSDate *until = [NSDate dateWithTimeIntervalSinceNow:ms / 1000.0];
+  while (until.timeIntervalSinceNow > 0)
+    CFRunLoopRunInMode((__bridge CFStringRef)NSEventTrackingRunLoopMode,
+                       until.timeIntervalSinceNow, false);
+}
 
 int dbm_perform_key(const char *chars, int shift) {
   NSEventModifierFlags f = NSEventModifierFlagCommand | (shift ? NSEventModifierFlagShift : 0);

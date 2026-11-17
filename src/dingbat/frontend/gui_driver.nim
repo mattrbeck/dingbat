@@ -62,6 +62,12 @@
 ##                                     macOS also `ns=<w>:<h> inc=<w>:<h>`, the
 ##                                     NSWindow's content aspect ratio and
 ##                                     resize increments (free: 0:0 and 1:1)
+##   link                              acked `ok linked=0|1 peer_paused=0|1
+##                                     frames=<n>`: the Link Cable's state, and
+##                                     frames emulated so far
+##   track <ms>                        macOS: the main loop held in AppKit's
+##                                     menu-tracking run loop for ms, as while
+##                                     a menu is open (acked after)
 ##   home dump <path.txt>              the home screen's tiles as last drawn,
 ##                                     one a line: `<name>|x y w h|missing or
 ##                                     present|picture or cart` (window points),
@@ -101,6 +107,7 @@ var
   mouse_x, mouse_y: cint
   mouse_in* = false
   home_dump*: proc(): string   ## set by the app: the home screen's tiles
+  link_state*: proc(): string  ## set by the app: `link`'s answer
   dropped* = ""       # a `drop` path for handle_input (a pushed SDL drop
                       # event cannot own its path)
   texts: seq[string]  # `text` strings, alive until handle_input has read them
@@ -362,6 +369,12 @@ proc run(window: Window; s: Step): bool =
   of "pad":
     ack(s.id, pad_cmd(w))
     return true
+  of "link":
+    ack(s.id, "ok " & (if link_state != nil: link_state() else: ""))
+    return true
+  of "track":
+    when defined(macosx): mac_track_for(parseInt(w[1]))
+    else: raise newException(ValueError, "track: macOS only")
   of "home":
     if w.len < 3 or w[1] != "dump": raise newException(ValueError, "home dump <path>")
     writeFile(w[2], if home_dump != nil: home_dump() else: "")
@@ -431,7 +444,7 @@ proc driver_poll*(window: Window) =
     pending.delete(0)
     try:
       if run(window, s):
-        if s.id.len > 0 and s.words[0] notin ["click", "state", "pad", "aspect"]: ack(s.id, "ok")
+        if s.id.len > 0 and s.words[0] notin ["click", "state", "pad", "aspect", "link"]: ack(s.id, "ok")
       else:
         waiting = s
         is_waiting = true
