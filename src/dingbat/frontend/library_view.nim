@@ -133,6 +133,36 @@ proc hairline(): float32 =
   let s = igGetIO_Nil().DisplayFramebufferScale.x
   if s > 0: 1 / s else: 1
 
+# imguin's bindings differ between the versions dev machines and CI hold
+# (thickness and flags swapped, popups returning bool): exactly one branch
+# of each compiles.
+proc add_rect(dl: ptr ImDrawList; a, b: ImVec2; col: uint32; rounding, thick: float32) =
+  let f = dflags(ImDrawFlags_RoundCornersAll)
+  when compiles(ImDrawList_AddRect(dl, a, b, col, rounding, f, thick)):
+    ImDrawList_AddRect(dl, a, b, col, rounding, f, thick)
+  else:
+    ImDrawList_AddRect(dl, a, b, col, rounding, thick, f)
+
+proc path_stroke(dl: ptr ImDrawList; col: uint32; thick: float32) =
+  let f = dflags(ImDrawFlags_None)
+  when compiles(ImDrawList_PathStroke(dl, col, f, thick)):
+    ImDrawList_PathStroke(dl, col, f, thick)
+  else:
+    ImDrawList_PathStroke(dl, col, thick, f)
+
+proc open_popup(id: string) =
+  when typeof(igOpenPopup_Str(cstring(id), 0)) is bool:
+    discard igOpenPopup_Str(cstring(id), 0)
+  else:
+    igOpenPopup_Str(cstring(id), 0)
+
+proc open_popup_on_right_click(id: string) =
+  let f = cint(ImGui_PopupFlags_MouseButtonRight)
+  when typeof(igOpenPopupOnItemClick(cstring(id), f)) is bool:
+    discard igOpenPopupOnItemClick(cstring(id), f)
+  else:
+    igOpenPopupOnItemClick(cstring(id), f)
+
 proc shade(dl: ptr ImDrawList; start: cint; a, b: ImVec2; top, bottom: uint32) =
   ## A top-to-bottom gradient over what was drawn since `start`
   igShadeVertsLinearColorGradientKeepAlpha(dl, start, dl.VtxBuffer.Size,
@@ -164,7 +194,7 @@ proc dashed_rect(dl: ptr ImDrawList; a, b: ImVec2; r: float32; col: uint32;
   for (c, a0) in [(v2(a.x + r, a.y + r), PI), (v2(b.x - r, a.y + r), 1.5 * PI),
                   (v2(b.x - r, b.y - r), 0.0), (v2(a.x + r, b.y - r), 0.5 * PI)]:
     ImDrawList_PathArcTo(dl, c, r, float32(a0), float32(a0 + 0.5 * PI), 0)
-    ImDrawList_PathStroke(dl, col, dflags(ImDrawFlags_None), thick)
+    dl.path_stroke(col, thick)
   proc run(p, q: ImVec2) =
     let len = max(abs(q.x - p.x), abs(q.y - p.y))
     var t = 0'f32
@@ -195,12 +225,6 @@ template with_size_value(size: float32; e: untyped): untyped =
 proc label_font(css: float32): float32 =
   ## The built-in font is drawn crisp at 13 px and its multiples
   if css >= 19.5: 26 else: 13
-
-proc item_min(): ImVec2 =
-  when compiles(igGetItemRectMin(addr result)): igGetItemRectMin(addr result)
-  else:
-    let p = igGetItemRectMin()
-    result = v2(p.x, p.y)
 
 # ──────────────────────────── The cartridge ────────────────────────────
 
@@ -424,7 +448,7 @@ proc add_button(v: LibraryView; dl: ptr ImDrawList; id: string; right, mid_y: fl
   let hot = igIsItemHovered(0)
   dl.fill_gradient(a, b, rgb(if hot: SURF_HOVER else: SURF3),
                    rgb(if hot: SURF3 else: SURF2), ui_px(8))
-  ImDrawList_AddRect(dl, a, b, border2(), ui_px(8), dflags(ImDrawFlags_RoundCornersAll), 1)
+  dl.add_rect(a, b, border2(), ui_px(8), 1)
   if icon_only:
     dl.plus_icon(v2((a.x + b.x) * 0.5, mid_y), ui_px(15), rgb(TEXT))
     igSetItemTooltip("Add a game")
@@ -449,8 +473,7 @@ proc primary_button(v: LibraryView; dl: ptr ImDrawList; id, label: string;
                            rgb(ACCENT, 0.10), h * 0.5, dflags(ImDrawFlags_RoundCornersAll))
   dl.fill_gradient(a, b, rgb(if hot: 0xD7C8FF'u32 else: ACCENT2),
                    rgb(if hot: ACCENT2 else: ACCENT), h * 0.5)
-  ImDrawList_AddRect(dl, a, b, rgb(ACCENT, 0.6), h * 0.5,
-                     dflags(ImDrawFlags_RoundCornersAll), 1)
+  dl.add_rect(a, b, rgb(ACCENT, 0.6), h * 0.5, 1)
   ImDrawList_AddLine(dl, v2(a.x + h * 0.5, a.y + hairline()),
                      v2(b.x - h * 0.5, a.y + hairline()), rgb(WHITE, 0.35), hairline())
   dl.text_at(v2(round(cx - ts.x * 0.5), round(a.y + (h - ts.y) * 0.5)),
@@ -480,8 +503,8 @@ proc draw_tile(v: LibraryView; dl: ptr ImDrawList; k: int; a: ImVec2;
     igSetItemTooltip("%s", cstring(
       if missing: g.display_name & " - the file is not there any more:\n" & g.path
       else: g.path.extractFilename()))
-  igOpenPopupOnItemClick("##menu", cint(ImGui_PopupFlags_MouseButtonRight))
-  if more_clicked: igOpenPopup_Str("##menu", 0)
+  open_popup_on_right_click("##menu")
+  if more_clicked: open_popup("##menu")
   if clicked:
     v.focus = g.path
     v.ring = false
@@ -551,12 +574,11 @@ proc draw_tile(v: LibraryView; dl: ptr ImDrawList; k: int; a: ImVec2;
     dl.dashed_rect(ta, tb, r, if lit: border2() else: rgb(WHITE, 0.12),
                    ui_px(4), ui_px(3))
   else:
-    ImDrawList_AddRect(dl, ta, tb, if lit: border2() else: border(), r,
-                       dflags(ImDrawFlags_RoundCornersAll), 1)
+    dl.add_rect(ta, tb, if lit: border2() else: border(), r, 1)
   if v.ring and v.focus == g.path:
     let o = ui_px(2) + ui_px(1.5)
-    ImDrawList_AddRect(dl, v2(ta.x - o, ta.y - o), v2(tb.x + o, tb.y + o), rgb(ACCENT),
-                       r + o, dflags(ImDrawFlags_RoundCornersAll), ui_px(3))
+    dl.add_rect(v2(ta.x - o, ta.y - o), v2(tb.x + o, tb.y + o), rgb(ACCENT),
+                       r + o, ui_px(3))
   if hot or menu_open:
     ImDrawList_AddCircleFilled(dl, more_c, more_r,
                                rgb(0, if more_hot or menu_open: 0.75 else: 0.55), 0)
@@ -665,8 +687,8 @@ proc draw_bar(v: LibraryView; dl: ptr ImDrawList; x0, y, width: float32; wrap: b
       let rr = (cb.y - ca.y) * 0.5
       ImDrawList_AddRectFilled(dl, ca, cb, if on: rgb(ACCENT, 0.12) else: rgb(SURF2), rr,
                                dflags(ImDrawFlags_RoundCornersAll))
-      ImDrawList_AddRect(dl, ca, cb, if on: rgb(ACCENT, 0.5) elif hot: rgb(WHITE, 0.24)
-                                     else: border2(), rr, dflags(ImDrawFlags_RoundCornersAll), 1)
+      dl.add_rect(ca, cb, if on: rgb(ACCENT, 0.5) elif hot: rgb(WHITE, 0.24)
+                                     else: border2(), rr, 1)
       let ty = round(cy + (h - ls.y) * 0.5)
       dl.text_at(v2(ca.x + ui_px(10), ty), if on: rgb(ACCENT) elif hot: rgb(TEXT) else: rgb(DIM),
                  s, bold = true)
@@ -805,7 +827,7 @@ proc draw*(v: LibraryView; rom_types: string) =
     ImDrawList_PathLineTo(dl, v2(ic.x - 7 * k, ic.y + 8 * k))
     ImDrawList_PathLineTo(dl, v2(ic.x + 7 * k, ic.y + 8 * k))
     ImDrawList_PathLineTo(dl, v2(ic.x + 7 * k, ic.y + 2 * k))
-    ImDrawList_PathStroke(dl, ink, dflags(ImDrawFlags_None), t)
+    dl.path_stroke(ink, t)
     let title = "Drop a game file anywhere in this window"
     let ts = calc_text_size(title)
     dl.text_at(v2(round(X(mid) - ts.x * 0.5), round(Y(body + 60 + 8.5) - ts.y * 0.5)),
