@@ -1055,11 +1055,11 @@ the no-switch `sound/*_ds_{2,4,6}`); on E it is the mirror image (22/46).
 ## I. DocBoy (`docboy/*`, first scored 2026-10-14)
 
 DocBoy's own suite, scored by its own runner's rules on DMG ABC and CPU CGB E
-(`tests/README.md`, "The DocBoy suite"): 8,765 / 9,186 at `DocboyRev` (49
+(`tests/README.md`, "The DocBoy suite"): 8,767 / 9,186 at `DocboyRev` (49
 more not scored, `DocboyNotScored`). Every failing ROM is in
 [`tests/results_docboy.md`](../../tests/results_docboy.md); every group that is
 not scored is in the "Deliberately not scored" ledger at the end of
-`tests/results.md`. The 421 failing tests are I1 79, I2 13, I3 180, I5 6,
+`tests/results.md`. The 419 failing tests are I1 79, I2 11, I3 180, I5 6,
 I6 49, I9 20, I11 15, I12 36, I13 10 and "Small" 13. I4's scored rows all
 pass; I7, I8 and I10 are closed. The 9,186 include DocBoy's rebuilds of 7 SameSuite channel 1 ROMs
 (`cgb/samesuite/apu/channel_1/*-cgbE`), which pass; the eighth,
@@ -1131,7 +1131,7 @@ hardware question. Families:
   DocBoy disables 640 `double_retrigger_*` tests (codes 0 and 1); its own
   build, run as a black box, fails 84 of them (SameBoy passes 37 of those
   84), so those expectations are not DocBoy's output; dingbat passes 484.
-* **I2. CH1 frequency sweep (13 left of 380).**
+* **I2. CH1 frequency sweep (11 left of 380).**
   `period_sweep_*` on DMG, CGB and double speed. Second opinion: SameBoy
   (black box, DMG B / CGB E) passed 301 of the 380 tests dingbat failed, so
   the family was dingbat's. Probe ROMs built from DocBoy's own code
@@ -1181,37 +1181,73 @@ hardware question. Families:
     rides on it (`double_trigger_*`); a clock's write-back reaches NR13/NR14
     on the 1 MHz edge after it, undoing a CPU write in between
     (`..._delay12243`).
+  * A clock takes NR10 as it stands after its own M-cycle in all three
+    things it does: the calculation it starts (above), the pace its timer
+    reloads with (`change_pace_4_to_6_during_recalc_round{0,1}_*` stop
+    alike; `_round2_*`, one M-cycle later, reload at pace 4 once and stop
+    two clocks earlier), and whether it writes
+    back: a step given on a step-0 clock's M-cycle makes it write the
+    adder, 0 if the adder holds nothing (`change_step_during_recalc_0_to_4_
+    alt_round{0,1}_*` alike; `_0_to_{4,6}_round1`). A step of 0 given on a
+    writing clock's M-cycle does not undo its write (`6_to_0_round2_*`).
+    Closed 2026-11-17 (CGB `..._alt_round1_2`, `..._pace_4_to_6_..._round1_1`);
+    SameBoy fails both, no hardware suite reaches the M-cycle.
   * DocBoy-only rules taken with the rest (SameBoy differs; they fall out of
     the same model): a trigger one tick into a calculation waits a tick, a
     trigger on its way holds the channel on, and a clock cuts a running
     calculation short (`change_period_nr14_during_recalc_delay14279..14284`:
     the frequency becomes 0 and the note plays on).
-  * Left (13):
+  * Left (11):
     * CGB `change_period_nr14_during_recalc{,_step0}_delay14284` (2; scored
-      again 2026-11-16): a retrigger 2 M-cycles before a sweep clock, the
-      clock wanted to take the new frequency, i.e. a CGB trigger lead of 4
-      where `SWEEP_TRIGGER_LEAD_T_CGB` is 8. The 8 comes from SameSuite
-      `channel_1_sweep_restart_2` (its apu README: "CPU-CGB-E – passes all
-      tests") and gambatte `ch1_init_reset_sweep_counter_timing_10` [cgb04c],
-      which is a CGB C. A rule "CGB, single speed, trigger before
-      frame-sequencer step 6 => lead 4, else 8" passes these two and every
-      other GB row, but it is a fit with no mechanism or citation behind it,
-      so it was not adopted. Not known: what separates these two from
-      SameSuite's sequence on a CGB E.
+      again 2026-11-16): a retrigger 8 cycles (2 M-cycles) before a sweep
+      clock, which DocBoy has the clock take, i.e. a CGB trigger lead of 4
+      where `SWEEP_TRIGGER_LEAD_T_CGB` is 8. Conflict with hardware, not
+      adopted (2026-11-17). `..._step0_delay14284_round1` is SameSuite
+      `channel_1_sweep_restart_2`'s subtest (`\2` = 1, `\1` = 1) with the
+      same registers (NR10 $10, NR13 $FF, $83 then $87), the same distance
+      to the clock (8 cycles), the same 512 kHz phase of write and clock
+      (both on the power-on grid, `GbApu.noise_phase`) and the same read
+      3 M-cycles after the write: SameSuite (CGB E hardware) reads $F1 there
+      and in all 16 columns, DocBoy wants $F0. gambatte `_10` [cgb] (CGB C
+      hardware) sits at the same 8 cycles. What still differs: the clock is
+      the frame sequencer's step 6 in DocBoy, step 2 in SameSuite and
+      gambatte, and SameSuite resets DIV between its two triggers. DocBoy's
+      own CGB rows all fit one lead of one 1 MHz tick at both speeds (4 at
+      single speed, 8 at double; an audit build of 2026-11-17, not kept,
+      passes the pair and fails no other DocBoy CH1 row), which is the DMG's lead: its model does not
+      split the machines here. That build fails SameSuite `channel_1_sweep_
+      restart_2` and gambatte `_10` [cgb]. A step-6-only lead of 4 passes
+      everything but has no mechanism (step 2 and step 6 are the same
+      DIV-APU edge pattern, bit 1 rising); only a CGB E run of DocBoy's
+      `step0_delay14284_round1` can settle it.
     * DMG `step6_period93_round2`, `step7_period247`, `change_step_6_to_5_
       period152_round2`, `change_direction_twice_period_overflow_round1_2`
       (4): DocBoy's DMG stops the channel when a clock's second calculation
-      lands exactly on $7FF; SameBoy does not. One hardware run settles it
-      (DocBoy's own ROMs on the GBP).
-    * CGB `change_step_during_recalc_0_to_4_alt_round1_2`,
-      `change_pace_4_to_6_during_recalc_round1_1` (2): an NR10 write on the
-      clock's own M-cycle reaching the clock's write-back; SameBoy fails
-      both.
+      lands exactly on $7FF (period 247: 2032 + 15; period 93: 2016 + 31),
+      where its CGB twins (`step7_period247` expects the period-248 count on
+      the CGB) and SameBoy do not. A trigger's check at $7FF does not stop
+      it (`disable_on_trigger_step6_period2016_round1_1`, `write_nr10_
+      overflow_period16_step7_round1`), so it would be a clock-only carry:
+      "the clock's second calculation overflows at $7FF on the DMG" passes
+      all four and breaks nothing (2026-11-17 audit build). Not adopted:
+      Pan Docs (Audio Details, "Obscure Behavior") runs the second check as
+      the same overflow check, "greater than 2047", and no mechanism gives
+      the clock's second calculation a carry the trigger's lacks. One DMG
+      run settles it (DocBoy's own ROMs on a DMG or GBP).
     * Double speed `delay12243_period_round2/4` (2: the duty phase after a
       trigger the clock's write-back overwrites; dingbat and SameBoy sit on
-      opposite sides of DocBoy's edge), `disable_on_triple_trigger_
-      step4_delay4_{2,3}_round1`, `change_step_7_to_0_during_recalc_delay16_
-      after_trigger` (3); SameBoy fails all five.
+      opposite sides of DocBoy's edge).
+    * Double speed `disable_on_triple_trigger_step4_delay4_{2,3}_round1`
+      (2): the third trigger arrives 2 ticks into the second one's
+      restarted calculation (arrival at 13 M-cycles after the first write,
+      the restart at 9); DocBoy has it restart at 15, as `delay4_{4,5}` do,
+      while 2 ticks into the FIRST trigger's calculation (the second
+      trigger, at 9 after a start at 5) restarts at once. A rule keyed on a
+      restarted calculation has no mechanism behind it; SameBoy fails both.
+    * Double speed `change_step_7_to_0_during_recalc_delay16_after_trigger`
+      (1): step 0 written 18 M-cycles after the trigger, before the 7th
+      tick (19) and the check (20); dingbat freezes the calculation, DocBoy
+      wants the stop. SameBoy fails it.
 
   The 14 double-speed CH1 tests outside the sweep are closed
   (`psg_channels.nim`: `sq_trigger`, `sq_starting`, `sq_reload_step`). Each

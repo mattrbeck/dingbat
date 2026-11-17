@@ -1952,8 +1952,35 @@ source consulted, no other emulator run.
   `..._step0_delay14284_round1` want 4 on the CGB and fail at 8 (scored,
   docs/dev/gb-failure-triage.md I2). They disagree with SameSuite (its apu
   README: CPU CGB E passes all tests) and gambatte's `[cgb]` rows, which are
-  CGB C. A step-6 gate (lead 4 before frame-sequencer step 6 at single
-  speed) passes every GB row but has no mechanism or citation; not adopted.
+  CGB C. `..._step0_delay14284_round1` is SameSuite's own subtest (same
+  registers, 8 cycles before the clock, same 512 kHz phase, read 3 M-cycles
+  on) before step 6 instead of step 2, with the opposite answer. A step-6
+  gate (lead 4 before frame-sequencer step 6 at single speed) passes every
+  GB row but has no mechanism or citation; not adopted. DocBoy's CGB rows
+  all fit the DMG's one-tick lead at both speeds, which SameSuite and
+  gambatte `_10` [cgb] refute at single speed.
+
+### A sweep clock samples NR10 after its own M-cycle
+- Claim: a CPU write to NR10 in the M-cycle of a channel 1 sweep clock
+  reaches all of the clock: the calculation it starts (its step), the pace
+  its timer reloads with, and its write-back, which a non-zero step given on
+  a step-0 clock's M-cycle turns on (the adder's output, 0 if it holds
+  nothing). A write-back already done at a non-zero step stays when step 0
+  is written on that M-cycle.
+- Default: `ch1_write` (NR10, a clock in flight: any `sweep_load_kind` but
+  `SWEEP_LOAD_ARRIVAL`) reloads `sweep_timer`; `SWEEP_LOAD_LATCH_STEP0` in
+  `ch1_sweep_run` writes the adder back (`common/psg_channels.nim`).
+- Evidence (DocBoy only, CGB E): `cgb/apu/ch1/ch1_period_sweep_change_pace_
+  4_to_6_during_recalc_round{0,1,2}_{1,2}` (pace 4 -> 6 one M-cycle before,
+  on, and after the clock: the first two stop at the same time, the third
+  two sweep clocks earlier), `change_step_during_recalc_0_to_4_alt_round
+  {0,1,2}_{1,2}` (step 0 -> 4 with a step-0 calculation's operand held:
+  round 0 and 1 stop alike, round 2 a pace period later), with
+  `change_step_during_recalc_0_to_{4,6}_round1` (the 0-writing clock) and
+  `6_to_0_round2_*` (the write-back kept) unchanged.
+- Without it: `..._pace_4_to_6_..._round1_1` and `..._0_to_4_alt_round1_2`
+  fail. SameBoy fails both; no hardware-verified test writes NR10 on a
+  clock's M-cycle (blargg, SameSuite APU, gambatte `sound` unchanged).
 
 ### An APU power-on samples the DIV-APU bit an M-cycle ahead
 - Claim: the NR52 power-on skips the first DIV-APU edge when the divider's tap

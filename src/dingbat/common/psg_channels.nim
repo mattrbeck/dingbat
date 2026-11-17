@@ -501,12 +501,20 @@ when not PSG_AGB:
             ch.sweep_load_at = l + 1
             ch.sweep_load_kind = SWEEP_LOAD_LATCH
         of SWEEP_LOAD_LATCH_STEP0:
+          # A step written on a step-0 clock's own M-cycle makes it a clock
+          # that writes back: 0 if the adder holds nothing (the clock that
+          # writes 0, below), else the adder's output, which the next
+          # calculation then starts from (change_step_during_recalc_0_to_4_
+          # alt_round1_*).
           if ch.shift != 0 and not ch.sweep_operand_valid:
-            # A step written on a step-0 clock's own M-cycle with nothing to
-            # write back: the clock becomes the one that writes 0 (below).
             ch.frequency = 0
             ch.frequency_shadow = 0
           else:
+            if ch.shift != 0 and ch1_sweep_sum(ch) <= 0x7FF:
+              ch.frequency = uint16(ch1_sweep_sum(ch))
+              ch.frequency_shadow = ch.frequency
+              ch.sweep_operand = 0
+              ch.sweep_operand_valid = false
             ch1_sweep_latch(ch, h, psg_edge_at(h, l - 1))
         else:
           # The sweep clock's calculation counts from the 1 MHz edge at or
@@ -748,6 +756,13 @@ proc ch1_write(ch: PsgSweepSquare; nr: int; val: uint8; h: PsgHost) =
     ch.shift        = val and 0x07
     if not ch.negate and ch.negate_used: ch.enabled = false
     when not PSG_AGB:
+      # A clock takes NR10 as it stands after its own M-cycle: until its
+      # calculation latches (any sweep_load_kind but a trigger's arrival is a
+      # clock in flight), a new pace is also the one its timer reloads with
+      # (DocBoy change_pace_4_to_6_during_recalc_round1_*).
+      if ch.sweep_load_at != PSG_NO_STEP and
+         ch.sweep_load_kind != SWEEP_LOAD_ARRIVAL:
+        ch.sweep_timer = if ch.sweep_period > 0: ch.sweep_period else: 8'u8
       # An add-mode NR10 write lets the adder's carry in for a moment where
       # its direction changes from subtraction (both machines), or on any
       # write over a non-zero step (DMG): an adder at $7FF then overflows and

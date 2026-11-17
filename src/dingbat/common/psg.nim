@@ -49,8 +49,10 @@ const SWEEP_TRIGGER_LEAD_T_CGB* {.intdefine.} = 8
   ## CGB, 8: 12 cycles before takes it, 8 before misses it; at double speed
   ## too, two M-cycles at either speed (gambatte `_7`..`_12` [cgb], SameSuite
   ## channel_1_sweep_restart_2, DocBoy cgb/double_speed/apu/ch1
-  ## `..._during_recalc_*delay1224*`). DocBoy's two single-speed CGB tests
-  ## that want 4 are not scored (the runner's DocboyNotScored).
+  ## `..._during_recalc_*delay1224*`). DocBoy's single-speed CGB
+  ## `..._delay14284` pair wants 4 and fails: its `step0_` member is
+  ## SameSuite's sequence at the same phase, before step 6 instead of 2
+  ## (docs/dev/gb-failure-triage.md I2).
 
 const PSG_WAVE_BANK* = 16
   ## Bytes in one wave RAM bank. The GB has one; the GBA two (SOUND3CNT_L).
