@@ -40,6 +40,7 @@ when defined(macosx):
   import dingbat/frontend/mac_menu
   import dingbat/frontend/mac_settings
   import dingbat/frontend/mac_alert
+  import dingbat/frontend/mac_scroll
 when defined(gui_driver):
   import dingbat/frontend/gui_driver
 import dingbat/common/cheats
@@ -2547,6 +2548,7 @@ proc handle_input() =
       app.running = false
 
     else: discard
+  when defined(macosx): mac_scroll_feed()
 
 # ──────────────────────────── FPS Title ────────────────────────────
 
@@ -2953,6 +2955,7 @@ proc main() =
       else: raise newException(ValueError, "app cmd|tab")
   when defined(macosx):
     mac_while_blocked(link_while_blocked)
+    mac_scroll_install(window)
     if native_menu:
       mac_menu_install(window, proc(): seq[MenuItem] = menu_bar(native = true),
                        menu_state, VERSION)

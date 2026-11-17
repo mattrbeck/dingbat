@@ -28,6 +28,8 @@
 #   find      Find the File relinks a missing game to its renamed file and
 #             keeps its save states; another game's file is refused
 #   labels    the in-window bar says Add a game and Close Game, never Open ROM
+#   scrolling macOS: a trackpad's points scroll the page as many points, a
+#             wheel mouse's line 40 (mac_scroll.nim)
 #
 # Needs SDL 3 and a display. From the repo root:
 #   tests/desktop_home_test.sh           (builds ./dingbat_gui_test)
@@ -570,6 +572,35 @@ check "Add a game" "$(grep -c '^  Add a game$' "$work/bar.txt")" "1"
 check "Close Game, greyed at home" \
       "$(grep -cF "  Close Game  $modname+W [off]" "$work/bar.txt")" "1"
 check "no Open ROM" "$(grep -c 'Open ROM' "$work/bar.txt")" "0"
+
+if [ "$(uname)" = Darwin ]; then
+  echo "scrolling (macOS: as AppKit hands it over)"
+  rm -rf "$home"
+  settings ""
+  python3 -c "import json, sys
+g = [dict(path='/nowhere/Game %02d.gba' % i, rom='Game %02d.gba' % i, system='GBA',
+          identity='%08X' % i, played=1794950000 - i) for i in range(1, 41)]
+json.dump(dict(version=1, sort='recent', games=g), open(sys.argv[1], 'w'))" "$cfg/library.json"
+  run "1 sleep 400
+2 move 300 300
+3 sleep 150
+4 home dump $work/s0.txt
+5 scroll -100 pt
+6 sleep 150
+7 home dump $work/s1.txt
+8 scroll -3 line
+9 sleep 150
+10 home dump $work/s2.txt
+11 scroll 37 pt
+12 sleep 150
+13 home dump $work/s3.txt
+14 quit"
+  y() { grep -m1 '^Game 01|' "$1" | cut -d'|' -f2 | cut -d' ' -f2; }
+  y0=$(y "$work/s0.txt") y1=$(y "$work/s1.txt") y2=$(y "$work/s2.txt") y3=$(y "$work/s3.txt")
+  check "a trackpad's 100 points scroll 100" "$((y0 - y1))" "100"
+  check "a wheel mouse's 3 lines scroll 120" "$((y1 - y2))" "120"
+  check "37 points back up scroll 37" "$((y3 - y2))" "37"
+fi
 
 if [ "$fails" -gt 0 ]; then echo "$fails failed"; exit 1; fi
 echo "all passed"
