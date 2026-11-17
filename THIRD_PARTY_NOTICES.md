@@ -25,7 +25,7 @@ licence asks to be kept.
 | glad OpenGL loader | public domain / CC0 | David Herberth |
 | NimYAML | MIT | Felix Krause |
 | stb_image, stb_image_write | public domain / MIT | Sean Barrett |
-| Inter 4.1, Regular and SemiBold (`src/dingbat/frontend/vendor/fonts/`, unmodified from the v4.1 release), the UI font on Linux and wherever the system's does not load | SIL Open Font License 1.1 (text below) | The Inter Project Authors |
+| Inter 4.1, Regular and SemiBold (`src/dingbat/frontend/vendor/fonts/`, unmodified from the v4.1 release), the UI font on Linux and Windows' fallback (not in the macOS build) | SIL Open Font License 1.1 (text below) | The Inter Project Authors |
 
 The UI's other fonts are the system's, read from it at run time and not
 distributed with dingbat: San Francisco and SF Mono on macOS, Segoe UI and

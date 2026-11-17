@@ -6,8 +6,10 @@
 ##   Linux    Inter (vendor/fonts, OFL; Linux has no standard UI font), and
 ##            ImGui's built-in ProggyClean for the monospaced text
 ##
-## Inter is compiled in everywhere: a face that does not load (no Segoe UI
-## under Wine) falls back to it, the monospaced one to ProggyClean.
+## Inter is compiled in on Windows and Linux: a face that does not load (no
+## Segoe UI under Wine) falls back to it, the monospaced one to ProggyClean.
+## macOS has SF everywhere, so no Inter: a face that does not load is
+## ImGui's ProggyClean.
 ##
 ## ImGui sizes a font by its line (ascent + descent). The UI code gives
 ## sizes as the web's CSS px, of the em: font_px turns one into ImGui's.
@@ -31,18 +33,20 @@ const
   MONO_PX* = 13'f32    ## debug windows, the overlay
   PROGGY_PX = 13'f32   ## ProggyClean is crisp at 13 px only
 
-const
-  INTER_REGULAR_TTF = staticRead("vendor/fonts/Inter-Regular.ttf")
-  INTER_SEMIBOLD_TTF = staticRead("vendor/fonts/Inter-SemiBold.ttf")
-let
-  INTER_REGULAR* = INTER_REGULAR_TTF
-  INTER_SEMIBOLD* = INTER_SEMIBOLD_TTF
+const INTER_DIR* = currentSourcePath().parentDir / "vendor" / "fonts"
+when not defined(macosx):
+  const
+    INTER_REGULAR_TTF = staticRead(INTER_DIR / "Inter-Regular.ttf")
+    INTER_SEMIBOLD_TTF = staticRead(INTER_DIR / "Inter-SemiBold.ttf")
+  let
+    INTER_REGULAR* = INTER_REGULAR_TTF
+    INTER_SEMIBOLD* = INTER_SEMIBOLD_TTF
 
 var
   faces*: array[Face, ptr ImFont]
   face_names*: array[Face, string]   ## what loaded, for the log
   line_em: array[Face, float32] = [1'f32, 1, 1]
-  proggy_mono = false
+  proggy: array[Face, bool]  ## drawn in ProggyClean, crisp at its one size
   system_data: array[Face, string]  ## the files' bytes, which ImGui reads for as long as it runs
 
 proc ttf_table(data: string; tag: string): int =
@@ -107,8 +111,7 @@ proc add_proggy(atlas: ptr ImFontAtlas): ptr ImFont =
     ImFontAtlas_AddFontDefault(atlas, nil)
 
 proc load_ui_fonts*(atlas: ptr ImFontAtlas) =
-  ## The three faces into ImGui's atlas, the regular one first (ImGui's
-  ## default font)
+  ## The three faces into ImGui's atlas; the regular one is ImGui's default
   proc put(f: Face; font: ptr ImFont; name: string; line: float32) =
     faces[f] = font
     face_names[f] = name
@@ -128,19 +131,25 @@ proc load_ui_fonts*(atlas: ptr ImFontAtlas) =
       except IOError: discard
       let font = atlas.add_ttf(system_data[f], name)
       if font != nil: put(f, font, name, ttf_line_em(system_data[f]))
-  # The globals themselves, not copies: ImGui reads them in place
-  if faces[fRegular] == nil:
-    put(fRegular, atlas.add_ttf(INTER_REGULAR, "Inter"), "Inter", ttf_line_em(INTER_REGULAR))
-  if faces[fBold] == nil:
-    put(fBold, atlas.add_ttf(INTER_SEMIBOLD, "Inter SemiBold"), "Inter SemiBold",
-        ttf_line_em(INTER_SEMIBOLD))
-  if faces[fMono] == nil:
-    put(fMono, atlas.add_proggy(), "ProggyClean", 1)
-    proggy_mono = true
+  when not defined(macosx):
+    # The globals themselves, not copies: ImGui reads them in place
+    if faces[fRegular] == nil:
+      put(fRegular, atlas.add_ttf(INTER_REGULAR, "Inter"), "Inter",
+          ttf_line_em(INTER_REGULAR))
+    if faces[fBold] == nil:
+      put(fBold, atlas.add_ttf(INTER_SEMIBOLD, "Inter SemiBold"), "Inter SemiBold",
+          ttf_line_em(INTER_SEMIBOLD))
+  var pc: ptr ImFont
+  for f in Face:
+    if faces[f] == nil:
+      if pc == nil: pc = atlas.add_proggy()
+      put(f, pc, "ProggyClean", 1)
+      proggy[f] = true
+  igGetIO_Nil().FontDefault = faces[fRegular]
 
 proc font_px*(css: float32; face = fRegular): float32 =
   ## ImGui's size, before the UI scale, of `face` with an em of `css` px
-  if face == fMono and proggy_mono: PROGGY_PX
+  if proggy[face]: PROGGY_PX
   else: css * line_em[face]
 
 proc push_font*(face: Face; css: float32) = igPushFont(faces[face], font_px(css, face))

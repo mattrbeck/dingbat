@@ -64,9 +64,10 @@ semibold) and SF Mono, rasterised by CoreText through an ImGui font loader
 (`frontend/mac_font.mm`; stb_truetype reads only SFNS.ttf's default
 instance, Display Regular, and SF may not be redistributed). Windows: Segoe
 UI, Segoe UI Semibold and Consolas from `%WINDIR%\Fonts`. Linux: Inter
-(`frontend/vendor/fonts`, OFL), compiled in everywhere as the fallback, and
-ImGui's ProggyClean for the monospaced text (debug windows, the overlay,
-cheat codes). Sizes are the web's CSS px (body 14, small 12, mono 13);
+(`frontend/vendor/fonts`, OFL), compiled in on Windows too as the fallback,
+and ImGui's ProggyClean for the monospaced text (debug windows, the overlay,
+cheat codes). The macOS build has no Inter; a face that does not load there
+is ProggyClean. Sizes are the web's CSS px (body 14, small 12, mono 13);
 ImGui sizes a font by its line, so `font_px` converts. ImGui 1.92 bakes the
 glyphs at the display's density and the UI scale, so text stays crisp on
 Retina and at 125 / 150 %. `tests/desktop_ui_shots.sh` takes screenshots of

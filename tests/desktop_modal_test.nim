@@ -8,7 +8,7 @@
 ## desktop_input_test).
 ## And every string the desktop draws has its characters in every UI font it
 ## may draw with (ui_fonts.nim): this platform's (SF on macOS, Segoe UI on
-## Windows) and the bundled Inter, which Linux and any fallback use; a
+## Windows) and the bundled Inter, which Linux and Windows' fallback use; a
 ## character one lacks draws as "?". src/dingbat.nim and every file under
 ## src/dingbat, found at compile time (the core's messages reach the
 ## notices, the Cheats and Link Cable windows too).
@@ -76,8 +76,14 @@ io.DeltaTime = 1.0 / 60.0
 # there; nothing here draws.
 io.BackendFlags = io.BackendFlags or cint(ImGui_BackendFlags_RendererHasTextures)
 load_ui_fonts(io.Fonts)
-let inter = [io.Fonts.add_ttf(INTER_REGULAR, "Inter"),
-             io.Fonts.add_ttf(INTER_SEMIBOLD, "Inter SemiBold")]
+# macOS builds no Inter in (SF is always there); it is read from its files
+when defined(macosx):
+  let inter_data = [readFile(INTER_DIR / "Inter-Regular.ttf"),
+                    readFile(INTER_DIR / "Inter-SemiBold.ttf")]
+else:
+  let inter_data = [INTER_REGULAR, INTER_SEMIBOLD]
+let inter = [io.Fonts.add_ttf(inter_data[0], "Inter"),
+             io.Fonts.add_ttf(inter_data[1], "Inter SemiBold")]
 doAssert inter[0] != nil and inter[1] != nil, "the bundled Inter does not load"
 igGetStyle().FontSizeBase = font_px(BODY_PX)
 
@@ -188,7 +194,7 @@ block the_fonts_load:
   when defined(macosx): doAssert face_names[fRegular] == "SF", face_names[fRegular]
   elif defined(windows): doAssert face_names[fRegular] == "Segoe UI", face_names[fRegular]
   else: doAssert face_names[fRegular] == "Inter", face_names[fRegular]
-  doAssert ttf_line_em(INTER_REGULAR) > 1 and ttf_line_em("not a font") == 0
+  doAssert ttf_line_em(inter_data[0]) > 1 and ttf_line_em("not a font") == 0
 
 igDestroyContext(nil)
 echo "ok"
