@@ -8,7 +8,8 @@
 ## drawn unseen for a frame each, so changing tab never resizes it. A height
 ## the player drags it to holds for the rest of the run (not saved: the next
 ## run fits it again); either way it never reaches past the window's bottom,
-## and grows back when the window does.
+## and grows back when the window does. Its width is clamped the same way,
+## to the window's right edge less the margin.
 
 import std/[strutils, tables]
 import imguin/cimgui
@@ -25,7 +26,8 @@ const BUF_SIZE = 512
 var tab_request* = -1  ## a tab to show at the next frame (gui_driver `app tab`)
 
 const TOP = 28.0f32      # where it first opens, in points: just under the menu bar
-const MARGIN = 12.0f32   # below it, at its tallest
+const MARGIN = 12.0f32   # below it, at its tallest; right of it, at its widest
+const WIDTH = 560.0f32
 
 type DrawnRow = object
   tab, label: string
@@ -38,7 +40,7 @@ var
   back_tab = 0           # the tab to show once measured
   shown_tab = 0          # the tab on screen
   settling = false       # measured, back_tab not yet on screen: still unseen
-  user_h = 0'f32         # a height the player dragged it to (0: none)
+  user_h, user_w = 0'f32  # a height, a width the player dragged it to (0: none)
   last_h, last_w, last_y = 0'f32  # the window as the last frame left it
   scrolls = false        # the tab pane has more than it shows
   drawn: seq[DrawnRow]   # the rows as last drawn (gui_driver `settings imgui`)
@@ -203,33 +205,41 @@ proc render*(ed: ConfigEditor) =
   let unseen = measuring >= 0 or settling
   igSetNextWindowPos(ImVec2(x: ui_px(60), y: ui_px(TOP)),
                      cint(ImGui_Cond_FirstUseEver), ImVec2(x: 0, y: 0))
-  igSetNextWindowSize(ImVec2(x: ui_px(560),
+  igSetNextWindowSize(ImVec2(x: min(ui_px(WIDTH), vp.WorkSize.x - ui_px(60 + MARGIN)),
                              y: min(ui_px(460), vp.WorkSize.y - ui_px(TOP + MARGIN))),
                       cint(ImGui_Cond_FirstUseEver))
-  var set_h = 0'f32
+  var set_h, set_w = 0'f32
   if not unseen and last_h > 0:
     let bottom = vp.WorkPos.y + vp.WorkSize.y - ui_px(MARGIN)
+    let right = vp.WorkPos.x + vp.WorkSize.x - ui_px(MARGIN)
     var top = last_y
-    # Too low for a usable window: up, as far as the window's top
-    if bottom - top < ui_px(160):
-      top = max(vp.WorkPos.y, bottom - ui_px(160))
-      igSetNextWindowPos(ImVec2(x: win_a.x, y: top), cint(ImGui_Cond_Always),
+    var left = win_a.x
+    # Too low or too far right for a usable window: up, left, as far as the
+    # window's edge
+    if bottom - top < ui_px(160): top = max(vp.WorkPos.y, bottom - ui_px(160))
+    if right - left < ui_px(320): left = max(vp.WorkPos.x, right - ui_px(320))
+    if top != last_y or left != win_a.x:
+      igSetNextWindowPos(ImVec2(x: left, y: top), cint(ImGui_Cond_Always),
                          ImVec2(x: 0, y: 0))
     let want = max(ui_px(80), min(if user_h > 0: user_h else: fit_h(), bottom - top))
-    if abs(want - last_h) > 0.5:
+    let want_w = max(ui_px(160), min(if user_w > 0: user_w else: ui_px(WIDTH), right - left))
+    if abs(want - last_h) > 0.5 or abs(want_w - last_w) > 0.5:
       set_h = want
-      igSetNextWindowSize(ImVec2(x: last_w, y: want), cint(ImGui_Cond_Always))
+      set_w = want_w
+      igSetNextWindowSize(ImVec2(x: want_w, y: want), cint(ImGui_Cond_Always))
   # Unseen: below one 8-bit step, not 0, at which Begin draws nothing at all
   if unseen: igPushStyleVar_Float(cint(ImGui_StyleVar_Alpha), 0.001)
   let shown = igBegin("Settings", addr ed.open,
                       if unseen: cint(ImGui_WindowFlags_NoInputs) else: 0)
   if shown and not igIsWindowCollapsed():
     let h = igGetWindowHeight()
-    # A height this frame did not ask for is the player's drag
-    if not unseen and last_h > 0 and abs(h - (if set_h > 0: set_h else: last_h)) > 0.5:
-      user_h = h
+    let w = igGetWindowWidth()
+    # A size this frame did not ask for is the player's drag
+    if not unseen and last_h > 0:
+      if abs(h - (if set_h > 0: set_h else: last_h)) > 0.5: user_h = h
+      if abs(w - (if set_w > 0: set_w else: last_w)) > 0.5: user_w = w
     last_h = h
-    last_w = igGetWindowWidth()
+    last_w = w
     var p: ImVec2
     when compiles(igGetWindowPos(addr p)): igGetWindowPos(addr p)
     else:

@@ -22,8 +22,8 @@
 #             library" (Resume, or From save, saved only then); as tall as
 #             its tallest tab where the window allows, else down to the
 #             window's bottom with its tab pane scrolling, re-fitted as the
-#             app window shrinks and grows; a height dragged to holds for
-#             the run
+#             app window shrinks and grows; as wide, 560, up to 12 from the
+#             window's right edge; a size dragged to holds for the run
 #   fullscreen (GUI_TEST_FULLSCREEN=1, macOS) a VISIBLE window taken
 #             fullscreen by AppKit's own toggle (the green button's), a Game
 #             Boy game loaded meanwhile, and back: the app's fullscreen flag
@@ -373,16 +373,18 @@ fi
 
 echo "Settings (ImGui): opening a game from the library; as tall as its tallest tab"
 yml="$work/home/.config/dingbat/dingbat.yml"
-# win <dump> <field>: the window line's y, h, bottom, scroll or fit
+# win <dump> <field>: the window line's x, y, w, h, bottom, scroll or fit
 win() {
   line=$(head -1 "$1")
   set -- "$2" $(echo "$line" | cut -d'|' -f2) "$(echo "$line" | cut -d'|' -f3)" \
          "$(echo "$line" | cut -d'|' -f4 | sed 's/fit //')"
   case $1 in
-    y) echo "$3" ;; h) echo "$5" ;; bottom) echo $(($3 + $5)) ;;
-    scroll) echo "$6" ;; fit) echo "$7" ;;
+    x) echo "$2" ;; y) echo "$3" ;; w) echo "$4" ;; h) echo "$5" ;;
+    bottom) echo $(($3 + $5)) ;; scroll) echo "$6" ;; fit) echo "$7" ;;
   esac
 }
+# wide <dump> <app window width>: 560, or up to 12 from its right edge
+wide() { room=$(($2 - 12 - $(win "$1" x))); echo $((room < 560 ? room : 560)); }
 # fits <dump> <app window height>: what the window should be, by the rule:
 # its tallest tab, no tab scrolling, or down to 12 above the bottom, where
 # the tab shown scrolls if it is taller (which tab is tallest is the font's)
@@ -449,6 +451,8 @@ $open_settings
 5 quit"
 check "480x320: down to the window's bottom, Keybindings scrolling" \
       "$(win "$work/s2.txt" h) $(win "$work/s2.txt" scroll)" "$(($(fits "$work/s2.txt" 320 | cut -d' ' -f1))) scroll"
+check "  and up to 12 from its right edge" "$(win "$work/s2.txt" w)" "$(wide "$work/s2.txt" 480)"
+check "  narrower than 560" "$(( $(win "$work/s2.txt" w) < 560 ))" "1"
 run "" "frame_size: 5
 " "1 sleep 300
 $open_settings
@@ -460,14 +464,28 @@ $open_settings
 9 sleep 300
 10 settings imgui $work/s5-big.txt
 11 quit"
-check "1200x800: the tallest tab, no scrolling" \
-      "$(win "$work/s5.txt" h) $(win "$work/s5.txt" scroll)" "$(win "$work/s5.txt" fit) noscroll"
+check "1200x800: the tallest tab, no scrolling, 560 wide" \
+      "$(win "$work/s5.txt" h) $(win "$work/s5.txt" scroll) $(win "$work/s5.txt" w)" \
+      "$(win "$work/s5.txt" fit) noscroll 560"
 check "  the app window made 360 tall: the Settings window fits in it" \
       "$(win "$work/s5-small.txt" h) $(win "$work/s5-small.txt" scroll)" \
       "$(fits "$work/s5-small.txt" 360)"
 check "  and 800 again: back to the tallest tab" \
       "$(win "$work/s5-big.txt" h) $(win "$work/s5-big.txt" scroll)" "$(win "$work/s5.txt" fit) noscroll"
-# The resize grip, dragged 80 up
+run "" "frame_size: 5
+" "1 sleep 300
+$open_settings
+4 window size 480 320
+5 sleep 300
+6 settings imgui $work/w-small.txt
+7 window size 1200 800
+8 sleep 300
+9 settings imgui $work/w-big.txt
+10 quit"
+check "  the app window made 480 wide: up to 12 from its right edge" \
+      "$(win "$work/w-small.txt" w)" "$(wide "$work/w-small.txt" 480)"
+check "  and 1200 again: 560" "$(win "$work/w-big.txt" w)" "560"
+# The resize grip, dragged 80 up and 60 left
 x2=$(( $(head -1 "$work/s5.txt" | cut -d'|' -f2 | cut -d' ' -f1) + $(head -1 "$work/s5.txt" | cut -d'|' -f2 | cut -d' ' -f3) - 4 ))
 y2=$(( $(win "$work/s5.txt" bottom) - 4 ))
 run "" "frame_size: 5
@@ -479,9 +497,9 @@ $open_settings
 7 sleep 100
 8 move $x2 $((y2 - 40))
 9 sleep 100
-10 move $x2 $((y2 - 80))
+10 move $((x2 - 60)) $((y2 - 80))
 11 sleep 100
-12 up $x2 $((y2 - 80))
+12 up $((x2 - 60)) $((y2 - 80))
 13 sleep 200
 14 settings imgui $work/u1.txt
 15 window size 720 360
@@ -497,14 +515,19 @@ $open_settings
 24 settings imgui $work/u3.txt
 25 quit"
 dragged=$(win "$work/u1.txt" h)
-check "dragged 80 shorter" "$(( $(win "$work/s5.txt" h) - dragged ))" "80"
-check "  that height holds through a smaller window and back" "$(win "$work/u2.txt" h)" "$dragged"
-check "  and when it opens again in the same run" "$(win "$work/u3.txt" h)" "$dragged"
+dragged_w=$(win "$work/u1.txt" w)
+check "dragged 80 shorter, 60 narrower" \
+      "$(( $(win "$work/s5.txt" h) - dragged )) $((560 - dragged_w))" "80 60"
+check "  that size holds through a smaller window and back" \
+      "$(win "$work/u2.txt" h) $(win "$work/u2.txt" w)" "$dragged $dragged_w"
+check "  and when it opens again in the same run" \
+      "$(win "$work/u3.txt" h) $(win "$work/u3.txt" w)" "$dragged $dragged_w"
 run "" "frame_size: 5
 " "1 sleep 300
 $open_settings
 4 settings imgui $work/u4.txt
 5 quit"
-check "  the next run fits it again" "$(win "$work/u4.txt" h)" "$(win "$work/s5.txt" fit)"
+check "  the next run fits it again" "$(win "$work/u4.txt" h) $(win "$work/u4.txt" w)" \
+      "$(win "$work/s5.txt" fit) 560"
 
 if [ "$fails" -eq 0 ]; then echo "all passed"; else echo "$fails failed"; exit 1; fi
