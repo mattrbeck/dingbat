@@ -2217,6 +2217,7 @@ proc linked_now(nl: NetLink): bool =
   ## Bind a new link to the app; drops rewind history, which would desync.
   if nl == nil: return false
   app.netlink = nl
+  app.link_lost = ""
   app.rewind.clear()
   app.rewinding = false
   true

@@ -9,6 +9,7 @@
 #   held      the joiner says "Your friend has paused." (peer_paused) and
 #             keeps the link; the host emulates nothing meanwhile
 #   after     both still linked, the pause gone, and both run frames again
+#   goodbye   the friend quits meanwhile: the link ends when the loop runs
 #
 # macOS only. From the repo root:
 #   tests/desktop_mac_link_test.sh       (builds ./dingbat_gui_test)
@@ -102,6 +103,26 @@ check "after: the host runs again" \
 check "after: the joiner runs again" \
       "$(( $(frames join 6) - $(frames join 4) > 60 ))" "1"
 check "no link lost" "$(cat "$work/host/out.log" "$work/join/out.log" | grep -c 'link lost')" "0"
+wait_for 10 stopped || echo "  (a window did not quit; killed)"
+
+echo "the friend quits while the menu is open"
+pids=""
+start host2 --listen "$((port + 100))"
+start join2 --connect "127.0.0.1:$((port + 100))"
+if ! wait_for 20 linked host2 || ! wait_for 20 linked join2; then
+  echo "  FAIL  the two windows did not link"
+  exit 1
+fi
+send host2 "1 sleep 500
+2 track 5000
+3 frames 5
+4 link"
+send join2 "1 sleep 2000
+2 quit"
+wait_for 20 acked host2 4
+send host2 "5 quit"
+check "the link ends once the loop runs" "$(field host2 4 linked)" "0"
+check "as the friend's goodbye" "$(grep -c 'peer disconnected' "$work/host2/out.log")" "1"
 wait_for 10 stopped || echo "  (a window did not quit; killed)"
 
 if [ "$fails" -gt 0 ]; then echo "$fails failed"; exit 1; fi
