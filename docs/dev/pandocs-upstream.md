@@ -15,7 +15,7 @@ needs hardware first.
 3. **HDMA5 readback after early termination** (CGB_Registers): the terminating
    write's own low 7 bits, not "remaining − 1" (SameSuite `dma/hdma_lcd_off`).
 4. **MBC3 RTC latch** (MBC3): any `$6000` write latches — CasualPokePlayer
-   `latch-rtc-test` capture 51/51 vs 28/51 for a bit-0 edge.
+   `latch-rtc-test` capture, which a bit-0 edge rule fails.
 5. **Printer status bits** (Gameboy_Printer): nothing to correct; the model
    follows the page's example. Worth adding: Game Boy Camera Gold polls
    STATUS about every 100 ms and waits on bit 1 alone.

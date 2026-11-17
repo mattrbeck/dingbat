@@ -83,8 +83,10 @@ pixels against `expected/` is settled by the photo only when it is structural
 Mooneye file-name convention (`README.markdown`, "Test naming"): `dmg`, `mgb`,
 `sgb`, `sgb2`, `cgb`, `agb`, `ags`; revision letters `DMG: 0, A, B, C / CGB: 0,
 A, B, C, D, E / AGB: 0, A, A E, B, B E`; group suffixes `G = dmg+mgb`,
-`S = sgb+sgb2`, `C = cgb+agb+ags`, `A = agb+ags`. Revision 0 is its own machine
-(`boot_div-cgb0` beside `boot_div-cgbABCDE`). "For now, the focus is on
+`S = sgb+sgb2`, `C = cgb+agb+ags`, `A = agb+ags`. Only four boot tests ship
+separate revision-0 ROMs (`boot_div-cgb0` beside `boot_div-cgbABCDE`); a bare
+token does not exclude revision 0, which the runner does not run (an open gap
+in the `NotScored` ledger). "For now, the focus is on
 DMG/MGB/SGB/SGB2, so not all tests pass on CGB/AGB/AGS."
 
 ## Rows deliberately not scored
@@ -332,8 +334,8 @@ other values disable RAM." dingbat: `(val and 0x0F) == 0x0A`.
 
 `latch-rtc-test` (`cpp.py`): "latches the RTC using a single write to the
 0x6000-0x7FFF region", 52 iterations of a random byte. The README publishes no
-conclusion; the latch register is modelled as 1 bit (0→1 edge of bit 0).
-Assumed beyond the reference image.
+conclusion; the reference has low→low, high→low and high→high writes all
+latching, so dingbat latches on any write (a bit-0 edge rule fails it).
 
 `rtc3test/tests.md` is the spec (all sub-tests pass on hardware; "these tests
 will fail if carried out in a platform with a significantly inaccurate clock,

@@ -564,8 +564,8 @@ proc build_blargg_tests(repo_dir: string): seq[TestDef] =
     for rom in find_roms(singles, ".gb"):
       # Standalone 7-timing_effect is a broken build: its verbose output
       # overruns the $A004..$BFFF text window into the $C000 copy of its own
-      # code and it never reports, on real DMG hardware too
-      # (Docheinstein/docboy#33). Test 7 is scored via the combined ROM below.
+      # code and it never reports (NotScored). Test 7 is scored via the
+      # combined ROM below.
       if subdir == "oam_bug" and rom.splitFile().name == "7-timing_effect":
         continue
       tests.add(TestDef(
@@ -722,8 +722,9 @@ proc mooneye_machines_for(base: string; cgb_rep = "cgbc"): seq[string] =
   ## representative revision, `cgb_rep`, since the ROM makes no per-revision
   ## claim. Gekkio's suite keeps the default CGB-C (its README's device table
   ## verifies on CPU CGB C and D); wilbertpol's fork passes CGB-E, see
-  ## build_wilbertpol_tests. Revision 0 is never in a fan-out: the suite ships
-  ## separate `-dmg0`/`-cgb0` ROMs. `ags` folds into `agb` (same SoC).
+  ## build_wilbertpol_tests. Revision 0 is not run under a bare token (an
+  ## open gap, NotScored); only four Gekkio boot tests ship `-dmg0`/`-cgb0`
+  ## ROMs. `ags` folds into `agb` (same SoC).
   if '-' notin base:
     return @[]
   let tok = base.rsplit('-', maxsplit = 1)[1]
@@ -1169,15 +1170,9 @@ proc build_age_tests(age_dir: string): seq[TestDef] =
   for rom in find_roms_recursive(age_dir, ".gb"):
     let rel = rom.relativePath(age_dir).changeFileExt("")
     let base = rom.splitFile().name
-    # `oam/oam-write-dmgC`: not scored. Its author's runner blacklists it (the
-    # AGE emulator's test-blacklist.txt names it, `_in-progress` and
-    # `speed-switch/caution`, nothing else of the suite), and the source
-    # marks its delay-2 line as depending on when the LCD was last switched
-    # off, changing when the test runs more frames. Verified on one
-    # DMG-CPU-08 in 2021. Every other line of the ROM passes here, and the
-    # CGB twin (oam-write-cgbBCE) is scored on all three revisions.
-    if rel == "oam" / "oam-write-dmgC":
-      continue
+    # `oam/oam-write-dmgC` is scored although the AGE emulator's own runner
+    # blacklists it (its source marks the delay-2 line as depending on when
+    # the LCD was last switched off); it passes whole on DMG C.
     # Screenshot ROMs are the ones with `<base>-<device>.png` siblings.
     var shots: seq[(string, string)]   # (device, png path)
     for png in find_roms(rom.parentDir, ".png"):
@@ -1897,12 +1892,14 @@ proc build_mbc_tests(): seq[TestDef] =
 const NotScored: seq[(string, string)] = @[
   # Every deliberate skip, so "why isn't X here?" is answerable from the
   # results page. Keep in sync with the skip sites (each names its builder).
-  ("blargg/oam_bug/7-timing_effect", "broken standalone build: its verbose " &
-    "output overruns the $A004..$BFFF text window into the $C000 copy of its " &
-    "own code, so it never reports — on real DMG hardware too (docboy#33: " &
-    "the maintainer reproduced the blank screen on a DMG through an " &
-    "Everdrive X7, and the shootout leaves it out for the same reason). " &
-    "Test 7 is scored through `blargg/oam_bug/combined` instead. " &
+  ("blargg/oam_bug/7-timing_effect",
+    "broken standalone build: its verbose output overruns the " &
+    "$A004..$BFFF text window into the $C000 copy of its own code, so it " &
+    "never reports. The shootout's test list comments it out (\"This test " &
+    "is broken.\"), and DocBoy's maintainer keeps an open issue on the " &
+    "hang (docboy#67, \"blargg's 7-timing_effect.gb hangs with a blank " &
+    "screen (Issue #33)\"; #33 itself no longer resolves). Test 7 is " &
+    "scored through `blargg/oam_bug/combined` instead. " &
     "(build_blargg_tests)"),
   ("daid/rom_and_ram, acid/which", "ship no reference image; the shootout's " &
     "test.py gives a test with no pass image the default result INFO, not " &
@@ -1917,26 +1914,32 @@ const NotScored: seq[(string, string)] = @[
     "so a `-C`/`-A` token's `ags` member folds into its `agb` arm rather " &
     "than inventing a machine. Everything else those tokens name IS run: " &
     "see mooneye_machines_for. (build_mooneye_tests / build_wilbertpol_tests)"),
-  ("mooneye/wilbertpol revision 0 inside a bare model token", "`-cgb` and " &
-    "`-dmg` fan out across the revisions dingbat models but deliberately " &
-    "stop short of revision 0, which the suite treats as its own machine and " &
-    "ships separate `-cgb0`/`-dmg0` ROMs for precisely because it diverges. " &
-    "Those separate ROMs ARE scored. (build_mooneye_tests)"),
-  ("age `oam/oam-write-dmgC`", "the AGE emulator's own runner blacklists it " &
-    "(its test-blacklist.txt names this ROM, `_in-progress` and " &
-    "`speed-switch/caution`, nothing else of the suite), and the source marks " &
-    "the delay-2 line as depending on when the LCD was last switched off, " &
-    "changing when the test covers more frames; verified on one DMG-CPU-08 " &
-    "in 2021. Every other line of the ROM passes here; the CGB twin " &
-    "`oam-write-cgbBCE` is scored on B, C and E. (build_age_tests)"),
-  ("gambatte `oamdma_src{FE00,FF00}_*read*` DMG rows (9)", "their verdict " &
-    "is a byte of uninitialised WRAM. That source fetches through the echo, " &
-    "so it reads $DE00/$DF00, and a colliding CPU read gets the DMA's latch " &
-    "rather than its own byte -- Pan Docs says WRAM is random on power-up and " &
-    "GB_POWERUP_WRAM_PATTERN honours that, so these encode gambatte's capture " &
-    "rig, not hardware. The non-colliding members of the same family " &
-    "(`busyread8000`, `busyreadFF4B`) and every CGB arm ARE scored. " &
-    "(build_gambatte_rows / gambatte_row_reads_powerup_wram)"),
+  ("mooneye/wilbertpol revision 0 under a bare model token",
+    "an open coverage gap, not a justified skip. mooneye_machines_for " &
+    "runs one representative revision per bare token: `G` -> dmgABC and " &
+    "mgb, `-dmg` -> dmgABC, `-cgb` and `C` -> cgbc (Gekkio) or cgbe " &
+    "(wilbertpol), plus agb for `C`. The suite's README defines the " &
+    "tokens by model (\"dmg = Game Boy\", \"cgb = Game Boy Color\") and " &
+    "does not exclude revision 0; separate revision-0 ROMs exist only for " &
+    "four Gekkio boot tests (`boot_div-dmg0`, `boot_hwio-dmg0`, " &
+    "`boot_regs-dmg0`, `misc/boot_div-cgb0`), which are scored. Run at " &
+    "revision 0, the 47 bare-token arms pass except, at dmg0, Gekkio " &
+    "`ppu/hblank_ly_scx_timing-GS` and `ppu/vblank_stat_intr-GS` and " &
+    "wilbertpol `boot_regs-dmg`, `gpu/hblank_ly_scx_timing-GS` and " &
+    "`gpu/vblank_stat_intr-GS`, and at cgb0 wilbertpol `ly_lyc-C`, " &
+    "`ly_lyc_0-C`, `ly_lyc_144-C`, `ly_lyc_153-C`, `ly_new_frame-C` and " &
+    "`ly00_mode1_2-C`. (build_mooneye_tests / build_wilbertpol_tests)"),
+  ("gambatte `oamdma_src{FE00,FF00}_*read*` DMG rows (9)",
+    "their verdict is uninitialised WRAM. That source fetches through the " &
+    "echo, so it reads $DE00/$DF00, and a colliding CPU read gets the " &
+    "DMA's latch rather than its own byte. No single fill value passes " &
+    "them: they need $FF at $DE00/$DE9E and $00 at $DF00/$DF45/$DF9E, and " &
+    "all-zero WRAM passes the 5 FF00 rows and fails the 4 FE00 rows. Pan " &
+    "Docs says WRAM is random on power-up and GB_POWERUP_WRAM_PATTERN " &
+    "honours that, so these record one console's power-up bytes, not a " &
+    "rule. The non-colliding members of the same family (`busyread8000`, " &
+    "`busyreadFF4B`) and every CGB arm ARE scored. (build_gambatte_rows / " &
+    "gambatte_row_reads_powerup_wram)"),
   ("gambatte `scx_during_m3_spx2{,_ds}`, `scx_attrib_during_m3_spx2_ds` " &
     "CGB rows (3)", "their only disagreement is x = 0 on lines 0-7, the " &
     "object's column 6 in OBJ palette 0 colour 2, which the ROM never " &
@@ -2004,9 +2007,6 @@ const NotScored: seq[(string, string)] = @[
     "green row was a gate that could not fail. (build_mooneye_tests)"),
   ("mooneye-wilbertpol utils/, logic-analysis/", "tools and analysis " &
     "captures, not pass/fail tests. (build_wilbertpol_tests)"),
-  ("rtc3test upstream single ROM", "needs menu input to select a sub-test; " &
-    "the shootout's three pre-split builds are scored instead. " &
-    "(build_shootout_tests)"),
   ("DocBoy: 645 rows its own manifests disable", "`\"enabled\": false`, " &
     "so DocBoy's runner never runs them and states no verdict for them: " &
     "640 `double_speed/apu/ch4` and 2 `double_speed/apu/ch3` CGB rows, " &
@@ -2024,166 +2024,102 @@ const NotScored: seq[(string, string)] = @[
     "0x080001A4, a branch from an odd halfword, expected 0x53, read 0x4E " &
     "here. Its first check, the ARM-to-Thumb branch before it, reads the " &
     "expected 0x3A. (build_alyosha_tests)"),
-  ("DocBoy manifests: 725 vendored ROMs of other suites", "everything " &
-    "outside `docboy/` in its manifests (blargg, mooneye, gbmicrotest, " &
-    "mealybug, SameSuite, daid, magen, acid2, little-things-gb, hacktix, " &
-    "firstwhite, rtc3test, cpp, zoomten, tepples). Those are scored from " &
-    "their upstream releases in the sections above, each by its own " &
-    "author's verdict; DocBoy's entries re-check them against DocBoy's own " &
-    "frame dumps, and 8 are DocBoy edits (`samesuite/apu/channel_1/*-cgbE`, " &
-    "expectations rewritten for CPU CGB E). (build_docboy_rows)"),
-  ("DocBoy: the KEY1 switch's IME-set leaf (8)", "`{,double_speed_}" &
-    "stop_key1_joypad0_interrupt1_ime1_*_div_round1`: `EI; STOP` with a " &
-    "request pending, the leaf Pan Docs' STOP chart calls \"The CPU glitches " &
-    "non-deterministically\". DocBoy wants the divider held 8 T; c-sp " &
-    "`speed-switch/caution/spsw-interrupts-cgbE`, checked on a CPU CGB E, " &
-    "measures 4 for the same sequence (`spsw_irq_leaf_hold_short`), and " &
-    "SameBoy (CGB E) fails these eight as dingbat does. The IME-clear leaf " &
-    "beside it IS scored. (build_docboy_rows, DocboyNotScored)"),
-  ("DocBoy: a joypad interrupt on key release (3)", "`joypad_{buttons,dpad}_" &
-    "interrupt_release` and `cpu/interactive_visual/stop_immediate_exit_" &
-    "joypad_interrupt` want the interrupt when the key is let go, from switch " &
-    "bounce (DocBoy's own comment), while its `joypad_keep_pressed_interrupt` " &
-    "wants exactly one for a press: a fixed bounce on every release only. Pan " &
-    "Docs (\"INT $60\") raises it on a high-to-low edge and describes bounce on " &
-    "a press as a mechanical effect, and gambatte's hardware note " &
-    "(test/hwtests/jpadirq.txt) has a real press bounce a varying number of " &
-    "times; a deterministic release model would change every game. SameBoy " &
-    "fails both release rows. (build_docboy_rows, DocboyNotScored)"),
-  ("DocBoy: $FEA0-$FEFF as RAM on the CGB E (29)", "13 rows in `cgb/memory` " &
-    "and 13 in `cgb_dmg_mode/memory` write the area outside modes 2/3 and read " &
-    "it back as RAM, `$FEC0-$FEFF` repeating 16 bytes (Pan Docs' description " &
-    "of CGB revisions 0-D). Pan Docs (\"FEA0-FEFF range\") has CGB E, AGB, AGS " &
-    "and GBP return the high nibble of the low address byte twice, and the AGS " &
-    "read exactly that under gbedge p0F (`$FEA0`..`$FEF8` = `AA AA BB BB .. FF " &
-    "FF`, `$FEA5` still `$AA` after writing `$5A`; docs/dev/flashcart-runbook.md). " &
-    "SameBoy (CGB E, either boot ROM) fails all 26. Three `cgb/hdma/gdma_source_" &
-    "wram_dma_source_ram_{160,256,480_bytes_overflow}` rows compare `$FE00-$FEFF` " &
-    "after an OAM DMA beside a GDMA, the area filled with `$EF` first: OAM " &
-    "matches byte for byte and only `$FEA0-$FEFF` differs (SameBoy fails them " &
-    "too). The two read-while-blocked " &
-    "rows per manifest ($FF) ARE scored. (build_docboy_rows, DocboyNotScored)"),
-  ("DocBoy: `boot_hram` (4)", "dmg (two), cgb, cgb_dmg_mode: every byte " &
-    "matches what running Nintendo's boot ROMs leaves (dingbat's skip-boot " &
-    "carries it) except `$FFFE`, which no boot ROM writes and DocBoy fixes " &
-    "(\"hardcoded ... even before boot rom\"); Pan Docs (\"Power Up Sequence\") " &
-    "has power-up HRAM random. SameBoy fails all four even through the real " &
-    "boot ROMs. (build_docboy_rows, DocboyNotScored)"),
-  ("DocBoy: MBC3 RTC latch on a $00-then-$01 pair only (3)", "`mbc3_rtc_" &
-    "latch_{0_to_2,1_to_0,1_to_1}` want no latch unless $00 is followed by $01; " &
-    "CasualPokePlayer's `latch-rtc-test` hardware capture has ANY write to " &
-    "`$6000-$7FFF` latch (51/51 of its cells under that rule, 23/51 under a " &
-    "bit-0 edge rule; mbc3.nim), and SameBoy fails these three as well. " &
+  ("DocBoy manifests: 717 vendored ROMs of other suites",
+    "everything outside `docboy/` in its manifests (blargg, mooneye, " &
+    "gbmicrotest, mealybug, SameSuite, daid, magen, acid2, " &
+    "little-things-gb, hacktix, firstwhite, rtc3test, cpp, zoomten, " &
+    "tepples) but the 8 SameSuite ROMs DocBoy edited. Those suites are " &
+    "scored from their upstream releases in the sections above, each by " &
+    "its own author's verdict; DocBoy's entries re-check them against " &
+    "DocBoy's own frame dumps. The 8 edits " &
+    "(`samesuite/apu/channel_1/*-cgbE`, expectations rewritten for CPU " &
+    "CGB E) are DocBoy rows, scored but for " &
+    "`channel_1_sweep_restart_2-cgbE` (its own entry). " &
+    "(build_docboy_rows)"),
+  ("DocBoy: the KEY1 switch's IME-set leaf (8)",
+    "`{,double_speed_}stop_key1_joypad0_interrupt1_ime1_*_div_round1`: " &
+    "`EI; STOP` with a request pending; DocBoy wants the divider held 8 " &
+    "T. AGE `speed-switch/caution/spsw-interrupts-cgbE` (source header: " &
+    "\"Verified: 2022-02-11 pass: CPU CGB E - CPU-CGB-06\"), scored and " &
+    "passing here, runs the same sequence and needs 4 " &
+    "(`spsw_irq_leaf_hold_short`): with an 8 T hold all 8 DocBoy rows " &
+    "pass and exactly that AGE row breaks. The two ROMs disagree by one " &
+    "M-cycle. (AGE's own runner blacklists `speed-switch/caution`; its " &
+    "WARNING.md reports the author's CGB E unstable for a while after " &
+    "running those ROMs several times in a row.) Pan Docs' STOP chart " &
+    "does not settle it: the rendered `imgs/stop_diagram.svg` puts \"The " &
+    "CPU glitches non-deterministically\" on IME disabled, the older " &
+    "`imgs/gb_stop.png` in the same repo on IME enabled. The IME-clear " &
+    "leaf beside it IS scored. (build_docboy_rows, DocboyNotScored)"),
+  ("DocBoy: a joypad interrupt on key release (3)",
+    "`joypad_{buttons,dpad}_interrupt_release` want the interrupt when " &
+    "the key is let go, and " &
+    "`cpu/interactive_visual/stop_immediate_exit_joypad_interrupt` wants " &
+    "a release to end a STOP (its comment, the only one on bounce: \"even " &
+    "on button release, because of switch bouncing\"), while " &
+    "`joypad_keep_pressed_interrupt` wants exactly one interrupt for a " &
+    "held press. Pan Docs (\"INT $60\") raises it on a high-to-low edge; " &
+    "gambatte's hardware note (test/hwtests/jpadirq.txt) has transitions " &
+    "\"multiple times per button press/release\", so release bounce is " &
+    "real but its count varies. Here the two release rows read the fail " &
+    "value and the STOP row never reports ($FFF0 stays $00). " &
     "(build_docboy_rows, DocboyNotScored)"),
-  ("DocBoy: the window tile under a mid-fetch LCDC.5 clear (43)",
-    "`dmg/ppu/visual/window_turn_off_*`: LCDC.5 cleared during the window's " &
-    "first tile fetch. On 40 rows the write lands between the window map read " &
-    "and its bitplane reads and DocBoy draws that tile from the BACKGROUND's " &
-    "row; mealybug's hardware notes have the disable \"take effect at the end " &
-    "of the current window tile\", and SameBoy (DMG B) draws dingbat's frame " &
-    "pixel for pixel on all 40; on the other 3 all three emulators differ. " &
-    "Hardware check pending: `window_turn_off_nops22_sprite_x4` on an MGB, " &
-    "line 8, x = 9..16 (docs/dev/gb-failure-triage.md I6). The window retrigger " &
-    "and resume rows ARE scored. (build_docboy_rows, DocboyNotScored)"),
-  ("DocBoy: single-unit OAM-bug margins (10)", "`oam_bug_ld_{hl,hli}_a_" &
-    "round3_{fe5c,fe5e_noisy,fe5f}` and `_round23_{fe46,fe47}`: in these " &
-    "truth tables of DocBoy's DMG the written bit as it lands in row 0 " &
-    "depends on row 0's old bits, or a word-3 write also rewrites word 2's " &
-    "low byte, where the sibling tables in the same position on other byte " &
-    "lanes (`fe58`..`fe5b`, `fe5d`) give the written bit, the maintainer marks " &
-    "`fe5b`/`fe5d`/`fe5e` noisy (hardware runs that did not repeat), and " &
-    "SameBoy gives the written bit on all ten. The other 258 rows of the " &
-    "family ARE scored. Hardware check pending: the ten on an MGB " &
-    "(docs/dev/gb-failure-triage.md I5). (build_docboy_rows, DocboyNotScored)"),
-  ("DocBoy: a CGB retrigger shortly before a sweep clock (2)",
-    "`cgb/apu/ch1/ch1_period_sweep_change_period_nr14_during_recalc_" &
-    "{delay14284,step0_delay14284_round1}` want the clock 2 M-cycles after a " &
-    "retrigger to take the new frequency. They disagree with SameSuite " &
-    "`channel_1_sweep_restart_2` (CGB hardware) and gambatte " &
-    "`sound/ch1_init_reset_sweep_counter_timing_10` [cgb04c] on the CGB's " &
-    "trigger lead (SWEEP_TRIGGER_LEAD_T_CGB = 8, where they want 4), and " &
-    "SameBoy (CGB E) fails both. The DMG rows of the same family ARE scored " &
-    "and pass (docs/dev/gb-failure-triage.md I2). (build_docboy_rows, " &
+  ("DocBoy: $FEA0-$FEFF as RAM on the CGB E (29)",
+    "13 rows in `cgb/memory` and 13 in `cgb_dmg_mode/memory` write the " &
+    "area outside modes 2/3 and read it back as RAM, `$FEC0-$FEFF` " &
+    "repeating 16 bytes. Pan Docs (\"FEA0-FEFF range\") gives that kind " &
+    "of answer only to CGB revisions 0-D (\"a unique RAM area, but is " &
+    "masked with a revision-specific value\"), and has CGB E, AGB, AGS " &
+    "and GBP return the high nibble of the low address byte twice, which " &
+    "dingbat follows. Under dingbat's CGB D model 14 of the 26 memory " &
+    "rows pass. Three " &
+    "`cgb/hdma/gdma_source_wram_dma_source_ram_{160,256,480_bytes_overflow}` " &
+    "rows compare `$FE00-$FEFF` after an OAM DMA beside a GDMA: OAM " &
+    "matches byte for byte and only `$FEA0-$FEFF` differs. Settling it " &
+    "needs a CGB E with a real cart (a flashcart answers for that range " &
+    "itself, docs/dev/hwprobe-questions.md). The two read-while-blocked " &
+    "rows per manifest ($FF) ARE scored. (build_docboy_rows, " &
     "DocboyNotScored)"),
-  ("DocBoy: compat-mode window frames under mid-line LCDC.5 pulses (51)",
-    "`cgb_dmg_mode/ppu/visual/m3_lcdc_win_en_change_multiple_wx_*`: mealybug's " &
-    "ROM (WX = LY, LCDC.5 pulsed low twice in mode 3) with DocBoy's tile data, " &
-    "on a CPU CGB E with a DMG cart. mealybug ships captures of this ROM for " &
-    "the DMG only, so no CGB picture of it was measured. dingbat matches " &
-    "SameBoy (CGB E) on all but 18 of the 7,344 lines; on about 520 DocBoy " &
-    "alone draws other bytes for a window tile cut short by LCDC.5 (cut k <= 4 " &
-    "dots after the WX match: the high plane is the tile index; k = 0: two " &
-    "colour-0 tiles), on 87 SameBoy alone differs. The same ROMs' timing twins " &
-    "(`m3_lcdc_win_en_change_multiple_wx_timing_*`, 90) ARE scored and pass; " &
-    "DocBoy disables two signed-addressing variants itself (\"glitch is " &
-    "different\"). (docs/dev/gb-failure-triage.md I3; build_docboy_rows, " &
+  ("DocBoy: `boot_hram` (4)",
+    "3 ROMs (dmg, cgb, cgb_dmg_mode; the dmg manifest lists its ROM " &
+    "twice) expect `$FFFE` = $4C (dmg) or $C0 (cgb, cgb_dmg_mode). Every " &
+    "other byte they check matches what Nintendo's boot ROMs leave " &
+    "(dingbat's skip-boot carries it); no boot ROM writes `$FFFE`, and " &
+    "DocBoy's source says \"FFFE seems to be hardcoded to C0 even before " &
+    "boot rom\" (4C on the DMG). Pan Docs (\"Power Up Sequence\"): \"The " &
+    "console's WRAM and HRAM are random on power-up.\" " &
+    "(build_docboy_rows, DocboyNotScored)"),
+  ("DocBoy: an MBC3 RTC latch on a bit-0 rising edge only (3)",
+    "`mbc3_rtc_latch_{0_to_2,1_to_0,1_to_1}`: DocBoy latches on a rising " &
+    "edge of bit 0 (0->1, 0->3 and 4->3 latch, the scored `0_to_1`, " &
+    "`0_to_3`, `4_to_3`; 0->2, 1->0 and 1->1 do not). The scored Shootout " &
+    "row `cpp/latch-rtc-test` has low->low, high->low and high->high " &
+    "writes all latching in its reference, and dingbat latches on any " &
+    "write to `$6000-$7FFF` (mbc3.nim): a bit-0 rule passes DocBoy's 3 " &
+    "and fails that row. Provenance as known: the capture's author states " &
+    "it was run on his own flashcart with a real MBC3+RTC chip; DocBoy's " &
+    "maintainer runs an Everdrive X7. (build_docboy_rows, " &
     "DocboyNotScored)"),
-  ("DocBoy: the CGB LCDC.4 tile-data glitch, DocBoy's variations (73)",
-    "`change_{bg,win}_tile_data_glitch_*` in `cgb_dmg_mode/ppu/visual` (63) and " &
-    "`cgb/ppu/visual` (10): LCDC.4 flipped across a bitplane read with objects " &
-    "and windows at other phases. Per line over the 73 frames: 1,562 lines are " &
-    "DocBoy's alone, 1,831 SameBoy's alone (SameBoy, CGB E, passes none), 954 " &
-    "three-way, 82 dingbat's alone. dingbat's glitch (CGB_TDSEL_GLITCH) is " &
-    "fitted to the hardware captures mealybug ships for CGB C and D " &
-    "(`m3_lcdc_tile_sel_change`, `_change2`, `_win_change`) and to " &
-    "cgb-acid-hell, all of which pass; the family's other 56 rows (26 " &
-    "`mealybug_shift*`, 24 `mealybug_var*`, 6 `sprites_nops*`) ARE scored and " &
-    "pass. (docs/dev/gb-failure-triage.md I3; build_docboy_rows, " &
+  ("DocBoy: fresh cart RAM reading $FF (1)",
+    "`dmg/mbc/mbc1/mbc1_initial_ram` wants every byte of a new MBC1 " &
+    "cart's RAM to read $FF before anything is written. Pan Docs (\"Power " &
+    "Up Sequence\"): \"external RAM in the cartridge, when present, " &
+    "usually contains random garbage data when first powered on.\" No " &
+    "suite in the tree reads cart RAM before writing it; mooneye's " &
+    "`emulator-only/mbc1/ram_*` read it disabled ($FF, open bus) and " &
+    "clear it first. dingbat keeps $00 for a cart with no save file; $FF " &
+    "stays a choice open to Matt (it would change every new save's first " &
+    "boot). (build_docboy_rows, DocboyNotScored)"),
+  ("DocBoy: SameSuite `channel_1_sweep_restart_2` rewritten for CGB E (1)",
+    "`cgb/samesuite/apu/channel_1/channel_1_sweep_restart_2-cgbE`: " &
+    "DocBoy's maintainer rebuilt SameSuite's ROM with a new expectation " &
+    "(docboy ccb5b248, \"Update samesuite tests roms not even passing on " &
+    "real hardware\"; its bytes differ from the bundle's). It fails here, " &
+    "while upstream `channel_1_sweep_restart_2`, scored on CGB E in " &
+    "SameSuite APU, passes, and SameSuite's apu README says \"CPU-CGB-E – " &
+    "passes all tests\": two CGB E claims for one test that cannot both " &
+    "be met. The other 7 edited ROMs are scored. (build_docboy_rows, " &
     "DocboyNotScored)"),
-  ("DocBoy: the CGB background column resumed after the window at WX = 25 (1)",
-    "`cgb/ppu/visual/window_bg_reprise_wx25`: the window disabled on the WY " &
-    "line, the background resuming where the fetcher stood. DocBoy differs in " &
-    "3 pixels on line 12 (x = 26, 32, 33); SameBoy (CGB E) draws dingbat's " &
-    "frame pixel for pixel, and the 17 CGB siblings (`_wx8`..`_wx24`, the " &
-    "same rule at every other WX) ARE scored and pass. (docs/gb-failure-" &
-    "triage.md I12; build_docboy_rows, DocboyNotScored)"),
-  ("DocBoy: the CGB panel across LCD off/on (13)",
-    "`cgb/ppu/visual/turn_off_y*`: \"Depending on the timing, the next lines " &
-    "are either kept, rendered, or cleared\" (the ROMs' own comment): the " &
-    "references keep on the panel the rows drawn before LCDC.7 went low and " &
-    "show later rows white or redrawn. Pan Docs (LCDC.7): \"When the display " &
-    "is disabled the screen is blank\", and on re-enabling \"the screen will " &
-    "stay blank during the first frame\", which dingbat's frames follow. " &
-    "SameBoy (CGB E) fails all 13. The three `_b` partners checked a frame " &
-    "later (`turn_off_y42_turn_on_y148_round2 #2`, `..._y52_wait144 #2`, " &
-    "`..._y52_wait150 #2`) ARE scored and pass. (docs/dev/gb-failure-triage.md " &
-    "I12; build_docboy_rows, DocboyNotScored)"),
-  ("DocBoy: fresh cart RAM reading $FF (1)", "`dmg/mbc/mbc1/mbc1_initial_ram` " &
-    "wants every byte of a new MBC1 cart's RAM to read $FF before anything " &
-    "is written. That is an emulator convention, not hardware: a new battery " &
-    "cart holds whatever its SRAM cells settled to (flash and EEPROM saves " &
-    "erase to $FF; static RAM does not), and Pan Docs says nothing. No suite " &
-    "in the tree reads cart RAM before writing it; mooneye's " &
-    "`emulator-only/mbc1/ram_*` read it disabled ($FF, open bus) and clear " &
-    "it first. dingbat keeps $00 for a cart with no save file; $FF stays a " &
-    "choice open to Matt (it would change every new save's first boot). " &
-    "SameBoy passes it. (docs/dev/gb-failure-triage.md I \"Small\"; " &
-    "build_docboy_rows, DocboyNotScored)"),
-  ("DocBoy: a serial slave shifting with SC = $00 (1)", "the two-player " &
-    "`dmg/serial/serial_two_players_basic_transfer_master + " &
-    "serial_two_players_basic_transfer_slave_sc_00`: the slave writes SC = " &
-    "$00 and expects the master's byte and the serial interrupt (its source: " &
-    "\"Serial transfer should start even with SC = 0\"). Pan Docs (\"Serial " &
-    "Data Transfer\"): the externally clocked side \"has to set SC's Bit 7 " &
-    "(that is, SC=$80) to enable the serial port\", which dingbat follows; " &
-    "Gekkio's SCLK experiment (8 external edges counted with the main clock " &
-    "stopped) does not say what bit 7 = 0 does. The SC = $80 pair " &
-    "(`..._master + ..._slave`) IS scored and passes. Hardware question " &
-    "row 24 in docs/dev/hwprobe-questions.md (the pair on two consoles and a " &
-    "cable). (build_docboy_rows, DocboyNotScored)"),
-  ("DocBoy: a VRAM DMA beside an object at X = 7 (1)", "`cgb/hdma/" &
-    "gdma_ppu_on_pixel_transfer_conflict_relaxed_64_bytes_sprite_y16_x07`: a " &
-    "GDMA across mode 3 of line 1 with one object at X = 7, the ROM checking " &
-    "which bytes the fetcher's VRAM reads cost it. Objects at X = 5, 6 and 7 " &
-    "all pay the same 6-dot penalty (Pan Docs' OBJ penalty algorithm); at " &
-    "X = 5 and 6 DocBoy, SameBoy (CGB E, VRAM dumped as a black box) and " &
-    "dingbat put the object's two plane reads on the same dots, and at " &
-    "X = 7 DocBoy alone moves them two dots later. SameBoy's VRAM equals " &
-    "dingbat's byte for byte from byte 7 on (the row checks 16 on). No spec " &
-    "text places them. The other 82 rows of the family (SCX 0..7, a window, " &
-    "one or two objects at X 1..50) ARE scored and pass (VDMA_M3_PORT). " &
-    "Hardware question 21 (gbedge p21 VDMABUS) covers the background map. " &
-    "(docs/dev/gb-failure-triage.md I4; build_docboy_rows, DocboyNotScored)"),
 ]
 
 proc provenance_line(): string =
@@ -3221,35 +3157,50 @@ proc generate_gambatte_detail_md(groups: seq[GambatteGroup]): string =
 # verdict, `--mode=docboy` (docboy_batch in dingbat_test.nim) reproduces
 # tests/testutils/testutils/runners.h. One results.md row per manifest
 # section; every row in tests/results_docboy.md. Only the ROMs under
-# `docboy/` are DocBoy's own; the manifests also vendor other suites, which
-# are scored from upstream (NotScored lists every skip).
+# `docboy/`, and its 8 edits of SameSuite ROMs, are DocBoy's own; the
+# manifests also vendor other suites, which are scored from upstream
+# (NotScored lists every skip).
 
 const DocboyRev = "01e04d3d9fcb4ea28d05f468771127b2f6bd3549"
 const DocboySuiteName = "Game Boy - DocBoy"
 const DocboyManifests = ["dmg", "cgb", "cgb_dmg_mode", "cgb_dmg_ext_mode"]
 
+proc docboy_samesuite_edit(rom: string): bool =
+  ## The 8 SameSuite channel 1 ROMs DocBoy rewrote for its CPU CGB E
+  ## (`samesuite/apu/channel_1/*-cgbE` in the cgb manifest), scored as its
+  ## own rows. Compared exactly, though the manifest gives them a colour
+  ## tolerance (an exact match passes under it too).
+  rom.startsWith("samesuite/apu/channel_1/") and rom.endsWith("-cgbE.gb")
+
 proc docboy_keep(rel: string): bool =
   ## The part of the repository the suite needs: the four manifests, the
-  ## reference PNGs and DocBoy's own ROMs. The rest of tests/roms is other
-  ## suites (and most of the 412 MB the archive extracts to).
+  ## reference PNGs, DocBoy's own ROMs and its edits of SameSuite's channel 1
+  ## ROMs (docboy_samesuite_edit). The rest of tests/roms is other suites (and
+  ## most of the 412 MB the archive extracts to).
   if not rel.startsWith("tests/"): return false
   let parts = rel.split('/')
   if parts.len == 3 and parts[1] == "config": return rel.endsWith(".json")
   if parts.len >= 3 and parts[1] == "results": return true
-  parts.len >= 4 and parts[1] == "roms" and parts[3] == "docboy"
+  if parts.len >= 4 and parts[1] == "roms" and parts[3] == "docboy": return true
+  parts.len >= 4 and parts[1] == "roms" and parts[2] == "cgb" and
+    docboy_samesuite_edit(parts[3 .. ^1].join("/"))
 
 proc ensure_docboy_tests(): string =
   ## DocBoy's tests/ tree at DocboyRev (a 19 MB GitHub archive), extracted
-  ## selectively: ~355 MB of it, ~10,000 32 KB ROMs.
+  ## selectively: ~355 MB of it, ~10,000 32 KB ROMs. A tree extracted before
+  ## the SameSuite edits were kept gets them added in place.
   let dir = RomCacheDir / "docboy-" & DocboyRev[0 ..< 7]
   let tests = dir / "tests"
-  if tree_intact(dir): return tests
-  if dirExists(dir): removeDir(dir)
+  let top_up = tree_intact(dir)
+  if top_up and fileExists(tests / "roms/cgb/samesuite/apu/channel_1" /
+                           "channel_1_sweep-cgbE.gb"):
+    return tests
+  if not top_up and dirExists(dir): removeDir(dir)
   echo "Downloading Docheinstein/docboy..."
   createDir(RomCacheDir)
   let pid = $getCurrentProcessId()
   let zipfile = RomCacheDir / "docboy-" & pid & ".zip"
-  let staging = RomCacheDir / "docboy-" & pid
+  let staging = if top_up: dir else: RomCacheDir / "docboy-" & pid
   download_file(&"https://github.com/Docheinstein/docboy/archive/{DocboyRev}.zip", zipfile)
   let prefix = "docboy-" & DocboyRev & "/"
   try:
@@ -3260,17 +3211,19 @@ proc ensure_docboy_tests(): string =
         let rel = path[prefix.len .. ^1]
         if not docboy_keep(rel): continue
         let dest = staging / rel
+        if top_up and fileExists(dest): continue
         createDir(dest.parentDir)
         writeFile(dest, reader.extractFile(path))
     finally:
       reader.close()
   except ZippyError, IOError, OSError:
     echo "Failed to extract: ", getCurrentExceptionMsg()
-    if dirExists(staging): removeDir(staging)
+    if not top_up and dirExists(staging): removeDir(staging)
     removeFile(zipfile)
     quit(1)
   removeFile(zipfile)
   stamp_tree(staging)
+  if top_up: return tests
   try:
     moveDir(staging, dir)
   except OSError:
@@ -3299,9 +3252,9 @@ type
     disabled, vendored, not_scored: int
 
 const DocboyNotScored: seq[string] = @[
-  # Row-name globs (`*` = any run of characters) of DocBoy rows whose
-  # expectation is not established hardware behaviour. Each family is one
-  # "DocBoy: ..." entry in NotScored, which gives the evidence.
+  # Row-name globs (`*` = any run of characters) of DocBoy rows left
+  # unscored. Each family is one "DocBoy: ..." entry in NotScored, which
+  # gives the evidence.
   # The KEY1 switch's IME-set leaf (8).
   "cgb/docboy/double_speed/interactive/*stop_key1_joypad0_interrupt1_ime1_*_div_round1",
   # A joypad interrupt on key release (3).
@@ -3323,217 +3276,14 @@ const DocboyNotScored: seq[string] = @[
   "cgb_dmg_mode/docboy/memory/not_usable_write_*",
   # $FFFE after the boot ROM (4).
   "*/docboy/boot/boot_hram*",   # the dmg manifest lists it twice (`#2`)
-  # MBC3 RTC latch on a $00-then-$01 pair only (3).
+  # An MBC3 RTC latch on a bit-0 rising edge only (3).
   "dmg/docboy/mbc/mbc3/mbc3_rtc_latch_0_to_2",
   "dmg/docboy/mbc/mbc3/mbc3_rtc_latch_1_to_0",
   "dmg/docboy/mbc/mbc3/mbc3_rtc_latch_1_to_1",
-  # The window's first tile when LCDC.5 clears mid-fetch (43 of the
-  # 107 `window_turn_off_*` rows; the other 64 pass and stay scored).
-  "dmg/docboy/ppu/visual/window_turn_off_alt_nops22_sprite_x3",
-  "dmg/docboy/ppu/visual/window_turn_off_alt_nops22_sprite_x4",
-  "dmg/docboy/ppu/visual/window_turn_off_alt_nops22_sprite_x5",
-  "dmg/docboy/ppu/visual/window_turn_off_alt_nops22_sprite_x6",
-  "dmg/docboy/ppu/visual/window_turn_off_alt_nops22_sprite_x7",
-  "dmg/docboy/ppu/visual/window_turn_off_alt_nops23_sprite_x0",
-  "dmg/docboy/ppu/visual/window_turn_off_alt_nops23_sprite_x1",
-  "dmg/docboy/ppu/visual/window_turn_off_alt_nops23_sprite_x2",
-  "dmg/docboy/ppu/visual/window_turn_off_alt_nops23_sprite_x3",
-  "dmg/docboy/ppu/visual/window_turn_off_alt_nops24_sprite_x2",
-  "dmg/docboy/ppu/visual/window_turn_off_alt_nops24_sprite_x3",
-  "dmg/docboy/ppu/visual/window_turn_off_alt_nops24_sprite_x4",
-  "dmg/docboy/ppu/visual/window_turn_off_alt_nops24_sprite_x5",
-  "dmg/docboy/ppu/visual/window_turn_off_alt_nops24_sprite_x6",
-  "dmg/docboy/ppu/visual/window_turn_off_alt_nops24_sprite_x7",
-  "dmg/docboy/ppu/visual/window_turn_off_alt_nops25_sprite_x0",
-  "dmg/docboy/ppu/visual/window_turn_off_alt_nops25_sprite_x1",
-  "dmg/docboy/ppu/visual/window_turn_off_nops22_sprite_x3_variation_a",
-  "dmg/docboy/ppu/visual/window_turn_off_nops22_sprite_x3_variation_b",
-  "dmg/docboy/ppu/visual/window_turn_off_nops22_sprite_x4",
-  "dmg/docboy/ppu/visual/window_turn_off_nops22_sprite_x4_variation_a",
-  "dmg/docboy/ppu/visual/window_turn_off_nops22_sprite_x4_variation_b",
-  "dmg/docboy/ppu/visual/window_turn_off_nops22_sprite_x5",
-  "dmg/docboy/ppu/visual/window_turn_off_nops22_sprite_x5_variation_a",
-  "dmg/docboy/ppu/visual/window_turn_off_nops22_sprite_x5_variation_b",
-  "dmg/docboy/ppu/visual/window_turn_off_nops22_sprite_x6",
-  "dmg/docboy/ppu/visual/window_turn_off_nops22_sprite_x6_variation_a",
-  "dmg/docboy/ppu/visual/window_turn_off_nops22_sprite_x6_variation_b",
-  "dmg/docboy/ppu/visual/window_turn_off_nops22_sprite_x7",
-  "dmg/docboy/ppu/visual/window_turn_off_nops22_sprite_x7_variation_a",
-  "dmg/docboy/ppu/visual/window_turn_off_nops22_sprite_x7_variation_b",
-  "dmg/docboy/ppu/visual/window_turn_off_nops23_sprite_x0",
-  "dmg/docboy/ppu/visual/window_turn_off_nops23_sprite_x0_variation_a",
-  "dmg/docboy/ppu/visual/window_turn_off_nops23_sprite_x0_variation_b",
-  "dmg/docboy/ppu/visual/window_turn_off_nops23_sprite_x1",
-  "dmg/docboy/ppu/visual/window_turn_off_nops23_sprite_x1_variation_a",
-  "dmg/docboy/ppu/visual/window_turn_off_nops23_sprite_x1_variation_b",
-  "dmg/docboy/ppu/visual/window_turn_off_nops23_sprite_x2",
-  "dmg/docboy/ppu/visual/window_turn_off_nops23_sprite_x2_variation_a",
-  "dmg/docboy/ppu/visual/window_turn_off_nops23_sprite_x2_variation_b",
-  "dmg/docboy/ppu/visual/window_turn_off_nops23_sprite_x3",
-  "dmg/docboy/ppu/visual/window_turn_off_nops23_sprite_x3_variation_a",
-  "dmg/docboy/ppu/visual/window_turn_off_nops23_sprite_x3_variation_b",
-  # Single-unit OAM-bug margins (10).
-  "dmg/docboy/oam_bug/oam_bug_ld_hl_a_round3_fe5c",
-  "dmg/docboy/oam_bug/oam_bug_ld_hl_a_round3_fe5e_noisy",
-  "dmg/docboy/oam_bug/oam_bug_ld_hl_a_round3_fe5f",
-  "dmg/docboy/oam_bug/oam_bug_ld_hli_a_round3_fe5c",
-  "dmg/docboy/oam_bug/oam_bug_ld_hli_a_round3_fe5e_noisy",
-  "dmg/docboy/oam_bug/oam_bug_ld_hli_a_round3_fe5f",
-  "dmg/docboy/oam_bug/oam_bug_ld_hl_a_round23_fe46",
-  "dmg/docboy/oam_bug/oam_bug_ld_hl_a_round23_fe47",
-  "dmg/docboy/oam_bug/oam_bug_ld_hli_a_round23_fe46",
-  "dmg/docboy/oam_bug/oam_bug_ld_hli_a_round23_fe47",
-  # A CGB trigger 2 M-cycles before a sweep clock (2).
-  "cgb/docboy/apu/ch1/ch1_period_sweep_change_period_nr14_during_recalc_delay14284",
-  "cgb/docboy/apu/ch1/ch1_period_sweep_change_period_nr14_during_recalc_step0_delay14284_round1",
-  # Compat-mode window frames under mid-line LCDC.5 pulses (51).
-  "cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_0000_win_0000",
-  "cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_0000_win_00ff",
-  "cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_0000_win_ff00",
-  "cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_0000_win_ffff",
-  "cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_00ff_win_0000",
-  "cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_00ff_win_00ff",
-  "cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_00ff_win_afff",
-  "cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_00ff_win_ff00",
-  "cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_00ff_win_ffff",
-  "cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_00ff_win_ffff_nops6_sprites_x16",
-  "cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_00ff_win_ffff_nops6_sprites_x16_sources",
-  "cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_00ff_win_ffff_nops6_sprites_x17",
-  "cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_00ff_win_ffff_nops6_sprites_x17_sources",
-  "cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_00ff_win_ffff_nops6_sprites_x17_sources_b",
-  "cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_00ff_win_ffff_nops6_sprites_x17_sources_c",
-  "cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_00ff_win_ffff_nops6_sprites_x18",
-  "cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_00ff_win_ffff_nops6_sprites_x18_sources",
-  "cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_00ff_win_ffff_nops6_sprites_x19",
-  "cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_00ff_win_ffff_nops6_sprites_x19_sources",
-  "cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_00ff_win_ffff_nops6_sprites_x19_sources_b",
-  "cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_00ff_win_ffff_nops6_sprites_x19_wly",
-  "cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_00ff_win_ffff_nops6_sprites_x20",
-  "cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_00ff_win_ffff_nops6_sprites_x20_sources",
-  "cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_00ff_win_ffff_nops6_sprites_x21",
-  "cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_00ff_win_ffff_nops6_sprites_x21_sources",
-  "cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_00ff_win_ffff_nops6_sprites_x21_sources_b",
-  "cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_00ff_win_ffff_nops6_sprites_x21_sources_c",
-  "cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_00ff_win_ffff_nops6_sprites_x21_sources_d",
-  "cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_00ff_win_ffff_nops6_sprites_x22",
-  "cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_00ff_win_ffff_nops6_sprites_x22_sources",
-  "cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_00ff_win_ffff_nops6_sprites_x23",
-  "cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_00ff_win_ffff_nops6_sprites_x23_sources",
-  "cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_00ff_win_ffff_nops6_sprites_x24",
-  "cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_00ff_win_ffff_win_tilenum_02",
-  "cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_ff00_win_0000",
-  "cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_ff00_win_00ff",
-  "cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_ff00_win_ff00",
-  "cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_ff00_win_ffff",
-  "cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_ffff_win_0000",
-  "cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_ffff_win_00ff",
-  "cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_ffff_win_ff00",
-  "cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_ffff_win_ffff",
-  "cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_ly10_second_tile_source_both_bytes",
-  "cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_ly10_second_tile_source",
-  "cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_ly32_to_40_tilenums",
-  "cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_ly38_lx31_extra_pixel_a",
-  "cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_ly38_lx31_extra_pixel_b",
-  "cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_ly38_lx31_extra_pixel_c",
-  "cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_ly38_lx31_extra_pixel_d",
-  "cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_ly38_lx31_extra_pixel_e",
-  "cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_ly38_lx31_extra_pixel_f",
-  # The CGB LCDC.4 tile-data glitch, DocBoy's variations (73).
-  "cgb/docboy/ppu/visual/change_bg_tile_data_glitch_sprites_nops26",
-  "cgb/docboy/ppu/visual/change_bg_tile_data_glitch_sprites_nops27",
-  "cgb/docboy/ppu/visual/change_bg_tile_data_glitch_sprites_nops28",
-  "cgb/docboy/ppu/visual/change_bg_tile_data_glitch_sprites_nops29",
-  "cgb/docboy/ppu/visual/change_bg_tile_data_glitch_sprites_nops30",
-  "cgb/docboy/ppu/visual/change_win_tile_data_glitch_window_nops26",
-  "cgb/docboy/ppu/visual/change_win_tile_data_glitch_window_nops27",
-  "cgb/docboy/ppu/visual/change_win_tile_data_glitch_window_nops28",
-  "cgb/docboy/ppu/visual/change_win_tile_data_glitch_window_nops29",
-  "cgb/docboy/ppu/visual/change_win_tile_data_glitch_window_nops30",
-  "cgb_dmg_mode/docboy/ppu/visual/change_bg_tile_data_glitch_mealybug_shift8_delay0_alt_sprite_data_var4",
-  "cgb_dmg_mode/docboy/ppu/visual/change_bg_tile_data_glitch_mealybug_var8",
-  "cgb_dmg_mode/docboy/ppu/visual/change_bg_tile_data_glitch_mealybug_var9",
-  "cgb_dmg_mode/docboy/ppu/visual/change_bg_tile_data_glitch_mealybug_var10",
-  "cgb_dmg_mode/docboy/ppu/visual/change_bg_tile_data_glitch_mealybug_var11",
-  "cgb_dmg_mode/docboy/ppu/visual/change_bg_tile_data_glitch_mealybug_var12",
-  "cgb_dmg_mode/docboy/ppu/visual/change_bg_tile_data_glitch_mealybug_var13",
-  "cgb_dmg_mode/docboy/ppu/visual/change_bg_tile_data_glitch_mealybug_var14",
-  "cgb_dmg_mode/docboy/ppu/visual/change_bg_tile_data_glitch_mealybug_var15",
-  "cgb_dmg_mode/docboy/ppu/visual/change_bg_tile_data_glitch_mealybug_var16",
-  "cgb_dmg_mode/docboy/ppu/visual/change_bg_tile_data_glitch_mealybug_var17",
-  "cgb_dmg_mode/docboy/ppu/visual/change_bg_tile_data_glitch_mealybug_var18",
-  "cgb_dmg_mode/docboy/ppu/visual/change_bg_tile_data_glitch_mealybug_var19",
-  "cgb_dmg_mode/docboy/ppu/visual/change_bg_tile_data_glitch_mealybug_var20",
-  "cgb_dmg_mode/docboy/ppu/visual/change_bg_tile_data_glitch_mealybug_var21",
-  "cgb_dmg_mode/docboy/ppu/visual/change_bg_tile_data_glitch_mealybug_var24",
-  "cgb_dmg_mode/docboy/ppu/visual/change_bg_tile_data_glitch_mealybug_var40",
-  "cgb_dmg_mode/docboy/ppu/visual/change_bg_tile_data_glitch_mealybug_var41",
-  "cgb_dmg_mode/docboy/ppu/visual/change_bg_tile_data_glitch_mealybug_var42",
-  "cgb_dmg_mode/docboy/ppu/visual/change_bg_tile_data_glitch_mealybug_var43",
-  "cgb_dmg_mode/docboy/ppu/visual/change_bg_tile_data_glitch_mealybug_var43_alt",
-  "cgb_dmg_mode/docboy/ppu/visual/change_bg_tile_data_glitch_mealybug_var43_alt2",
-  "cgb_dmg_mode/docboy/ppu/visual/change_bg_tile_data_glitch_mealybug_var43_alt3",
-  "cgb_dmg_mode/docboy/ppu/visual/change_bg_tile_data_glitch_mealybug_var43_alt4",
-  "cgb_dmg_mode/docboy/ppu/visual/change_bg_tile_data_glitch_mealybug_var44",
-  "cgb_dmg_mode/docboy/ppu/visual/change_bg_tile_data_glitch_mealybug_var44_alt",
-  "cgb_dmg_mode/docboy/ppu/visual/change_bg_tile_data_glitch_sprites_nops26",
-  "cgb_dmg_mode/docboy/ppu/visual/change_bg_tile_data_glitch_sprites_nops27",
-  "cgb_dmg_mode/docboy/ppu/visual/change_bg_tile_data_glitch_sprites_nops28",
-  "cgb_dmg_mode/docboy/ppu/visual/change_bg_tile_data_glitch_sprites_nops29",
-  "cgb_dmg_mode/docboy/ppu/visual/change_bg_tile_data_glitch_sprites_nops29_a",
-  "cgb_dmg_mode/docboy/ppu/visual/change_bg_tile_data_glitch_sprites_nops29_b",
-  "cgb_dmg_mode/docboy/ppu/visual/change_bg_tile_data_glitch_sprites_nops29_c",
-  "cgb_dmg_mode/docboy/ppu/visual/change_bg_tile_data_glitch_sprites_nops29_d",
-  "cgb_dmg_mode/docboy/ppu/visual/change_bg_tile_data_glitch_sprites_nops29_var1",
-  "cgb_dmg_mode/docboy/ppu/visual/change_bg_tile_data_glitch_sprites_nops29_var2",
-  "cgb_dmg_mode/docboy/ppu/visual/change_bg_tile_data_glitch_sprites_nops29_var3",
-  "cgb_dmg_mode/docboy/ppu/visual/change_bg_tile_data_glitch_sprites_nops29_var4_nops28",
-  "cgb_dmg_mode/docboy/ppu/visual/change_bg_tile_data_glitch_sprites_nops29_var4_nops29",
-  "cgb_dmg_mode/docboy/ppu/visual/change_bg_tile_data_glitch_sprites_nops29_var4_nops30",
-  "cgb_dmg_mode/docboy/ppu/visual/change_bg_tile_data_glitch_sprites_nops29_var4_nops31",
-  "cgb_dmg_mode/docboy/ppu/visual/change_bg_tile_data_glitch_sprites_nops29_var4_nops32",
-  "cgb_dmg_mode/docboy/ppu/visual/change_bg_tile_data_glitch_sprites_nops29_var4_nops85",
-  "cgb_dmg_mode/docboy/ppu/visual/change_bg_tile_data_glitch_sprites_nops29_var4_nops98",
-  "cgb_dmg_mode/docboy/ppu/visual/change_bg_tile_data_glitch_sprites_nops29_var4_nops99",
-  "cgb_dmg_mode/docboy/ppu/visual/change_bg_tile_data_glitch_sprites_nops29_var4_nops100",
-  "cgb_dmg_mode/docboy/ppu/visual/change_bg_tile_data_glitch_sprites_nops29_var4_nops101",
-  "cgb_dmg_mode/docboy/ppu/visual/change_bg_tile_data_glitch_sprites_nops29_var4_nops102",
-  "cgb_dmg_mode/docboy/ppu/visual/change_bg_tile_data_glitch_sprites_nops29_var5_nops30",
-  "cgb_dmg_mode/docboy/ppu/visual/change_bg_tile_data_glitch_sprites_nops29_var5_nops30_alt",
-  "cgb_dmg_mode/docboy/ppu/visual/change_bg_tile_data_glitch_sprites_nops29_var6_nops30",
-  "cgb_dmg_mode/docboy/ppu/visual/change_bg_tile_data_glitch_sprites_nops29_var10",
-  "cgb_dmg_mode/docboy/ppu/visual/change_bg_tile_data_glitch_sprites_nops30",
-  "cgb_dmg_mode/docboy/ppu/visual/change_bg_tile_data_glitch_sprites_nops34",
-  "cgb_dmg_mode/docboy/ppu/visual/change_bg_tile_data_glitch_sprites_nops35",
-  "cgb_dmg_mode/docboy/ppu/visual/change_bg_tile_data_glitch_sprites_nops36",
-  "cgb_dmg_mode/docboy/ppu/visual/change_bg_tile_data_glitch_sprites_nops37",
-  "cgb_dmg_mode/docboy/ppu/visual/change_bg_tile_data_glitch_sprites_nops38",
-  "cgb_dmg_mode/docboy/ppu/visual/change_win_tile_data_glitch_window_nops26",
-  "cgb_dmg_mode/docboy/ppu/visual/change_win_tile_data_glitch_window_nops27",
-  "cgb_dmg_mode/docboy/ppu/visual/change_win_tile_data_glitch_window_nops28",
-  "cgb_dmg_mode/docboy/ppu/visual/change_win_tile_data_glitch_window_nops29",
-  "cgb_dmg_mode/docboy/ppu/visual/change_win_tile_data_glitch_window_nops30",
-  # The CGB background column resumed after the window at WX = 25 (1).
-  "cgb/docboy/ppu/visual/window_bg_reprise_wx25",
-  # The CGB panel across LCD off/on (13).
-  "cgb/docboy/ppu/visual/turn_off_y42_turn_on_y148_round1",
-  "cgb/docboy/ppu/visual/turn_off_y42_turn_on_y148_round1 #2",
-  "cgb/docboy/ppu/visual/turn_off_y42_turn_on_y148_round2",
-  "cgb/docboy/ppu/visual/turn_off_y42_turn_on_y52_wait144",
-  "cgb/docboy/ppu/visual/turn_off_y42_turn_on_y52_wait150",
-  "cgb/docboy/ppu/visual/turn_off_y50_skip_y16_stall_nops50",
-  "cgb/docboy/ppu/visual/turn_off_y50_skip_y16_stall_nops51",
-  "cgb/docboy/ppu/visual/turn_off_y50_skip_y16_stall_nops99",
-  "cgb/docboy/ppu/visual/turn_off_y50_skip_y16_stall_nops100",
-  "cgb/docboy/ppu/visual/turn_off_y48_skip_y16_stall_nops50",
-  "cgb/docboy/ppu/visual/turn_off_y48_skip_y16_stall_nops51",
-  "cgb/docboy/ppu/visual/turn_off_y50_stall_nops50",
-  "cgb/docboy/ppu/visual/turn_off_y50_stall_nops51",
   # Fresh cart RAM reading $FF (1).
   "dmg/docboy/mbc/mbc1/mbc1_initial_ram",
-  # A serial slave shifting with SC = $00 (1).
-  "dmg/docboy/serial/serial_two_players_basic_transfer_master + serial_two_players_basic_transfer_slave_sc_00",
-  # A VRAM DMA beside an object at X = 7 (1).
-  "cgb/docboy/hdma/gdma_ppu_on_pixel_transfer_conflict_relaxed_64_bytes_sprite_y16_x07",
+  # DocBoy's CGB E rewrite of SameSuite channel_1_sweep_restart_2 (1).
+  "cgb/samesuite/apu/channel_1/channel_1_sweep_restart_2-cgbE",
 ]
 
 proc docboy_glob(pat, s: string): bool =
@@ -3591,7 +3341,8 @@ proc build_docboy_rows(tests: string; skips: var DocboySkips): seq[DocboyRow] =
     for section, entries in doc.pairs:
       for t in entries:
         let rom = t["rom"].getStr
-        if not rom.startsWith("docboy/"):
+        if not rom.startsWith("docboy/") and
+           not (manifest == "cgb" and docboy_samesuite_edit(rom)):
           inc skips.vendored
           continue
         if t.hasKey("enabled") and not t["enabled"].getBool:

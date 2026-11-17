@@ -447,13 +447,15 @@ Docheinstein/docboy (MIT) keeps its emulator's test ROMs under `tests/` with
 four JSON manifests naming each ROM's verdict: `config/dmg.json`, `cgb.json`,
 `cgb_dmg_mode.json`, `cgb_dmg_ext_mode.json`; ROM sources are in
 Docheinstein/docboy-test-suite. The runner fetches the archive at `DocboyRev`
-(19 MB) and extracts only the manifests, `results/` and the ROMs under
-`roms/*/docboy/` (~355 MB, ~10,000 ROMs). Only `docboy/` is DocBoy's own: the
-manifests also vendor other suites (725 entries), which are scored from
-upstream, and DocBoy disables 645 of its own entries; both are in the
-`NotScored` ledger. So are 243 of DocBoy's own rows whose expectation is not
-established hardware behaviour (`DocboyNotScored` in the runner: row-name
-globs, one ledger entry per family with its evidence).
+(19 MB) and extracts only the manifests, `results/`, the ROMs under
+`roms/*/docboy/` (~355 MB, ~10,000 ROMs) and DocBoy's 8 rebuilt SameSuite ROMs
+(`roms/cgb/samesuite/apu/channel_1/*-cgbE`, expectations rewritten for its CGB
+E). Those 8 and `docboy/` are DocBoy's own: the manifests also vendor other
+suites (717 entries), which are scored from upstream, and DocBoy disables 645
+of its own entries; both are in the `NotScored` ledger. So are 49 of DocBoy's
+own rows whose expectation conflicts with a source of equal standing or asserts
+a value Pan Docs calls random (`DocboyNotScored` in the runner: row-name globs,
+one ledger entry per family with its evidence).
 
 **Device.** DocBoy emulates one revision per family. CGB: the maintainer,
 docboy#42: "I'm supporting only CGB-E at the moment" (and the manifest's
@@ -492,8 +494,9 @@ modes; ticks count from the hand-off at `$0100`, the run stops at 100,000,000.
   "whiter than color #0" with the LCD off); dingbat draws a blank panel as
   shade 0, so a reference showing it cannot match.
 - `check_at_tick` appears in the manifests but DocBoy's `RunnerAdapter` never
-  passes it on, so it is ignored here too. `color_tolerance` and `palette`
-  appear only on vendored entries. `limit_speed` only paces RTC rows to the
+  passes it on, so it is ignored here too. `palette` appears only on
+  vendored entries, `color_tolerance` also on the SameSuite rebuilds, which
+  are compared exactly (an exact match passes under it). `limit_speed` only paces RTC rows to the
   wall clock when DocBoy is built with system time, which its CI is not.
 - The two two-player rows (`serial_two_players_*`) run both carts on the
   in-process cable and check both screens at frame granularity.
@@ -508,10 +511,12 @@ modes; ticks count from the hand-off at `$0100`, the run stops at 100,000,000.
 (`docboy/<manifest>/<section>`, gated on its pass count like gambatte's);
 every failing ROM, with the first differing pixel or the `$FFF0` value, is in
 `results_docboy.md`. Failing framebuffer rows run the full 100M ticks (about
-1,400 frames each): 350 of the suite's ~390 CPU-seconds (8,800 rows cost the
-other 40). CI sets `DINGBAT_DOCBOY_FB_MAX_TICKS=10000000`, which stops
-framebuffer rows at 10M ticks (~35 CPU-s for the red ones); every green
-framebuffer row passes by tick 4.84M, and the committed baseline comes from
+1,400 frames each) and take most of the suite's CPU time: about 240 CPU-s for
+the whole suite uncapped, 50 capped (2026-11-16, the dev Mac). CI sets
+`DINGBAT_DOCBOY_FB_MAX_TICKS=10000000`, which stops framebuffer rows at 10M
+ticks; every green
+framebuffer row passes by tick 6.81M (`channel_1_volume_div-cgbE`; DocBoy's
+own by 4.84M), and the committed baseline comes from
 the uncapped local run, so a row that only passes between the two limits
 would show up in CI as a regression rather than hide.
 

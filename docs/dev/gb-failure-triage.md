@@ -28,9 +28,8 @@ test whose ROM names several machines.
   maximum for their revision ("The device each suite is scored on",
   [`tests/README.md`](../../tests/README.md)).
 * Tests deliberately not scored: the runner's `NotScored` ledger, printed as
-  "Deliberately not scored" at the end of `tests/results.md`. Buckets B1
-  (AGE `oam/oam-write-dmgC`) and C3 (the three `spx2` tests) have entries in
-  it.
+  "Deliberately not scored" at the end of `tests/results.md`. Bucket C3 (the
+  three `spx2` tests) has an entry in it.
 * Reading a test as a dot count — gambatte family ladders, AGE cell tables,
   wilbertpol sample dumps, PNG diffs, the `-d:gb_*` trace builds, sweeps and
   the retired-instruction A/B:
@@ -316,8 +315,8 @@ questions for it are hwprobe rows 2 and 10 (`docs/dev/hwprobe-questions.md`).
 
 **Closed.** After an LCD enable, line 0's mode-3 edges sit 2 dots later
 against the CPU's grid than on any later line (`LCD_ON_LINE0_LOCK_LEAD = 2`,
-`LCD_ON_STAT_READ_LAG = 2`; ppu.nim). AGE `oam/oam-write-dmgC` is not
-scored.
+`LCD_ON_STAT_READ_LAG = 2`; ppu.nim). AGE `oam/oam-write-dmgC` is scored
+and passes (2026-11-16).
 
 Tests: AGE `oam/oam-read-dmgC-cgbBC@dmgC`,
 `oam-read-cgbE`, `vram/vram-read-{dmgC, cgbBCE@*}`; gambatte
@@ -379,15 +378,13 @@ again over the 2 -> 3 edge (dot 81 lands, 85 does not). Evidence: gambatte
 `oam_write_l0_e`/`l1_c`, mooneye `lcdon_write_timing-GS`. Knobs:
 `OAM_WRITE_*` (gb.nim, ppu.nim).
 
-`oam-write-dmgC` is in `NotScored` since 2026-09-21: its delay-2 line,
+`oam-write-dmgC` was in `NotScored` from 2026-09-21 (its delay-2 line,
 which the ROM's author marks as depending on when the LCD was last switched
-off, contradicts gambatte `postwrite_2_scx3` [dmg] on the open edge, and
-the AGE emulator's own runner blacklists the ROM. SameBoy's DMG model does
-reproduce the line, so it is modellable; the thread to pull is a
-slot-by-slot diff of SameBoy's bytes against dingbat's on that line;
-gambatte `prewrite_lcdoffset1_1` [cgb], which passed only because the
-start-of-cycle sample cancelled the `lcdoffset1` phase error the
-`preread_lcdoffset1_1` row still shows.
+off, failed, and the AGE emulator's own runner blacklists the ROM); it
+passes whole on DMG C and is scored again since 2026-11-16. Gambatte
+`prewrite_lcdoffset1_1` [cgb] passed only because the start-of-cycle sample
+cancelled the `lcdoffset1` phase error the `preread_lcdoffset1_1` row still
+shows.
 
 **The double-speed mode 2 read lock on CGB 0..C.**
 `oam-read-dmgC-cgbBC@{cgbab,cgbc}` failed on one line. At double speed a
@@ -1058,13 +1055,22 @@ the no-switch `sound/*_ds_{2,4,6}`); on E it is the mirror image (22/46).
 ## I. DocBoy (`docboy/*`, first scored 2026-10-14)
 
 DocBoy's own suite, scored by its own runner's rules on DMG ABC and CPU CGB E
-(`tests/README.md`, "The DocBoy suite"): 8,751 / 8,984 at `DocboyRev` (243
+(`tests/README.md`, "The DocBoy suite"): 8,758 / 9,186 at `DocboyRev` (49
 more not scored, `DocboyNotScored`). Every failing ROM is in
 [`tests/results_docboy.md`](../../tests/results_docboy.md); every group that is
 not scored is in the "Deliberately not scored" ledger at the end of
-`tests/results.md`. The 233 failing tests are I1 79, I2 11, I3 66, I6 6,
-I9 22, I11 15, I12 12, I13 10 and "Small" 12. I4, I5, I7, I8 and I10 are
-closed.
+`tests/results.md`. The 428 failing tests are I1 79, I2 13, I3 180, I4 1,
+I5 10, I6 49, I9 22, I11 15, I12 36, I13 10 and "Small" 13. I7, I8 and I10
+are closed. The 9,186 include DocBoy's rebuilds of 7 SameSuite channel 1 ROMs
+(`cgb/samesuite/apu/channel_1/*-cgbE`), which pass; the eighth,
+`channel_1_sweep_restart_2-cgbE`, is not scored (its expectation and
+SameSuite's both claim CGB E).
+
+A test is left out only when it is broken or conflicts with an equal-standing
+source in a way nothing in hand resolves; that SameBoy fails it too is no
+reason. Nine families (195 rows) left out before on weaker grounds, mostly
+SameBoy agreeing with dingbat, are scored again (2026-11-16) and appear below
+as open, failing families.
 
 Its expectations come from one emulator's model of the maintainer's own DMG
 and CGB-E, so a failing test is a lead, not a verdict. "Second opinion" below
@@ -1125,7 +1131,7 @@ hardware question. Families:
   DocBoy disables 640 `double_retrigger_*` tests (codes 0 and 1); its own
   build, run as a black box, fails 84 of them (SameBoy passes 37 of those
   84), so those expectations are not DocBoy's output; dingbat passes 484.
-* **I2. CH1 frequency sweep (11 left of 380; 2 not scored).**
+* **I2. CH1 frequency sweep (13 left of 380).**
   `period_sweep_*` on DMG, CGB and double speed. Second opinion: SameBoy
   (black box, DMG B / CGB E) passed 301 of the 380 tests dingbat failed, so
   the family was dingbat's. Probe ROMs built from DocBoy's own code
@@ -1180,12 +1186,18 @@ hardware question. Families:
     trigger on its way holds the channel on, and a clock cuts a running
     calculation short (`change_period_nr14_during_recalc_delay14279..14284`:
     the frequency becomes 0 and the note plays on).
-  * Not scored (2; `DocboyNotScored`, ledger "DocBoy: a CGB retrigger
-    shortly before a sweep clock"): CGB `change_period_nr14_during_
-    recalc{,_step0}_delay14284`. DocBoy's CGB sweep-trigger lead disagrees
-    with SameSuite `channel_1_sweep_restart_2` (CGB hardware) and gambatte
-    `ch1_init_reset_sweep_counter_timing_10` [cgb04c].
-  * Left (11):
+  * Left (13):
+    * CGB `change_period_nr14_during_recalc{,_step0}_delay14284` (2; scored
+      again 2026-11-16): a retrigger 2 M-cycles before a sweep clock, the
+      clock wanted to take the new frequency, i.e. a CGB trigger lead of 4
+      where `SWEEP_TRIGGER_LEAD_T_CGB` is 8. The 8 comes from SameSuite
+      `channel_1_sweep_restart_2` (its apu README: "CPU-CGB-E – passes all
+      tests") and gambatte `ch1_init_reset_sweep_counter_timing_10` [cgb04c],
+      which is a CGB C. A rule "CGB, single speed, trigger before
+      frame-sequencer step 6 => lead 4, else 8" passes these two and every
+      other GB row, but it is a fit with no mechanism or citation behind it,
+      so it was not adopted. Not known: what separates these two from
+      SameSuite's sequence on a CGB E.
     * DMG `step6_period93_round2`, `step7_period247`, `change_step_6_to_5_
       period152_round2`, `change_direction_twice_period_overflow_round1_2`
       (4): DocBoy's DMG stops the channel when a clock's second calculation
@@ -1233,11 +1245,11 @@ hardware question. Families:
 
   blargg, SameSuite APU 70/70, gambatte `sound`/`speedchange` and the GBA PSG
   tests are unchanged by these rules.
-* **I3. CGB compatibility-mode picture (66 left of 233; 114 not scored).**
-  Three groups: the boot ROM's palette table (left), and two kinds of
-  mid-mode-3 LCDC write in compat mode, `m3_lcdc_win_en_change_multiple_wx_*`
-  (timing tests closed, frames not scored) and
-  `change_{bg,win}_tile_data_glitch_*` (not scored).
+* **I3. CGB compatibility-mode picture (180 left of 233).**
+  Three groups: the boot ROM's palette table, and two kinds of mid-mode-3
+  LCDC write in compat mode, `m3_lcdc_win_en_change_multiple_wx_*` (timing
+  tests closed, 51 frames left) and `change_{bg,win}_tile_data_glitch_*` (63
+  left; their 10 CGB-mode twins are counted in I12).
   * Left (66, the palette table, which Matt keeps failing): 63
     `palettes_checksum_*`, `palettes_old_license_33_new_license_01_checksum_
     01`, and `change_bgp_or_bug_checksum_d1{,_first_dot}`, whose title
@@ -1269,32 +1281,43 @@ hardware question. Families:
     `visual/m3_lcdc_win_en_change_multiple_wx_*` frames the lines where the
     rise lands on a window map read (WX = 2, 3, 22, 23, 30, 31) end the
     window where DocBoy and SameBoy both end it. Those frames still do not
-    match (next point): they differ from SameBoy only on DocBoy's glitch
-    pixels.
-  * Not scored (51; ledger "DocBoy: compat-mode window frames under mid-line
-    LCDC.5 pulses"), the `visual/m3_lcdc_win_en_change_multiple_wx_*`
-    frames. Per line, dingbat matches SameBoy (CGB E) on all but 18 of the
-    51 x 144 rows; the rest are where DocBoy alone draws other bytes for a
-    window tile cut short by LCDC.5 (k <= 4: low plane fetched, high plane
-    the tile index; k = 0: two tiles of colour 0) and 87 rows where SameBoy
-    alone differs. mealybug's `m3_lcdc_win_en_change_multiple_wx` has no CGB
-    capture (DMG only), so nothing measured decides those bytes. One more
-    difference, which no test scores: on a k = 0 line (the match on the
+    match (next point).
+  * Left (51; scored again 2026-11-16), the
+    `visual/m3_lcdc_win_en_change_multiple_wx_*` frames: mealybug's ROM (WX =
+    LY, LCDC.5 pulsed low twice in mode 3) with DocBoy's tile data, on a CPU
+    CGB E with a DMG cart. Per line, dingbat matches SameBoy (CGB E) on all
+    but 18 of the 51 x 144 rows; on about 520 DocBoy alone draws other bytes
+    for a window tile cut short by LCDC.5 k <= 4 dots after the WX match (low
+    plane fetched, high plane the tile index; k = 0: two tiles of colour 0),
+    on 87 SameBoy alone differs. mealybug upstream ships CGB C and CGB D
+    references for `m3_lcdc_win_en_change_multiple_wx` (the
+    game-boy-test-roms bundle carries only the DMG ones) and none for CGB E;
+    its README calls its references "screenshots from my Game Boy emulator
+    (which I believe to be correct)", with blurry photos of real devices
+    alongside. Not known: which bytes a CGB E fetches for the cut tile;
+    checking dingbat against the CGB C/D references is the next step. One
+    more difference, which no test scores: on a k = 0 line (the match on the
     fall's own dot, `ly10`/`ly38` timing: no charge, background grid) DocBoy
     and SameBoy both still count a window line (the `_wly` frame's window
     rows run one ahead of dingbat's from line 10), and SameBoy draws one
     window tile at the next background tile; dingbat does not take the match
-    at all.
-  * Not scored (ledger "DocBoy: the CGB LCDC.4 tile-data glitch, DocBoy's
-    variations", with the 10 `cgb/ppu` twins),
-    `change_{bg,win}_tile_data_glitch_*` (63 compat + 10 CGB): per line,
-    of 73 frames, 1,562 rows are DocBoy's alone, 1,831 SameBoy's alone, 954
-    three-way, 82 dingbat's alone (`mealybug_var42`). dingbat's LCDC.4
-    glitch (`CGB_TDSEL_GLITCH`) is fitted to mealybug's CGB C/D hardware
-    captures of `m3_lcdc_tile_sel_change{,2}` and cgb-acid-hell, which pass.
-* **I4. HDMA / GDMA (closed; 4 not scored).** Closed. `cgb/hdma` is 639/639
-  and `double_speed/hdma` 50/50; the four not scored are marked below. The
-  rules, by group:
+    at all. DocBoy disables two signed-addressing variants itself ("glitch
+    is different").
+  * Left (63 here, 10 in I12; scored again 2026-11-16),
+    `change_{bg,win}_tile_data_glitch_*` (63 compat + 10 CGB): LCDC.4 flipped
+    across a bitplane read with objects and windows at other phases. Per line,
+    of 73 frames, 1,562 rows are DocBoy's alone, 1,831 SameBoy's alone
+    (SameBoy passes none), 954 three-way, 82 dingbat's alone
+    (`mealybug_var42`). dingbat's LCDC.4 glitch (`CGB_TDSEL_GLITCH`) is fitted
+    to mealybug's CGB C/D references of `m3_lcdc_tile_sel_change{,2}` and
+    `m3_lcdc_tile_sel_win_change` (its emulator's screenshots, see above) and
+    to cgb-acid-hell, all of which pass, as do the family's other 56 rows (26
+    `mealybug_shift*`, 24 `mealybug_var*`, 6 `sprites_nops*`). Not known: the
+    CGB E's glitch at the phases only DocBoy's variations reach; no capture
+    from a console covers them.
+* **I4. HDMA / GDMA (1 left; 3 not scored).** `cgb/hdma` is 639/640 and
+  `double_speed/hdma` 50/50; the one left and the three not scored are
+  marked below. The rules, by group:
   * The LCD-enable line (95 tests in this and the next three points; 89
     here, `gb.nim` knobs, and the six double-speed tests with I7). The
     LCD-enable line has no OAM scan, so the VRAM DMA's HBlank input sees the
@@ -1359,13 +1382,13 @@ hardware question. Families:
     agree (all 8 SCX, all 8 window, 6 object tests), on 60 object tests
     SameBoy differs from both around the object fetch, and one test is
     SameBoy's and dingbat's against DocBoy:
-    `..._64_bytes_sprite_y16_x07` (not scored, ledger "DocBoy:
-    a VRAM DMA beside an object at X = 7", `DocboyNotScored`): an object
-    at X = 7 has the same 6-dot penalty as X = 5 and 6, and DocBoy puts its
-    plane reads where X = 5, 6 have them at X = 1..6 but two dots later at
-    X = 7 alone; SameBoy (and now dingbat) gives X = 7 the X = 6 map, byte
-    for byte from byte 7. Hardware question 21 (gbedge p21 bytes 00-0F)
-    now has dingbat predicting DocBoy's map.
+    `..._64_bytes_sprite_y16_x07` (left, scored again 2026-11-16): an
+    object at X = 7 has the same 6-dot penalty as X = 5 and 6 (Pan Docs' OBJ
+    penalty algorithm), and DocBoy puts its plane reads where X = 5, 6 have
+    them at X = 1..6 but two dots later at X = 7 alone; SameBoy (and dingbat)
+    give X = 7 the X = 6 map, byte for byte from byte 7 (the row checks 16
+    on). No spec text places the reads. Hardware question 21 (gbedge p21
+    bytes 00-0F) covers the background map, not this object case.
   * 3 `gdma_source_wram_dma_source_ram_{160,256,480_bytes_overflow}`: the
     ROMs `Memcmp` all of `$FE00-$FEFF`; dingbat's OAM matches byte for byte
     and only the `$FEA0-$FEFF` readback differs (SameBoy fails all three).
@@ -1385,18 +1408,17 @@ hardware question. Families:
     _stat}_round2` pass with the speed-switch stall's halt model (I7): the
     HBlank STAT request ends the stall, as in
     `speed_switch_to_double_interrupt_stat_round2` without a DMA.
-* **I5. DMG OAM corruption patterns (closed; 10 not scored).** Closed.
-  `dmg/oam_bug` is 258/258; the other 10 of the family's 268 are not scored
-  (below). Each ROM fills OAM with a known pattern, turns the LCD on, waits
-  `103 + n` M-cycles so its one OAM access lands on scan row `n - 3` of line
-  1 (round 3: the M-cycle ending on the scan's first dot; round 23: the one
-  after its last row), turns the LCD off and compares all 160 bytes. The
-  `_fe4x` tests move the CPU's address at round 22/23, the `_fe5x` tests
-  sweep a 512-entry truth table (row 0 and row 11 bits, the written bit) at
-  round 3. The maintainer runs the suite on his DMG (docboy#33); `_noisy`
-  marks a truth table whose hardware runs did not repeat. SameBoy (DMG B,
-  black box, OAM dumped after each test) passes 246/268; every test it
-  fails, dingbat failed too.
+* **I5. DMG OAM corruption patterns (10 left of 268).** `dmg/oam_bug` is
+  258/268; the 10 left are below. Each ROM fills OAM with a known pattern,
+  turns the LCD on, waits `103 + n` M-cycles so its one OAM access lands on
+  scan row `n - 3` of line 1 (round 3: the M-cycle ending on the scan's first
+  dot; round 23: the one after its last row), turns the LCD off and compares
+  all 160 bytes. The `_fe4x` tests move the CPU's address at round 22/23, the
+  `_fe5x` tests sweep a 512-entry truth table (row 0 and row 11 bits, the
+  written bit) at round 3. The maintainer runs the suite on his DMG; the
+  `_noisy` suffix is not defined upstream. SameBoy (DMG B, black box, OAM
+  dumped after each test) passes 246/268; every test it fails, dingbat failed
+  too.
 
   The rules: plain CPU reads and writes of `$FE00-$FEFF` corrupt (Pan Docs,
   "OAM Corruption Bug": "Any memory access instruction, if it accesses OAM";
@@ -1426,9 +1448,8 @@ hardware question. Families:
   object one row up is hidden, its corruption copy is found. SameBoy fails
   both `round2` tests.
 
-  Not scored (10; `DocboyNotScored`, ledger "DocBoy: single-unit OAM-bug
-  margins"), each a single unit's margin that SameBoy does not reproduce and
-  no sibling test shows:
+  Left (10; scored again 2026-11-16), each a single unit's margin that no
+  sibling test shows:
   `ld_{hl,hli}_a_round3_fe5c`, `_fe5e_noisy`, `_fe5f`: the written bit as it
   lands in row 0 depends on row 0's old bits on DocBoy's DMG (`fe5f`: v | old;
   `fe5e`: v | (old & row 11 word 0); `fe5c`: an eight-input function), where
@@ -1436,9 +1457,11 @@ hardware question. Families:
   SameBoy (all eight) give the written bit; `ld_{hl,hli}_a_round23_fe46/fe47`:
   a write to word 3 at round 23 also rewrites the low byte of word 2 (`$55`
   -> `$11`), which SameBoy does not do and `push_round21` (word 3 at round
-  23, words 2 equal) cannot show. Hardware: the ten ROMs on an MGB, pass/fail
-  screens, with `ld_a_hl_round11` (row 0 at R = 8, DocBoy only) as a control.
-* **I6. DMG window glitches (6 left of 120; 43 not scored).**
+  23, words 2 equal) cannot show. Not known: whether these are the DMG's
+  rule or one unit's margin, since one console stands behind the tables.
+  Hardware: the ten ROMs on an MGB, pass/fail screens, with
+  `ld_a_hl_round11` (row 0 at R = 8, DocBoy only) as a control.
+* **I6. DMG window glitches (49 left of 120).**
   * Closed: `window_retrigger_pixel_glitch_*` (67) and
     `window_bg_reprise_wx{15,23}`. Each ROM turns the window off in the WY
     line's HBlank, so every later line has WX matching with LCDC.5 low.
@@ -1455,8 +1478,7 @@ hardware question. Families:
     pixel right of the push position on the DMG (`WIN_ABORT_COL_LEAD = 1`;
     values on both sides fail over the 18 WX of the family; DocBoy's and
     SameBoy's CGB keep 0).
-  * Not scored (43; `DocboyNotScored`, ledger "DocBoy: the window tile under
-    a mid-fetch LCDC.5 clear"): `window_turn_off_*`. LCDC.5 is cleared
+  * Left (43; scored again 2026-11-16): `window_turn_off_*`. LCDC.5 is cleared
     during the window's first tile fetch on line 8, at 4-dot phases (an
     object's X shifts the fetch, `nops21..25` the write). On 40 tests the
     write lands between the window map read and its bitplane reads, and
@@ -1466,9 +1488,11 @@ hardware question. Families:
     (`window_turn_off_nops22_sprite_x3_variation_{a,b}`,
     `_alt_nops22_sprite_x3`: the write right after the WX match) all three
     emulators differ, and SameBoy fails 17 further tests of the family that
-    dingbat and DocBoy pass. mealybug's hardware notes say the disable "will
-    take effect at the end of the current window tile", i.e. that tile is
-    drawn as a window tile. A DocBoy-only model with no spec text. The
+    dingbat and DocBoy pass. A note in mealybug's repository says the
+    disable "will take effect at the end of the current window tile", i.e.
+    that tile is drawn as a window tile, but the document it comes from is
+    based on mealybug's test ROMs and its emulator, not a console
+    measurement. Not known: what the DMG draws; no spec text covers it. The
     decider is one photo on the MGB: `window_turn_off_nops22_sprite_x4`,
     line 8, x = 9..16 reads `32222222` (shades; DocBoy) or `00000222`
     (dingbat, SameBoy).
@@ -1530,14 +1554,19 @@ hardware question. Families:
   20, all `double_speed/interactive`:
   * Not scored (8; `DocboyNotScored`, ledger "DocBoy: the KEY1 switch's
     IME-set leaf"): `{,double_speed_}stop_key1_joypad0_interrupt1_ime1_*_
-    div_round1`, the IME-set leaf, which Pan Docs' chart calls "The CPU
-    glitches non-deterministically". DocBoy wants the same 8 T hold as with
-    IME clear; c-sp `speed-switch/caution/spsw-interrupts-cgbE`
-    (hardware-checked on a CPU CGB E, the same `EI; STOP` with a request
-    pending) measures 4 (`SPEED_SWITCH_IRQ_LEAF_HOLD_T`,
-    `spsw_irq_leaf_hold_short`), and SameBoy (CGB E) fails these eight
-    exactly as dingbat does. This is DocBoy's model of a leaf the spec calls
-    non-deterministic, against a hardware measurement.
+    div_round1`, the IME-set leaf. DocBoy wants the same 8 T hold as with
+    IME clear; AGE `speed-switch/caution/spsw-interrupts-cgbE` (source
+    header: "Verified: 2022-02-11 pass: CPU CGB E - CPU-CGB-06"), scored and
+    passing here, runs the same `EI; STOP` with a request pending and needs
+    4 (`SPEED_SWITCH_IRQ_LEAF_HOLD_T`, `spsw_irq_leaf_hold_short`). With an
+    8 T hold all eight DocBoy tests pass and exactly that AGE row breaks: the
+    two ROMs disagree by one M-cycle. AGE's own runner blacklists
+    `speed-switch/caution`, and its WARNING.md reports the author's CGB E
+    unstable for a while after running those ROMs several times in a row.
+    Pan Docs' STOP chart is no citation either way: the rendered
+    `imgs/stop_diagram.svg` puts "The CPU glitches non-deterministically" on
+    IME disabled, the older `imgs/gb_stop.png` in the same repo on IME
+    enabled.
   * Closed: 12 PPU-phase tests of the IME-clear leaf,
     `stop_key1_joypad0_interrupt1_ime0_ly_round2` (into double speed) and
     `double_speed_stop_key1_joypad0_interrupt1_ime0_{ly,ly_b,stat,stat_scx*,
@@ -1646,10 +1675,12 @@ hardware question. Families:
     `boot_vram_nintendo_logo_checksum_{43,58}` (the boot ROM leaves the
     logo's tile map for those two entries). The table is not carried, as for
     I3's 63 palette tests.
-  * Not scored (4; ledger "DocBoy: `boot_hram`"): the four `boot_hram` tests
-    match in every byte but `$FFFE`, which no boot ROM writes (DocBoy:
-    "hardcoded to C0" / "4C" "even before boot rom"); Pan Docs ("Power Up
-    Sequence") has power-up HRAM random and SameBoy fails them too.
+  * Not scored (4; ledger "DocBoy: `boot_hram`"): three ROMs (the dmg
+    manifest lists its ROM twice) match in every byte but `$FFFE`, which no
+    boot ROM writes and they expect as $4C (dmg) or $C0 (cgb, cgb_dmg_mode);
+    DocBoy's source: "FFFE seems to be hardcoded to C0 even before boot rom".
+    Pan Docs ("Power Up Sequence"): "The console's WRAM and HRAM are random
+    on power-up."
 * **I10. `$FEA0-$FEFF` (closed; 29 not scored).** Closed. A read while OAM
   is blocked answers $FF on every model (Pan Docs, "FEA0-FEFF range"): the
   six `not_usable_read_{oam_scan,pixel_transfer}` tests (DMG, CGB, compat)
@@ -1657,15 +1688,15 @@ hardware question. Families:
   Not scored (`DocboyNotScored`, ledger "DocBoy: $FEA0-$FEFF as RAM on the
   CGB E"): 26 tests (13 in `cgb/memory`, 13 in `cgb_dmg_mode/memory`) that
   all write the area outside mode 2/3 and read it back, expecting RAM with
-  `$FEC0-$FEFF` repeating 16 bytes. dingbat follows Pan Docs (CGB E, AGB,
-  AGS, GBP return the high nibble of the low address byte twice:
-  `urNibbleEcho`), and the AGS read exactly that under gbedge p0F,
-  `$FEA0`..`$FEF8` = `AA AA BB BB .. FF FF` and `$FEA5` still `$AA` after a
-  `$5A` write (docs/dev/flashcart-runbook.md); SameBoy (CGB E, either boot ROM)
-  fails all 26. With them, the three `hdma/gdma_source_wram_dma_source_ram_
-  {160,256,480_bytes_overflow}` tests (I4), whose only miss is this
-  readback. A CGB E unit would settle the one open point, whether CGB E
-  really groups with the AGB here.
+  `$FEC0-$FEFF` repeating 16 bytes. Pan Docs gives RAM only to CGB revisions
+  0-D ("a unique RAM area, but is masked with a revision-specific value"; it
+  describes no 16-byte repeat) and has CGB E, AGB, AGS and GBP return the
+  high nibble of the low address byte twice, which dingbat follows
+  (`urNibbleEcho`); under dingbat's CGB D model 14 of the 26 pass. With them,
+  the three `hdma/gdma_source_wram_dma_source_ram_{160,256,480_bytes_
+  overflow}` tests (I4), whose only miss is this readback. No CGB E has been
+  measured; a flashcart answers for this range itself
+  (docs/dev/hwprobe-questions.md), so it needs a CGB E with a real cart.
 * **I11. CGB header modes (15 left).** `mode_cgb_flag_{81,82,83,90}` pass:
   the header read follows Pan Docs ("0143 — CGB flag", "Power Up Sequence",
   "FF4C — KEY0"): bit 7 picks the CGB and copies the byte to KEY0, so CGB
@@ -1689,16 +1720,17 @@ hardware question. Families:
   OPRI itself (`$FF6C` bit 0, Pan Docs "FF6C — OPRI") is a register in CGB
   mode, $FF in compatibility mode (`cgb/ppu/opri_write_read`,
   `boot_regs_cgb`; the AGS read $FE at hand-off).
-* **I12. CGB pictures (12 left of 46; 24 not scored), and CGB PPU timing.**
-  * Not scored (13; ledger "DocBoy: the CGB panel across LCD off/on"):
-    `ppu/visual/turn_off_y*`. The ROMs' own comment: "Depending on the
-    timing, the next lines are either kept, rendered, or cleared": the
-    references keep rows drawn before LCDC.7 went low, where Pan Docs
-    (LCDC.7) has the screen blank while the LCD is off and through the first
-    frame after it is re-enabled, as dingbat draws; SameBoy (CGB E) fails
-    all 13. The `_b` partners checked a frame later pass and stay scored.
-    The 10 `change_{bg,win}_tile_data_glitch_*` CGB-mode tests are not
-    scored with I3's family.
+* **I12. CGB pictures (36 left of 46), and CGB PPU timing.**
+  * Left (13; scored again 2026-11-16): `ppu/visual/turn_off_y*`. The ROMs'
+    own comment: "Depending on the timing, the next lines are either kept,
+    rendered, or cleared": the references keep rows drawn before LCDC.7 went
+    low and show later rows white or redrawn, where Pan Docs (LCDC.7) has
+    "When the display is disabled the screen is blank" and, on re-enabling,
+    "the screen will stay blank during the first frame", as dingbat draws.
+    The three `_b` partners checked a frame later pass. Not known: what a
+    CGB's panel holds across an LCD off/on; Pan Docs describes the screen,
+    not the panel's retention. The 10 `change_{bg,win}_tile_data_glitch_*`
+    CGB-mode tests are counted with I3's family.
   * Closed: `stop_during_hblank`, `stop_during_oam_scan`,
     `stop_ly42_during_hblank #2` (the `_b` reference). STOP with the LCD on
     blacks a CGB screen outside mode 3 (Pan Docs, "Using the STOP
@@ -1756,10 +1788,13 @@ hardware question. Families:
     (the next tile already shows its data, by the push-dot rule). One line
     of one geometry; not modelled. SameBoy differs from DocBoy (and now
     dingbat) on 6 to 13 other lines of five of the tests.
-  * Not scored (1; ledger "DocBoy: the CGB background column resumed after
-    the window at WX = 25"): `window_bg_reprise_wx25`, 3 pixels of DocBoy's
-    (row 12, x = 26 and 32..33) where SameBoy CGB E draws dingbat's frame
-    pixel for pixel; its 17 siblings pass.
+  * Left (1; scored again 2026-11-16): `window_bg_reprise_wx25`, the window
+    disabled on the WY line, the background resuming where the fetcher
+    stood. On line 12 DocBoy draws x = 26..33 in colour 0 where dingbat draws
+    BG tile $A3: the BG fetch for column 3 read its map byte at dot 108, the
+    window starts at dot 110 and LCDC.5 aborts it at dot 115. The 17 CGB
+    siblings (`_wx8`..`_wx24`) pass. Not known: whether a CGB keeps the
+    aborted fetch's tile there; no spec text says.
   * Closed, `double_speed/ppu/double_speed_ppu_vram_write_block_
     timing_ly0_{1,3}_out_of_4` (2): VRAM writes one double-speed M-cycle
     apart across the LCD-on line's mode 3. The CGB write lock there closes
@@ -1776,16 +1811,19 @@ hardware question. Families:
   * Not scored (3; ledger "DocBoy: a joypad interrupt on key release"): 2
     `joypad_{buttons,dpad}_interrupt_release` and DMG
     `stop_immediate_exit_joypad_interrupt`.
-    DocBoy raises the joypad interrupt when the key is released, and names
-    switch bounce on release as
-    the cause (`stop_immediate_exit_joypad_interrupt`'s own comment). Pan
-    Docs ("Joypad Input", "INT $60") raises it on a P10-P13 high-to-low edge
-    and names bounce on the PRESS ("one or more High to Low transitions are
-    usually produced when pressing a button"), a mechanical effect with no
-    fixed count; DocBoy's `joypad_keep_pressed_interrupt` asserts exactly one
-    interrupt for a held press, so its model is bounce on release only, every
-    time. SameBoy (DMG B) fails both release tests. A deterministic release
-    interrupt would fire in every game on every key release; not modelled.
+    DocBoy raises the joypad interrupt when the key is released; only
+    `stop_immediate_exit_joypad_interrupt` names a cause ("even on button
+    release, because of switch bouncing"). Pan Docs ("Joypad Input", "INT
+    $60") raises it on a P10-P13 high-to-low edge and names bounce on the
+    press ("one or more High to Low transitions are usually produced when
+    pressing a button"); gambatte's hardware note (test/hwtests/jpadirq.txt)
+    has transitions "multiple times per button press/release", so release
+    bounce is real, but with a varying count. DocBoy's
+    `joypad_keep_pressed_interrupt` asserts exactly one interrupt for a held
+    press, so its model is bounce on release only, every time. A
+    deterministic release interrupt would fire in every game on every key
+    release; not modelled. Here the two release tests read the fail value and
+    `stop_immediate_exit_joypad_interrupt` never reports ($FFF0 stays $00).
     In `stop_immediate_exit_joypad_interrupt` the key is held at the STOP
     with IE.4 set and nothing pending, so STOP is a HALT (Pan Docs' chart;
     dingbat takes it) and the ROM expects the release to end it (DocBoy's
@@ -1834,7 +1872,7 @@ hardware question. Families:
     cartridge clock runs on its own crystal (Pan Docs, "MBC3": "an external
     32.768 kHz Quartz Oscillator, and an external battery"), so STOP mode
     moves its second on (`STOP_RTC_RUNS`, memory.nim).
-* **Small (12 left of 40; 5 not scored):**
+* **Small (13 left of 40; 4 not scored):**
   * Left (6): HuC3 commands, `dmg/mbc/huc3` `huc3_command_{3x,4x,5x,10,62}`
     and `huc3_scratchpad`. `$FFF0` is never written. SameBoy passes 5 of 6,
     so the family is dingbat's.
@@ -1848,29 +1886,37 @@ hardware question. Families:
     in the framebuffer (every frontend's palette) and a runner rule for a
     stopped or blank panel: a scoring and UI decision, not chased. (The CGB
     `ppu/visual/stop_*` pictures are in I12.)
-  * Not scored (3; ledger "DocBoy: MBC3 RTC latch on a $00-then-$01 pair
-    only"): `mbc3_rtc_latch_{0_to_2,1_to_0,1_to_1}` want only a $00 then $01
-    write to latch; CasualPokePlayer's `latch-rtc-test` hardware capture has
-    ANY write latch, 51/51 against 28/51, mbc3.nim; SameBoy fails them too.
+  * Not scored (3; ledger "DocBoy: an MBC3 RTC latch on a bit-0 rising edge
+    only"): `mbc3_rtc_latch_{0_to_2,1_to_0,1_to_1}`. DocBoy latches on a
+    rising edge of bit 0 (0->1, 0->3 and 4->3 latch; 0->2, 1->0 and 1->1 do
+    not). CasualPokePlayer's `latch-rtc-test`, scored in the Shootout suite,
+    has low->low, high->low and high->high writes all latching in its
+    reference; dingbat latches on any write (mbc3.nim), and a bit-0 rule
+    passes DocBoy's three and fails that row. Its author states the capture
+    was run on his own flashcart with a real MBC3+RTC chip; DocBoy's
+    maintainer runs an Everdrive X7.
   * Not scored (1; `DocboyNotScored`, ledger "DocBoy: fresh cart RAM reading
     $FF"): `mbc1_initial_ram`, cart RAM read back as $FF before any write.
-    Pan Docs is silent; SRAM powers up with whatever it holds. SameBoy
-    passes it; dingbat starts a fresh cart at $00. No suite in the tree
+    Pan Docs ("Power Up Sequence"): "external RAM in the cartridge, when
+    present, usually contains random garbage data when first powered on."
+    dingbat starts a fresh cart at $00. No suite in the tree
     reads cart RAM it has not written -- mooneye `emulator-only/mbc1/ram_*`
     reads it disabled ($FF, open bus) and clears it before round 2 -- and
     $FF is an emulator convention (a fresh battery cart holds whatever its
     SRAM cells settled to; flash-erased $FF is real only for flash and
     EEPROM saves). dingbat keeps $00, and $FF stays Matt's choice of
     convention, which would move every new save's first boot.
-  * Not scored (1; ledger "DocBoy: a serial slave shifting with SC = $00"):
-    the two-player `slave_sc_00` test wants a slave with SC = $00 to shift
-    and interrupt (its source: "Serial transfer should start even with SC =
-    0"); Pan Docs has the externally clocked side "has to set SC's Bit 7
-    (that is, SC=$80) to enable the serial port", Gekkio's SCLK experiment
-    (an external-clock shift register counting 8 edges with the main clock
-    stopped) does not say what SC bit 7 = 0 does, and SameBoy's driver here
-    cannot run two-player tests. The pair of ROMs on two consoles and a
-    cable settles it, hardware question 24.
+  * Left (1; scored again 2026-11-16): the two-player `slave_sc_00` test
+    wants a slave with SC = $00 to shift and interrupt (its source: "Serial
+    transfer should start even with SC = 0"); Pan Docs has the externally
+    clocked side "has to set SC's Bit 7 (that is, SC=$80) to enable the
+    serial port", which dingbat follows, and Gekkio's SCLK experiment (an
+    external-clock shift register counting 8 edges with the main clock
+    stopped) does not say what SC bit 7 = 0 does. Letting the externally
+    clocked side shift with SC bit 7 clear passes it and changes no other
+    scored row; not adopted without hardware. The pair of ROMs on two
+    consoles and a cable settles it, hardware question 24. The SC = $80 pair
+    passes.
   * Closed: the other two serial tests (serial.nim). An SC write that
     closes an open bit slot shifts that bit for the old transfer and the
     restarted byte still takes eight, `serial_abort_to_81_sc_round1`; a DIV

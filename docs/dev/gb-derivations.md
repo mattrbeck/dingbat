@@ -1893,10 +1893,12 @@ source consulted, no other emulator run.
   double speed (4 passes half of them, 0 none), and `delay12240`,
   `step0_delay12240_round2` and three `double_trigger_*` tests fail at 12, so
   the lead is two M-cycles at double speed, not 8 T-cycles of real time.
-- Not scored: DocBoy's single-speed CGB tests `cgb/apu/ch1/..._delay14284`
-  and `..._step0_delay14284_round1` want 4 on the CGB and fail at 8; they
-  contradict SameSuite's and gambatte's CGB captures (the runner's
-  `DocboyNotScored` entry).
+- Open: DocBoy's single-speed CGB tests `cgb/apu/ch1/..._delay14284` and
+  `..._step0_delay14284_round1` want 4 on the CGB and fail at 8 (scored,
+  docs/dev/gb-failure-triage.md I2). They disagree with SameSuite (its apu
+  README: CPU CGB E passes all tests) and gambatte's `[cgb]` rows, which are
+  CGB C. A step-6 gate (lead 4 before frame-sequencer step 6 at single
+  speed) passes every GB row but has no mechanism or citation; not adopted.
 
 ### An APU power-on samples the DIV-APU bit an M-cycle ahead
 - Claim: the NR52 power-on skips the first DIV-APU edge when the divider's tap
