@@ -78,7 +78,7 @@ proc init*(window: Window; readable: bool): bool =
     metal_view = metal_CreateView(window)
     if metal_view == nil:
       echo "Failed to create a Metal view: ", $getError(); return false
-    let vsync = getEnv("DINGBAT_METAL_VSYNC") == "1"
+    let vsync = getEnv("DINGBAT_METAL_VSYNC") != "0"
     dbmtl_init(metal_GetLayer(metal_view), cstring(PRESENT_MSL),
                cint(readable), cint(vsync)) != 0
   else:

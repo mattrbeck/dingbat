@@ -124,8 +124,10 @@ extern "C" int dbmtl_init(void* sdl_layer, const char* msl, int readable, int vs
   layer.pixelFormat = MTLPixelFormatBGRA8Unorm;
   // Captures and the GUI driver's shots read the drawable back
   layer.framebufferOnly = readable ? NO : YES;
-  // As OpenGL's swap interval 0: a present goes to the next refresh, never
-  // waits for one; main()'s frame scheduler and swap hold do the pacing.
+  // A present is shown at the next refresh. Without display sync it is shown
+  // at once, mid-scan: the picture tears (OpenGL's swap interval 0 never
+  // did, the compositor waited for it). main()'s frame scheduler still paces,
+  // never presenting faster than the display refreshes.
   layer.displaySyncEnabled = vsync ? YES : NO;
   queue = [dev newCommandQueue];
   MTLCompileOptions* opts = [MTLCompileOptions new];
