@@ -1930,9 +1930,19 @@ hardware question. Families:
     external-clock shift register counting 8 edges with the main clock
     stopped) does not say what SC bit 7 = 0 does. Letting the externally
     clocked side shift with SC bit 7 clear passes it and changes no other
-    scored row; not adopted without hardware. The pair of ROMs on two
-    consoles and a cable settles it, hardware question 24. The SC = $80 pair
-    passes.
+    scored row; not adopted. Re-tried 2026-11-17 (link.nim: shift any
+    SC.0 = 0 peer; the idle-skip guard in cpu.nim widened to match): the
+    row passes, all GB suites otherwise unchanged, gblinktest and the GB
+    rollback tests pass, and Crystal/Silver still reach the Trade Center
+    — but a Crystal NOT at the Cable Club then answers Silver's clock
+    ($FE) and sets its connection status. Against it, the one hardware
+    report: gbdev/pandocs#558 (quinnyo, DMG/MGB/CGB on a cable, 2024-07)
+    has the master read 0 from a connected peer with SC.7 = 0, its own
+    caveat "limited", the peer's clock select not stated; a shifting peer
+    would have sent its SB. That thread's DMG-CPU schematic reading
+    (nitro2k01) has an SC.7 = 0 peer hold its last output bit (0 after
+    reset), and dingbat's $FF for that case is a separate open item.
+    Hardware question 24 still settles it. The SC = $80 pair passes.
   * Closed: the other two serial tests (serial.nim). An SC write that
     closes an open bit slot shifts that bit for the old transfer and the
     restarted byte still takes eight, `serial_abort_to_81_sc_round1`; a DIV
