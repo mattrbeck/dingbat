@@ -10,13 +10,17 @@ tap).
 Native: run `dingbat`, pass a ROM path (`./dingbat /path/to/rom`), or drag a file onto
 the window. With no game open the window is the library, as in the browser: every game
 opened there as a tile with its last screen (or its newest save state's), newest first; a
-click, Return or a controller's A opens one, right-click (or the tile's ...) removes it.
+click, Return or a controller's A opens one, right-click (or the tile's ...) removes it, or
+for a file that has moved, Find the File… puts it back in its place. File > Close Game
+(⌘W on macOS, Ctrl+W elsewhere) goes back to the library with that game at its head:
+Resume picks up exactly where you closed it, Play starts it from its in-game save.
 
 On macOS the menus live in the system menu bar (Settings and Quit in the dingbat menu),
-Settings… (⌘,) opens a Mac settings window, File > Open ROM… (⌘O) is the system's Open
+Settings… (⌘,) opens a Mac settings window, File > Add a Game… (⌘O) is the system's Open
 panel, and the app opens ROMs from Finder: Open With, or a drop on the Dock icon. Games
 you open show in the Dock icon's and the Apple menu's recent items. The Edit menu's Cut,
 Copy, Paste and Undo work in any text field, the Cheats and Link Cable windows' too.
+With no game open ⌘W closes the window; with one, Close Window is ⇧⌘W.
 `DINGBAT_IMGUI_MENU=1` brings back the in-window menu bar and Settings window.
 The Mac app draws with Metal; Windows and Linux draw with OpenGL.
 

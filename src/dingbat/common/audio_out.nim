@@ -34,6 +34,7 @@ when defined(ios) or defined(test_harness):
   proc audio_put*(data: pointer; len: int) = ios_audio_put(data, uint32(len))
   proc audio_queued*(): uint32 = ios_audio_queued()
   proc audio_clear*() = ios_audio_clear()
+  proc audio_close*() = ios_audio_clear()
   proc audio_wait*(ms: uint32) =
     ## Sleep while the queue drains. Breaks a stall (the audio engine
     ## stopped mid-frame) by dropping the queue after ~250 ms.
@@ -71,5 +72,11 @@ else:
 
   proc audio_clear*() =
     if stream != nil: discard clearAudioStream(stream)
+
+  proc audio_close*() =
+    ## No core any more (the game was closed): the device goes too.
+    if stream != nil:
+      destroyAudioStream(stream)
+      stream = nil
 
   proc audio_wait*(ms: uint32) = delay(ms)

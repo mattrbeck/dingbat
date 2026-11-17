@@ -1,7 +1,7 @@
 // The app's notices as alerts (driven from mac_alert.nim): a sheet on the
 // game's window, the notice's first paragraph as its title, the rest and the
-// hint below, one OK that Return, Enter and Escape all press. Showing beeps,
-// as a Mac alert does. The answer is only queued (dingbat_alert_answered):
+// hint below, one OK that Return, Enter and Escape all press. Silent, as the
+// web's and iOS's notices are. The answer is only queued (dingbat_alert_answered):
 // AppKit calls back inside SDL's event pump.
 //
 // A hidden game window (the GUI driver's) cannot carry a sheet: the alert is
@@ -77,7 +77,6 @@ void dba_show(void *nswindow, int serial, const char *text, const char *hint) {
   NSWindow *w = (__bridge NSWindow *)nswindow;
   if (w && w.visible) {
     parent = w;
-    NSBeep();
     [a beginSheetModalForWindow:w completionHandler:^(NSModalResponse r) {
       if (shown_serial != serial) return;   // a later alert took its place
       forget();

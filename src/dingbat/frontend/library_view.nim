@@ -1,8 +1,10 @@
 ## The desktop's home screen, in ImGui on every platform: the brand, then
 ## the library (library.nim) as a grid of tiles, or with no games a box to
-## drop one on. It follows the web's home screen (web/index.html `#home`,
-## web/styles.css "home-tile", Night theme) in size, colour and behaviour:
-## sizes here are that page's CSS px, scaled by ui_px.
+## drop one on. Once a game has been played and closed, that game heads the
+## page instead of the brand (the hero: Resume, Play) and stands down from
+## the grid. It follows the web's home screen (web/index.html `#home`,
+## `#hero`, web/styles.css "home-tile", "The hero", Night theme) in size,
+## colour and behaviour: sizes here are that page's CSS px, scaled by ui_px.
 ##
 ## No file reads or textures here. The app decodes pictures (`load_picture`)
 ## and owns textures (`make_texture`, `free_texture`); each is made once, the
@@ -58,6 +60,16 @@ type
     on_add*: proc()
     on_remove*: proc(path: string)
     on_sort*: proc(sort: string)
+    # The hero
+    hero*: LibGame            ## the game heading the page; path "" = none
+    hero_session*: string     ## its session snapshot's file: Resume while it is there
+    has_session: bool
+    hero_missing: bool
+    hero_rects: seq[TileRect] ## its picture and buttons as last drawn
+    menu_rects: seq[TileRect] ## the open game menu's items as last drawn
+    on_resume*: proc(path: string)  ## put the session back
+    on_play*: proc(path: string)    ## boot from the in-game save
+    on_find*: proc(path: string)    ## Find the File, for a game whose file is gone
 
 const
   BAR_MIN = 9          ## search, chips and sort above this many games (web LIB_BAR_MIN)
@@ -299,9 +311,13 @@ proc free_art(v: LibraryView; a: TileArt) =
   if a.blur != 0: v.free_texture(a.blur)
 
 proc check_files*(v: LibraryView) =
-  ## Which games' files are gone (a moved file, an unplugged drive)
+  ## Which games' files are gone (a moved file, an unplugged drive), and
+  ## whether the hero's session is still there (another window may have
+  ## played the game since)
   v.missing.setLen(v.games.len)
   for i, g in v.games: v.missing[i] = not fileExists(g.path)
+  v.has_session = v.hero_session.len > 0 and fileExists(v.hero_session)
+  v.hero_missing = v.hero.path.len > 0 and not fileExists(v.hero.path)
   v.last_check = epochTime()
 
 proc rescan_pictures*(v: LibraryView) =
@@ -325,18 +341,43 @@ proc set_games*(v: LibraryView; games: seq[LibGame]) =
   v.check_files()
   v.rescan_pictures()
 
+proc set_hero*(v: LibraryView; g: LibGame; session: string) =
+  ## The game heading the page (path "" for none) and its session's file
+  if g == v.hero and session == v.hero_session: return
+  v.hero = g
+  v.hero_session = session
+  v.filter_key = "\0"
+  if v.focus.startsWith("@"): v.focus = ""
+  v.check_files()
+
 proc query_text(v: LibraryView): string = $cast[cstring](addr v.query[0])
 
+proc filtering(v: LibraryView): bool = v.query_text.len > 0 or v.systems.len > 0
+
 proc bar_shown(v: LibraryView): bool =
-  v.games.len >= BAR_MIN or v.query_text.len > 0 or v.systems.len > 0
+  v.games.len >= BAR_MIN or v.filtering
+
+proc hero_shown(v: LibraryView): bool =
+  if v.hero.path.len == 0: return false
+  for g in v.games:
+    if g.path == v.hero.path: return true
+
+proc solo(v: LibraryView): bool =
+  ## The library is the hero's game alone: the hero is the library (web
+  ## body.home-solo)
+  v.hero_shown and v.games.len == 1
 
 proc update_filter(v: LibraryView) =
   let q = v.query_text
-  let key = q & "\n" & v.systems.join(",")
+  let key = q & "\n" & v.systems.join(",") & "\n" & v.hero.path
   if key == v.filter_key: return
   v.filter_key = key
   v.visible.setLen(0)
+  # The hero's game is shown once: its tile stands down, except while a
+  # search or filter runs (asked for by name, it must be found)
+  let hidden = if v.filtering: "" else: v.hero.path
   for i, g in v.games:
+    if hidden.len > 0 and g.path == hidden: continue
     if v.systems.len > 0 and g.system notin v.systems: continue
     if not search_match(q, g.display_name): continue
     v.visible.add i
@@ -350,9 +391,9 @@ proc load_art(v: LibraryView; g: LibGame; a: var TileArt) =
   a.w = float32(p.w)
   a.h = float32(p.h)
   a.state = asReady
-  # Narrower than 3:2 (a Game Boy's 10:9, a DS's two screens): the bars
-  # beside it are the picture again, a few pixels stretched (web: blurred)
-  if abs(a.w / a.h - 1.5) > 0.02:
+  # A few pixels of it: the bars beside a picture narrower than 3:2 (a Game
+  # Boy's 10:9, a DS's two screens) and the hero's glow (web: blurred)
+  block:
     const bw = 12
     let bh = max(1, int(round(bw * a.h / a.w)))
     var small = Picture(w: bw, h: bh, rgba: newSeq[byte](bw * bh * 4))
@@ -372,6 +413,19 @@ proc load_art(v: LibraryView; g: LibGame; a: var TileArt) =
 
 # ──────────────────────────── Keys and pads ────────────────────────────
 
+proc hero_buttons(v: LibraryView): seq[string] =
+  ## The hero's row for the focus ring: its first button, then Play beside
+  ## Resume (web padHomeItems)
+  if not v.hero_shown: return
+  result.add "@resume"
+  if v.has_session: result.add "@play"
+
+proc hero_primary(v: LibraryView) =
+  ## The picture and the first button: Resume, or Play with no session
+  if v.has_session:
+    if v.on_resume != nil: v.on_resume(v.hero.path)
+  elif v.on_play != nil: v.on_play(v.hero.path)
+
 proc focus_index(v: LibraryView): int =
   ## Where the focused game is in the grid; -1 when it is not shown
   if v.focus.len == 0: return -1
@@ -384,11 +438,14 @@ proc pressed(keys: openArray[ImGuiKey]): bool =
     if igIsKeyPressed_Bool(k, true): return true
 
 proc nav_input(v: LibraryView; cols: int) =
-  ## Arrows or a pad's d-pad and stick move through the grid, Return or the
-  ## pad's A opens, Escape or B lets go (web index.js "Gamepad support").
-  ## The first press only shows where it is: the most recent game.
+  ## Arrows or a pad's d-pad and stick move through the hero's buttons and
+  ## the grid, Return or the pad's A presses, Start is the hero's first
+  ## button, Escape or B lets go (web index.js "Gamepad support"). The first
+  ## press only shows where it is: the hero's Resume, else the most recent
+  ## game.
   let n = v.visible.len
-  if n == 0 or cols <= 0: return
+  let row = v.hero_buttons()
+  if (n == 0 and row.len == 0) or cols <= 0: return
   if igGetIO_Nil().WantTextInput: return
   if igIsPopupOpen_Str(nil, cint(ImGui_PopupFlags_AnyPopupId) or
                             cint(ImGui_PopupFlags_AnyPopupLevel)): return
@@ -397,7 +454,37 @@ proc nav_input(v: LibraryView; cols: int) =
   let right = pressed([ImGui_Key_RightArrow, ImGui_Key_GamepadDpadRight, ImGui_Key_GamepadLStickRight])
   let up = pressed([ImGui_Key_UpArrow, ImGui_Key_GamepadDpadUp, ImGui_Key_GamepadLStickUp])
   let down = pressed([ImGui_Key_DownArrow, ImGui_Key_GamepadDpadDown, ImGui_Key_GamepadLStickDown])
+  if row.len > 0 and igIsKeyPressed_Bool(ImGui_Key_GamepadStart, false):
+    v.hero_primary()
+    return
+  let on_hero = v.focus.startsWith("@") and v.focus in row
+  if on_hero and v.ring:
+    let k = row.find(v.focus)
+    if left and k > 0: v.focus = row[k - 1]
+    elif right and k + 1 < row.len: v.focus = row[k + 1]
+    elif down and n > 0:
+      v.focus = v.games[v.visible[0]].path
+      v.scroll_to_focus = true
+    if igIsKeyPressed_Bool(ImGui_Key_Enter, false) or
+       igIsKeyPressed_Bool(ImGui_Key_KeypadEnter, false) or
+       igIsKeyPressed_Bool(ImGui_Key_Space, false) or
+       igIsKeyPressed_Bool(ImGui_Key_GamepadFaceDown, false):
+      if v.focus == "@play":
+        if v.on_play != nil: v.on_play(v.hero.path)
+      else: v.hero_primary()
+    if igIsKeyPressed_Bool(ImGui_Key_Escape, false) or
+       igIsKeyPressed_Bool(ImGui_Key_GamepadFaceRight, false):
+      v.ring = false
+    return
   var cur = v.focus_index()
+  if (left or right or up or down) and row.len > 0 and
+     (cur < 0 or not v.ring or (up and cur < cols)):
+    # The first press, or up from the grid's first row: the hero
+    v.focus = row[0]
+    v.ring = true
+    igSetScrollY_Float(0)
+    return
+  if n == 0: return
   if left or right or up or down:
     if cur < 0 or not v.ring:
       cur = max(0, cur)
@@ -480,6 +567,47 @@ proc primary_button(v: LibraryView; dl: ptr ImDrawList; id, label: string;
   dl.text_at(v2(round(cx - ts.x * 0.5), round(a.y + (h - ts.y) * 0.5)),
              rgb(ACCENT_INK), label, bold = true)
 
+proc item_rect(): (ImVec2, ImVec2) =
+  ## The last item's corners (imguin's out-param or by-value binding)
+  var a, b: ImVec2
+  when compiles(igGetItemRectMin(addr a)):
+    igGetItemRectMin(addr a)
+    igGetItemRectMax(addr b)
+  else:
+    let p = igGetItemRectMin()
+    let q = igGetItemRectMax()
+    a = ImVec2(x: p.x, y: p.y)
+    b = ImVec2(x: q.x, y: q.y)
+  (a, b)
+
+proc menu_item(v: LibraryView; title: string; enabled = true): bool =
+  result = igMenuItem_Bool(cstring(title), nil, false, enabled)
+  let (a, b) = item_rect()
+  v.menu_rects.add TileRect(name: title, x: a.x, y: a.y, w: b.x - a.x, h: b.y - a.y)
+
+proc game_menu(v: LibraryView; id: string; g: LibGame; missing, hero: bool) =
+  ## What the web's tile menu has that the desktop can do: the hero's adds
+  ## Resume, a game whose file is gone Find the File
+  igPushStyleColor_U32(cint(ImGui_Col_PopupBg), rgb(SURF2))
+  igPushStyleColor_U32(cint(ImGui_Col_Border), border2())
+  igPushStyleColor_U32(cint(ImGui_Col_HeaderHovered), rgb(ACCENT, 0.18))
+  if igBeginPopup(cstring(id), 0):
+    v.menu_rects.setLen(0)
+    igTextDisabled("%s", cstring(g.display_name))
+    if missing: igTextDisabled("The file is not there any more.")
+    igSeparator()
+    if hero and v.has_session and v.menu_item("Resume", not missing) and
+       v.on_resume != nil:
+      v.on_resume(g.path)
+    if v.menu_item("Play", not missing) and v.on_open != nil:
+      if hero and v.on_play != nil: v.on_play(g.path) else: v.on_open(g.path)
+    if missing and v.menu_item("Find the File...") and v.on_find != nil:
+      v.on_find(g.path)
+    if v.menu_item("Remove from Library") and v.on_remove != nil:
+      v.on_remove(g.path)
+    igEndPopup()
+  igPopStyleColor(3)
+
 # ──────────────────────────── One tile ────────────────────────────
 
 proc draw_tile(v: LibraryView; dl: ptr ImDrawList; k: int; a: ImVec2;
@@ -536,7 +664,7 @@ proc draw_tile(v: LibraryView; dl: ptr ImDrawList; k: int; a: ImVec2;
     let s = min(bw / art.w, bh / art.h)
     let (dw, dh) = (art.w * s, art.h * s)
     let tint = rgb(WHITE, alpha)
-    if art.blur != 0:
+    if art.blur != 0 and abs(art.w / art.h - 1.5) > 0.02:
       # Cover: the middle of the small copy, filling the box
       let ar = art.w / art.h
       let (u0, u1, v0, v1) =
@@ -589,24 +717,258 @@ proc draw_tile(v: LibraryView; dl: ptr ImDrawList; k: int; a: ImVec2;
     for dx in [-1'f32, 0, 1]:
       ImDrawList_AddCircleFilled(dl, v2(more_c.x + dx * ui_px(4.4), more_c.y),
                                  ui_px(1.3), dc, 8)
-  # Its menu: what the web's tile menu has that the desktop can do
-  igPushStyleColor_U32(cint(ImGui_Col_PopupBg), rgb(SURF2))
-  igPushStyleColor_U32(cint(ImGui_Col_Border), border2())
-  igPushStyleColor_U32(cint(ImGui_Col_HeaderHovered), rgb(ACCENT, 0.18))
-  if igBeginPopup("##menu", 0):
-    igTextDisabled("%s", cstring(g.display_name))
-    if missing: igTextDisabled("The file is not there any more.")
-    igSeparator()
-    if igMenuItem_Bool("Play", nil, false, not missing) and v.on_open != nil:
-      v.on_open(g.path)
-    if igMenuItem_Bool("Remove from Library", nil, false, true) and v.on_remove != nil:
-      v.on_remove(g.path)
-    igEndPopup()
-  igPopStyleColor(3)
+  v.game_menu("##menu", g, missing, hero = false)
   igPopID()
   v.tiles.add TileRect(name: g.display_name, path: g.path, x: a.x, y: a.y,
                        w: track, h: tile_h, missing: missing,
                        picture: art.state == asReady)
+
+# ──────────────────────────── The hero ────────────────────────────
+#
+# web/styles.css "The hero", closed (`#hero[data-mode="closed"]`): the game's
+# last picture in a faint glow of its own colours, dimmed a little as a
+# memory; over its name "LAST PLAYED" with the lamp out and the system's
+# chip; Resume (the session goes back in) and Play (from the in-game save),
+# or Play alone with no session; then the game's menu. From 760 px the
+# picture is left of the words, the block the library's width; under that
+# the words go under the picture. A hero that is the whole library is its
+# own centred block, a size up.
+
+const
+  HERO_KICKER_H = 18'f32
+  HERO_GAP = 12'f32        ## kicker, name and buttons
+  HERO_BUTTON_H = 48'f32
+  HERO_RADIUS = 14'f32
+  HERO_DIM = 0xD1D1D1'u32  ## web: brightness(0.82) on a closed game's picture
+
+type HeroLayout = object
+  row: bool                ## the picture beside the words
+  x, w: float32            ## the block's left edge and width
+  frame_w, frame_h, gap, body_w, body_h, h, name_css: float32
+
+proc hero_aspect(v: LibraryView; art: TileArt): float32 =
+  ## The picture's own shape (a DS picture: its top screen, as the web's
+  ## paused hero shows), else the system's screen's for its cartridge
+  if art.state == asReady and art.w > 0 and art.h > 0:
+    if art.h > art.w * 1.2: art.w / (art.h * 0.5) else: art.w / art.h
+  else:
+    case v.hero.system
+    of "GBA": 1.5'f32
+    of "DS": 4'f32 / 3
+    else: 10'f32 / 9
+
+proc hero_layout(css_w, lib_x, lib_w, avail_x, avail_w, avail_h: float32; solo: bool;
+                 aspect: float32): HeroLayout =
+  ## `avail_h`: the window's height less its gutters. A window shorter than
+  ## the hero would be (a game's own size, 720 x 480 for a GBA at 3x) takes a
+  ## smaller picture, at the block's left edge, rather than scrolling it away.
+  result.row = css_w >= 760
+  var basis = 0'f32
+  if result.row:
+    if solo:
+      result.frame_w = clamp(css_w * 0.36, 320, 480)
+      result.gap = 48
+      basis = 380
+      result.name_css = clamp(css_w * 0.032, 30, 42)
+      result.w = min(avail_w, result.frame_w + result.gap + basis)
+      result.x = avail_x + (avail_w - result.w) * 0.5
+    else:
+      result.frame_w = clamp(css_w * 0.30, 280, 384)
+      result.gap = 40
+      basis = 460
+      result.name_css = clamp(css_w * 0.028, 28, 36)
+      result.w = lib_w
+      result.x = lib_x
+  else:
+    result.w = lib_w
+    result.x = lib_x
+    result.frame_w = lib_w
+    result.gap = 16
+    result.name_css = clamp(css_w * 0.065, 24, 30)
+    result.body_w = lib_w
+  let ar = max(0.1'f32, aspect)
+  result.body_h = HERO_KICKER_H + HERO_GAP + result.name_css * 1.1 + HERO_GAP + 2 +
+                  HERO_BUTTON_H
+  let room = if result.row: avail_h else: avail_h - result.gap - result.body_h
+  result.frame_w = min(result.frame_w, max(160'f32, room * ar))
+  result.frame_h = result.frame_w / ar
+  if result.row:
+    if solo:
+      result.w = min(avail_w, result.frame_w + result.gap + basis)
+      result.x = avail_x + (avail_w - result.w) * 0.5
+    result.body_w = max(0'f32, min(basis, result.w - result.frame_w - result.gap))
+  result.h = if result.row: max(result.frame_h, result.body_h)
+             else: result.frame_h + result.gap + result.body_h
+
+proc pill(dl: ptr ImDrawList; a, b: ImVec2; primary, hot: bool) =
+  ## A round-ended button: the accent one (web .button-primary) or the
+  ## surface one (.button)
+  let r = (b.y - a.y) * 0.5
+  if primary:
+    ImDrawList_AddRectFilled(dl, v2(a.x + ui_px(6), a.y + ui_px(4)),
+                             v2(b.x - ui_px(6), b.y + ui_px(4)),
+                             rgb(ACCENT, 0.10), r, dflags(ImDrawFlags_RoundCornersAll))
+    dl.fill_gradient(a, b, rgb(if hot: 0xD7C8FF'u32 else: ACCENT2),
+                     rgb(if hot: ACCENT2 else: ACCENT), r)
+    dl.add_rect(a, b, rgb(ACCENT, 0.6), r, 1)
+    ImDrawList_AddLine(dl, v2(a.x + r, a.y + hairline()), v2(b.x - r, a.y + hairline()),
+                       rgb(WHITE, 0.35), hairline())
+  else:
+    dl.fill_gradient(a, b, rgb(if hot: SURF_HOVER else: SURF3),
+                     rgb(if hot: SURF3 else: SURF2), r)
+    dl.add_rect(a, b, border2(), r, 1)
+
+proc ring_around(dl: ptr ImDrawList; a, b: ImVec2; r: float32) =
+  ## The focus ring (web :focus-visible): the accent, a gap out
+  let o = ui_px(2) + ui_px(1.5)
+  dl.add_rect(v2(a.x - o, a.y - o), v2(b.x + o, b.y + o), rgb(ACCENT), r + o, ui_px(3))
+
+proc spaced_text(dl: ptr ImDrawList; p: ImVec2; col: uint32; s: string;
+                 spacing: float32): float32 =
+  ## Text with letter-spacing (the kicker's 0.16em); returns its width
+  var x = p.x
+  for i, c in s:
+    let ch = $c
+    dl.text_at(v2(round(x), p.y), col, ch, bold = true)
+    x += calc_text_size(ch).x + (if i + 1 < s.len: spacing else: 0)
+  x - p.x
+
+proc spaced_width(s: string; spacing: float32): float32 =
+  for i, c in s:
+    result += calc_text_size($c).x + (if i + 1 < s.len: spacing else: 0)
+
+proc draw_hero(v: LibraryView; dl: ptr ImDrawList; hl: HeroLayout; ox, oy: float32;
+               loads: var int) =
+  ## The hero at (ox, oy), the block's top left in window points
+  let s = ui_scale
+  let g = v.hero
+  var art = v.art.getOrDefault(g.path, TileArt(state: asNone))
+  if art.state == asUnread and loads < LOADS_PER_FRAME:
+    inc loads
+    v.load_art(g, art)
+    v.art[g.path] = art
+  v.hero_rects.setLen(0)
+  # The picture: Resume or Play, as the first button
+  let fy = oy + (if hl.row: (hl.h - hl.frame_h) * 0.5 * s else: 0)
+  let fa = v2(round(ox), round(fy))
+  let fb = v2(round(ox + hl.frame_w * s), round(fy + hl.frame_h * s))
+  if button_at("##hero_shot", fa, fb): v.hero_primary()
+  let shot_hot = igIsItemHovered(0)
+  igSetItemTooltip("%s", cstring((if v.has_session: "Resume " else: "Play ") & g.display_name))
+  let r = ui_px(HERO_RADIUS)
+  if art.state == asReady and art.blur != 0:
+    # The glow: the picture's few pixels, faint, spread past the frame and
+    # feathered in layers (web: blur(36px) at opacity 0.14)
+    let (gw, gh) = (fb.x - fa.x, fb.y - fa.y)
+    let ga = v2(fa.x - 0.08 * gw, fa.y - 0.10 * gh)
+    let gb = v2(fb.x + 0.08 * gw, fb.y + 0.10 * gh)
+    const layers = 18
+    for k in 0 ..< layers:
+      let e = (float32(k) - layers / 2) * ui_px(3)
+      ImDrawList_AddImageRounded(dl, ImTextureRef(internal_TexID: ImTextureID(art.blur)),
+                                 v2(ga.x - e, ga.y - e), v2(gb.x + e, gb.y + e),
+                                 v2(0, 0), v2(1, 1), rgb(WHITE, 0.14 / layers),
+                                 max(0'f32, ui_px(30) + e), dflags(ImDrawFlags_RoundCornersAll))
+  # Its shadow, under it (0 20px 50px -14px)
+  for k in 1 .. 3:
+    let e = float32(k) * ui_px(10) - ui_px(14)
+    ImDrawList_AddRectFilled(dl, v2(fa.x - e, fa.y + ui_px(20) - e),
+                             v2(fb.x + e, fb.y + ui_px(20) + e), rgb(0, 0.14),
+                             r + max(0'f32, e), dflags(ImDrawFlags_RoundCornersAll))
+  if art.state == asReady:
+    ImDrawList_AddRectFilled(dl, fa, fb, rgb(0), r, dflags(ImDrawFlags_RoundCornersAll))
+    let top_half = art.h > art.w * 1.2
+    ImDrawList_AddImageRounded(dl, ImTextureRef(internal_TexID: ImTextureID(art.tex)),
+                               v2(fa.x + 1, fa.y + 1), v2(fb.x - 1, fb.y - 1), v2(0, 0),
+                               v2(1, if top_half: 0.5 else: 1), rgb(HERO_DIM), r - 1,
+                               dflags(ImDrawFlags_RoundCornersAll))
+  else:
+    # Never pictured: its cartridge, as on its tile
+    ImDrawList_AddRectFilled(dl, fa, fb, look(g.system).bg, r, dflags(ImDrawFlags_RoundCornersAll))
+    dl.draw_cart(fa, fb, g, 1)
+  dl.add_rect(fa, fb, rgb(WHITE, if shot_hot: 0.28 else: 0.14), r, 1)
+  v.hero_rects.add TileRect(name: "@picture", path: g.path, x: fa.x, y: fa.y,
+                            w: fb.x - fa.x, h: fb.y - fa.y, missing: v.hero_missing,
+                            picture: art.state == asReady)
+  # The words
+  let bx = if hl.row: ox + (hl.frame_w + hl.gap) * s else: ox
+  let by = if hl.row: oy + (hl.h - hl.body_h) * 0.5 * s
+           else: oy + (hl.frame_h + hl.gap) * s
+  let bw = hl.body_w * s
+  let kc = by + HERO_KICKER_H * 0.5 * s
+  ImDrawList_AddCircleFilled(dl, v2(bx + ui_px(4), kc), ui_px(4), rgb(FAINT, 0.55), 0)
+  let kicker = "LAST PLAYED"
+  let ks = calc_text_size(kicker)
+  let kw = dl.spaced_text(v2(bx + ui_px(8 + 10), round(kc - ks.y * 0.5)), rgb(DIM), kicker,
+                          ui_px(2))
+  if g.system.len > 0:
+    let lk = look(g.system)
+    let ca = v2(bx + ui_px(18 + 10) + kw, kc - ui_px(9))
+    let cb = v2(ca.x + ui_px(34), kc + ui_px(9))
+    ImDrawList_AddRectFilled(dl, ca, cb, lk.bg, ui_px(5), dflags(ImDrawFlags_RoundCornersAll))
+    let cs = calc_text_size(g.system)
+    dl.text_at(v2(round(ca.x + (ui_px(34) - cs.x) * 0.5), round(kc - cs.y * 0.5)), lk.fg,
+               g.system, bold = true)
+  let name_y = by + (HERO_KICKER_H + HERO_GAP) * s
+  let name_h = hl.name_css * 1.1 * s
+  with_size(label_font(hl.name_css)):
+    let name = fit_text(g.display_name, bw)
+    let ns = calc_text_size(name)
+    dl.text_at(v2(bx, round(name_y + (name_h - ns.y) * 0.5)), rgb(TEXT), name, bold = true)
+  # The buttons: Resume (or Play, with no session), Play, the menu
+  let ay = round(name_y + name_h + (HERO_GAP + 2) * s)
+  let bh = ui_px(HERO_BUTTON_H)
+  let first = if v.has_session: "Resume" else: "Play"
+  let fs = calc_text_size(first)
+  let more_w = bh
+  let play_w = if v.has_session: ui_px(44) + calc_text_size("Play").x else: 0'f32
+  var first_w = ui_px(22 + 15 + 8 + 22) + fs.x
+  if not hl.row:
+    # A phone's Resume takes the row (web flex: 1 1 auto)
+    first_w = max(first_w, bw - more_w - ui_px(10) -
+                           (if play_w > 0: play_w + ui_px(10) else: 0))
+  var x = round(bx)
+  template button(id, focus_id: string; width: float32; primary: bool; body: untyped) =
+    block:
+      let a {.inject.} = v2(x, ay)
+      let b {.inject.} = v2(round(x + width), ay + bh)
+      let clicked {.inject.} = button_at(id, a, b)
+      let hot {.inject.} = igIsItemHovered(0)
+      dl.pill(a, b, primary, hot)
+      body
+      if v.ring and v.focus == focus_id: dl.ring_around(a, b, bh * 0.5)
+      if focus_id.len > 0:
+        v.hero_rects.add TileRect(name: focus_id, path: g.path, x: a.x, y: a.y,
+                                  w: b.x - a.x, h: b.y - a.y)
+      x = b.x + ui_px(10)
+  button("##hero_first", "@resume", first_w, true):
+    # The play triangle, then the word
+    let cy = (a.y + b.y) * 0.5
+    let t = ui_px(15)
+    let ix = if hl.row: a.x + ui_px(22)
+             else: round((a.x + b.x - (t + ui_px(8) + fs.x)) * 0.5)
+    ImDrawList_AddTriangleFilled(dl, v2(ix + t * 0.27, cy - t * 0.42),
+                                 v2(ix + t * 0.27, cy + t * 0.42), v2(ix + t * 0.85, cy),
+                                 rgb(ACCENT_INK))
+    dl.text_at(v2(round(ix + t + ui_px(8)), round(cy - fs.y * 0.5)), rgb(ACCENT_INK), first,
+               bold = true)
+    if clicked: v.hero_primary()
+  if v.has_session:
+    button("##hero_play", "@play", play_w, false):
+      let ps = calc_text_size("Play")
+      dl.text_at(v2(round((a.x + b.x - ps.x) * 0.5), round((a.y + b.y - ps.y) * 0.5)),
+                 rgb(TEXT), "Play")
+      igSetItemTooltip("Start the game from its in-game save")
+      if clicked and v.on_play != nil: v.on_play(g.path)
+  button("##hero_more", "", more_w, false):
+    let c = v2((a.x + b.x) * 0.5, (a.y + b.y) * 0.5)
+    let menu_open = igIsPopupOpen_Str("##heromenu", 0)
+    for dx in [-1'f32, 0, 1]:
+      ImDrawList_AddCircleFilled(dl, v2(c.x + dx * ui_px(7), c.y), ui_px(2),
+                                 rgb(if hot or menu_open: TEXT else: DIM), 8)
+    igSetItemTooltip("More for this game")
+    if clicked: open_popup("##heromenu")
+  v.game_menu("##heromenu", g, v.hero_missing, hero = true)
 
 # ──────────────────────────── The bar (above BAR_MIN games) ────────────────────────────
 
@@ -728,6 +1090,7 @@ proc draw*(v: LibraryView; rom_types: string) =
   if v.games.len > 0 and epochTime() - v.last_check > CHECK_EVERY: v.check_files()
   v.update_filter()
   v.tiles.setLen(0)
+  v.menu_rects.setLen(0)
   let pos = vp[].WorkPos
   let size = vp[].WorkSize
   igSetNextWindowPos(pos, cint(ImGui_Cond_Always), v2(0, 0))
@@ -761,18 +1124,29 @@ proc draw*(v: LibraryView; rom_types: string) =
   template Y(q: float32): float32 = pos.y - scroll + q * s
   let n = v.visible.len
   let gutter = if css_w < 360: 16'f32 else: LIB_PAD
-  let lay = grid_layout(css_w, max(1, n), gutter)
+  let hero = v.hero_shown
+  let solo = v.solo
+  let lay = grid_layout(css_w, max(1, n), gutter, under_hero = hero)
   let tile_h = (lay.track - 2) / 1.5 + CAPTION_H + 2
   let rows = (n + lay.cols - 1) div max(1, lay.cols)
-  let bar = v.games.len > 0 and v.bar_shown()
+  let bar = v.games.len > 0 and v.bar_shown() and not solo
   let wrap = bar and v.bar_wraps(lay.width * s)
   let bar_h = if not bar: 0'f32 elif wrap: 2 * BAR_H + BAR_GAP + 12 else: BAR_H + 12
+  # Under a hero the library begins at a rule (web .home-recent-head)
+  let rule_h = if hero: 20'f32 else: 0'f32
   let body_h =
     if v.games.len == 0: DROP_H
-    else: HEAD_H + 10 + bar_h +
+    elif solo: HEAD_H   # Add a game, under the hero
+    else: rule_h + HEAD_H + 10 + bar_h +
           (if n == 0: 20'f32 else: float32(rows) * tile_h + float32(rows - 1) * LIB_GAP)
   let small = css_w < SMALL_WINDOW or avail < SMALL_WINDOW
-  let brand_h = if small: BRAND_SMALL_H else: BRAND_H
+  var hl: HeroLayout
+  if hero:
+    hl = hero_layout(css_w, css_w * 0.5 - lay.width * 0.5, lay.width, gutter,
+                     css_w - 2 * gutter, avail - 2 * gutter, solo,
+                     v.hero_aspect(v.art.getOrDefault(v.hero.path, TileArt(state: asNone))))
+  # The brand stands down for the hero (web body.home-card #home-brand)
+  let brand_h = if hero: hl.h elif small: BRAND_SMALL_H else: BRAND_H
   let inner_h = brand_h + 26 + body_h
   let top = gutter + max(0, (avail - 2 * gutter - inner_h) * 0.5)
   let total = max(avail, inner_h + 2 * gutter)
@@ -780,9 +1154,12 @@ proc draw*(v: LibraryView; rom_types: string) =
   v.nav_input(lay.cols)
 
   # The brand: the bat, the name and what it is, or in a small window the
-  # bat and the name on one line
+  # bat and the name on one line; the hero in its place
   let name_w = with_size_value(26, calc_text_size("dingbat").x)
-  if small:
+  var loads = 0
+  if hero:
+    v.draw_hero(dl, hl, X(hl.x), Y(top), loads)
+  elif small:
     let ns = calc_text_size("dingbat")
     let lw = v.logo_w * s
     let gap = ui_px(8)
@@ -843,14 +1220,22 @@ proc draw*(v: LibraryView; rom_types: string) =
     let hs = calc_text_size(rom_types)
     dl.text_at(v2(round(X(mid) - hs.x * 0.5), round(Y(body + 149 + 8) - hs.y * 0.5)),
                rgb(FAINT), rom_types)
+  elif solo:
+    # The hero is the library: its head's Add a game under it
+    let w = add_button_w(false)
+    v.add_button(dl, "##add", X(mid) + w * 0.5, Y(body + HEAD_H / 2), false)
   else:
     # The head: "LIBRARY  3 games", and Add a game
     let x0 = mid - lay.width * 0.5
-    let hy = Y(body + HEAD_H / 2)
+    if hero:
+      ImDrawList_AddLine(dl, v2(X(x0), round(Y(body))), v2(X(x0 + lay.width), round(Y(body))),
+                         border(), max(1'f32, hairline()))
+    let hy = Y(body + rule_h + HEAD_H / 2)
     let label = "LIBRARY"
     let ls = calc_text_size(label)
     dl.text_at(v2(X(x0), round(hy - ls.y * 0.5)), rgb(FAINT), label, bold = true)
-    let count = if n == v.games.len: $n & (if n == 1: " game" else: " games")
+    let count = if not v.filtering:
+                  $v.games.len & (if v.games.len == 1: " game" else: " games")
                 else: $n & " of " & $v.games.len
     let cs = calc_text_size(count)
     # A narrow head keeps the label; the count, then the button's words, go
@@ -859,7 +1244,7 @@ proc draw*(v: LibraryView; rom_types: string) =
     if room - add_button_w(icon_only) >= cs.x + ui_px(10):
       dl.text_at(v2(X(x0) + ls.x + ui_px(10), round(hy - ls.y * 0.5)), rgb(FAINT), count)
     v.add_button(dl, "##add", X(x0 + lay.width), hy, icon_only)
-    var gy = body + HEAD_H + 10
+    var gy = body + rule_h + HEAD_H + 10
     if bar:
       v.draw_bar(dl, X(x0), Y(gy), lay.width * s, wrap)
       gy += bar_h
@@ -867,7 +1252,8 @@ proc draw*(v: LibraryView; rom_types: string) =
       let none = "No games match."
       let ns = calc_text_size(none)
       dl.text_at(v2(round(X(mid) - ns.x * 0.5), Y(gy)), rgb(DIM), none)
-    let gx = mid - lay.grid_w * 0.5
+    # Under a hero a short library's tiles start at its left edge, the hero's
+    let gx = if hero: x0 else: mid - lay.grid_w * 0.5
     let fk = v.focus_index()
     if v.scroll_to_focus and fk >= 0:
       v.scroll_to_focus = false
@@ -876,7 +1262,6 @@ proc draw*(v: LibraryView; rom_types: string) =
       if fy - pad < scroll: igSetScrollY_Float(max(0, fy - pad))
       elif fy + tile_h * s + pad > scroll + size.y:
         igSetScrollY_Float(fy + tile_h * s + pad - size.y)
-    var loads = 0
     for k in 0 ..< n:
       let (row, col) = (k div lay.cols, k mod lay.cols)
       let tx = gx + float32(col) * (lay.track + LIB_GAP)
@@ -895,10 +1280,24 @@ proc draw*(v: LibraryView; rom_types: string) =
   igEnd()
 
 proc dump*(v: LibraryView): string =
-  ## The tiles as last drawn, one a line (gui_driver `home dump`):
-  ## `<name>|x y w h|missing|picture`
+  ## The page as last drawn, one a line (gui_driver `home dump`), in window
+  ## points. Each tile: `<name>|x y w h|missing|picture`. The hero, first:
+  ## `@hero|<name>|<its buttons>`, then `@picture|x y w h|missing|picture`
+  ## and a line per button (`@resume`, `@play`). An open game menu's items:
+  ## `@menu <title>|x y w h`.
+  proc rect(t: TileRect): string =
+    $int(t.x) & " " & $int(t.y) & " " & $int(t.w) & " " & $int(t.h)
+  if v.hero_shown and v.hero_rects.len > 0:
+    result.add "@hero|" & v.hero.display_name & "|" &
+               (if v.has_session: "resume play" else: "play") & "\n"
+    for t in v.hero_rects:
+      result.add t.name & "|" & rect(t)
+      if t.name == "@picture":
+        result.add "|" & (if t.missing: "missing" else: "present") & "|" &
+                   (if t.picture: "picture" else: "cart")
+      result.add "\n"
   for t in v.tiles:
-    result.add t.name & "|" & $int(t.x) & " " & $int(t.y) & " " & $int(t.w) & " " &
-               $int(t.h) & "|" & (if t.missing: "missing" else: "present") & "|" &
-               (if t.picture: "picture" else: "cart") & "\n"
+    result.add t.name & "|" & rect(t) & "|" & (if t.missing: "missing" else: "present") &
+               "|" & (if t.picture: "picture" else: "cart") & "\n"
+  for t in v.menu_rects: result.add "@menu " & t.name & "|" & rect(t) & "\n"
   if v.games.len == 0: result.add "empty\n"

@@ -214,7 +214,7 @@ void dbm_add_edit(void *menu, const char *name, int cmd, const char *selector, c
 void dbm_add_separator(void *menu) { [(__bridge NSMenu *)menu addItem:NSMenuItem.separatorItem]; }
 
 void dbm_add_system(void *menu, const char *title, const char *selector, const char *key,
-                    int alt) {
+                    int alt, int shift) {
   NSMenu *m = (__bridge NSMenu *)menu;
   NSString *sel = str(selector);
   NSMenuItem *it;
@@ -231,8 +231,9 @@ void dbm_add_system(void *menu, const char *title, const char *selector, const c
                                     action:NSSelectorFromString(sel)
                              keyEquivalent:str(key)];
     if (key && *key)
-      it.keyEquivalentModifierMask =
-          NSEventModifierFlagCommand | (alt ? NSEventModifierFlagOption : 0);
+      it.keyEquivalentModifierMask = NSEventModifierFlagCommand |
+                                     (alt ? NSEventModifierFlagOption : 0) |
+                                     (shift ? NSEventModifierFlagShift : 0);
   }
   [m addItem:it];
 }
@@ -263,8 +264,9 @@ void dbm_add_slider(void *menu, const char *title, int cmd, int done, int lo, in
 
 // ── Beside the menus ──
 
-void dbm_open_panel(void *nswindow, const char *exts_csv, const char *dir) {
+void dbm_open_panel(void *nswindow, const char *exts_csv, const char *dir, const char *message) {
   NSOpenPanel *p = [NSOpenPanel openPanel];
+  if (message && *message) p.message = title(message);
   p.canChooseFiles = YES;
   p.canChooseDirectories = NO;
   p.allowsMultipleSelection = NO;
@@ -282,6 +284,13 @@ void dbm_open_panel(void *nswindow, const char *exts_csv, const char *dir) {
   // A sheet keeps the main loop (and the game behind it) running
   if (w && w.visible) [p beginSheetModalForWindow:w completionHandler:done];
   else [p beginWithCompletionHandler:done];
+}
+
+int dbm_close_key_window(void) {
+  NSWindow *k = NSApp.keyWindow;
+  if (k == nil || k == game_window) return 0;
+  [k performClose:nil];
+  return 1;
 }
 
 void dbm_note_recent(const char *path) {
@@ -310,6 +319,14 @@ void dbm_watch_blocked(void) {
   }];
   [NSRunLoop.mainRunLoop addTimer:t forMode:NSEventTrackingRunLoopMode];
   [NSRunLoop.mainRunLoop addTimer:t forMode:NSModalPanelRunLoopMode];
+}
+
+void dbm_refresh(void) {
+  // Key equivalents are matched against the items a menu holds, which
+  // AppKit does not rebuild first: a menu whose shortcuts changed (Cmd+W,
+  // Close Game or Close Window) is rebuilt when they change
+  for (NSMenuItem *top in NSApp.mainMenu.itemArray)
+    if ([top.submenu isKindOfClass:DbmMenu.class]) [controller menuNeedsUpdate:top.submenu];
 }
 
 // ── For the GUI driver (gui_driver.nim) ──

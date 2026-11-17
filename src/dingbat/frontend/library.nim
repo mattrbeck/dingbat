@@ -133,6 +133,33 @@ proc remove*(lib: var Library; path: string) =
   let i = lib.find_game(path)
   if i >= 0: lib.games.delete(i)
 
+proc relink*(lib: var Library; old_path: string; found: LibGame) =
+  ## Find the File: the entry at `old_path` is the game at `found.path` now,
+  ## played when it was. An entry already there for that file goes: one
+  ## file, one tile.
+  var i = lib.find_game(old_path)
+  if i < 0: return
+  var e = lib.games[i]
+  e.path = found.path
+  if found.rom.len > 0: e.rom = found.rom
+  if found.system.len > 0: e.system = found.system
+  if found.identity.len > 0: e.identity = found.identity
+  var k = 0
+  while k < lib.games.len:
+    if k != i and lib.games[k].path == found.path:
+      lib.games.delete(k)
+      if k < i: dec i
+    else: inc k
+  lib.games[i] = e
+
+proc hero_of*(lib: Library; played_here: seq[string]; ds_beta: bool): LibGame =
+  ## The game heading the home screen (web refreshHero): the most recent one
+  ## played in this run of the app that the library still holds; none (path
+  ## "") before any is played, so a fresh start opens on the plain library.
+  for p in played_here:
+    let i = lib.find_game(p)
+    if i >= 0 and (ds_beta or lib.games[i].system != "DS"): return lib.games[i]
+
 # ──────────────────────────── Order and search ────────────────────────────
 
 const SYSTEM_ORDER = ["GBA", "GBC", "GB", "DS"]
@@ -282,7 +309,7 @@ proc cart_label*(name: string): string =
 # ──────────────────────────── Pictures ────────────────────────────
 #
 # A tile's picture is the newest of: the game's last screen (written when it
-# is left: another game opened, or dingbat quit), and its save-state slots'
+# is left: closed, another game opened, or dingbat quit), and its save-state slots'
 # thumbnails. Never anything fetched.
 
 proc picture_name*(rom: string; identity: uint32): string =
@@ -335,20 +362,25 @@ const
   LIB_PAD* = 24'f32
   LIB_MAX_W = 1400'f32
 
-proc grid_layout*(viewport_w: float32; n: int; pad = LIB_PAD): GridLayout =
+proc grid_layout*(viewport_w: float32; n: int; pad = LIB_PAD;
+                  under_hero = false): GridLayout =
   ## web/styles.css "#home-inner": 1 to 6 columns by the window's width; a
   ## library short of a row draws only its own columns, and at least a floor
-  ## wide, so the head is ruled over its own tiles.
+  ## wide, so the head is ruled over its own tiles. Under a hero
+  ## (`under_hero`) one or two tiles take a wider floor, the hero's, and a
+  ## phone keeps its two columns for one.
   let vw = viewport_w
   let cols = if vw < 360: 1 elif vw < 640: 2 elif vw < 900: 3
              elif vw < 1150: 4 elif vw < 1400: 5 else: 6
   let w = max(1'f32, min(LIB_MAX_W, vw - 2 * pad))
   let tile = (w - float32(cols - 1) * LIB_GAP) / float32(cols)
-  let fit = if n >= 1 and n < cols and (n == 1 or vw >= 760): n else: cols
+  let short = n >= 1 and n < cols and (vw >= 760 or (n == 1 and not under_hero))
+  let fit = if short: n else: cols
   var floor = 460'f32
   var tile_max = 300'f32
   if vw >= 760 and n == 2: (floor, tile_max) = (min(w, 780'f32), 520'f32)
   if vw >= 760 and n == 3: (floor, tile_max) = (min(w, 1000'f32), 520'f32)
+  if under_hero and vw >= 760 and n in 1 .. 2: floor = min(w, 860'f32)
   let width = min(w, max(floor, float32(fit) * tile + float32(fit - 1) * LIB_GAP))
   let track = min(tile_max, (width - float32(fit - 1) * LIB_GAP) / float32(fit))
   GridLayout(cols: fit, track: track, width: width,

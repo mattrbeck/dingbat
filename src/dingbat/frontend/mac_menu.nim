@@ -22,9 +22,11 @@ proc dbm_add_action(menu: pointer; title: cstring; cmd, arg: cint; key: cstring;
                     alt, shown: cint)
 proc dbm_add_submenu(menu: pointer; title: cstring; cmd: cint): pointer
 proc dbm_add_separator(menu: pointer)
-proc dbm_add_system(menu: pointer; title, selector, key: cstring; alt: cint)
+proc dbm_add_system(menu: pointer; title, selector, key: cstring; alt, shift: cint)
 proc dbm_add_slider(menu: pointer; title: cstring; cmd, done, lo, hi, value: cint)
-proc dbm_open_panel(nswindow: pointer; exts_csv, dir: cstring)
+proc dbm_open_panel(nswindow: pointer; exts_csv, dir, message: cstring)
+proc dbm_close_key_window(): cint
+proc dbm_refresh()
 proc dbm_note_recent(path: cstring)
 proc dbm_clear_recents()
 proc dbm_set_document(nswindow: pointer; path: cstring)
@@ -41,8 +43,9 @@ var
   installed* = false
   build_bar: proc(): seq[MenuItem]
   state_of: proc(cmd: MenuCmd; arg: int): MenuState
-  opened = ""   # what the Open panel returned, until taken
   on_blocked: proc()
+  asked_for = ""                         # what the Open panel up now is for
+  opened: tuple[purpose, path: string]   # its answer, until taken
 
 proc populate(menu: pointer; items: seq[MenuItem]) =
   for it in items:
@@ -58,7 +61,7 @@ proc populate(menu: pointer; items: seq[MenuItem]) =
                      cint(it.lo), cint(it.hi), cint(it.value))
     of mkSystem:
       dbm_add_system(menu, cstring(it.title), cstring(it.selector),
-                     cstring(it.key), cint(ord(it.alt)))
+                     cstring(it.key), cint(ord(it.alt)), cint(ord(it.shift)))
     of mkEdit:
       dbm_add_edit(menu, cstring(it.title), cint(ord(it.cmd)), cstring(it.selector),
                    cstring(it.key), cint(ord(it.shift)))
@@ -87,7 +90,8 @@ proc dingbat_menu_action(cmd, arg: cint) {.exportc, cdecl.} =
     push_cmd(MenuCmd(cmd), int(arg))
 
 proc dingbat_open_panel_done(path: cstring) {.exportc, cdecl.} =
-  if path != nil: opened = $path
+  opened = (asked_for, if path != nil: $path else: "")
+  asked_for = ""
 
 proc dingbat_main_loop_blocked() {.exportc, cdecl.} =
   if on_blocked == nil: return
@@ -118,17 +122,31 @@ proc mac_menu_install*(window: Window; build: proc(): seq[MenuItem];
               nswindow(window))
   installed = true
 
-proc mac_open_panel*(window: Window; exts: openArray[string]; dir: string) =
-  ## The Open panel as a sheet; its choice comes back by `mac_take_opened`.
+proc mac_open_panel*(window: Window; exts: openArray[string]; dir: string;
+                     purpose = "open"; message = "") =
+  ## The Open panel as a sheet; its answer comes back by `mac_take_opened`
+  ## with `purpose`. `message`: a line at its top saying what it is for.
   var csv = ""
   for i, e in exts:
     if i > 0: csv.add ','
     csv.add e
-  dbm_open_panel(nswindow(window), cstring(csv), cstring(dir))
+  asked_for = purpose
+  dbm_open_panel(nswindow(window), cstring(csv), cstring(dir), cstring(message))
 
-proc mac_take_opened*(): string =
+proc mac_take_opened*(): tuple[purpose, path: string] =
+  ## The panel's answer since the last call: what it was for and the file
+  ## chosen ("" = cancelled), or ("", "") when it has not answered.
   result = opened
-  opened = ""
+  opened = ("", "")
+
+proc mac_menu_refresh*() =
+  ## Rebuild the menus now: a game opened or closed changes their shortcuts.
+  if installed: dbm_refresh()
+
+proc mac_close_key_window*(): bool =
+  ## Another of the app's windows has the keyboard (Settings, a panel):
+  ## close it as its close button would. False when the game's has it.
+  dbm_close_key_window() != 0
 
 proc mac_note_recent*(path: string) = dbm_note_recent(cstring(path))
 proc mac_clear_recents*() = dbm_clear_recents()

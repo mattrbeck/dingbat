@@ -344,10 +344,42 @@ With no game open the desktop window draws the same page in ImGui, one
 implementation on Windows, Linux and macOS (`src/dingbat/frontend/library_view.nim`,
 the data in `library.nim`): the brand, then the library's tiles in the web's
 sizes and Night colours, or with no games the drop box and **Add a game**
-(the Open ROM dialog). Search, the system chips and the sort come in above
-8 games, as on the web. A window under 420 px either way shows the bat and
-the name on one line instead of the brand. There is no hero: the desktop
-has no paused game to come back to.
+(File > Add a Game…, the same dialog). Search, the system chips and the sort
+come in above 8 games, as on the web. A window under 420 px either way shows
+the bat and the name on one line instead of the brand.
+
+**Close Game** (File, ⌘W on macOS, Ctrl+W elsewhere) goes home from a
+running game, and that game then heads the page as the web's closed hero:
+its last picture, dimmed, in a faint glow of its own colours, *LAST PLAYED*
+with the lamp out and its system's chip, its name, and **Resume** · **Play**
+· ⋯ (Play alone with no session). The brand stands down for it, its tile
+stands down from the grid except while a search or chip runs, the library
+under it begins at a rule, and a library of only that game is the hero with
+Add a game under it. The hero is the latest game played *in this run*
+(`played_here`, `hero_of`): a fresh start opens on the plain library, as a
+fresh web visit does. The desktop has no paused hero: there is no Main Menu
+leaving a game in memory, so Close Game goes straight to the closed one.
+From 760 px the picture sits left of the words, as on the web; under that
+the words go under it, and a window shorter than the hero (a game's own
+size: 720 × 480 for a GBA at 3x) takes a smaller picture rather than
+scrolling it off, where the web would scroll.
+
+Close Game ends a link as loading another game does, writes the battery
+(one that cannot be written keeps the game open, with the save file's
+notice: closing would lose it), takes the **session**, keeps the last
+screen, then drops the core: its audio device, locks, Cheats, Save States,
+Link Cable and debug windows go with it. The session is a save state outside
+the slots, `states/<rom>-<identity>.session.state` (persist.nim
+`session_file_name`; the slots' naming, so its identity checks are theirs),
+taken after the battery is written. **Resume** boots the game and loads it
+before the first frame (a refused one leaves the game booted from its save,
+as Play, with the state notice); **Play** boots from the battery. Any boot
+of the game but Resume (Play, a tile, Reset, Open Recent, a drop) deletes
+the session, since it would put back the battery it was taken with over
+anything saved since; a Resume keeps it until the next Close Game replaces
+it. The hero checks every 2 s that it is still there (another window may
+have played the game). Tiles open from the save, as before: the desktop has
+no *Opening a game from the library* setting.
 
 **The library** is `library.json` beside `dingbat.yml` (path, the ROM's
 file name, system, ROM identity, last opened), every game opened here, up
@@ -359,7 +391,7 @@ recents first, as listed, then by when last opened. Remove from Library
 takes a game out of both. DS games show only with DS Beta on.
 
 **Pictures**, the newest of: the game's last screen
-(`pictures/<rom>-<identity>.png`, written when it is left for another game
+(`pictures/<rom>-<identity>.png`, written when it is closed or left for another game
 and at quit, never one of a single colour), and its save-state slots'
 thumbnails. Never anything fetched. No picture: the cartridge, as on the
 web. A picture becomes a texture the first time its tile is on screen, two
@@ -370,11 +402,26 @@ presenter `ui_texture` (`make_home_texture` / `free_home_texture` in
 crisp on Metal, whose ImGui backend samples linearly.
 
 **A missing file** (checked every 2 s at home) is a dashed, dimmed tile; a
-click says the file is not there any more. **Keys and pads**: arrows or
-the d-pad and stick move a focus ring through the grid (the first press
-lands on the most recent game), Return, Space or A opens, Escape or B lets
-go.
+click says the file is not there any more, and its menu has **Find the
+File…** above Remove from Library: the Open panel (macOS) or the ImGui
+dialog, in the old file's folder when it is still there. The file chosen
+must be the same game: its ROM identity (GB and GBA: the whole file's
+FNV-1a; DS: the header's, `rom_identity`) against the library's. Another
+game is refused with a notice and nothing changes (the notice has only OK,
+and the game's saves stay with it for its own file). The same game takes
+the entry's place, its *Last played* kept, in the recents too; its slots,
+session and picture are named by ROM file name and identity, and its
+battery and cheats sit beside the ROM, so under a new name or folder they
+are copied across, never over files already there (the old ones stay).
+**Keys and pads**: arrows or the d-pad and stick move a focus ring through
+the hero's Resume and Play, then the grid (the first press lands on Resume,
+else the most recent game; up from the grid's first row is the hero),
+Return, Space or A presses, a pad's Start is the hero's first button, Escape
+or B lets go.
 
 Tests: `tests/desktop_library_test.nim` (the file, order, search, marks,
-the grid's sizes against the web's), `tests/desktop_home_test.sh` (the app
-driven: tiles, a missing game, a click, keys and a pad).
+the grid's sizes against the web's, the hero's game, relinking),
+`tests/desktop_home_test.sh` (the app driven: tiles, a missing game, a
+click, keys and a pad, Close Game and the hero, Resume against the state
+taken, Play from the battery, Find the File), `tests/desktop_mac_menu_test.sh`
+(⌘W and ⇧⌘W).

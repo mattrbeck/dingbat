@@ -42,6 +42,11 @@ const
     "holds what it held before."
   SLOT_SAVE_FAILED* =
     "Saving didn't work; that slot still holds what it held before."
+  # Close Game writes the battery first; if it can't, the game stays open
+  CLOSE_BATTERY_FAILED* =
+    "dingbat can't write this game's save file, so the game is still open: " &
+    "closing it now would lose what was saved in the game. Check that the " &
+    "folder is writable and the disk has room, then close it again."
 
 # ──────────────────────────── Save-state slot files ────────────────────────────
 #
@@ -58,6 +63,12 @@ proc state_file_name*(rom_path: string; identity: uint32; slot: int): string =
   result = rom_path.extractFilename() & "-" & identity.toHex(8)
   if slot != 0: result.add ".slot" & $slot
   result.add ".state"
+
+proc session_file_name*(rom_path: string; identity: uint32): string =
+  ## The session snapshot Close Game takes and the home screen's Resume puts
+  ## back (web `stateauto:<game>`): `<rom file name>-<identity>.session.state`,
+  ## beside the slots but none of them, so Save States never lists it.
+  rom_path.extractFilename() & "-" & identity.toHex(8) & ".session.state"
 
 proc legacy_state_file_name*(rom_path: string; slot: int): string =
   ## What builds before the identity names called the slot.

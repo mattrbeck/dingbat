@@ -16,6 +16,7 @@ type
     selected_idx:  int
     show_hidden:   bool
     open*:         bool
+    rows*:         seq[(string, ImVec2, ImVec2)]  ## each row and button as last drawn (the GUI driver's)
 
 proc gather_entries(fe: FileExplorer) =
   fe.entries.setLen(0)
@@ -38,6 +39,30 @@ proc gather_entries(fe: FileExplorer) =
 proc new_file_explorer*(cfg: Config): FileExplorer =
   result = FileExplorer(cfg: cfg, selected_idx: -1)
   result.gather_entries()
+
+proc show_dir*(fe: FileExplorer; dir: string) =
+  ## Start the next dialog in `dir` (Find the File: the old file's folder).
+  if dirExists(dir):
+    fe.cfg.explorer_dir = dir
+    fe.gather_entries()
+
+proc note_row(fe: FileExplorer; label: string) =
+  var a, b: ImVec2
+  when compiles(igGetItemRectMin(addr a)):
+    igGetItemRectMin(addr a)
+    igGetItemRectMax(addr b)
+  else:
+    let p = igGetItemRectMin()
+    let q = igGetItemRectMax()
+    (a, b) = (ImVec2(x: p.x, y: p.y), ImVec2(x: q.x, y: q.y))
+  fe.rows.add((label, a, b))
+
+proc dump*(fe: FileExplorer): string =
+  ## `<label>|x y w h` a line: what the dialog showed last, "none" closed
+  if not fe.open: return "none\n"
+  for (label, a, b) in fe.rows:
+    result.add label & "|" & $int(a.x) & " " & $int(a.y) & " " & $int(b.x - a.x) & " " &
+               $int(b.y - a.y) & "\n"
 
 proc close*(fe: FileExplorer) =
   fe.open = false
@@ -71,6 +96,7 @@ proc render*(fe: FileExplorer; name: string; open_popup: bool;
                      ImVec2(x: 0.5'f32, y: 0.5'f32))
 
   if igBeginPopupModal(cstring(name), nil, cint(ImGui_WindowFlags_AlwaysAutoResize)):
+    fe.rows.setLen(0)
     let sep = $DirSep
     var parts = fe.cfg.explorer_dir.split(sep)
     var parts_clean: seq[string] = @[]
@@ -108,9 +134,11 @@ proc render*(fe: FileExplorer; name: string; open_popup: bool;
         let is_selected = idx == fe.selected_idx
         let label = if entry.is_file: "[F] " & entry.name
                     else: "[D] " & entry.name & "/"
-        if igSelectable_Bool(cstring(label), is_selected,
-                             cint(ImGui_SelectableFlags_AllowDoubleClick),
-                             ImVec2(x: 0, y: 0)):
+        let picked = igSelectable_Bool(cstring(label), is_selected,
+                                       cint(ImGui_SelectableFlags_AllowDoubleClick),
+                                       ImVec2(x: 0, y: 0))
+        fe.note_row(label)
+        if picked:
           if entry.is_file:
             fe.selected_idx = idx
             if igIsMouseDoubleClicked_Nil(0):
@@ -132,7 +160,9 @@ proc render*(fe: FileExplorer; name: string; open_popup: bool;
       fe.selected_idx = -1
 
     igBeginGroup()
-    if igButton("Open", ImVec2(x: 0, y: 0)):
+    let open_now = igButton("Open", ImVec2(x: 0, y: 0))
+    fe.note_row("Open")
+    if open_now:
       if fe.selected_idx in 0 ..< fe.entries.len and
          fe.entries[fe.selected_idx].is_file and
          fe.entries[fe.selected_idx].shown(extensions):
