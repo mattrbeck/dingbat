@@ -18,7 +18,11 @@
 // the same with the friend's game already in one side's library (it says
 // so, and that ROM never crosses); and the manual code exchange with no
 // server at all (each side pastes the other's code; the app's goes through
-// tmp/linkcode.txt and tmp/friendcode.txt).
+// tmp/linkcode.txt and tmp/friendcode.txt). Each case also runs the sync
+// checks (docs/dev/multiplayer.md): the page compares the app's fingerprints
+// with its own, and the native and wasm ones must agree at every one. One
+// case sets the page's copy of the app's game back: both must re-sync and
+// end identical.
 
 import { spawn, execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync, copyFileSync, mkdirSync, existsSync, rmSync } from "node:fs";
@@ -68,12 +72,13 @@ const launchApp = (rom, args, log, extra = []) => {
   for (const r of [...extra, rom]) copyFileSync(r, join(data, "Documents/roms", r.split("/").pop()));
   simctl("spawn", UDID, "defaults", "write", BUNDLE, "audio.muted", "-bool", "true");
   if (existsSync(log)) rmSync(log);
-  simctl("launch", "--stderr=" + log, UDID, BUNDLE, ...MUTED, ...args);
+  if (existsSync(log + ".out")) rmSync(log + ".out");
+  simctl("launch", "--stderr=" + log, "--stdout=" + log + ".out", UDID, BUNDLE, ...MUTED, ...args);
 };
 
 const STOP = 600;
 
-const runCase = async (name, { webRom, appRom, appGame, manual = false, webHas = [], appHas = [], expect }) => {
+const runCase = async (name, { webRom, appRom, appGame, manual = false, webHas = [], appHas = [], expect, drift = 0 }) => {
   console.log(`\n${name}`);
   const code = "T" + Math.random().toString(36).slice(2, 8).toUpperCase();
   const log = join(SHOTS, `link-${name.replace(/\W+/g, "-")}.log`);
@@ -102,15 +107,32 @@ const runCase = async (name, { webRom, appRom, appGame, manual = false, webHas =
   await page.waitForFunction(() => document.body.classList.contains("running") && !paused, null, { timeout: 20000 });
   // Scripted buttons by frame, and a stop at STOP: set inside the tick so
   // what is simulated is what netplay.js sends.
-  await page.evaluate((stop) => {
+  await page.evaluate(([stop, drift]) => {
     const tick = Module._rollback_tick;
     Module._rollback_tick = () => {
       const h = Module._rollback_head();
+      // The page's copy of the app's game, saved at drift - 150 and loaded
+      // back at drift with every input in: no input explains it.
+      if (drift && !window.__drifted && net?.rb) {
+        const remote = 1 - net.rb.localPlayer;
+        if (!window.__old && h >= drift - 150) {
+          const n = Module._rollback_dump_size(remote);
+          window.__old = new Uint8Array(Module.memory.buffer, Module._rollback_dump_data(), n).slice();
+        }
+        if (window.__old && h >= drift) {
+          if (Module._rollback_confirmed() !== h - 1) return -1;
+          window.__drifted = true;
+          const p = Module._malloc(window.__old.length);
+          new Uint8Array(Module.memory.buffer, p, window.__old.length).set(window.__old);
+          Module._rollback_load_state(remote, p, window.__old.length);
+          Module._free(p);
+        }
+      }
       if (h >= stop) return -1;
       localButtons = ((h / 29) | 0) % 2 ? 1 << 4 : ((h / 41) | 0) % 2 ? 1 << 7 : 0;
       return tick(localButtons);
     };
-  }, STOP);
+  }, [STOP, drift]);
 
   launchApp(appRom, ["-autoplay", appGame, "-signal", sig,
                      ...(manual ? ["-link-manual"] : ["-link", code]),
@@ -143,8 +165,10 @@ const runCase = async (name, { webRom, appRom, appGame, manual = false, webHas =
   // Linked on both sides, then both at the stop with every input in.
   await page.waitForFunction(() => rollbackMode, null, { timeout: 60000 });
   console.log("  web linked");
-  await page.waitForFunction((stop) => Module._rollback_head() >= stop &&
-    Module._rollback_confirmed() === stop - 1, STOP, { timeout: 60000 });
+  // A re-sync restarts the frame count: the stop is reached in the new session.
+  await page.waitForFunction(([stop, drift]) => Module._rollback_head() >= stop &&
+    Module._rollback_confirmed() === stop - 1 && (!drift || net.rb.resyncs >= 1),
+    [STOP, drift], { timeout: 90000 });
   let appLine = "", appState = "";
   for (let i = 0; i < 100 && !appLine; i++) {
     await sleep(200);
@@ -163,6 +187,12 @@ const runCase = async (name, { webRom, appRom, appGame, manual = false, webHas =
     }
     return out;
   });
+  // The last fingerprint (frame STOP) crosses just after both stop.
+  const syncOf = () => page.evaluate(() => ({ checks: net.rb.syncChecks, mismatches: net.rb.syncMismatches,
+                                              resyncs: net.rb.resyncs, peerSync: net.rb.peerSync }));
+  for (let i = 0; i < 100 && (await syncOf()).checks < STOP / 120; i++) await sleep(100);
+  const sync = await syncOf();
+  console.log("  sync: web " + JSON.stringify(sync));
   const webLine = `LINKDUMP head=${webDump.head} confirmed=${webDump.confirmed} ` +
     webDump.p.map((b, i) => `p${i}=${b.length}:${fnv(b)}`).join(" ");
   console.log("  app " + (appLine || "(no dump: " + appState + ")"));
@@ -175,10 +205,22 @@ const runCase = async (name, { webRom, appRom, appGame, manual = false, webHas =
   trySimctl("io", UDID, "screenshot", after);
   const alive = trySimctl("spawn", UDID, "launchctl", "list").includes(BUNDLE);
   const appLog = readFileSync(log, "utf8");
+  const appOut = existsSync(log + ".out") ? readFileSync(log + ".out", "utf8") : "";
   trySimctl("terminate", UDID, BUNDLE);
   await ctx.close();
   assert.ok(appLine, "the app reached the stop frame with every input in");
   assert.equal(appLine, webLine, "both players' cores identical on both sides");
+  assert.equal(sync.peerSync, true, "the app's HELLO says it checks");
+  if (drift) {
+    assert.equal(sync.mismatches, 1, "the set-back copy caught once");
+    assert.equal(sync.resyncs, 1, "re-synced once, with the app");
+    // The page finishes only on the app's READY: the app restarted too.
+    assert.ok(sync.checks >= STOP / 120, "checks carried on after, and agreed");
+  } else {
+    assert.equal(sync.checks, STOP / 120, "the page compared every fingerprint with the app's");
+    assert.equal(sync.mismatches, 0, "native iOS and wasm fingerprints agree");
+    assert.equal(sync.resyncs, 0);
+  }
   if (expect) {
     const x = xfer;
     console.log("  web transfer " + JSON.stringify(x));
@@ -186,9 +228,15 @@ const runCase = async (name, { webRom, appRom, appGame, manual = false, webHas =
     if (x.fromLibrary) assert.equal(x.got, 0, "the browser was sent nothing it had");
   }
   assert.ok(alive, "the app plays on after the browser disconnects (" + after + ")");
-  assert.ok(!/netlink: /.test(appLog) || !/failed|lost/i.test(appLog), "no link failure logged");
+  // Per line: the simulator logs its own "failed"s (IOSurface...).
+  assert.ok(!appLog.split("\n").some((l) => /netlink: /.test(l) && /failed|lost/i.test(l)), "no link failure logged");
   console.log("  ok");
 };
+
+// A GB stand-in whose state moves every frame and that uses no cable.
+const { synctestRom } = await import("../../web/e2e/synctest-rom.mjs");
+const SYNCTEST = join(SHOTS, "synctest.gb");
+writeFileSync(SYNCTEST, Buffer.from(synctestRom()));
 
 let failed = 0;
 const cases = [
@@ -206,6 +254,8 @@ const cases = [
                                       appRom: join(ROOT, "tests/roms/gbaedge.gba"), appGame: "gbaedge.gba",
                                       webHas: [join(ROOT, "tests/roms/gbaedge.gba")],
                                       expect: { fromLibrary: true, friendHas: false } }],
+  ["a copy set back on the browser: both re-sync", { webRom: SYNCTEST, appRom: SYNCTEST,
+                                                    appGame: "synctest.gb", drift: 300 }],
   ["manual codes, no server", { webRom: join(ROOT, "tests/roms/linktest.gba"), appRom: join(ROOT, "tests/roms/linktest.gba"),
                                 appGame: "linktest.gba", manual: true }],
 ];

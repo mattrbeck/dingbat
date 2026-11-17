@@ -178,7 +178,8 @@ const cases = {
     s.shot("after-27s");
     assert.ok(!s.netlink().some((l) => l.includes("idle")), "the app didn't end it: " + s.netlink());
     await s.hide(false);
-    await until(() => s.netlink().some((l) => l.startsWith("friend back after 0:2")), () => "app: " + s.netlink(), 5000);
+    // 27 s plus the screenshot, which takes the simulator 2-10 s.
+    await until(() => s.netlink().some((l) => /^friend back after 0:[23]\d/.test(l)), () => "app: " + s.netlink(), 5000);
     await sleep(2000);
     assert.ok(await s.linked(), "still linked: " + s.netlink());
     await s.end();

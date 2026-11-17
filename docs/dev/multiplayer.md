@@ -173,13 +173,19 @@ local one (`OnlineHooks.resynced`).
   Restarting the moment the friend's state is complete (if ours went) keeps
   every input in its session: the friend's new inputs travel behind its
   state. A drop during a re-sync ends the session.
-* **The GBA BIOS** is the one setting that changes emulated state: Golden
-  Sun with an image and without one differ from the first frame, even in
-  HLE mode (HLE hands some calls to an image when there is one; the mode
-  itself and Emerald, FireRed, Golden Sun TLA showed no difference over 900
-  frames). Two HELLOs that name different BIOSes both build their session
-  cores on HLE without an image (`bios_force_hle`, the same answer on both
-  sides); an older friend names none and each runs its own, as before.
+* **The GBA BIOS** is the one setting that changes emulated state. Played
+  from boot, HLE with an image and without one run the same (23 games,
+  6000 frames); but a state saved inside a BIOS call under one mapping
+  doesn't run on under the other, and a session loads each side's state
+  into both sides' cores. Golden Sun and Metroid Fusion wait in Halt at
+  every frame's end, and seven more games (Ruby, Mother 3, Superstar Saga,
+  ...) in IntrWait: such a state hangs on the other mapping. Two HELLOs
+  that name different BIOSes both build their session cores on HLE without
+  an image (`bios_force_hle`, the same answer on both sides), so the two
+  sides never run apart; a state the image player saved inside a BIOS call
+  still doesn't load right there until a cross-mapping load works (the
+  HLE Halt frame and the stub's IntrWait addresses; open). An older friend
+  names none and each runs its own, as before.
   Volume, filters, 2x, channel toggles, MP2K HLE, FIFO interpolation,
   palettes and LCD effects stay out of the state (audited); MP2K HLE on one
   side and off on the other is by design harmless but not tested.

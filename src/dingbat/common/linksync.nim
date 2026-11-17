@@ -96,6 +96,6 @@ proc bios_identity*(path: string; mode: int): tuple[mode: uint8; hash: uint32] =
 proc bios_force_hle*(mine, theirs: tuple[mode: uint8; hash: uint32]): bool =
   ## Both sides' session cores on HLE without an image unless both run the
   ## same mode on the same image: the same answer on both sides. Without the
-  ## image too: HLE hands some calls to an image when there is one (Golden
-  ## Sun with and without one differ from the first frame).
+  ## image too: a state saved inside a BIOS call under one mapping doesn't
+  ## run on under the other (Golden Sun, in Halt at every frame's end).
   mine != theirs

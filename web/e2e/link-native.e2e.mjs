@@ -289,8 +289,9 @@ test("browser copy set back, native hosts: caught, re-synced, both agree after",
 // A player with the real GBA BIOS (real-BIOS mode) and one without: before
 // the HELLO named it, the two copies of each game ran different code on
 // every BIOS call. DINGBAT_GBA_BIOS=a gba_bios.bin, DINGBAT_BIOS_GAME=a game
-// whose run differs with an image and without (Golden Sun does from the
-// first frame; attachtest.gba doesn't); neither is in the repo.
+// that sits inside a BIOS call at a frame's end (Golden Sun, in Halt; its
+// no-image state loaded under the image runs apart at once; attachtest.gba
+// doesn't); neither is in the repo.
 const biosPath = process.env.DINGBAT_GBA_BIOS, biosGame = process.env.DINGBAT_BIOS_GAME;
 const biosSkip = skip || ((!biosPath || !biosGame) && "DINGBAT_GBA_BIOS / DINGBAT_BIOS_GAME not set");
 const biosRom = () => ({ name: "biosgame.gba", bytes: readFileSync(biosGame) });

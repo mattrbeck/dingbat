@@ -12,6 +12,9 @@
 //
 // Cases: the same GBA game, the app hosting and the desktop hosting; the
 // same GB game; two different GBA games (each side sends the other its ROM).
+// Each case also runs the sync checks (docs/dev/multiplayer.md): the
+// desktop compares the app's fingerprints with its own, and they must agree
+// at every one, with no re-sync on either side.
 
 import { spawn, execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync, copyFileSync, mkdirSync, existsSync, rmSync, mkdtempSync } from "node:fs";
@@ -51,7 +54,8 @@ const launchApp = (rom, args, log) => {
   mkdirSync(join(data, "Documents/roms"), { recursive: true });
   copyFileSync(rom, join(data, "Documents/roms", rom.split("/").pop()));
   if (existsSync(log)) rmSync(log);
-  simctl("launch", "--stderr=" + log, UDID, BUNDLE, ...MUTED, ...args);
+  if (existsSync(log + ".out")) rmSync(log + ".out");
+  simctl("launch", "--stderr=" + log, "--stdout=" + log + ".out", UDID, BUNDLE, ...MUTED, ...args);
   return data;
 };
 
@@ -87,12 +91,26 @@ const runCase = async (name, { appRom, peerRom, appFirst }) => {
   console.log("  peer: " + (pm ? pm[0] : "(no dump) " + peer.log().slice(-400)));
   const hosted = /started as host/.test(peer.log()) ? "desktop" : "app";
   console.log("  host: " + hosted);
+  // Fingerprints at 120 ... STOP; the last crosses just after both stop.
+  const sync = () => {
+    const all = [...peer.log().matchAll(/ONLINE SYNC checks=(\d+) mismatches=(\d+) resyncs=(\d+)/g)];
+    const m = all[all.length - 1];
+    return m ? { checks: +m[1], mismatches: +m[2], resyncs: +m[3] } : { checks: 0, mismatches: 0, resyncs: 0 };
+  };
+  for (let i = 0; i < 100 && sync().checks < STOP / 120; i++) await sleep(100);
+  const appOut = existsSync(log + ".out") ? readFileSync(log + ".out", "utf8") : "";
+  console.log("  sync: desktop " + JSON.stringify(sync()) +
+              (/out of sync/.test(appOut) ? " | app: OUT OF SYNC" : " | app: no difference seen"));
   trySimctl("terminate", UDID, BUNDLE);
   const rc = await Promise.race([peer.done, sleep(15000).then(() => "timeout")]);
   if (rc === "timeout") peer.p.kill("SIGKILL");
   assert.ok(am && pm, "both sides dumped");
   assert.deepEqual([am[1], am[2], am[3], am[4]], [pm[1], pm[2], pm[3], pm[4]], "app and desktop cores identical");
   assert.equal(hosted, appFirst ? "app" : "desktop", "the first to arrive hosts");
+  assert.equal(sync().checks, STOP / 120, "the desktop compared every fingerprint with the app's");
+  assert.equal(sync().mismatches, 0, "native iOS and native desktop fingerprints agree");
+  assert.equal(sync().resyncs, 0);
+  assert.doesNotMatch(appOut, /out of sync/, "the app saw no difference either");
   // terminate kills the app with no goodbye: the desktop redials (as for
   // a vanished friend) until the peer process is stopped below.
   console.log("  ok");
