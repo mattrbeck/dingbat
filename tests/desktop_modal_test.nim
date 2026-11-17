@@ -74,11 +74,6 @@ io.DeltaTime = 1.0 / 60.0
 # The atlas is built by ImGui itself and handed to a renderer that is not
 # there; nothing here draws.
 io.BackendFlags = io.BackendFlags or cint(ImGui_BackendFlags_RendererHasTextures)
-when defined(windows):
-  for f in ["segoeui.ttf", "seguisb.ttf", "consola.ttf"]:
-    let p = getEnv("WINDIR", "C:\\Windows") / "Fonts" / f
-    let data = (try: readFile(p) except IOError: "")
-    echo f, ": ", data.len, " bytes, character map format ", stb_cmap_format(data)
 load_ui_fonts(io.Fonts)
 let inter = [io.Fonts.add_ttf(INTER_REGULAR, "Inter"),
              io.Fonts.add_ttf(INTER_SEMIBOLD, "Inter SemiBold")]
