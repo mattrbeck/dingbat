@@ -600,8 +600,18 @@ jobs:
           set -e
           cp -R "$HOME/sdl3-prefix/lib/." /opt/homebrew/lib/
           cp -R "$HOME/sdl3-prefix/include/." /opt/homebrew/include/
+      - name: Cache Nim
+        # choosenim's toolchain and its nim/nimble shims (~4 min to install)
+        id: nim-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.choosenim
+            ~/.nimble/bin
+          key: choosenim-${{ runner.os }}-${{ runner.arch }}-nim${{ env.NIM_VERSION }}
       - name: Install Nim
         # As build-artifacts.yml's macOS job
+        if: steps.nim-cache.outputs.cache-hit != 'true'
         env:
           CHOOSENIM_CHOOSE_VERSION: ${{ env.NIM_VERSION }}
         run: |
@@ -609,7 +619,10 @@ jobs:
           .github/scripts/retry.sh 3 bash -c \
             'curl -fsSL --retry 5 --retry-all-errors --connect-timeout 30 \
                https://nim-lang.org/choosenim/init.sh | sh -s -- -y'
+      - name: Put Nim on the PATH
+        run: |
           echo "$HOME/.nimble/bin" >> "$GITHUB_PATH"
+          "$HOME/.nimble/bin/nim" --version
       - name: Install dependencies
         shell: bash
         run: |
