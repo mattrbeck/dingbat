@@ -33,6 +33,9 @@ Metal details that matter:
   words; the shader reads them with OpenGL's NEAREST + REPEAT texel rule
   (the quad's `tex_coord.y` runs 0 to -1, as on OpenGL). Works on any
   Metal Mac (no packed 16-bit formats needed).
+- A filter's neighbour past the picture's edge reads the edge texel
+  (`srctex` clamps before the fetch), on both backends, as the web's and
+  iOS's presenters do; the wrap above only maps the flipped quad.
 - The game texture is a ring of 3 written with `replaceRegion`; at most 2
   presents are on the GPU, so a texture still being read is never written.
 - `read` (captures, `shot`) ends the pass, blits the drawable into a
@@ -74,10 +77,8 @@ texture a level or two off v/31 (a 5-bit 3 reads 24, not 25; 16 reads 134,
 not 132), and Metal reads exactly v/31. Against
 `tests/golden/desktop-blendprobe.png` (llvmpipe), Metal is 2 levels off on
 6 % of channels, this Mac's OpenGL 2 levels on 9 %. Where hq4x and xBR
-decide on a threshold, a level's difference flips a few edge pixels. The
-Save States thumbnail's top row on OpenGL blends in its bottom row (that
-texture's default REPEAT wrap under linear filtering); ImGui's Metal
-sampler clamps.
+decide on a threshold, a level's difference flips a few edge pixels. ImGui
+images (the Save States thumbnails) clamp at their edges on both backends.
 
 Pacing, `DINGBAT_FRAME_TRACE`, 10 s, hidden window, muted (ms, median /
 p99; the window is hidden, so these are CPU times, not glass times):

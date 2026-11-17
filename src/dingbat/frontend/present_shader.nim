@@ -32,7 +32,13 @@ float dmg_shade(int i) {
 // palette, as web/glpresent.js fetchRGB: a pixel between two shades (the LCD
 // response settling) mixes their entries; one off the ramp keeps its colour.
 float3 srctex(CTX_IN float2 uv) {
-  float3 c = GAME(uv).rgb;
+  // A filter's neighbour past the picture's edge reads the edge texel, as the
+  // web's and iOS's do, not the opposite edge's. uv.y runs in [-1, 0] (top
+  // row at -1), so the texel row is (uv.y + 1) * height; the clamped point is
+  // put back in that range, where the wrapping fetch below reads it.
+  float2 size = float2(u.tex_width, u.tex_height);
+  float2 p = clamp(float2(uv.x, uv.y + 1.0) * size, float2(0.5), size - 0.5);
+  float3 c = GAME(float2(p.x / size.x, p.y / size.y - 1.0)).rgb;
   if (u.dmg_remap) {
     float3 v = c * 31.0;
     for (int i = 0; i < 3; i++) {
