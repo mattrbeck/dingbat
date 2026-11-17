@@ -61,7 +61,7 @@
 
 import std/[os, strutils]
 import sdl3
-import imguin/glad/gl
+from presenter as pr import nil
 import stb_image/write as stbiw
 when defined(macosx):
   import mac_menu
@@ -390,16 +390,10 @@ proc driver_frame*(window: Window) =
   if shot_path.len == 0: return
   var w, h: cint
   discard window.getWindowSizeInPixels(w, h)
-  var pix = newSeq[byte](int(w) * int(h) * 3)
-  glPixelStorei(GL_PACK_ALIGNMENT, 1)
-  glReadPixels(0, 0, GLsizei(w), GLsizei(h), GL_RGB, GL_UNSIGNED_BYTE, addr pix[0])
-  var flipped = newSeq[byte](pix.len)
-  let stride = int(w) * 3
-  for row in 0 ..< int(h):
-    copyMem(addr flipped[row * stride], addr pix[(int(h) - 1 - row) * stride], stride)
+  let pix = pr.read(0, 0, int(w), int(h))
   var ww, wh: cint
   discard window.getWindowSize(ww, wh)
-  if stbiw.writePNG(shot_path, int(w), int(h), 3, flipped):
+  if pix.len > 0 and stbiw.writePNG(shot_path, int(w), int(h), 3, pix):
     ack(shot_id, "ok " & $w & "x" & $h & " px, window " & $ww & "x" & $wh & " pt")
   else:
     ack(shot_id, "error could not write " & shot_path)

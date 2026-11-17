@@ -1,7 +1,6 @@
 import std/[os, hashes, math, options, parseopt, strformat, strutils, tables, times, algorithm]
 import sdl3
-import imguin/[cimgui, impl_opengl]
-import imguin/glad/gl
+import imguin/cimgui
 import stb_image/read as stbi
 import stb_image/write as stbiw
 import dingbat/common/config
@@ -30,6 +29,7 @@ import dingbat/frontend/game_lock
 import dingbat/frontend/window_restore
 import dingbat/frontend/nds_game
 import dingbat/frontend/imgui_sdl3
+from dingbat/frontend/presenter as pr import nil
 import dingbat/frontend/util
 import dingbat/frontend/menu_model
 import dingbat/frontend/imgui_menu
@@ -66,226 +66,6 @@ var native_menu = false
 # The sdl3 package types SDL_WINDOWPOS_CENTERED as uint; positions are cint
 const WINDOW_CENTERED = cint(WINDOWPOS_CENTERED)
 
-# ──────────────────────────── Shaders ────────────────────────────
-
-const VERT_SRC = """
-#version 330 core
-out vec2 tex_coord;
-const vec2 vertices[4] = vec2[](vec2(-1.0,-1.0),vec2(1.0,-1.0),vec2(-1.0,1.0),vec2(1.0,1.0));
-void main() {
-  gl_Position = vec4(vertices[gl_VertexID], 0.0, 1.0);
-  tex_coord = (vertices[gl_VertexID] + 1.0) / vec2(2.0, -2.0);
-}
-"""
-
-# Color correction, one model per panel (panel_gbc):
-#  - GBA: the ares colour model (ISC, see THIRD_PARTY_NOTICES.md): linearize
-#    γ4.0, mix, re-gamma. Matches bgr555_to_rgb and the wasm LUT.
-#  - GB/GBC: Pokefan531's "GBC-Color" model. The GBA curve would crush the
-#    less washed-out CGB panel's colors.
-# Upscale filters follow the public hq4x/xBR descriptions. Mirrored in
-# web/glpresent.js's GLSL ES shader.
-const FRAG_SRC = """
-#version 330 core
-in vec2 tex_coord;
-out vec4 frag_color;
-uniform sampler2D input_texture;
-uniform sampler2D border_texture;
-uniform bool color_correct;
-uniform bool panel_gbc;
-uniform bool lcd_grid;
-uniform float tex_width;
-uniform float tex_height;
-// The pixel pitches the LCD-grid and RGB-subpixel looks use. Equal to the
-// game texture's dims without a border; with one they are the OUTPUT dims
-// (256x224), because the SGB border and the Game Boy window are both native
-// pixels of the same picture. Feed tex_width/tex_height here instead and the
-// border gets a 160x144 grid stretched over 256x224.
-uniform float scan_height;
-uniform float scan_width;
-uniform bool subpixel;
-// SGB border: a 256x224 RGB5_A1 layer drawn over the whole quad, with the
-// Game Boy window composited into the 160x144 rect at (48, 40). Alpha 0 is
-// SNES colour 0 -- transparent, so the window (or the backdrop) shows through.
-uniform bool sgb_border;
-uniform vec3 sgb_backdrop;
-uniform int filter_mode;   // 0 = none, 1 = hq4x, 2 = xBR
-// A black-and-white game's four greys (gb.nim DMG_COLORS) in the shade
-// palette, as web/glpresent.js fetchRGB: a pixel between two shades (the LCD
-// response settling) mixes their entries; one off the ramp keeps its colour.
-uniform bool dmg_remap;
-uniform vec3 dmg_pal[4];
-const float DMG_SHADE[4] = float[4](31.0, 21.0, 10.0, 0.0);
-
-vec3 srctex(vec2 uv) {
-  vec3 c = texture(input_texture, uv).rgb;
-  if (dmg_remap) {
-    vec3 v = c * 31.0;
-    for (int i = 0; i < 3; i++) {
-      float a = DMG_SHADE[i], b = DMG_SHADE[i + 1];
-      float t = (a - v.g) / (a - b);
-      if (t >= 0.0 && t <= 1.0) {
-        if (all(lessThan(abs(vec3(mix(a, b, t)) - v), vec3(1.5))))
-          return mix(dmg_pal[i], dmg_pal[i + 1], t);
-        break;
-      }
-    }
-  }
-  return c;
-}
-
-// BT.601 YUV; the perceptual space both filters classify edges in.
-vec3 yuv(vec3 c) {
-  return vec3(dot(c, vec3( 0.299,  0.587,  0.114)),
-              dot(c, vec3(-0.169, -0.331,  0.500)),
-              dot(c, vec3( 0.500, -0.419, -0.081)));
-}
-// xBR weighted color distance: 48*|dY| + 7*|dU| + 6*|dV|.
-float df(vec3 a, vec3 b) {
-  vec3 d = abs(yuv(a) - yuv(b));
-  return d.x * 48.0 + d.y * 7.0 + d.z * 6.0;
-}
-// hqx similar/different test: per-channel YUV thresholds 48,7,6 (8-bit units).
-bool similar(vec3 a, vec3 b) {
-  vec3 d = abs(yuv(a) - yuv(b));
-  return d.x <= 48.0/255.0 && d.y <= 7.0/255.0 && d.z <= 6.0/255.0;
-}
-// Sample the source texel-neighborhood around uv and smooth the pixel-art edge
-// the fragment sits on. filter_mode picks the algorithm.
-vec3 upscale(vec2 uv, vec2 tsz) {
-  vec3 E = srctex(uv);
-  if (filter_mode == 0) return E;
-  vec2 t  = 1.0 / tsz;
-  vec2 fp = fract(uv * tsz);                 // sub-texel position, 0.5 = center
-  float sx = fp.x < 0.5 ? -1.0 : 1.0;        // which diagonal corner we're in
-  float sy = fp.y < 0.5 ? -1.0 : 1.0;
-  float lx = sx > 0.0 ? fp.x : 1.0 - fp.x;   // corner-local: 0.5 at center..1 far
-  float ly = sy > 0.0 ? fp.y : 1.0 - fp.y;
-  // ramp across the anti-diagonal through the active corner (lv2-style AA)
-  float w = smoothstep(0.15, 0.85, lx + ly - 1.0);
-  vec3 Ph = srctex(uv + t * vec2(sx, 0.0));  // horizontal edge neighbor
-  vec3 Pv = srctex(uv + t * vec2(0.0, sy));  // vertical edge neighbor
-  vec3 X  = srctex(uv + t * vec2(sx, sy));   // diagonal neighbor
-
-  if (filter_mode == 1) {                    // hq4x-style (threshold + 3px blend)
-    if (!similar(E, Ph) && !similar(E, Pv) && similar(Ph, Pv))
-      return mix(E, 0.5 * (Ph + Pv), w);
-    return E;
-  }
-  // filter_mode == 2: xBR-lv2 edge-directed interpolation
-  vec3 C  = srctex(uv + t * vec2( sx, -sy));
-  vec3 G  = srctex(uv + t * vec2(-sx,  sy));
-  vec3 F4 = srctex(uv + t * vec2( 2.0 * sx, 0.0));
-  vec3 H5 = srctex(uv + t * vec2( 0.0, 2.0 * sy));
-  vec3 D  = srctex(uv + t * vec2(-sx, 0.0));
-  vec3 I5 = srctex(uv + t * vec2( sx, 2.0 * sy));
-  vec3 I4 = srctex(uv + t * vec2( 2.0 * sx, sy));
-  vec3 B  = srctex(uv + t * vec2( 0.0, -sy));
-  float wd_red  = df(E, C) + df(E, G) + df(X, F4) + df(X, H5) + 4.0 * df(Pv, Ph);
-  float wd_blue = df(Pv, D) + df(Pv, I5) + df(Ph, I4) + df(Ph, B) + 4.0 * df(E, X);
-  if (wd_red < wd_blue) {
-    vec3 px = df(E, Ph) <= df(E, Pv) ? Ph : Pv;
-    return mix(E, px, w);
-  }
-  return E;
-}
-
-vec3 correct(vec3 c) {
-  float outGamma = 2.2;
-  if (panel_gbc) {
-    vec3 lin = pow(c, vec3(2.2)) * 0.94;
-    return pow(clamp(vec3(
-      0.82 * lin.r + 0.240 * lin.g - 0.060 * lin.b,
-      0.125 * lin.r + 0.665 * lin.g + 0.210 * lin.b,
-      0.195 * lin.r + 0.075 * lin.g + 0.730 * lin.b), 0.0, 1.0),
-      vec3(1.0 / outGamma));
-  }
-  float lcdGamma = 4.0;
-  vec3 lin = pow(c, vec3(lcdGamma));
-  return pow(vec3(
-      0.0 * lin.b +  50.0 * lin.g + 240.0 * lin.r,
-     30.0 * lin.b + 230.0 * lin.g +  10.0 * lin.r,
-    220.0 * lin.b +  10.0 * lin.g +  50.0 * lin.r) / 255.0,
-    vec3(1.0 / outGamma));
-}
-
-// The Game Boy layer, with every filter the no-border path applies.
-vec3 gb_layer(vec2 uv) {
-  vec3 raw = upscale(uv, vec2(tex_width, tex_height));
-  // A shade palette is display colour already: no panel model on it.
-  return color_correct && !dmg_remap ? correct(raw) : raw;
-}
-
-void main() {
-  vec3 rgb;
-  if (sgb_border) {
-    vec4 b = texture(border_texture, tex_coord);
-    if (b.a > 0.5) {
-      // Border art is native SNES output, not an LCD panel: no colour
-      // correction, and the upscale filters stay off it (they are tuned for
-      // 2bpp pixel art and smear 4bpp tiles).
-      rgb = b.rgb;
-    } else {
-      // tex_coord.y runs 0 -> -1 (the vertex shader flips there), so the
-      // window rectangle has to be worked out in un-flipped space and the
-      // result flipped back for the sampler.
-      vec2 up = vec2(tex_coord.x, -tex_coord.y) * vec2(256.0, 224.0);
-      vec2 guv = (up - vec2(48.0, 40.0)) / vec2(160.0, 144.0);
-      rgb = (guv.x >= 0.0 && guv.x < 1.0 && guv.y >= 0.0 && guv.y < 1.0)
-            ? gb_layer(vec2(guv.x, -guv.y)) : sgb_backdrop;
-    }
-  } else {
-    rgb = gb_layer(tex_coord);
-  }
-  // "LCD grid": a thin dark seam between every pixel, on BOTH axes — the
-  // pixel matrix a reflective Game Boy LCD really shows (scanlines were a CRT
-  // idiom; no handheld panel has them). The seam is the trailing quarter of
-  // each cell and darkens gently, so the grid reads as texture rather than as
-  // bars. fract() of the negative tex_coord.y still lands in [0,1).
-  if (lcd_grid &&
-      (fract(tex_coord.x * scan_width) > 0.75 ||
-       fract(tex_coord.y * scan_height) > 0.75)) {
-    rgb *= 0.85;
-  }
-  // "RGB subpixels": draw the display's own structure — each emulated pixel
-  // splits into three vertical R/G/B stripes over a darkened row gap, the way
-  // a GBC/GBA TFT's subpixel triad looks up close (a DMG panel has no
-  // subpixels, so there this is a stylised look, not a simulation). The
-  // off-stripes keep half and a 1.35 gain rebalances overall brightness;
-  // min() stops the gain pushing whites into hue shifts.
-  if (subpixel) {
-    int stripe = int(fract(tex_coord.x * scan_width) * 3.0);
-    vec3 m = stripe == 0 ? vec3(1.0, 0.5, 0.5)
-           : stripe == 1 ? vec3(0.5, 1.0, 0.5)
-           :               vec3(0.5, 0.5, 1.0);
-    rgb = min(rgb * m * 1.35, vec3(1.0));
-    if (fract(tex_coord.y * scan_height) > 0.85) rgb *= 0.7;
-  }
-  frag_color = vec4(rgb, 1.0);
-}
-"""
-
-const LOGO_VERT_SRC = """
-#version 330 core
-out vec2 tex_coord;
-uniform float aspect;
-uniform float scale;
-const vec2 vertices[4] = vec2[](vec2(-1.0,-1.0),vec2(1.0,-1.0),vec2(-1.0,1.0),vec2(1.0,1.0));
-void main() {
-  vec2 scaled_xy = vec2(vertices[gl_VertexID]) * scale;
-  gl_Position = vec4(scaled_xy.x, scaled_xy.y * aspect, 0.0, 1.0);
-  tex_coord = (vertices[gl_VertexID] + 1.0) / vec2(2.0, -2.0);
-}
-"""
-
-const LOGO_FRAG_SRC = """
-#version 330 core
-in vec2 tex_coord;
-out vec4 frag_color;
-uniform sampler2D input_texture;
-void main() { frag_color = texture(input_texture, tex_coord); }
-"""
-
 # ──────────────────────────── Helpers ────────────────────────────
 
 proc print_help() =
@@ -313,113 +93,25 @@ proc print_help() =
   echo "  or a copy of the ROM file under another name."
   echo ""
   echo "Verification:"
-  echo "  --capture N:PATH    After N presented frames, write the GL back buffer"
+  echo "  --capture N:PATH    After N presented frames, write the back buffer"
   echo "                      (the real composited picture, letterbox excluded,"
   echo "                      in device pixels: 2x the window on a Retina display)"
   echo "                      to PATH as a PNG and exit"
 
-proc compile_shader(src: string; shader_type: GLenum): GLuint =
-  result = glCreateShader(shader_type)
-  var src_ptr = cstring(src)
-  glShaderSource(result, 1, cast[cstringArray](addr src_ptr), nil)
-  glCompileShader(result)
-  var status: GLint = 0
-  glGetShaderiv(result, GL_COMPILE_STATUS, addr status)
-  if status == 0:
-    var log_len: GLint = 0
-    glGetShaderiv(result, GL_INFO_LOG_LENGTH, addr log_len)
-    var log_buf = newString(log_len + 1)
-    glGetShaderInfoLog(result, log_len, nil, cstring(log_buf))
-    echo "Shader compile error: ", log_buf
-    sdl3.quit(); system.quit(1)
-
-proc create_shader_program(): GLuint =
-  let vert = compile_shader(VERT_SRC, GL_VERTEX_SHADER)
-  let frag = compile_shader(FRAG_SRC, GL_FRAGMENT_SHADER)
-  result = glCreateProgram()
-  glAttachShader(result, vert)
-  glAttachShader(result, frag)
-  glLinkProgram(result)
-  var status: GLint = 0
-  glGetProgramiv(result, GL_LINK_STATUS, addr status)
-  if status == 0:
-    var log_len: GLint = 0
-    glGetProgramiv(result, GL_INFO_LOG_LENGTH, addr log_len)
-    var log_buf = newString(log_len + 1)
-    glGetProgramInfoLog(result, log_len, nil, cstring(log_buf))
-    echo "Shader link error: ", log_buf
-    sdl3.quit(); system.quit(1)
-  glDeleteShader(vert)
-  glDeleteShader(frag)
-
-proc create_logo_shader_program(): GLuint =
-  let vert = compile_shader(LOGO_VERT_SRC, GL_VERTEX_SHADER)
-  let frag = compile_shader(LOGO_FRAG_SRC, GL_FRAGMENT_SHADER)
-  result = glCreateProgram()
-  glAttachShader(result, vert)
-  glAttachShader(result, frag)
-  glLinkProgram(result)
-  var status: GLint = 0
-  glGetProgramiv(result, GL_LINK_STATUS, addr status)
-  if status == 0:
-    var log_len: GLint = 0
-    glGetProgramiv(result, GL_INFO_LOG_LENGTH, addr log_len)
-    var log_buf = newString(log_len + 1)
-    glGetProgramInfoLog(result, log_len, nil, cstring(log_buf))
-    echo "Logo shader link error: ", log_buf
-    sdl3.quit(); system.quit(1)
-  glDeleteShader(vert)
-  glDeleteShader(frag)
-
-proc setup_game_texture(): GLuint =
-  glGenTextures(1, addr result)
-  glActiveTexture(GL_TEXTURE0)
-  glBindTexture(GL_TEXTURE_2D, result)
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GLint(GL_NEAREST))
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GLint(GL_NEAREST))
-
-proc load_logo_texture(): (GLuint, float32) =
+proc load_logo_texture(): float32 =
+  ## The logo's height over its width.
   var buf = newSeq[byte](LOGO_PNG_DATA.len)
   for i, c in LOGO_PNG_DATA: buf[i] = byte(c)
   var w, h, comp: int
   let pixels = stbi.loadFromMemory(buf, w, h, comp, stbi.RGBA)
-  var tex: GLuint
-  glGenTextures(1, addr tex)
-  glActiveTexture(GL_TEXTURE0)
-  glBindTexture(GL_TEXTURE_2D, tex)
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GLint(GL_NEAREST))
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GLint(GL_NEAREST))
-  glTexImage2D(GL_TEXTURE_2D, 0, GLint(GL_RGBA), GLsizei(w), GLsizei(h), 0,
-               GL_RGBA, GL_UNSIGNED_BYTE,
-               unsafeAddr pixels[0])
-  let canvas_aspect = float32(h) / float32(w)
-  result = (tex, canvas_aspect)
+  pr.logo_upload(unsafeAddr pixels[0], w, h)
+  float32(h) / float32(w)
 
-# --capture N:PATH. Reads the actual GL back buffer, so it proves the shader
+# --capture N:PATH. Reads the actual back buffer, so it proves the shader
 # path rather than the core's buffers. -1 disables.
 var capture_after = -1
 var capture_path  = ""
 var present_count = 0
-
-proc setup_border_texture(): GLuint =
-  glGenTextures(1, addr result)
-  glActiveTexture(GL_TEXTURE1)
-  glBindTexture(GL_TEXTURE_2D, result)
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GLint(GL_NEAREST))
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GLint(GL_NEAREST))
-  # Wrap stays at the default REPEAT: VERT_SRC emits tex_coord.y in [0, -1],
-  # so every fetch is at a negative V. CLAMP_TO_EDGE pins the whole border to
-  # row 0 (vertical stripes).
-  # RGB5_A1 with 1_5_5_5_REV is the core's border format: BGR555 in bits 0-14,
-  # opaque flag in bit 15.
-  glTexImage2D(GL_TEXTURE_2D, 0, GLint(GL_RGB5_A1), GLsizei(256), GLsizei(224),
-               0, GL_RGBA, GL_UNSIGNED_SHORT_1_5_5_5_REV, nil)
-  glActiveTexture(GL_TEXTURE0)
-
-proc setup_vao() =
-  var vao: GLuint
-  glGenVertexArrays(1, addr vao)
-  glBindVertexArray(vao)
 
 # ──────────────────────────── App State ────────────────────────────
 
@@ -433,26 +125,21 @@ type AppState = ref object
   nds:             NdsGame   # a DS game (DS Beta; frontend/nds_game.nim)
   emu_kind:        EmuKind
   window:          Window
-  gl_ctx:          GLContext
   io:              ptr ImGuiIO
-  game_texture:    GLuint
+  look:            pr.Look  # the game shader's inputs
   nds_tex_scale:   int      # a DS game's texture: 256x384 times this (HD 3D)
-  # SGB border layer, 256x224 RGB5_A1. Uploaded and sampled only while the
-  # cart runs as a Super Game Boy and has transferred a border.
-  border_texture:  GLuint
+  # The SGB border layer is uploaded and sampled only while the cart runs
+  # as a Super Game Boy and has transferred a border.
   border_shown:    bool     # what the last present decided; drives window sizing
   border_gen:      uint32   # last border generation uploaded to the texture
-  logo_texture:    GLuint
   canvas_aspect:   float32
-  logo_shader:     GLuint
-  game_shader:     GLuint
   fe:              FileExplorer
   ce:              ConfigEditor
   dbg:             GbaDebug
   gb_dbg:          GbDebug
   cheats:          CheatsWidget
   save_states:     SaveStatesWidget
-  state_slot_texs: array[NUM_SLOTS, GLuint]  # thumbnails for the grid (0 = none)
+  state_slot_texs: array[NUM_SLOTS, uint64]  # thumbnails for the grid (0 = none)
   scale:           int
   running:         bool
   paused:          bool
@@ -524,10 +211,7 @@ proc flush_saves() =
 
 proc apply_color_correction() =
   ## The correction models the GBA and GBC panels: never on a DS's own.
-  glUseProgram(app.game_shader)
-  let loc = glGetUniformLocation(app.game_shader, "color_correct")
-  glUniform1i(loc, GLint(if app.cfg.color_correction and app.emu_kind != ekNDS: 1
-                         else: 0))
+  app.look.color_correct = app.cfg.color_correction and app.emu_kind != ekNDS
 
 # Black-and-white game palette: Night's, the web and iOS default (web
 # GB_DEFAULT_SHADES), lightest first, 0xRRGGBB. The core's greys are codes.
@@ -651,40 +335,33 @@ proc track_fullscreen() =
     remember_fullscreen(real)
   if app.fs_track.take_refit(real): resize_to_output()
 
-proc letterbox(ww, wh: cint): (GLint, GLint, GLint, GLint) =
+proc letterbox(ww, wh: cint): (int, int, int, int) =
   ## The letterboxed rect the picture fills in a ww x wh area, in that
   ## area's units. An SGB border switches the picture from 10:9 to 8:7
   ## mid-session, so one window must fit both.
   let (ow, oh) = output_size()
   if not app.cfg.preserve_aspect or ow <= 0 or oh <= 0:
-    return (0.GLint, 0.GLint, GLint(ww), GLint(wh))
+    return (0, 0, int(ww), int(wh))
   let scale = min(float(ww) / float(ow), float(wh) / float(oh))
-  let vw = GLint(float(ow) * scale)
-  let vh = GLint(float(oh) * scale)
-  ((GLint(ww) - vw) div 2, (GLint(wh) - vh) div 2, vw, vh)
+  let vw = int(float(ow) * scale)
+  let vh = int(float(oh) * scale)
+  ((int(ww) - vw) div 2, (int(wh) - vh) div 2, vw, vh)
 
-proc game_viewport(): (GLint, GLint, GLint, GLint) =
-  ## The rect the game quad is drawn into, in back-buffer pixels: twice the
-  ## window's size on a Retina display (WINDOW_HIGH_PIXEL_DENSITY).
+proc game_viewport(): (int, int, int, int) =
+  ## The rect the game quad is drawn into, in back-buffer pixels from the
+  ## bottom left: twice the window's size on a Retina display
+  ## (WINDOW_HIGH_PIXEL_DENSITY).
   var pw, ph: cint
   discard getWindowSizeInPixels(app.window, pw, ph)
   letterbox(pw, ph)
 
 proc apply_panel_uniforms() =
   ## Depends only on the core kind: run on core (re)load, not per frame.
-  glUseProgram(app.game_shader)
   let gbc = app.emu_kind == ekGB
   let ds = app.emu_kind == ekNDS
-  glUniform1i(glGetUniformLocation(app.game_shader, "panel_gbc"),
-              GLint(if gbc: 1 else: 0))
-  glUniform1f(glGetUniformLocation(app.game_shader, "tex_height"),
-              if gbc: GLfloat(GB_H) elif ds: GLfloat(NDS_H) else: GLfloat(GBA_H))
-  glUniform1f(glGetUniformLocation(app.game_shader, "tex_width"),
-              if gbc: GLfloat(GB_W) elif ds: GLfloat(NDS_W) else: GLfloat(GBA_W))
-  # Without this the border sampler defaults to unit 0 and samples the game
-  # texture as its border.
-  glUniform1i(glGetUniformLocation(app.game_shader, "input_texture"), 0)
-  glUniform1i(glGetUniformLocation(app.game_shader, "border_texture"), 1)
+  app.look.panel_gbc = gbc
+  app.look.tex_height = if gbc: float32(GB_H) elif ds: float32(NDS_H) else: float32(GBA_H)
+  app.look.tex_width = if gbc: float32(GB_W) elif ds: float32(NDS_W) else: float32(GBA_W)
 
 proc apply_master_volume() =
   # Nothing audible: the cores skip mixing (APU.silent) and queue zeros
@@ -949,16 +626,10 @@ proc load_rom(path: string; keep_ds = false) =
   else:
     app.rewind.clear()
   app.rewinding = false
-  glDisable(GL_BLEND)
-  glUseProgram(app.game_shader)
-  glBindTexture(GL_TEXTURE_2D, app.game_texture)
-  # Allocate storage once; per-frame uploads use glTexSubImage2D
-  # (glTexImage2D each frame costs ~0.4 ms on macOS's GL-on-Metal)
   let (tw, th) = if app.emu_kind == ekGBA: (GBA_W, GBA_H)
                  elif app.emu_kind == ekNDS: (NDS_W, NDS_H)
                  else: (GB_W, GB_H)
-  glTexImage2D(GL_TEXTURE_2D, 0, GLint(GL_RGB5), GLsizei(tw), GLsizei(th), 0,
-               GL_RGBA, GL_UNSIGNED_SHORT_1_5_5_5_REV, nil)
+  pr.game_alloc(tw, th)
   app.nds_tex_scale = 1   # a DS game's HD size is taken at its first present
   app.cur_path = path
   var recs = app.cfg.recents
@@ -1161,7 +832,7 @@ proc delete_state_slot(slot: int) =
       echo "Delete state failed: ", getCurrentExceptionMsg()
 
 proc refresh_state_slots() =
-  ## Decode each slot's thumbnail into a GL texture for the Save States
+  ## Decode each slot's thumbnail into a texture for the Save States
   ## widget. Called on window open and after a save, never on the hot path.
   let w = app.save_states
   w.have_rom = app.emu_kind != ekNone
@@ -1189,15 +860,10 @@ proc refresh_state_slots() =
           px[i] = (px[i] and 0x8000'u16) or (uint16(c[2] shr 3) shl 10) or
                   (uint16(c[1] shr 3) shl 5) or uint16(c[0] shr 3)
     if pixels.len > 0:
-      if app.state_slot_texs[i] == 0:
-        glGenTextures(1, addr app.state_slot_texs[i])
-      glBindTexture(GL_TEXTURE_2D, app.state_slot_texs[i])
-      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GLint(GL_LINEAR))
-      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GLint(GL_LINEAR))
-      glTexImage2D(GL_TEXTURE_2D, 0, GLint(GL_RGB5), GLsizei(tw), GLsizei(th), 0,
-                   GL_RGBA, GL_UNSIGNED_SHORT_1_5_5_5_REV, addr pixels[0])
+      pr.ui_texture(app.state_slot_texs[i], addr pixels[0], tw, th,
+                    bgr555 = true, linear = true)
       w.set_slot(i, used = true, label = label,
-                 tex = uint64(app.state_slot_texs[i]),
+                 tex = app.state_slot_texs[i],
                  tw = float32(tw), th = float32(th))
     else:
       # A state without a thumbnail: selectable, no preview.
@@ -1309,17 +975,10 @@ proc save_screenshot() =
 # ──────────────────────────── Rendering ────────────────────────────
 
 proc render_logo() =
-  # Bind explicitly: other code may have switched program/texture
-  glUseProgram(app.logo_shader)
-  glBindTexture(GL_TEXTURE_2D, app.logo_texture)
   var w, h: cint
   discard getWindowSize(app.window, w, h)
   let window_aspect = float32(w) / float32(h)
-  let aspect_loc = glGetUniformLocation(app.logo_shader, "aspect")
-  let scale_loc  = glGetUniformLocation(app.logo_shader, "scale")
-  glUniform1f(aspect_loc, window_aspect * app.canvas_aspect)
-  glUniform1f(scale_loc, 0.5'f32)
-  glDrawArrays(GL_TRIANGLE_STRIP, 0, 4)
+  pr.draw_logo(window_aspect * app.canvas_aspect, 0.5'f32)
 
 proc upload_frame(fb: ptr uint16; w, h: int) =
   ## Upload the frame through the LCD response model. The model advances once
@@ -1336,13 +995,13 @@ proc upload_frame(fb: ptr uint16; w, h: int) =
     display_gamma = if app.emu_kind == ekGBA and app.cfg.color_correction: 4.0
                     else: 0.0)
   let upload = cast[pointer](lcd_resp.apply(src, w * h))
-  glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, GLsizei(w), GLsizei(h),
-                  GL_RGBA, GL_UNSIGNED_SHORT_1_5_5_5_REV, upload)
+  pr.game_upload(0, w, h, upload)
 
 when defined(gputime):
   # Diagnostic, off by default (-d:gputime): GL_TIME_ELAPSED around the game
   # quad, to measure upscale filters at a real window size. Prints median/p90
-  # GPU ms every 2 s.
+  # GPU ms every 2 s. OpenGL only (DINGBAT_RENDERER=gl on macOS).
+  import imguin/glad/gl
   var gpuq: array[8, GLuint]
   var gpuq_init = false
   var gpuq_slot = 0
@@ -1351,6 +1010,7 @@ when defined(gputime):
   var gpu_sweep_step = 0
 
   proc gpu_begin() =
+    if pr.backend != pr.pbGL: return
     if not gpuq_init:
       glGenQueries(GLsizei(gpuq.len), addr gpuq[0])
       gpuq_init = true
@@ -1365,6 +1025,7 @@ when defined(gputime):
     glBeginQuery(GL_TIME_ELAPSED, gpuq[gpuq_slot])
 
   proc gpu_end() =
+    if pr.backend != pr.pbGL: return
     glEndQuery(GL_TIME_ELAPSED)
     gpuq_slot = (gpuq_slot + 1) mod gpuq.len
     let now = getTime()
@@ -1409,129 +1070,85 @@ proc note_gba_frame() =
 
 proc render_game() =
   if app.emu_kind != ekNone:
-    glUseProgram(app.game_shader)
-    glBindTexture(GL_TEXTURE_2D, app.game_texture)
     # Pushed every present: Settings' Apply has no callback into this module.
     # filter_mode carries only the smoothing filters; grid and subpixel are
     # separate stages.
     let vf = app.cfg.video_filter
-    glUniform1i(glGetUniformLocation(app.game_shader, "lcd_grid"),
-                GLint(if vf == vfGrid: 1 else: 0))
-    glUniform1i(glGetUniformLocation(app.game_shader, "subpixel"),
-                GLint(if vf == vfSubpixel: 1 else: 0))
-    glUniform1i(glGetUniformLocation(app.game_shader, "filter_mode"),
-                GLint(if vf in {vfHq4x, vfXbr}: ord(vf) else: 0))
-    glUniform1i(glGetUniformLocation(app.game_shader, "dmg_remap"),
-                GLint(if dmg_shades_on(): 1 else: 0))
-    var pal: array[12, GLfloat]
+    app.look.lcd_grid = vf == vfGrid
+    app.look.subpixel = vf == vfSubpixel
+    app.look.filter_mode = if vf in {vfHq4x, vfXbr}: ord(vf) else: 0
+    app.look.dmg_remap = dmg_shades_on()
     for i, c in DMG_SHADES:
-      pal[i * 3] = GLfloat(c shr 16) / 255
-      pal[i * 3 + 1] = GLfloat((c shr 8) and 0xFF) / 255
-      pal[i * 3 + 2] = GLfloat(c and 0xFF) / 255
-    glUniform3fv(glGetUniformLocation(app.game_shader, "dmg_pal"), 4, addr pal[0])
-  # Restored to the full window afterwards so ImGui is not clipped.
-  var win_w, win_h: cint
-  discard getWindowSizeInPixels(app.window, win_w, win_h)
-  let (vx, vy, vw, vh) = game_viewport()
-  if app.emu_kind != ekNone:
-    glViewport(vx, vy, GLsizei(vw), GLsizei(vh))
+      app.look.dmg_pal[i * 3] = float32(c shr 16) / 255
+      app.look.dmg_pal[i * 3 + 1] = float32((c shr 8) and 0xFF) / 255
+      app.look.dmg_pal[i * 3 + 2] = float32(c and 0xFF) / 255
+  var (vx, vy, vw, vh) = game_viewport()
   case app.emu_kind
   of ekGBA:
-    if app.gba_emu == nil:
-      glViewport(0, 0, GLsizei(win_w), GLsizei(win_h)); return
-    glUniform1i(glGetUniformLocation(app.game_shader, "sgb_border"), 0)
-    glUniform1f(glGetUniformLocation(app.game_shader, "scan_height"),
-                GLfloat(GBA_H))
-    glUniform1f(glGetUniformLocation(app.game_shader, "scan_width"),
-                GLfloat(GBA_W))
+    if app.gba_emu == nil: return
+    app.look.sgb_border = false
+    app.look.scan_height = float32(GBA_H)
+    app.look.scan_width = float32(GBA_W)
     # The LCD model needs static frames too, or a settling cell freezes
     if app.cfg.lcd_response or gba_changed_unuploaded or not app.gba_emu.ppu.frame_static:
       upload_frame(addr app.gba_emu.ppu.framebuffer[0], GBA_W, GBA_H)
       gba_changed_unuploaded = false
     when defined(gputime): gpu_begin()
-    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4)
+    pr.draw_game(vx, vy, vw, vh, app.look)
     when defined(gputime): gpu_end()
   of ekGB:
-    if app.gb_emu == nil:
-      glViewport(0, 0, GLsizei(win_w), GLsizei(win_h)); return
+    if app.gb_emu == nil: return
     let border = sgb_border_active()
-    glUniform1i(glGetUniformLocation(app.game_shader, "sgb_border"),
-                GLint(if border: 1 else: 0))
+    app.look.sgb_border = border
     # The scanline pitch follows the OUTPUT (224 rows with a border), not the
     # Game Boy texture.
-    glUniform1f(glGetUniformLocation(app.game_shader, "scan_height"),
-                if border: GLfloat(SGB_BORDER_H) else: GLfloat(GB_H))
-    glUniform1f(glGetUniformLocation(app.game_shader, "scan_width"),
-                if border: GLfloat(SGB_BORDER_W) else: GLfloat(GB_W))
+    app.look.scan_height = if border: float32(SGB_BORDER_H) else: float32(GB_H)
+    app.look.scan_width = if border: float32(SGB_BORDER_W) else: float32(GB_W)
     if border:
       let bd = app.gb_emu.sgb_backdrop()
-      glUniform3f(glGetUniformLocation(app.game_shader, "sgb_backdrop"),
-                  GLfloat(float(bd and 0x1F) / 31.0),
-                  GLfloat(float((bd shr 5) and 0x1F) / 31.0),
-                  GLfloat(float((bd shr 10) and 0x1F) / 31.0))
+      app.look.sgb_backdrop = [float32(float(bd and 0x1F) / 31.0),
+                               float32(float((bd shr 5) and 0x1F) / 31.0),
+                               float32(float((bd shr 10) and 0x1F) / 31.0)]
       let gen = app.gb_emu.sgb_border_gen()
       if gen != app.border_gen:
         app.border_gen = gen
-        glActiveTexture(GL_TEXTURE1)
-        glBindTexture(GL_TEXTURE_2D, app.border_texture)
-        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0,
-                        GLsizei(SGB_BORDER_W), GLsizei(SGB_BORDER_H),
-                        GL_RGBA, GL_UNSIGNED_SHORT_1_5_5_5_REV,
-                        app.gb_emu.sgb_border_ptr())
-        glActiveTexture(GL_TEXTURE0)
-        glBindTexture(GL_TEXTURE_2D, app.game_texture)
-      else:
-        glActiveTexture(GL_TEXTURE1)
-        glBindTexture(GL_TEXTURE_2D, app.border_texture)
-        glActiveTexture(GL_TEXTURE0)
+        pr.border_upload(app.gb_emu.sgb_border_ptr())
     # A border appearing or going changes the picture's size: resize once,
     # on the edge.
     if border != app.border_shown:
       app.border_shown = border
       resize_to_output()
-      discard getWindowSizeInPixels(app.window, win_w, win_h)
-      let (nx, ny, nw, nh) = game_viewport()
-      glViewport(nx, ny, GLsizei(nw), GLsizei(nh))
+      (vx, vy, vw, vh) = game_viewport()
     upload_frame(addr app.gb_emu.ppu.framebuffer[0], GB_W, GB_H)
     if rumble_on:
       # ±1 window-unit viewport jitter (pixel density and UI scale applied),
       # alternating per present; ImGui renders unshaken.
       rumble_flip = not rumble_flip
-      let px = GLint(max(1.0, round(getWindowPixelDensity(app.window) * ui_scale)))
-      let off: GLint = if rumble_flip: px else: -px
-      let (jx, jy, jw, jh) = game_viewport()
-      glViewport(jx + off, jy - off, GLsizei(jw), GLsizei(jh))
-      glDrawArrays(GL_TRIANGLE_STRIP, 0, 4)
+      let px = int(max(1.0, round(getWindowPixelDensity(app.window) * ui_scale)))
+      let off = if rumble_flip: px else: -px
+      pr.draw_game(vx + off, vy - off, vw, vh, app.look)
     else:
-      glDrawArrays(GL_TRIANGLE_STRIP, 0, 4)
+      pr.draw_game(vx, vy, vw, vh, app.look)
   of ekNDS:
-    if app.nds == nil:
-      glViewport(0, 0, GLsizei(win_w), GLsizei(win_h)); return
-    glUniform1i(glGetUniformLocation(app.game_shader, "sgb_border"), 0)
-    glUniform1f(glGetUniformLocation(app.game_shader, "scan_height"),
-                GLfloat(NDS_H))
-    glUniform1f(glGetUniformLocation(app.game_shader, "scan_width"),
-                GLfloat(NDS_W))
+    if app.nds == nil: return
+    app.look.sgb_border = false
+    app.look.scan_height = float32(NDS_H)
+    app.look.scan_width = float32(NDS_W)
     # HD 3D follows the setting live. The texture is 256k x 384k at scale k;
     # window, viewport and scan_* stay at 1x: HD only sharpens.
     app.nds.set_hd(app.cfg.nds_hd)
     let (tw, th) = app.nds.screen_size()
     if app.nds.hd_scale != app.nds_tex_scale:
       app.nds_tex_scale = app.nds.hd_scale
-      glTexImage2D(GL_TEXTURE_2D, 0, GLint(GL_RGB5), GLsizei(tw), GLsizei(th), 0,
-                   GL_RGBA, GL_UNSIGNED_SHORT_1_5_5_5_REV, nil)
-      glUniform1f(glGetUniformLocation(app.game_shader, "tex_width"), GLfloat(tw))
-      glUniform1f(glGetUniformLocation(app.game_shader, "tex_height"), GLfloat(th))
+      pr.game_alloc(tw, th)
+      app.look.tex_width = float32(tw)
+      app.look.tex_height = float32(th)
     # Top screen above bottom. No LCD response model: it models GB/GBA panels.
-    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, GLsizei(tw), GLsizei(th div 2),
-                    GL_RGBA, GL_UNSIGNED_SHORT_1_5_5_5_REV, app.nds.top_screen())
-    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, GLint(th div 2), GLsizei(tw),
-                    GLsizei(th div 2), GL_RGBA, GL_UNSIGNED_SHORT_1_5_5_5_REV,
-                    app.nds.bottom_screen())
-    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4)
+    pr.game_upload(0, tw, th div 2, app.nds.top_screen())
+    pr.game_upload(th div 2, tw, th div 2, app.nds.bottom_screen())
+    pr.draw_game(vx, vy, vw, vh, app.look)
   of ekNone:
     render_logo()
-  glViewport(0, 0, GLsizei(win_w), GLsizei(win_h))
 
 proc show_menu_bar(): bool =
   ## The in-window bar: on the home screen, and over a game while the mouse
@@ -1913,7 +1530,7 @@ proc render_imgui() =
     return
   imgui_skipped = false
 
-  ImGui_Impl_OpenGL3_NewFrame()
+  pr.imgui_new_frame()
   ImGui_ImplSDL3_NewFrame()
   igNewFrame()
 
@@ -1954,11 +1571,7 @@ proc render_imgui() =
         igText("Rewind: %d snapshots, %.1f MB", cint(app.rewind.len),
                cdouble(app.rewind.mem_used()) / (1024.0 * 1024.0))
       igSeparator()
-      igText("OpenGL")
-      let ver  = cast[cstring](glGetString(GL_VERSION))
-      let shad = cast[cstring](glGetString(GL_SHADING_LANGUAGE_VERSION))
-      igText("  Version: %s", ver)
-      igText("  Shading: %s", shad)
+      for line in pr.info(): igTextUnformatted(cstring(line), nil)
     igEnd()
 
   if app.dbg != nil:
@@ -2051,7 +1664,7 @@ proc render_imgui() =
       igEnd()
 
   igRender()
-  ImGui_Impl_OpenGL3_RenderDrawData(igGetDrawData())
+  pr.imgui_render(igGetDrawData())
 
 # ──────────────────────────── Controllers ────────────────────────────
 
@@ -2291,11 +1904,8 @@ proc handle_input() =
       apply_trigger()
 
     of EVENT_WINDOW_RESIZED, EVENT_WINDOW_PIXEL_SIZE_CHANGED:
-      # GL draws in back-buffer pixels: a move between 1x and Retina changes
-      # only those. ImGui follows by itself.
-      var w, h: cint
-      discard getWindowSizeInPixels(app.window, w, h)
-      glViewport(0, 0, w, h)
+      # Each present takes the back buffer's size afresh (pr.begin): a move
+      # between 1x and Retina changes only that. ImGui follows by itself.
       if evt.type == EVENT_WINDOW_RESIZED: track_fullscreen()
 
     of EVENT_WINDOW_DISPLAY_SCALE_CHANGED:
@@ -2375,8 +1985,6 @@ proc update_fps_title(emulated: bool) =
     fps_frames = 0
     fps_us     = 0
     fps_second = cur_sec
-
-proc gl_loader(name: cstring): pointer = cast[pointer](glGetProcAddress(name))
 
 # ──────────────────────────── Network link ────────────────────────────
 
@@ -2605,20 +2213,13 @@ proc main() =
     echo "SDL init failed: ", $getError(); system.quit(1)
   defer: sdl3.quit()
 
-  when defined(macosx):
-    discard glSetAttribute(GL_CONTEXT_FLAGS, GL_CONTEXT_FORWARD_COMPATIBLE_FLAG)
-  discard glSetAttribute(GL_CONTEXT_PROFILE_MASK, GL_CONTEXT_PROFILE_CORE)
-  discard glSetAttribute(GL_CONTEXT_MAJOR_VERSION, 3)
-  discard glSetAttribute(GL_CONTEXT_MINOR_VERSION, 3)
-  discard glSetAttribute(GL_DOUBLEBUFFER, 1)
-  discard glSetAttribute(GL_DEPTH_SIZE, 24)
-  discard glSetAttribute(GL_STENCIL_SIZE, 8)
+  pr.choose_backend()
 
   # Created hidden, then centred and shown: SDL_CreateWindow takes no position.
   # HIGH_PIXEL_DENSITY: on Retina (and Wayland, density = desktop scale) the
   # back buffer is device pixels, not 1x pixel-doubled by the compositor.
-  # Window sizes, positions and the mouse stay in points; GL and captures use
-  # getWindowSizeInPixels. Windows and X11 windows are already in pixels (SDL 3
+  # Window sizes, positions and the mouse stay in points; drawing and captures
+  # use getWindowSizeInPixels. Windows and X11 windows are already in pixels (SDL 3
   # is per-monitor DPI aware), so the flag does nothing there; the display
   # scale becomes the UI scale (display_ui_scale), applied before showing.
   var hidden = false
@@ -2627,7 +2228,7 @@ proc main() =
     hidden = driver_enabled()
   let window = createWindow("dingbat",
     cint(GBA_W * cfg.frame_size), cint(GBA_H * cfg.frame_size),
-    WINDOW_OPENGL or WINDOW_RESIZABLE or WINDOW_HIDDEN or
+    pr.window_flags() or WINDOW_RESIZABLE or WINDOW_HIDDEN or
     WINDOW_HIGH_PIXEL_DENSITY or (if start_fs: WINDOW_FULLSCREEN else: 0'u64))
   if window == nil:
     echo "Failed to create window: ", $getError(); system.quit(1)
@@ -2640,25 +2241,12 @@ proc main() =
   discard setWindowPosition(window, WINDOW_CENTERED, WINDOW_CENTERED)
   if not hidden: discard showWindow(window)
 
-  let gl_ctx = glCreateContext(window)
-  if gl_ctx == nil:
-    echo "Failed to create OpenGL context: ", $getError(); system.quit(1)
-  defer: discard glDestroyContext(gl_ctx)
-  discard glSetSwapInterval(0)  # disable vsync
-
-  if not gladLoadGL(gl_loader):
-    echo "Failed to load OpenGL extensions"; system.quit(1)
-
-  glClearColor(60.0'f32/255, 61.0'f32/255, 107.0'f32/255, 1.0'f32)
-  let game_tex = setup_game_texture()
-  let border_tex = setup_border_texture()
-  setup_vao()
-  let game_shader = create_shader_program()
-  let logo_shader = create_logo_shader_program()
-  let (logo_tex, canvas_aspect) = load_logo_texture()
-  glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
-  glEnable(GL_BLEND)
-  glUseProgram(logo_shader)
+  # Reading the back buffer is set up front (a Metal layer must allow it)
+  var readable = capture_after >= 0
+  when defined(gui_driver): readable = true
+  if not pr.init(window, readable): system.quit(1)
+  defer: pr.shutdown()
+  let canvas_aspect = load_logo_texture()
 
   discard igCreateContext(nil)
   igStyleColorsDark(nil)
@@ -2668,8 +2256,7 @@ proc main() =
   # Retina needs nothing here: the SDL 3 backend sets
   # io.DisplayFramebufferScale each frame and ImGui 1.92 rasterises the font
   # at it. Windows/X11 scale goes through apply_ui_scale.
-  discard ImGui_ImplSDL3_InitForOpenGL(window, gl_ctx)
-  discard ImGui_Impl_opengl3_Init("#version 330")
+  pr.imgui_init(window)
 
   let fe = new_file_explorer(cfg)
   let ce = new_config_editor(cfg, fe)
@@ -2689,14 +2276,8 @@ proc main() =
     cfg:             cfg,
     gba_emu:         nil,
     window:          window,
-    gl_ctx:          gl_ctx,
     io:              io_ptr,
-    game_texture:    game_tex,
-    border_texture:  border_tex,
-    logo_texture:    logo_tex,
     canvas_aspect:   canvas_aspect,
-    logo_shader:     logo_shader,
-    game_shader:     game_shader,
     fe:              fe,
     ce:              ce,
     cheats:          new_cheats_widget(),
@@ -2738,7 +2319,7 @@ proc main() =
       when defined(gui_driver): driven = driver_enabled()
       mac_settings_init(ce, driven)
 
-  # GLSL uniforms default to 0/false, so push the configured value now
+  # The look starts all 0/false, so set the configured value now
   # (tex_height too: 0 would make the scanline fract() darken everything)
   apply_color_correction()
   apply_panel_uniforms()
@@ -2861,10 +2442,11 @@ proc main() =
   var pace_start  = 0'u64
   var pace_last   = 0'u64
   # DINGBAT_FRAME_TRACE=<path>: one CSV row per present, written at quit:
-  # slot due, emulation start/end, swap issued/returned (performance-counter
-  # ticks; due is 0 for a present with no new frame)
+  # slot due, emulation start/end, swap issued/returned, on the glass
+  # (performance-counter ticks; due is 0 for a present with no new frame,
+  # shown 0 where unknown: OpenGL, or a hidden window)
   let trace_path = getEnv("DINGBAT_FRAME_TRACE")
-  var trace: seq[array[6, uint64]]
+  var trace: seq[array[7, uint64]]
   var trace_due, trace_end, trace_ready, trace_swap: uint64
   # DINGBAT_LATENCY_TEST=<trials>: inject an UP press where SDL keys are
   # applied; time until (a) the framebuffer differs and (b) that frame is
@@ -3057,25 +2639,15 @@ proc main() =
       last_present = now
       # Black letterbox behind a game; brand purple on the home screen.
       if app.emu_kind == ekNone:
-        glClearColor(60.0'f32/255, 61.0'f32/255, 107.0'f32/255, 1.0'f32)
+        pr.begin(window, 60.0'f32/255, 61.0'f32/255, 107.0'f32/255)
       else:
-        glClearColor(0'f32, 0'f32, 0'f32, 1.0'f32)
-      glClear(GL_COLOR_BUFFER_BIT)
+        pr.begin(window, 0'f32, 0'f32, 0'f32)
       render_game()
       inc present_count
       if capture_after >= 0 and present_count >= capture_after:
         let (cx, cy, cw, ch) = game_viewport()
-        var pix = newSeq[byte](int(cw) * int(ch) * 3)
-        glPixelStorei(GL_PACK_ALIGNMENT, 1)
-        glReadPixels(cx, cy, GLsizei(cw), GLsizei(ch), GL_RGB, GL_UNSIGNED_BYTE,
-                     addr pix[0])
-        # GL reads bottom-up; PNG wants top-down.
-        var flipped = newSeq[byte](pix.len)
-        let stride = int(cw) * 3
-        for row in 0 ..< int(ch):
-          copyMem(addr flipped[row * stride],
-                  addr pix[(int(ch) - 1 - row) * stride], stride)
-        if stbiw.writePNG(capture_path, int(cw), int(ch), 3, flipped):
+        let pix = pr.read(cx, cy, cw, ch)
+        if pix.len > 0 and stbiw.writePNG(capture_path, cw, ch, 3, pix):
           echo "capture written: ", capture_path, " ", cw, "x", ch
         else:
           echo "capture FAILED: ", capture_path
@@ -3090,11 +2662,12 @@ proc main() =
           delayPrecise((present_at - ready) * 1_000_000_000'u64 div sched_freq)
         hold_learn(ready - frame_start)
       if trace_path.len > 0: trace_swap = getPerformanceCounter()
-      discard glSwapWindow(window)
+      let present_seq = pr.present(window)
       presented = true
       if trace_path.len > 0:
         trace.add([(if emulated: trace_due else: 0'u64), frame_start,
-                   trace_end, trace_ready, trace_swap, getPerformanceCounter()])
+                   trace_end, trace_ready, trace_swap, getPerformanceCounter(),
+                   present_seq])
       if lat_trials > 0 and lat_state == 2:
         let t2 = getPerformanceCounter()
         lat_change_ms.add(lat_ms(lat_t0, lat_t1))
@@ -3124,8 +2697,11 @@ proc main() =
         delay(1)
   if trace_path.len > 0:
     var csv = &"# freq={getPerformanceFrequency()} " &
-              &"frame_ticks={frame_ticks}\ndue,start,emulated,ready,swap,swapped\n"
-    for r in trace: csv.add r.join(",") & "\n"
+              &"frame_ticks={frame_ticks}\ndue,start,emulated,ready,swap,swapped,shown\n"
+    for r in trace:
+      var row = r
+      row[6] = pr.shown_at(r[6], uint64(getPerformanceFrequency()))
+      csv.add row.join(",") & "\n"
     writeFile(trace_path, csv)
   # The peer hears BYE instead of waiting out its timeout
   link_auto_stop()
