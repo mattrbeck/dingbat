@@ -61,7 +61,7 @@ jobs:
         run: |
           set -e
           cd "$RUNNER_TEMP"
-          for p in "https://github.com/nim-lang/sdl3@#bb137829ff619b0a27a473628cb28fc1c86f3fe5" imguin yaml stb_image zippy; do
+          for p in "https://github.com/nim-lang/sdl3@#bb137829ff619b0a27a473628cb28fc1c86f3fe5" imguin@1.92.4.0 yaml stb_image zippy; do
             "$GITHUB_WORKSPACE/.github/scripts/retry.sh" 3 nimble install -y "$p"
           done
       - name: Build
@@ -140,7 +140,7 @@ jobs:
         run: |
           set -e
           cd "$RUNNER_TEMP"
-          for p in "https://github.com/nim-lang/sdl3@#bb137829ff619b0a27a473628cb28fc1c86f3fe5" imguin yaml stb_image zippy; do
+          for p in "https://github.com/nim-lang/sdl3@#bb137829ff619b0a27a473628cb28fc1c86f3fe5" imguin@1.92.4.0 yaml stb_image zippy; do
             "$GITHUB_WORKSPACE/.github/scripts/retry.sh" 3 nimble install -y "$p"
           done
       - name: Build (self-contained)
@@ -244,7 +244,7 @@ jobs:
         run: |
           set -e
           cd "$RUNNER_TEMP"
-          for p in "https://github.com/nim-lang/sdl3@#bb137829ff619b0a27a473628cb28fc1c86f3fe5" imguin yaml stb_image zippy; do
+          for p in "https://github.com/nim-lang/sdl3@#bb137829ff619b0a27a473628cb28fc1c86f3fe5" imguin@1.92.4.0 yaml stb_image zippy; do
             "$GITHUB_WORKSPACE/.github/scripts/retry.sh" 3 nimble install -y "$p"
           done
       - name: Build dingbat.exe

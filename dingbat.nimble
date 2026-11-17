@@ -12,7 +12,9 @@ requires "nim >= 2.0.0"
 # The desktop app. The registry's "sdl3" is an older, unofficial binding
 # (nim-lang/sdl3 issue #11), so the official one is named by URL.
 requires "https://github.com/nim-lang/sdl3#bb137829ff619b0a27a473628cb28fc1c86f3fe5"
-requires "imguin"
+# One imguin everywhere: its Nim bindings change shape between releases
+# (docs/building.md). CI installs the same, by name.
+requires "imguin == 1.92.4.0"
 requires "yaml"
 requires "stb_image"
 requires "zippy"
