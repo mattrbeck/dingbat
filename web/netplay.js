@@ -379,7 +379,7 @@ const sigDialAgain = async (session) => {
 // left the server or were suspended (a phone in the background) before the
 // descriptions crossed, or the channel never opened. Drop the peer connection
 // and the socket and rendezvous again on the same code, as if Connect had just
-// been pressed (formal/WebState/LinkPairing.lean, `rewait`).
+// been pressed (tools/formal/WebState/LinkPairing.lean, `rewait`).
 const sigRewait = (why) => {
   const session = net;
   if (!session || !session.code || session.rtcConnected || session.started) return;
@@ -1308,7 +1308,7 @@ const rbSendInputWire = (frame, bits) => {
 // press, the host's on a tie, so once neither press is in flight they hold
 // the same one, whatever order they arrived in (a "now" state message, the
 // last to arrive wins, split them: each side's last was the other's).
-// formal/WebState/LinkResume.lean `presses_agree`.
+// tools/formal/WebState/LinkResume.lean `presses_agree`.
 const rbNewReg = (on) => ({ on, n: 0, host: true });
 const rbBeats = (a, b) => a.n > b.n || (a.n === b.n && a.host && !b.host);
 
@@ -1575,7 +1575,7 @@ const rbMessage = (data) => {
   }
   if (kind === RB_BYE) {
     // Why the friend ended: its own Disconnect, or a failure there (its
-    // give-up just after the new channel opened). formal/WebState/
+    // give-up just after the new channel opened). tools/formal/WebState/
     // LinkResume.lean bye_reason_heard.
     rb.byeIn = true;
     if (net.started) netPeerGone(v.byteLength >= 2 && v.getUint8(1) === 1 ? "Couldn't reconnect" : "Your friend disconnected");
@@ -1751,7 +1751,7 @@ const rbStartIfReady = () => {
   rb.stateBuf = null;
 };
 
-// --- Sync checks (rollback.nim syncEvery; formal/WebState/LinkSync.lean) ---
+// --- Sync checks (rollback.nim syncEvery; tools/formal/WebState/LinkSync.lean) ---
 // Both sides run both games and only inputs cross, so two builds whose
 // cores differ can drift apart without a word. Every 120 frames each side's
 // core fingerprints both games at a frame both have confirmed, and the two
@@ -1867,7 +1867,7 @@ const rbAtBarrier = () => {
   const rs = net?.rb?.resync;
   // Restarted: a new session, whose frames the old stop frame says nothing
   // about; the friend's new inputs can't come before its state, which ours
-  // went after (formal/WebState/LinkSync.lean inputs_in_session).
+  // went after (tools/formal/WebState/LinkSync.lean inputs_in_session).
   if (!rs || rs.applied) return false;
   return Module._rollback_head() > (rs.target >= 0 ? rs.target : rs.mineT);
 };
@@ -2452,7 +2452,7 @@ const rbRenderCard = () => {
   // While redialing the game waits on the link (the frame loop doesn't
   // tick), and both sides take pause and 2x from the two RESUMEs: a press
   // now could only be undone then, so there is none to make
-  // (formal/WebState/LinkResume.lean regress_no_press_in_drop).
+  // (tools/formal/WebState/LinkResume.lean regress_no_press_in_drop).
   /** @type {HTMLButtonElement} */ (pauseButton).disabled = reconnecting;
   /** @type {HTMLButtonElement} */ (speed2xButton).disabled = reconnecting;
   if (show) {
@@ -2545,7 +2545,7 @@ document.addEventListener("visibilitychange", () => {
 // both rendezvous on the retry code, open a new connection and swap RESUME
 // [sid][last input frame received][flags]: each resends the inputs the
 // other missed, both take one pause/2x state from the two RESUMEs' flags,
-// and they play on (formal/WebState/LinkResume.lean). A deliberate end
+// and they play on (tools/formal/WebState/LinkResume.lean). A deliberate end
 // sends BYE first, so the friend doesn't redial, and leaves a goodbye note
 // on the retry code (rbLeaveNote) for a friend the BYE can't reach: one
 // already redialing is told by the server. Not offered over the
@@ -2611,7 +2611,7 @@ const NET_SIGNAL_HTTP = (() => {
 // rendezvous away with the goodbye for the next 10 minutes, so it ends
 // with "Your friend disconnected" ("Couldn't reconnect" for "gave-up") instead of
 // "Reconnecting…" until its own give-up (server.js leaveNote;
-// formal/WebState/LinkRedial.lean). A beacon: it survives the page
+// tools/formal/WebState/LinkRedial.lean). A beacon: it survives the page
 // closing. Not after the friend's own goodbye: it has gone.
 const rbLeaveNote = (rb, why) => {
   if (!rb.resume || rb.byeIn || rb.noteLeft || !NET_SIGNAL_HTTP) return;
@@ -2640,7 +2640,7 @@ const rbPostBye = (code, id, why) => {
 // minutes old (the server keeps a goodbye that long) leaves the goodbye the
 // killed page couldn't, unless a live tab still holds that session (Duplicate
 // Tab copies sessionStorage): it answers on RB_OWNER_CHANNEL.
-// formal/WebState/LinkResume.lean Event.relaunch, regress_kill_heard_on_relaunch.
+// tools/formal/WebState/LinkResume.lean Event.relaunch, regress_kill_heard_on_relaunch.
 const RB_LIVE_KEY = "dingbat-link-live";
 const RB_LIVE_MS = 10 * 60 * 1000;
 const RB_OWNER_CHANNEL = "dingbat-link-owner";
@@ -3018,7 +3018,7 @@ const rsResumeIn = (rb, v) => {
 
 // The pause and 2x both sides take after a resume, from the two RESUMEs'
 // flags (1 away, 2 paused, 4 2x); symmetric, so both get the same answer.
-// formal/WebState/LinkResume.lean `finalPause` proves the two then agree.
+// tools/formal/WebState/LinkResume.lean `finalPause` proves the two then agree.
 const rbResumeState = (mine, theirs) => {
   const pausedAway = (f) => (f & 3) === 3;
   return {

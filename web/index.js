@@ -20055,7 +20055,7 @@ var Module = {
       const now = audioCtx.currentTime;
       // A spent cushion means a gap already happened: restore a small floor
       // so the next hitch doesn't click too; the rate servo walks the lead
-      // back to its target (docs/web_audio_pacing.md).
+      // back to its target (docs/dev/web_audio_pacing.md).
       if (playTime < now + AUDIO_LEAD_FLOOR) playTime = now + AUDIO_LEAD_FLOOR;
       // The audio clock stalled: drop this frame's samples rather than stack
       // source nodes. A backstop; the rate servo keeps it from firing.
@@ -20483,7 +20483,7 @@ var Module = {
           framesRun++;
         }
         // Bound the debt but keep two frames of it: zeroing deletes those
-        // frames' audio (a click at every big hitch, docs/web_audio_pacing.md).
+        // frames' audio (a click at every big hitch, docs/dev/web_audio_pacing.md).
         if (accumulator > step * 2) accumulator = step * 2;
         // On a 120 Hz display every other tick steps zero frames; don't
         // re-present (doubles the upload + shader cost). presentDirty forces one.

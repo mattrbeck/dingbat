@@ -491,7 +491,7 @@ void main() {
 // faded to a soft ellipse. It was CSS (filter: blur(32px) plus a radial
 // mask-image), and the game canvas repaints over it every frame, so the
 // compositor re-ran that blur and mask on every frame: +0.25-0.65 ms of
-// GPU-process work per frame on an M2 (docs/settings-cost.md). Here it is
+// GPU-process work per frame on an M2 (docs/dev/settings-cost.md). Here it is
 // composed once per sample (10 Hz), and not at all while the picture holds
 // still, on a grid of a few dozen texels; the compositor only stretches a
 // bitmap. The model is the CSS it replaced, in the element's own CSS pixels:
