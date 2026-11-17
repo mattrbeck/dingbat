@@ -1,6 +1,6 @@
 # DocBoy Test Suite - Detailed Results
 
-*Generated: 2026-11-16 22:48:14 · Docheinstein/docboy 01e04d3d*
+*Generated: 2026-11-17 08:13:59 · Docheinstein/docboy 01e04d3d*
 
 DocBoy's own ROMs (`docboy/` in its tests/config manifests), each
 scored by the verdict its manifest names, the way DocBoy's runner
@@ -11,7 +11,7 @@ run on a DMG ABC, the three CGB manifests on a CPU CGB E with the
 cart header picking the mode. See tests/README.md for the mechanism
 and docs/dev/gb-failure-triage.md for the failing families.
 
-**8758/9186 passed.**
+**8763/9186 passed.**
 
 ## docboy/dmg/cpu
 
@@ -122,19 +122,15 @@ All 21 tests passed (DMG dmgABC).
 
 All 23 tests passed (DMG dmgABC).
 
-## docboy/dmg/oam_bug (258/268 passed)
+## docboy/dmg/oam_bug (262/268 passed)
 
-258/268 tests passed on DMG dmgABC, 10 failed:
+262/268 tests passed on DMG dmgABC, 6 failed:
 
 | Test | Result |
 |------|--------|
-| dmg/docboy/oam_bug/oam_bug_ld_hl_a_round23_fe46 | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/oam_bug/oam_bug_ld_hl_a_round23_fe47 | $FFF0=$02 = fail value (tick 100000) |
 | dmg/docboy/oam_bug/oam_bug_ld_hl_a_round3_fe5c | $FFF0=$02 = fail value (tick 1500000) |
 | dmg/docboy/oam_bug/oam_bug_ld_hl_a_round3_fe5e_noisy | $FFF0=$02 = fail value (tick 1500012) |
 | dmg/docboy/oam_bug/oam_bug_ld_hl_a_round3_fe5f | $FFF0=$02 = fail value (tick 1500000) |
-| dmg/docboy/oam_bug/oam_bug_ld_hli_a_round23_fe46 | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/oam_bug/oam_bug_ld_hli_a_round23_fe47 | $FFF0=$02 = fail value (tick 100000) |
 | dmg/docboy/oam_bug/oam_bug_ld_hli_a_round3_fe5c | $FFF0=$02 = fail value (tick 1500000) |
 | dmg/docboy/oam_bug/oam_bug_ld_hli_a_round3_fe5e_noisy | $FFF0=$02 = fail value (tick 1500012) |
 | dmg/docboy/oam_bug/oam_bug_ld_hli_a_round3_fe5f | $FFF0=$02 = fail value (tick 1500000) |
@@ -233,13 +229,9 @@ All 27 tests passed (CGB cgbE).
 
 All 41 tests passed (CGB cgbE).
 
-## docboy/cgb/hdma (639/640 passed)
+## docboy/cgb/hdma
 
-639/640 tests passed on CGB cgbE, 1 failed:
-
-| Test | Result |
-|------|--------|
-| cgb/docboy/hdma/gdma_ppu_on_pixel_transfer_conflict_relaxed_64_bytes_sprite_y16_x07 | $FFF0=$02 = fail value (tick 100000) |
+All 640 tests passed (CGB cgbE).
 
 ## docboy/cgb/serial
 
