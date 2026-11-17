@@ -556,6 +556,20 @@ jobs:
           DINGBAT_GUI_BIN: ${{ github.workspace }}/dingbat_gui_test
           SDL_AUDIO_DRIVER: dummy
         run: xvfb-run -a -s "-screen 0 1280x1024x24" tests/desktop_home_test.sh
+      - name: Screenshots of the UI (Xvfb)
+        # For looking at, not compared: tests/desktop_ui_shots.sh. Inter is
+        # Linux's UI font (ui_fonts.nim).
+        if: always()
+        timeout-minutes: 5
+        env:
+          SDL_AUDIO_DRIVER: dummy
+        run: xvfb-run -a -s "-screen 0 1280x1024x24" tests/desktop_ui_shots.sh "$GITHUB_WORKSPACE/dingbat_gui_test" ui-shots
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ui-shots-linux
+          path: ui-shots
+          if-no-files-found: ignore
 
   wasm:
     # The web build, made once for the end-to-end jobs (the test job never

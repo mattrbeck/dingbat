@@ -266,6 +266,15 @@ jobs:
           name: dingbat-windows-x64
           path: dist/windows/dingbat.exe
           if-no-files-found: error
+      - name: Build the GUI driver exe (UI screenshots, never shipped)
+        run: |
+          nim c -d:mingw -d:release -d:gui_driver --cpu:amd64 --hints:off \
+            -o:dist/windows-driver/dingbat_gui.exe src/dingbat.nim
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dingbat-windows-gui-driver
+          path: dist/windows-driver/dingbat_gui.exe
+          if-no-files-found: error
 
   windows-smoke:
     # The cross-built dingbat.exe on a real Windows, which has no OpenGL
@@ -296,6 +305,25 @@ jobs:
         env:
           GALLIUM_DRIVER: llvmpipe
         run: .github/scripts/smoke-desktop.sh smoke/dingbat.exe
+      - uses: actions/download-artifact@v4
+        with:
+          name: dingbat-windows-gui-driver
+          path: smoke
+      - name: Screenshots of the UI (Mesa llvmpipe)
+        # For looking at, not compared: tests/desktop_ui_shots.sh, through
+        # the GUI driver build. Segoe UI is Windows' UI font (ui_fonts.nim).
+        timeout-minutes: 10
+        continue-on-error: true
+        shell: bash
+        env:
+          GALLIUM_DRIVER: llvmpipe
+        run: tests/desktop_ui_shots.sh smoke/dingbat_gui.exe ui-shots
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ui-shots-windows
+          path: ui-shots
+          if-no-files-found: ignore
       - uses: actions/upload-artifact@v4
         if: failure()
         with:

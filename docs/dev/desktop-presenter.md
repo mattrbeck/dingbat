@@ -56,6 +56,23 @@ Metal details that matter:
   Metal 3D renderer (`ios/Dingbat/Sources/NdsGpu3d*.swift`) is not on the
   desktop.
 
+## The UI's fonts
+
+`frontend/ui_fonts.nim`: every ImGui surface draws in the system's UI font,
+as the web app (`--font-ui`) and iOS do. macOS: San Francisco (regular,
+semibold) and SF Mono, rasterised by CoreText through an ImGui font loader
+(`frontend/mac_font.mm`; stb_truetype reads only SFNS.ttf's default
+instance, Display Regular, and SF may not be redistributed). Windows: Segoe
+UI, Segoe UI Semibold and Consolas from `%WINDIR%\Fonts`. Linux: Inter
+(`frontend/vendor/fonts`, OFL), compiled in everywhere as the fallback, and
+ImGui's ProggyClean for the monospaced text (debug windows, the overlay,
+cheat codes). Sizes are the web's CSS px (body 14, small 12, mono 13);
+ImGui sizes a font by its line, so `font_px` converts. ImGui 1.92 bakes the
+glyphs at the display's density and the UI scale, so text stays crisp on
+Retina and at 125 / 150 %. `tests/desktop_ui_shots.sh` takes screenshots of
+every surface (CI uploads `ui-shots-linux` and `ui-shots-windows`);
+`desktop_modal_test` checks every UI string's characters are in each font.
+
 ## How they compare (2026-11-16, Apple silicon, macOS 26.6)
 
 Captures (`--capture`, hidden window, scratch HOME) of every look, Metal
