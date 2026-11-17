@@ -1375,6 +1375,43 @@ hardware question. Families:
     `mealybug_shift*`, 24 `mealybug_var*`, 6 `sprites_nops*`). Not known: the
     CGB E's glitch at the phases only DocBoy's variations reach; no capture
     from a console covers them.
+
+    What DocBoy asks for (2026-11-17, traced cell by cell): a RESET (LCDC.4
+    1 -> 0 landing on a bitplane read) that delivers the byte at the NEW
+    ($8800-mode) address, not the tile index, while still leaving its $8000
+    address in the SET glitch's latch and arming the index path (without the
+    latch and the arming the `mealybug_var*` rows, whose index and new byte
+    are both $00, fail). Every failing block of the 5 CGB
+    `change_win_tile_data_glitch_window_*` (lines 16/64/80/128 or
+    32/48/96/112) is exactly a RESET cell with index $01..$0F over $FF data,
+    and the reference shows $FF there; the same holds for the tile part of
+    the 5 CGB `change_bg_*_sprites_*` and for the compat rows. Built as a
+    CGB-E-only quirk it passes 61 of the 63 compat rows (all but
+    `mealybug_var42` and `sprites_nops29_var4_nops100`) and the 5 CGB window
+    rows. Held, because it contradicts AGE in the same situation: AGE
+    `m3-bg-lcdc` and `m3-bg-lcdc-nocgb`, one reference each for CGB B, C and
+    E (`-cgbBCE`, `-ncmBCE`, verified on those consoles), put 64 RESET cells
+    on BG low-plane reads with index $55 over $00 ($8000) / $FF ($8800)
+    data, the write on the same M-cycle phase and fetcher step as DocBoy's,
+    and show $55's alternating pixels; the quirk fails both `@cgbe` arms
+    (256 pixels each). Taken on every revision it also fails mealybug
+    `m3_lcdc_tile_sel_change2` and `_win_change2` `_cgb_c` (8 cells want the
+    index) and cgb-acid-hell. No timing separates the two: DocBoy wants the
+    new byte with LCDC.4 risen 9, 17, 29 or 41 dots before the fall, AGE the
+    index at 13 and mealybug at 9; what is left is how many LCDC.4 edges the
+    line had, which would be a rule fitted to rows. On `tdselcells.py`'s
+    corpus the new byte scores 103 of 111 RESET cells (the 8 mealybug
+    cells). Decider: the same DocBoy `change_win_tile_data_glitch_window`
+    ROM on a CGB E, photographed.
+
+    The 5 CGB `change_bg_tile_data_glitch_sprites_nops{26..30}` cannot pass on
+    any tile rule: 288 pixels each are object pixels in OBJ palette 0 colour
+    3, whose high byte (OCP byte 7) the ROM never writes (its last palette
+    store sets BCPS = 7 instead of OCPS, so the OCPD write lands on byte 6
+    again). The reference shows the word $2C00, dingbat its power-up $7F00;
+    Pan Docs leaves the CGB's object colours uninitialised, the reason
+    gambatte's `scx_during_m3_spx2` CGB rows are not scored. A not-scored
+    candidate on the same grounds.
 * **I4. HDMA / GDMA (0 left; 3 not scored).** `cgb/hdma` is 640/640 and
   `double_speed/hdma` 50/50; the three not scored are marked below. The rules, by group:
   * The LCD-enable line (95 tests in this and the next three points; 89
@@ -1832,7 +1869,11 @@ hardware question. Families:
     "the screen will stay blank during the first frame", as dingbat draws.
     The three `_b` partners checked a frame later pass. Not known: what a
     CGB's panel holds across an LCD off/on; Pan Docs describes the screen,
-    not the panel's retention. The 10 `change_{bg,win}_tile_data_glitch_*`
+    not the panel's retention. Rechecked 2026-11-17: all 13 are checked at
+    `ld b,b` with the LCD off or inside the first frame after an enable (the
+    `skip_y16` ROMs switch it on and off again on line 0, 16 or 232 dots in,
+    every frame), so every one asks what that panel shows; none is a PPU
+    timing row. The 10 `change_{bg,win}_tile_data_glitch_*`
     CGB-mode tests are counted with I3's family.
   * Closed: `stop_during_hblank`, `stop_during_oam_scan`,
     `stop_ly42_during_hblank #2` (the `_b` reference). STOP with the LCD on
@@ -1889,7 +1930,15 @@ hardware question. Families:
     lands on the window's first push, the startup fetch's (high plane and
     push on one dot), and both references draw that first tile as colour 0
     (the next tile already shows its data, by the push-dot rule). One line
-    of one geometry; not modelled. SameBoy differs from DocBoy (and now
+    of one geometry; not modelled. Traced 2026-11-17: WX = 9 is stored on
+    dot 93, the startup fetch reads tile $10's planes on dots 95 and 97 and
+    pushes on 97, the compare re-matches on that dot (`fetch_counter` 0), so
+    the push-dot rule keeps $10 for the next fetch (drawn at x = 9, as both
+    references show) and the pushed tile at x = 1..8 keeps its $66/$66. The
+    references want it colour 0 (BG palette 0 gives colours 1 and 2 their
+    own RGB, so both planes are 0, not just the high one). No rule found that blanks a tile
+    already pushed on the re-trigger's dot on the startup fetch alone and
+    leaves the 111 push-dot lines of the six tests as they are. SameBoy differs from DocBoy (and now
     dingbat) on 6 to 13 other lines of five of the tests.
   * Left (1; scored again 2026-11-16): `window_bg_reprise_wx25`, the window
     disabled on the WY line, the background resuming where the fetcher
@@ -1897,7 +1946,15 @@ hardware question. Families:
     BG tile $A3: the BG fetch for column 3 read its map byte at dot 108, the
     window starts at dot 110 and LCDC.5 aborts it at dot 115. The 17 CGB
     siblings (`_wx8`..`_wx24`) pass. Not known: whether a CGB keeps the
-    aborted fetch's tile there; no spec text says.
+    aborted fetch's tile there; no spec text says. Traced 2026-11-17 against
+    `_wx24`: there the window starts on dot 107, before column 3's map read,
+    and column 3 follows the window tile in both pictures; on `_wx25` the
+    window starts on dot 108, the dot column 3's map byte ($A3) is read, the
+    fall on 113 revokes it after its low plane (CGB_WIN_REVOKE_KEEP), and
+    DocBoy then draws column 3's eight pixels as colour 0 and resumes at
+    column 4, where the DMG twin (passing, WIN_ABORT_PUSH_POS) draws column
+    3. The distinguishing event is a map read on the window start's own dot,
+    reached by this one row; no hardware or second reference covers it.
   * Closed, `double_speed/ppu/double_speed_ppu_vram_write_block_
     timing_ly0_{1,3}_out_of_4` (2): VRAM writes one double-speed M-cycle
     apart across the LCD-on line's mode 3. The CGB write lock there closes
@@ -2191,6 +2248,13 @@ idea is not tried again as a knob.
   phantom sprite is a BUS value (`OAMDMA_FREEZE_BUS`), the `& $FC` is
   measured by the reference frame, and `OAMDMA_FREEZE_DEST_LEAD` is a
   one-word plateau.
+* A CGB LCDC.4 RESET glitch that reads the new ($8800-mode) address's byte
+  instead of the tile index (latch and index path kept), even CGB E only:
+  AGE `m3-bg-lcdc{,-nocgb}` `@cgbe` fail (64 cells want index $55), and on
+  every revision mealybug `m3_lcdc_tile_sel_change2`/`_win_change2` `_cgb_c`
+  and cgb-acid-hell too. It is what DocBoy's 73 `change_{bg,win}_tile_data_
+  glitch_*` want (I3); dropping the RESET glitch altogether instead fails
+  21 compat `mealybug_*` rows that pass.
 * `rtc3test-1`/`-3` as an RTC defect: the local harness sampled at frame 570
   where the shootout's budget is 925.
 

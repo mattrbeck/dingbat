@@ -238,7 +238,7 @@ def score(corpus):
 
     print("\nRESET branch")
     for nm, f in (("tile index", "num"), ("latched byte", "latch"),
-                  ("unsigned byte", "uns"),
+                  ("unsigned byte", "uns"), ("new-address byte", "sgn"),
                   ("previous bitplane byte", "prevd")):
         print("  %-28s %3d / %d"
               % (nm, sum(1 for c in R if ok(c, c[f])), len(R)))
