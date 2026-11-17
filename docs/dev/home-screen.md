@@ -363,8 +363,11 @@ takes a game out of both. DS games show only with DS Beta on.
 and at quit, never one of a single colour), and its save-state slots'
 thumbnails. Never anything fetched. No picture: the cartridge, as on the
 web. A picture becomes a texture the first time its tile is on screen, two
-a frame at most, and stays until its file changes; the only GL is
-`make_home_texture` / `free_home_texture` in `dingbat.nim`.
+a frame at most, and stays until its file changes: a linear, mipmapped
+presenter `ui_texture` (`make_home_texture` / `free_home_texture` in
+`dingbat.nim`), so it draws on Metal and OpenGL alike. The bat is a nearest
+`ui_texture`, drawn between `ui_nearest_begin` / `ui_nearest_end` to stay
+crisp on Metal, whose ImGui backend samples linearly.
 
 **A missing file** (checked every 2 s at home) is a dashed, dimmed tile; a
 click says the file is not there any more. **Keys and pads**: arrows or
