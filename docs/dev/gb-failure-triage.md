@@ -1393,7 +1393,17 @@ hardware question. Families:
     to cgb-acid-hell, all of which pass, as do the family's other 56 rows (26
     `mealybug_shift*`, 24 `mealybug_var*`, 6 `sprites_nops*`). Not known: the
     CGB E's glitch at the phases only DocBoy's variations reach; no capture
-    from a console covers them.
+    from a console covers them. Hardware check (2026-11-17): mealybug's own
+    `photos/CPU CGB D/m3_lcdc_tile_sel_change.jpg` shows dingbat's frame
+    (the dark, blue and light bands and the glyph diagonal in place), so
+    the fitted rule stands on a photo at those phases, not only on the
+    emulator screenshots. The 63 left: 26 `mealybug_*` (21 change 8..40 pixels
+    in 1..8 rows, `var20`/`21`/`40`..`44` 248..587), 32 `sprites_nops*` (an
+    object's fetch beside the flip; the `var4_nops*` set 8..12 pixels each)
+    and 5 `change_win_tile_data_glitch_window_nops26..30` (176 pixels each,
+    the window's fetch). Held back: a change for these would rest on
+    DocBoy's frames alone at phases no capture reaches, against SameBoy's
+    different picture, and has to keep the photographed mealybug rows.
 
     What DocBoy asks for (2026-11-17, traced cell by cell): a RESET (LCDC.4
     1 -> 0 landing on a bitplane read) that delivers the byte at the NEW
