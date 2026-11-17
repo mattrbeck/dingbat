@@ -181,7 +181,7 @@ enum ExportCore {
 
     /// What an export holds (web exportPackage's info.json), keys in the
     /// web's order and indented as JSON.stringify(info, null, 2) writes it.
-    static func infoJSON(game: String, system: String, exportedMs: Double,
+    static func infoJSON(game: String, title: String? = nil, system: String, exportedMs: Double,
                          files: [(path: String, kind: String)]) -> Data {
         func str(_ s: String) -> String {
             let d = (try? JSONSerialization.data(withJSONObject: [s], options: [.withoutEscapingSlashes])) ?? Data("[\"\"]".utf8)
@@ -192,6 +192,7 @@ enum ExportCore {
         s += "  \"app\": \"dingbat\",\n"
         s += "  \"format\": 1,\n"
         s += "  \"game\": \(str(game)),\n"
+        if let title { s += "  \"title\": \(str(title)),\n" }
         s += "  \"system\": \(str(system)),\n"
         s += "  \"exported\": \(str(iso(exportedMs))),\n"
         if files.isEmpty {
@@ -216,5 +217,11 @@ enum ExportCore {
             if let f = f as? [String: Any], let p = f["path"] as? String { out[p] = f["kind"] as? String ?? "" }
         }
         return out
+    }
+
+    /// The title an export's info.json gives its game (web exportKinds' `title`).
+    static func exportTitle(_ info: Data?) -> String? {
+        guard let info, let o = (try? JSONSerialization.jsonObject(with: info)) as? [String: Any] else { return nil }
+        return o["title"] as? String
     }
 }

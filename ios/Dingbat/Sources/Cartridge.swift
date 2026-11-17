@@ -27,10 +27,10 @@ enum CartLabel {
         r.stringByReplacingMatches(in: s, range: NSRange(s.startIndex..., in: s), withTemplate: with)
     }
 
-    /// web cartTitle: the name without its extension, dump tags, release
-    /// number or trailing article.
+    /// web cartTitle: the shown name (a zip's title, else the file's without
+    /// its extension) without dump tags, release number or trailing article.
     static func title(_ fileName: String) -> String {
-        let stem = (fileName as NSString).deletingPathExtension
+        let stem = RomEntry(fileName: fileName).name
         var s = stem.isEmpty ? fileName : stem
         s = sub(tags, s, "")
         s = sub(number, s, "")
@@ -92,6 +92,8 @@ enum CartLabel {
 /// the tile menu's head.
 struct CartridgeView: View {
     @Environment(\.palette) var palette
+    /// Observed so the label follows the game's title.
+    @ObservedObject private var library = RomLibrary.shared
     let entry: RomEntry
     let boxWidth: CGFloat
 
