@@ -33,11 +33,11 @@ const
   MONO_PX* = 13'f32    ## debug windows, the overlay
   PROGGY_PX = 13'f32   ## ProggyClean is crisp at 13 px only
 
-const INTER_DIR* = currentSourcePath().parentDir / "vendor" / "fonts"
+const INTER_DIR* = currentSourcePath().parentDir & "/vendor/fonts"  ## Inter's files
 when not defined(macosx):
   const
-    INTER_REGULAR_TTF = staticRead(INTER_DIR / "Inter-Regular.ttf")
-    INTER_SEMIBOLD_TTF = staticRead(INTER_DIR / "Inter-SemiBold.ttf")
+    INTER_REGULAR_TTF = staticRead("vendor/fonts/Inter-Regular.ttf")
+    INTER_SEMIBOLD_TTF = staticRead("vendor/fonts/Inter-SemiBold.ttf")
   let
     INTER_REGULAR* = INTER_REGULAR_TTF
     INTER_SEMIBOLD* = INTER_SEMIBOLD_TTF
