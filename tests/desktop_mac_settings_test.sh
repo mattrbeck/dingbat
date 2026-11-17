@@ -121,13 +121,13 @@ check "DS Beta off: no DS keys" "$(line "$work/nods.txt" 'binding X (DS) = D')" 
 check "DS Beta off: no DS files" "$(grep -c 'path DS' "$work/nods.txt")" 0
 check "DS Beta off: not applied" "$(grep -c 'beta: true' "$yml")" 1
 
-echo "Edit menu (the Cheats window's name field, GBA game)"
+echo "Edit menu (the Cheats window's name field, GBA game: its third row, at y 156)"
 run tests/roms/hwverified/psrmask.gba "1 sleep 300
 2 menu pick Emulation>Cheats
-3 move 200 135
+3 move 200 156
 4 sleep 300
 5 menu dump $work/m0.txt
-6 click 200 135
+6 click 200 156
 7 sleep 300
 8 text hello
 9 sleep 300

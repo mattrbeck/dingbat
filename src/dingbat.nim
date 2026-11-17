@@ -31,6 +31,7 @@ import dingbat/frontend/nds_game
 import dingbat/frontend/imgui_sdl3
 from dingbat/frontend/presenter as pr import nil
 import dingbat/frontend/util
+import dingbat/frontend/ui_fonts
 import dingbat/frontend/menu_model
 import dingbat/frontend/imgui_menu
 import dingbat/frontend/library
@@ -330,14 +331,34 @@ proc display_ui_scale(window: Window): float32 =
   if d <= 0 or s <= 0: 1'f32 else: s / d
 
 proc apply_ui_scale(s: float32) =
-  ## Scale ImGui's style, font and ui_px sizes by s. Scaled from the 100% style
-  ## each time, as ScaleAllSizes rounds down. The built-in 13 px pixel font is
-  ## sized to a whole pixel (16 px at 125%), edges softened a little.
+  ## Scale ImGui's style, fonts and ui_px sizes by s. Scaled from the 100%
+  ## style each time, as ScaleAllSizes rounds down; ImGui rasterises the fonts
+  ## at the scaled size.
   ui_scale = s
   let style = igGetStyle()
   style[] = ui_base_style
   ImGuiStyle_ScaleAllSizes(style, s)
-  style.FontScaleDpi = round(13 * s) / 13
+  style.FontScaleDpi = s
+
+proc setup_ui_style() =
+  ## The fonts, and ImGui's dark style spaced for them: body text at the
+  ## web's 14 px, controls a little roomier and rounder than ImGui's own
+  load_ui_fonts(igGetIO_Nil().Fonts)
+  echo "UI fonts: ", face_names.join(", ")
+  igStyleColorsDark(nil)
+  let st = igGetStyle()
+  st.FontSizeBase = font_px(BODY_PX)
+  st.WindowPadding = ImVec2(x: 12, y: 10)
+  st.FramePadding = ImVec2(x: 6, y: 4)
+  st.ItemSpacing = ImVec2(x: 8, y: 5)
+  st.ItemInnerSpacing = ImVec2(x: 6, y: 4)
+  st.WindowRounding = 8
+  st.ChildRounding = 6
+  st.PopupRounding = 6
+  st.FrameRounding = 5
+  st.GrabRounding = 4
+  st.TabRounding = 5
+  ui_base_style = st[]
 
 proc resize_to_output() =
   ## Size the window to an integer multiple of the native picture. In
@@ -1848,8 +1869,8 @@ proc run_menu(cmd: MenuCmd; arg: int) =
 proc menu_bar(native: bool): seq[MenuItem] =
   ## Both bars' menus. The macOS bar (`native`) adds the app, Window and Help
   ## menus, moves Settings and Quit into the app menu, and shows file names
-  ## in Open Recent, as Mac apps do. Titles stay ASCII (ImGui's font has no
-  ## ellipsis); mac_menu.m draws "..." as one.
+  ## in Open Recent, as Mac apps do. Titles spell "..." (mac_menu.m draws it
+  ## as one "…", and `menu pick` paths name it so).
   var recent: seq[MenuItem]
   for i, r in app.cfg.recents:
     recent.add action(if native: extractFilename(r) else: r, mcOpenRecent, i)
@@ -2048,6 +2069,7 @@ proc render_imgui() =
                    cint(ImGui_WindowFlags_NoMove) or
                    cint(ImGui_WindowFlags_NoSavedSettings)
     if igBegin("##overlay", addr app.enable_overlay, ov_flags):
+      push_font(fMono, MONO_PX)   # its numbers lined up
       let fps = app.io[].Framerate
       igText("UI FPS:     %.1f", fps)
       igText("Frame time: %.3f ms", 1000.0'f32 / fps)
@@ -2061,6 +2083,7 @@ proc render_imgui() =
                cdouble(app.rewind.mem_used()) / (1024.0 * 1024.0))
       igSeparator()
       for line in pr.info(): igTextUnformatted(cstring(line), nil)
+      igPopFont()
     igEnd()
 
   if app.dbg != nil:
@@ -2102,18 +2125,15 @@ proc render_imgui() =
         else:
           ImDrawList_AddRect(dl, p0, p1, 0x99FFFFFF'u32, rounding, thick, 0)
         let title = "Release to load"
-        # Twice the font's size before the UI scale (PushFont takes that one)
-        let big = igGetStyle().FontSizeBase * 2
-        igPushFont(nil, big)
+        push_font(fBold, 28)
         let t_size = calc_text_size(title)
         let t_h = igGetTextLineHeightWithSpacing()
         igPopFont()
         let d_size = calc_text_size(rom_types)
         let top = (vp[].Size.y - t_h - d_size.y) * 0.5'f32
         igSetCursorPos(ImVec2(x: (vp[].Size.x - t_size.x) * 0.5'f32, y: top))
-        igPushFont(nil, big)
-        igTextUnformatted(cstring(title), nil)
-        igPopFont()
+        with_font(fBold, 28):
+          igTextUnformatted(cstring(title), nil)
         igSetCursorPos(ImVec2(x: (vp[].Size.x - d_size.x) * 0.5'f32, y: top + t_h))
         igTextDisabled(cstring(rom_types))
       igEnd()
@@ -2742,8 +2762,7 @@ proc main() =
   let (logo_tex, logo_w, logo_h) = load_logo_texture()
 
   discard igCreateContext(nil)
-  igStyleColorsDark(nil)
-  ui_base_style = igGetStyle()[]
+  setup_ui_style()
   apply_ui_scale(ui_scale)
   let io_ptr = igGetIO_Nil()
   # Retina needs nothing here: the SDL 3 backend sets

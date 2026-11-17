@@ -8,7 +8,8 @@ import config_editor
 import settings_model
 import file_explorer
 import notice
-import util
+import util, ui_fonts
+from save_states_widget import calc_text_size
 
 const INDENT = 106'f32   # rows under a label, in points
 const BUF_SIZE = 512
@@ -25,7 +26,15 @@ proc put_text(b: var array[BUF_SIZE, char]; s: string) =
   let n = min(s.len, BUF_SIZE - 1)
   if n > 0: copyMem(addr b[0], cstring(s), n)
 
+proc binding_width(rows: seq[SettingRow]): float32 =
+  ## One width for a list's binding buttons: theirs, or the widest key name's
+  for r in rows:
+    if r.kind == rkBinding:
+      result = max(result, max(ui_px(r.width), calc_text_size(r.text).x +
+                                             igGetStyle().FramePadding.x * 2))
+
 proc render_rows(ed: ConfigEditor; rows: seq[SettingRow]) =
+  let bind_w = binding_width(rows)
   for r in rows:
     if not r.shown: continue
     case r.kind
@@ -77,7 +86,8 @@ proc render_rows(ed: ConfigEditor; rows: seq[SettingRow]) =
       ed.fe.render(r.title.strip(chars = {':'}), browse, [], proc(path: string) =
         ed.set_value(id, 0, path))
     of rkNote:
-      for line in r.text.split('\n'): igTextDisabled("%s", cstring(line))
+      with_font(fRegular, SMALL_PX):
+        for line in r.text.split('\n'): igTextDisabled("%s", cstring(line))
     of rkText:
       igText("%s", cstring(r.text))
     of rkSeparator:
@@ -96,7 +106,7 @@ proc render_rows(ed: ConfigEditor; rows: seq[SettingRow]) =
         let col = igGetStyleColorVec4(cint(ImGui_Col_ButtonHovered))
         igPushStyleColor_Vec4(cint(ImGui_Col_Button),
           if col != nil: col[] else: ImVec4(x: 0.4, y: 0.4, z: 0.8, w: 1.0))
-      if igButton(cstring(r.text & "##" & $r.id & $r.arg), ImVec2(x: ui_px(r.width), y: 0)):
+      if igButton(cstring(r.text & "##" & $r.id & $r.arg), ImVec2(x: bind_w, y: 0)):
         ed.activate(r.id, r.arg)
       if r.on: igPopStyleColor(1)
       igSameLine(0, -1)

@@ -4,7 +4,7 @@
 ## `on_open`, and saves/loads in the callbacks.
 
 import imguin/cimgui
-import util
+import util, ui_fonts
 
 const NUM_SLOTS* = 9
 
@@ -87,9 +87,9 @@ proc render*(w: SaveStatesWidget) =
   let work_h = igGetMainViewport().WorkSize.y
   igSetNextWindowPos(ImVec2(x: ui_px(60), y: ui_px(28)),
                      cint(ImGui_Cond_FirstUseEver), ImVec2(x: 0, y: 0))
-  # Width 470: 3 x 136px cells + 2 x 10 spacing + padding + room for the grid
+  # Width 480: 3 x 136px cells + 2 x 10 spacing + padding + room for the grid
   # child's scrollbar, which otherwise eats the third column's captions.
-  igSetNextWindowSize(ImVec2(x: ui_px(470), y: min(ui_px(500), work_h - ui_px(56))),
+  igSetNextWindowSize(ImVec2(x: ui_px(480), y: min(ui_px(500), work_h - ui_px(56))),
                       cint(ImGui_Cond_FirstUseEver))
   if igBegin("Save States", addr w.window, 0):
     if not w.have_rom:
@@ -160,6 +160,7 @@ proc render*(w: SaveStatesWidget) =
         # never exceed cell_w (that widens the group and misaligns the
         # columns), so the timestamp truncates to the space the tag leaves.
         let tag = $(i + 1) & (if i == 0: " · Quick" else: "")
+        push_font(fRegular, SMALL_PX)
         igTextColored(dim(), cstring(tag))
         igSameLine(0, 0)
         let avail = cell_x + cell_w - igGetCursorPosX() - ui_px(8)
@@ -170,6 +171,7 @@ proc render*(w: SaveStatesWidget) =
           igTextUnformatted(cstring(cap), nil)
         else:
           igTextColored(dim(), cstring(cap))
+        igPopFont()
         igEndGroup()
         if selected or has_thumb:
           igPopStyleColor(1)
@@ -190,7 +192,7 @@ proc render*(w: SaveStatesWidget) =
       if not sel.used: igEndDisabled()
       # Right-aligned from the window width, not igGetContentRegionAvail,
       # whose return signature differs across imguin versions.
-      let pad = ui_px(8)
+      let pad = igGetStyle().WindowPadding.x
       igSameLine(0, 0)
       igSetCursorPosX(max(igGetCursorPosX(),
                           igGetWindowWidth() - (btn_w * 2 + gap + pad)))

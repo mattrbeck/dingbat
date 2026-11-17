@@ -2,7 +2,7 @@ import std/strformat
 import imguin/cimgui
 import ../common/scheduler
 import ../gba/gba
-import util
+import util, ui_fonts
 
 type
   GbaDebug* = ref object
@@ -73,7 +73,9 @@ proc render_layers(d: GbaDebug) =
     igEndTabItem()
 
 proc tx(s: string) =
-  igTextUnformatted(cstring(s), nil)
+  ## A register line, its columns lined up
+  with_font(fMono, MONO_PX):
+    igTextUnformatted(cstring(s), nil)
 
 proc onoff(b: bool): string =
   if b: "on" else: "off"

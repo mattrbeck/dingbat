@@ -5,7 +5,7 @@
 import std/strutils
 import imguin/cimgui
 import ../common/cheats
-import util
+import util, ui_fonts
 
 type
   CheatsWidget* = ref object
@@ -91,7 +91,8 @@ proc render*(w: CheatsWidget) =
           igTextColored(red(), "  %s", cstring(err))
         else:
           let summary = w.engine.cheats[i].codes.replace("\n", "  ")
-          igTextColored(dim(), "  %s", cstring(summary))
+          with_font(fMono, MONO_PX):
+            igTextColored(dim(), "  %s", cstring(summary))
         igPopID()
       if delete_idx >= 0:
         w.engine.cheats.delete(delete_idx)
@@ -106,10 +107,14 @@ proc render*(w: CheatsWidget) =
     discard igInputTextWithHint("##name", "name (optional)",
       cast[cstring](addr w.name_buf[0]), csize_t(w.name_buf.len), 0, nil, nil)
     let hint = if w.platform == cpGBA: HINT_GBA else: HINT_GB
-    discard igInputTextMultiline("##codes",
-      cast[cstring](addr w.code_buf[0]), csize_t(w.code_buf.len),
-      ImVec2(x: -1, y: ui_px(60)), 0, nil, nil)
-    igTextColored(dim(), "%s", cstring(hint))
+    with_font(fMono, MONO_PX):
+      discard igInputTextMultiline("##codes",
+        cast[cstring](addr w.code_buf[0]), csize_t(w.code_buf.len),
+        ImVec2(x: -1, y: ui_px(64)), 0, nil, nil)
+    with_font(fRegular, SMALL_PX):
+      igPushTextWrapPos(0)
+      igTextColored(dim(), "%s", cstring(hint))
+      igPopTextWrapPos()
     if igButton("Add", ImVec2(x: 0, y: 0)):
       w.do_add()
     if w.add_error.len > 0:

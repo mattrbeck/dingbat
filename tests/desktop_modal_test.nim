@@ -5,10 +5,12 @@
 ## not; a held key closes one notice at most; and the keyboard is ImGui's
 ## (WantCaptureKeyboard) for as long as one is up, which is what keeps the
 ## key from the game (held_input.nim `modal_key_of`, desktop_input_test).
-## And every string the desktop draws has its characters in ImGui's built-in
-## font (no em dash, curly quote or "…": those draw as "?"): src/dingbat.nim
-## and every file under src/dingbat, found at compile time (the core's
-## messages reach the notices, the Cheats and Link Cable windows too).
+## And every string the desktop draws has its characters in every UI font it
+## may draw with (ui_fonts.nim): this platform's (SF on macOS, Segoe UI on
+## Windows) and the bundled Inter, which Linux and any fallback use; a
+## character one lacks draws as "?". src/dingbat.nim and every file under
+## src/dingbat, found at compile time (the core's messages reach the
+## notices, the Cheats and Link Cable windows too).
 ##
 ## Needs imguin (its C++ compiles into this binary; nothing else of the GUI:
 ## no SDL, no GL). CI's test job installs it (.github/scripts/
@@ -17,6 +19,7 @@
 import std/[algorithm, macros, os, strutils, unicode]
 import imguin/cimgui
 import dingbat/frontend/notice
+import dingbat/frontend/ui_fonts
 
 const SRC = currentSourcePath().parentDir.parentDir / "src"
 
@@ -71,7 +74,11 @@ io.DeltaTime = 1.0 / 60.0
 # The atlas is built by ImGui itself and handed to a renderer that is not
 # there; nothing here draws.
 io.BackendFlags = io.BackendFlags or cint(ImGui_BackendFlags_RendererHasTextures)
-discard ImFontAtlas_AddFontDefault(io.Fonts, nil)
+load_ui_fonts(io.Fonts)
+let inter = [io.Fonts.add_ttf(INTER_REGULAR, "Inter"),
+             io.Fonts.add_ttf(INTER_SEMIBOLD, "Inter SemiBold")]
+doAssert inter[0] != nil and inter[1] != nil, "the bundled Inter does not load"
+igGetStyle().FontSizeBase = font_px(BODY_PX)
 
 var first, first_hint, second, second_hint: string
 var wants_keyboard = false
@@ -147,24 +154,40 @@ block nothing_else_closes:
   doAssert first.len > 0
 
 block every_ui_string_has_a_glyph:
-  # The desktop draws with ImGui's built-in ProggyClean (it loads no other),
-  # which has U+0020-00FF and little else: an em dash, a curly quote or "…"
-  # draws as "?". Every string literal in the desktop's UI sources, and in
-  # the core files whose messages it shows (a State notice, a cheat's error,
-  # the Link Cable window's "Handshake failed: ..."), must have each
-  # character in that font. Log lines (echo), GLSL sources ("""...""") and
-  # compile-time pragmas never reach ImGui and are skipped.
+  # Every string literal in the desktop's UI sources, and in the core files
+  # whose messages it shows (a State notice, a cheat's error, the Link Cable
+  # window's "Handshake failed: ..."), must have each character in the
+  # regular and semibold faces loaded here and in Inter: "…", curly quotes
+  # and dashes are in all of them. The debug windows' text is drawn
+  # monospaced too (Linux: ProggyClean, U+0020-00FF and little else). Log
+  # lines (echo), GLSL sources ("""...""") and compile-time pragmas never
+  # reach ImGui and are skipped.
   frame()
-  let font = igGetFont()
+  echo "fonts: ", face_names.join(", "), ", Inter, Inter SemiBold"
   var missing: seq[string]
   for (file, line, s) in ui_string_literals():
-    for r in s.runes:
-      if r.int > 0xFFFF or not ImFont_IsGlyphInFont(font, ImWchar(r.int)):
-        missing.add file & ":" & $line & ": U+" & r.int.toHex(4) &
-                    " in \"" & s & "\""
-        break
+    var fonts = @[faces[fRegular], faces[fBold], inter[0], inter[1]]
+    if file.endsWith("_debug.nim"): fonts.add faces[fMono]
+    block one:
+      for r in s.runes:
+        for f in fonts:
+          if r.int > 0xFFFF or not ImFont_IsGlyphInFont(f, ImWchar(r.int)):
+            missing.add file & ":" & $line & ": U+" & r.int.toHex(4) &
+                        " in \"" & s & "\""
+            break one
   doAssert missing.len == 0,
-    "characters the desktop's font can't draw:\n  " & missing.join("\n  ")
+    "characters a UI font can't draw:\n  " & missing.join("\n  ")
+  # The check can fail: none of them has a CJK ideograph
+  for f in [faces[fRegular], inter[0]]:
+    doAssert not ImFont_IsGlyphInFont(f, ImWchar(0x4E00))
+
+block the_fonts_load:
+  # The system's faces where it has them, Inter otherwise; never none
+  for f in Face: doAssert faces[f] != nil, $f & " did not load"
+  when defined(macosx): doAssert face_names[fRegular] == "SF", face_names[fRegular]
+  elif defined(windows): doAssert face_names[fRegular] == "Segoe UI", face_names[fRegular]
+  else: doAssert face_names[fRegular] == "Inter", face_names[fRegular]
+  doAssert ttf_line_em(INTER_REGULAR) > 1 and ttf_line_em("not a font") == 0
 
 igDestroyContext(nil)
 echo "ok"
