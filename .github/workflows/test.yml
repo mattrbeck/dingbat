@@ -274,6 +274,12 @@ jobs:
         # never in the repo, so they skip here.
         shell: bash
         run: ./dingbat_desktop_nds_test
+      - name: Desktop library (the home screen's games)
+        # library.json and the recents it takes in, the grid's order, search
+        # and cartridge marks as the web's, the grid's sizes against the web
+        # page's, which picture a tile shows.
+        shell: bash
+        run: ./dingbat_desktop_library_test
       - name: Desktop modal notices (Dear ImGui, headless)
         # notice.nim in a real ImGui context with no window: Return, keypad
         # Enter and Escape close a notice as OK does; the press it appears
@@ -544,6 +550,12 @@ jobs:
           # A runner has no sound device; the dummy driver still paces.
           SDL_AUDIO_DRIVER: dummy
         run: xvfb-run -a -s "-screen 0 1280x1024x24" tests/desktop_gui_test.sh
+      - name: Desktop home screen's library (Xvfb)
+        timeout-minutes: 5
+        env:
+          DINGBAT_GUI_BIN: ${{ github.workspace }}/dingbat_gui_test
+          SDL_AUDIO_DRIVER: dummy
+        run: xvfb-run -a -s "-screen 0 1280x1024x24" tests/desktop_home_test.sh
 
   wasm:
     # The web build, made once for the end-to-end jobs (the test job never

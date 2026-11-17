@@ -8,7 +8,9 @@ library across devices (a game held only elsewhere shows as a dashed tile and do
 tap).
 
 Native: run `dingbat`, pass a ROM path (`./dingbat /path/to/rom`), or drag a file onto
-the window.
+the window. With no game open the window is the library, as in the browser: every game
+opened there as a tile with its last screen (or its newest save state's), newest first; a
+click, Return or a controller's A opens one, right-click (or the tile's ...) removes it.
 
 On macOS the menus live in the system menu bar (Settings and Quit in the dingbat menu),
 Settings… (⌘,) opens a Mac settings window, File > Open ROM… (⌘O) is the system's Open

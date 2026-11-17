@@ -35,7 +35,7 @@ design notes, hardware evidence and test triage for people working on dingbat.
 - [lcd_response.md](dev/lcd_response.md) — the LCD panel response model (ghosting) and its test. Video maintainers.
 - [lcd_ghost_delta.md](dev/lcd_ghost_delta.md) — parked: LCD ghosting per upscale-filter cell. Video maintainers.
 - [ui-redesign-spec.md](dev/ui-redesign-spec.md) — the earlier web UI redesign plan; its §0 Do-not-break table still holds. Web maintainers.
-- [home-screen.md](dev/home-screen.md) — the web home screen: its states, Resume and Play, sessions and their pictures, flights, the account slot. Web maintainers.
+- [home-screen.md](dev/home-screen.md) — the web home screen: its states, Resume and Play, sessions and their pictures, flights, the account slot; and the desktop's library home. Web and desktop maintainers.
 - [web_audio_pacing.md](dev/web_audio_pacing.md) — the web audio scheduling-lead servo and how to measure it. Web maintainers.
 - [hle-bios-shortcomings.md](dev/hle-bios-shortcomings.md) — what the built-in GBA HLE BIOS does not do. GBA maintainers.
 - [gba-rtc.md](dev/gba-rtc.md) — the GBA cartridge clock: host time unless a game sets it, the battery-save RTC trailer, behaviour next to mGBA and real carts. GBA maintainers, anyone moving saves between emulators.

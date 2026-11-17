@@ -154,3 +154,23 @@ proc extract_zip_rom*(cache_root, zip_path: string;
   except ZippyError, IOError, OSError:
     echo "Failed to read zip: ", getCurrentExceptionMsg()
     ""
+
+proc zip_rom_name*(cache_root, zip_path: string;
+                   exts: openArray[string] = ROM_EXTS_DS): string =
+  ## The file name of the ROM extract_zip_rom would take from the zip,
+  ## without extracting it: the copy in its cache folder, else the zip's
+  ## listing. "" for none or an unreadable zip.
+  let dir = zip_cache_dir(cache_root, zip_path)
+  if dirExists(dir):
+    for kind, f in walkDir(dir):
+      if kind == pcFile and f.splitFile().ext.toLowerAscii() in exts:
+        return f.extractFilename()
+  try:
+    let reader = openZipArchive(zip_path)
+    defer: reader.close()
+    for name in reader.walkFiles:
+      if name.splitFile().ext.toLowerAscii() in exts:
+        return name.extractFilename()
+  except ZippyError, IOError, OSError:
+    discard
+  ""
