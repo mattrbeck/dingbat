@@ -65,8 +65,9 @@ semibold) and SF Mono, rasterised by CoreText through an ImGui font loader
 instance, Display Regular, and SF may not be redistributed). Windows: Segoe
 UI, Segoe UI Semibold and Consolas from `%WINDIR%\Fonts`. Linux: Inter, and
 JetBrains Mono for the monospaced text (debug windows, the overlay, cheat
-codes), both in `frontend/vendor/fonts` (OFL) and compiled in on Windows too
-as the fallbacks. The macOS build has neither; a face that does not load
+codes; its NL cut, without the ligatures ImGui never draws), both in
+`frontend/vendor/fonts` (OFL) and compiled in on Windows too as the
+fallbacks. The macOS build has neither; a face that does not load
 there is ImGui's ProggyClean. Windows and Linux rasterise with FreeType
 (ImGui's `imgui_freetype`, vendored, over a static FreeType from
 `.github/scripts/build-freetype.sh`), hinted by the fonts' own TrueType

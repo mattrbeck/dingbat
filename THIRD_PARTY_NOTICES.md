@@ -28,7 +28,7 @@ licence asks to be kept.
 | NimYAML | MIT | Felix Krause |
 | stb_image, stb_image_write | public domain / MIT | Sean Barrett |
 | Inter 4.1, Regular and SemiBold (`src/dingbat/frontend/vendor/fonts/`, unmodified from the v4.1 release), the UI font on Linux and Windows' fallback (not in the macOS build) | SIL Open Font License 1.1 (text below) | The Inter Project Authors |
-| JetBrains Mono 2.304, Regular (`src/dingbat/frontend/vendor/fonts/`, unmodified from the v2.304 release), the monospaced UI font on Linux and Windows' fallback (not in the macOS build) | SIL Open Font License 1.1 (text below) | The JetBrains Mono Project Authors |
+| JetBrains Mono 2.304, NL Regular, the cut without ligatures (`src/dingbat/frontend/vendor/fonts/JetBrainsMonoNL-Regular.ttf`, unmodified from the v2.304 release's JetBrainsMono-2.304.zip, SHA-256 `fb3b2575d7b0657359707993288f12a7360344d39387bb26050e276d61f6bd2a`), the monospaced UI font on Linux and Windows' fallback (not in the macOS build) | SIL Open Font License 1.1 (text below) | The JetBrains Mono Project Authors |
 
 The UI's other fonts are the system's, read from it at run time and not
 distributed with dingbat: San Francisco and SF Mono on macOS, Segoe UI and

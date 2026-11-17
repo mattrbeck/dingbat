@@ -82,13 +82,13 @@ load_ui_fonts(io.Fonts)
 when defined(macosx):
   let inter_data = [readFile(FONT_DIR / "Inter-Regular.ttf"),
                     readFile(FONT_DIR / "Inter-SemiBold.ttf")]
-  let mono_data = readFile(FONT_DIR / "JetBrainsMono-Regular.ttf")
+  let mono_data = readFile(FONT_DIR / "JetBrainsMonoNL-Regular.ttf")
 else:
   let inter_data = [INTER_REGULAR, INTER_SEMIBOLD]
   let mono_data = JETBRAINS_MONO
 let inter = [io.Fonts.add_ttf(inter_data[0], "Inter"),
              io.Fonts.add_ttf(inter_data[1], "Inter SemiBold")]
-let mono = io.Fonts.add_ttf(mono_data, "JetBrains Mono")
+let mono = io.Fonts.add_ttf(mono_data, "JetBrains Mono NL")
 doAssert inter[0] != nil and inter[1] != nil, "the bundled Inter does not load"
 doAssert mono != nil, "the bundled JetBrains Mono does not load"
 igGetStyle().FontSizeBase = font_px(BODY_PX)
@@ -176,7 +176,7 @@ block every_ui_string_has_a_glyph:
   # face and JetBrains Mono too. Log lines (echo), GLSL sources
   # ("""...""") and compile-time pragmas never reach ImGui and are skipped.
   frame()
-  echo "fonts: ", face_names.join(", "), ", Inter, Inter SemiBold, JetBrains Mono"
+  echo "fonts: ", face_names.join(", "), ", Inter, Inter SemiBold, JetBrains Mono NL"
   var missing: seq[string]
   for (file, line, s) in ui_string_literals():
     var fonts = @[faces[fRegular], faces[fBold], inter[0], inter[1]]
@@ -202,7 +202,7 @@ block the_fonts_load:
   elif defined(windows): doAssert face_names[fRegular] == "Segoe UI", face_names[fRegular]
   else:
     doAssert face_names[fRegular] == "Inter", face_names[fRegular]
-    doAssert face_names[fMono] == "JetBrains Mono", face_names[fMono]
+    doAssert face_names[fMono] == "JetBrains Mono NL", face_names[fMono]
   doAssert ttf_line_em(inter_data[0]) > 1 and ttf_line_em("not a font") == 0
   # Their capitals already sit in the middle of their lines (add_ttf moves
   # a font's that do not)

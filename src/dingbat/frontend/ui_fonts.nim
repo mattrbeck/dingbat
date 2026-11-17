@@ -3,8 +3,9 @@
 ##
 ##   macOS    San Francisco and SF Mono, through CoreText (mac_font.mm)
 ##   Windows  Segoe UI, Segoe UI Semibold and Consolas, from %WINDIR%\Fonts
-##   Linux    Inter and JetBrains Mono (vendor/fonts, OFL; Linux has no
-##            standard UI font)
+##   Linux    Inter and JetBrains Mono NL (vendor/fonts, OFL; Linux has no
+##            standard UI font). NL is the cut without ligatures: ImGui
+##            never joins characters, so it draws the same, smaller.
 ##
 ## Inter and JetBrains Mono are compiled in on Windows and Linux: a face that
 ## does not load (no Segoe UI under Wine) falls back to them. macOS has SF
@@ -61,7 +62,7 @@ when not defined(macosx):
   const
     INTER_REGULAR_TTF = staticRead("vendor/fonts/Inter-Regular.ttf")
     INTER_SEMIBOLD_TTF = staticRead("vendor/fonts/Inter-SemiBold.ttf")
-    JETBRAINS_MONO_TTF = staticRead("vendor/fonts/JetBrainsMono-Regular.ttf")
+    JETBRAINS_MONO_TTF = staticRead("vendor/fonts/JetBrainsMonoNL-Regular.ttf")
   let
     INTER_REGULAR* = INTER_REGULAR_TTF
     INTER_SEMIBOLD* = INTER_SEMIBOLD_TTF
@@ -185,7 +186,7 @@ proc load_ui_fonts*(atlas: ptr ImFontAtlas) =
     # The globals themselves, not copies: ImGui reads them in place
     for (f, data, name) in [(fRegular, addr INTER_REGULAR, "Inter"),
                             (fBold, addr INTER_SEMIBOLD, "Inter SemiBold"),
-                            (fMono, addr JETBRAINS_MONO, "JetBrains Mono")]:
+                            (fMono, addr JETBRAINS_MONO, "JetBrains Mono NL")]:
       if faces[f] == nil:
         put(f, atlas.add_ttf(data[], name), name, ttf_line_em(data[]))
   var pc: ptr ImFont
