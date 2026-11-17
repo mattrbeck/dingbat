@@ -5,6 +5,7 @@
 # and save on both sides.
 
 import ../common/input
+import ../common/linksync
 import link
 import gb
 
@@ -42,10 +43,14 @@ type
     ringFrame: seq[int]          ## frame each ring slot currently holds (-1 = empty)
     ringKeys: seq[array[2, HeldKeys]]  ## each core's HeldKeys entering that frame
     cap: int                     ## ring capacity (> maxAhead so the frontier never evicts)
+    syncEvery*: int              ## fingerprint every this many frames (0 = never)
+    syncNext: int                ## the next frame whose state-before is fingerprinted
+    syncOut*: seq[(int, uint64)] ## final fingerprints, oldest first (the transport ships them)
 
 proc bit(v: uint16; i: int): bool {.inline.} = ((v shr i) and 1) != 0
 
-proc new_gb_rollback_session*(link: GbLink; local: int; maxAhead = 12): GbRollbackSession =
+proc new_gb_rollback_session*(link: GbLink; local: int; maxAhead = 12;
+                              syncEvery = 120): GbRollbackSession =
   ## `link` must be a fresh 2-core GbLink at frame 0 (both cores post_init from
   ## the two players' ROM+save). `local` is which core this peer's buttons drive.
   ## `maxAhead` bounds prediction depth — pick it above the round-trip in frames.
@@ -55,7 +60,8 @@ proc new_gb_rollback_session*(link: GbLink; local: int; maxAhead = 12): GbRollba
   result = GbRollbackSession(
     link: link, local: local, head: 0, confirmed: -1, maxAhead: maxAhead,
     ring: newSeq[GbLinkSnapshot](cap), ringFrame: newSeq[int](cap),
-    ringKeys: newSeq[array[2, HeldKeys]](cap), cap: cap)
+    ringKeys: newSeq[array[2, HeldKeys]](cap), cap: cap,
+    syncEvery: syncEvery, syncNext: syncEvery)
   for i in 0 ..< cap: result.ringFrame[i] = -1
 
 proc grow(sess: GbRollbackSession; f: int) =
@@ -102,11 +108,53 @@ proc load_ckpt(sess: GbRollbackSession; f: int) =
     j.start = k.start; j.jselect = k.jselect; j.b = k.b; j.a = k.a
     j.prev_lines = k.prev_lines
 
+proc fingerprint*(sess: GbRollbackSession): uint64 =
+  ## Both cores' portable state images, hashed (linksync.sync_hash): what the
+  ## two peers compare, as gba/rollback.nim.
+  result = 0
+  for core in sess.link.cores:
+    result = sync_hash(core.state_bytes(), result)
+
 proc sim(sess: GbRollbackSession; f: int) =
   # Snapshot the state entering frame f, apply its inputs, advance one frame.
   sess.store_ckpt(f)
   sess.apply_inputs(f)
   sess.link.step_frame()
+
+proc sync_flush(sess: GbRollbackSession) =
+  ## Fingerprint the state before each syncEvery-th frame once it is final:
+  ## every input before it known (confirmed >= f-1), so no replay can change
+  ## it. Once each, here, not as frames are simulated: a replay through f
+  ## would pay for another (measured: 9 ms ticks on Emerald in wasm). The
+  ## state is the live one at f == head, else ring slot f, put in for the
+  ## fingerprint and taken out again. The window keeps f in the ring: f-1
+  ## <= confirmed and head - confirmed <= maxAhead + 1 < cap.
+  if sess.syncEvery <= 0: return
+  while sess.syncNext <= sess.head and sess.confirmed >= sess.syncNext - 1:
+    let f = sess.syncNext
+    var h: uint64
+    if f == sess.head:
+      h = sess.fingerprint()
+    else:
+      # The live HeldKeys go back too: load_ckpt puts frame f's in, and the
+      # next frame's joypad interrupt edge reads them.
+      let live = sess.link.capture_state()
+      var keys: array[2, HeldKeys]
+      for p in 0 .. 1:
+        let j = sess.link.cores[p].joypad
+        keys[p] = HeldKeys(down: j.down, up: j.up, left: j.left, right: j.right,
+          start: j.start, jselect: j.jselect, b: j.b, a: j.a, prev_lines: j.prev_lines)
+      sess.load_ckpt(f)
+      h = sess.fingerprint()
+      sess.link.restore_state(live)
+      for p in 0 .. 1:
+        let j = sess.link.cores[p].joypad
+        let k = keys[p]
+        j.down = k.down; j.up = k.up; j.left = k.left; j.right = k.right
+        j.start = k.start; j.jselect = k.jselect; j.b = k.b; j.a = k.a
+        j.prev_lines = k.prev_lines
+    sess.syncOut.add((f, h))
+    sess.syncNext = f + sess.syncEvery
 
 proc reconcile(sess: GbRollbackSession) =
   ## Extend the confirmed frontier over contiguously-known remote frames, rolling
@@ -136,6 +184,7 @@ proc feed_remote*(sess: GbRollbackSession; frame: int; bits: uint16) =
   sess.remoteIn[frame] = bits
   sess.remoteKnown[frame] = true
   sess.reconcile()
+  sess.sync_flush()
 
 proc tick*(sess: GbRollbackSession; localBits: uint16): GbRbStatus =
   ## Simulate one presentation frame with the local input and prediction. STALL
@@ -152,6 +201,7 @@ proc tick*(sess: GbRollbackSession; localBits: uint16): GbRbStatus =
   # re-runs); waiting for the next arrival would stall this side at the window
   # if the peer goes quiet.
   sess.reconcile()
+  sess.sync_flush()
   grbAdvanced
 
 proc checksum*(sess: GbRollbackSession): uint64 =

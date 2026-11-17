@@ -33,6 +33,7 @@ import dingbat/common/scheduler
 import dingbat/common/atomicfile
 import dingbat/common/timestretch
 import dingbat/common/audio_out
+import dingbat/common/linksync
 import dingbat/gba/gba
 import dingbat/gba/link as gbalink
 import dingbat/gba/rollback as gbarb
@@ -2418,6 +2419,32 @@ proc dingbat_rollback_dump_size(player: cint): cint {.exportc, cdecl.} =
 
 proc dingbat_rollback_dump_data(): pointer {.exportc, cdecl.} =
   if rbDumpImage.len > 0: addr rbDumpImage[0] else: nil
+
+proc dingbat_rollback_dump_packed(player: cint): cint {.exportc, cdecl.} =
+  ## Core `player`'s state, packed as a session's STATE transfer is, into the
+  ## dump buffer (web rollback_dump_packed): what a re-sync sends.
+  if dingbat_rollback_dump_size(player) <= 0: return 0
+  rbDumpImage = pack_state(rbDumpImage)
+  cint(rbDumpImage.len)
+
+proc dingbat_rollback_sync_poll(outp: ptr UncheckedArray[uint32]): cint {.exportc, cdecl.} =
+  ## The oldest final sync fingerprint into outp[0..2] = frame, hash high,
+  ## hash low (web rollback_sync_poll); 1 if there was one.
+  var q: ptr seq[(int, uint64)] = nil
+  if rbGb != nil: q = addr rbGb.syncOut
+  elif rbGba != nil: q = addr rbGba.syncOut
+  if q == nil or q[].len == 0 or outp == nil: return 0
+  let (f, h) = q[][0]
+  q[].delete(0)
+  outp[0] = uint32(f)
+  outp[1] = uint32(h shr 32)
+  outp[2] = uint32(h and 0xFFFFFFFF'u64)
+  1
+
+proc dingbat_core_id(outp: ptr UncheckedArray[uint32]) {.exportc, cdecl.} =
+  ## linksync.CORE_ID (high, low): sent in the rollback HELLO.
+  outp[0] = uint32(CORE_ID shr 32)
+  outp[1] = uint32(CORE_ID and 0xFFFFFFFF'u64)
 
 # --- 2P local link (dingbat_wasm.nim's link_*) ---
 # Two cores of one ROM over the lockstep cable, on screen side by side. The

@@ -362,6 +362,9 @@ jobs:
           ./dingbat_test tests/roms/inputrec.gba --mode=rollback
           # Two RollbackSessions exchanging inputs over a delay, both bit-identical.
           ./dingbat_test tests/roms/inputrec.gba --mode=rollbacknet
+          # Link sync checks: fingerprints agree, a poked copy is caught, a
+          # re-sync from both own-game states agrees again.
+          ./dingbat_test tests/roms/inputrec.gba --mode=rollbacksync
       - name: Speculative rollback acceptance (bit-identical to the blocking path)
         # The speculative link must reproduce the blocking path's EWRAM log.
         shell: bash

@@ -780,6 +780,8 @@ final class GameSession: NSObject, ObservableObject {
             if let stop = Self.linkStopAt, dingbat_rollback_head() >= stop { return false }
             if let script = Self.linkScript() { bits = script.bits(at: Int(dingbat_rollback_head())) }
             #endif
+            // A re-sync's stop frame (NetLink.atBarrier): wait there, as at a stall.
+            if NetLink.shared.atBarrier { return false }
             let f = dingbat_rollback_tick(Int32(bits))
             guard f >= 0 else {
                 if linkStallSince == 0 { linkStallSince = CACurrentMediaTime() }
@@ -802,6 +804,7 @@ final class GameSession: NSObject, ObservableObject {
             // Stalled at the prediction window: wait for the friend.
             if !step() { frameDebt = 0; break }
         }
+        NetLink.shared.onLinkedFrame()
         keepAudioAlive()
         return ran
     }

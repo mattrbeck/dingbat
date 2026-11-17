@@ -495,6 +495,18 @@
     "web/index.js#togglePause": "3f50fa80ab5be0cd",
     "web/index.js#setSpeed2x": "36002247dd38d785"
   },
+  "WebState/LinkSync": {
+    "web/netplay.js#rbSessionGen": "1cbcf7261a389607",
+    "web/netplay.js#rbSyncPoll": "65e3eedf49b46113",
+    "web/netplay.js#rbSyncCompare": "caf8b6ebcb102f56",
+    "web/netplay.js#rbResyncBegin": "e300618a0d45202b",
+    "web/netplay.js#rbAtBarrier": "188c6ab0d172c5d0",
+    "web/netplay.js#rbResyncStep": "3e5923e09de8b827",
+    "web/netplay.js#rbResyncApply": "c1c628c2a0d48304",
+    "web/netplay.js#rbSyncMessage": "3622b77ce4fccecd",
+    "web/netplay.js#rbOnFrame": "4691518c6455221e",
+    "web/netplay.js#rbDropped": "d8185303e24c8235"
+  },
   "WebState/Modals": {
     "web/index.js#anyModalOpen": "710d144eee6ed386",
     "web/index.js#askRomWarn": "d976cb7fd30d4f1d",

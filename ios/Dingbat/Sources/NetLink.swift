@@ -147,6 +147,22 @@ final class NetLink: ObservableObject {
         /// Our goodbye note is posted (leaveNote).
         var noteLeft = false
         var lastRx: Int32 = -1
+        /// The two cores' ROM paths, for a re-sync's restart.
+        var rom0Path = ""
+        var rom1Path = ""
+        // Sync checks (see "sync checks" below).
+        var peerSync = false
+        var peerCore: (UInt32, UInt32)?
+        var peerBuilt: UInt32 = 0
+        var syncMine: [Int32: (UInt32, UInt32)] = [:]
+        var syncTheirs: [Int32: (UInt32, UInt32)] = [:]
+        var syncChecks = 0
+        var syncMismatches = 0
+        var resync: Resync?
+        var resyncGen: UInt8 = 0
+        var resyncs = 0
+        var resyncAt: [Date] = []
+        var resyncWarned = false
         /// Wall clock of the friend's last message.
         var lastMsgAt: Date?
         /// The input log (a ring), for the friend's gap.
@@ -221,6 +237,8 @@ final class NetLink: ObservableObject {
     private static let romBegin: UInt8 = 4, romChunk: UInt8 = 5, ready: UInt8 = 6, speed: UInt8 = 7, pause: UInt8 = 8
     private static let haveRom: UInt8 = 9, needRom: UInt8 = 10, away: UInt8 = 11
     private static let resumeInfo: UInt8 = 12, resumeKind: UInt8 = 13, bye: UInt8 = 14, ping: UInt8 = 15
+    private static let syncKind: UInt8 = 16, resyncKind: UInt8 = 17, resyncBeginKind: UInt8 = 18
+    private static let resyncChunkKind: UInt8 = 19, resyncReadyKind: UInt8 = 20
     /// A started link says something this often even when nothing else
     /// flows (both paused, a stall): a drop after a long pause is judged by
     /// how long the friend has been silent (`lastMsgAt`).
@@ -242,6 +260,9 @@ final class NetLink: ObservableObject {
     static let awayToastAfter: TimeInterval = 5
     static let backToastDelay: TimeInterval = 1.5
     private static let helloLen = 21  // with the whole-ROM identity
+    /// ... and the build (web RB_HELLO_BUILD_LEN): [21] core id, [29] build
+    /// time, [33] capabilities (bit 0: sync checks).
+    private static let helloBuildLen = 34
     private static let chunk = 16384
     private static let highWater = 4 * 1024 * 1024
     private static let romMax = 48 * 1024 * 1024
@@ -791,8 +812,13 @@ final class NetLink: ObservableObject {
         rb.localState = state
         s.rb = rb
         setStatus("Syncing…")
-        send([Self.hello] + Self.be32(rb.epoch) + Self.be32(rb.romHash)
-             + Self.be32(rb.romId.len) + Self.be32(rb.romId.crc) + Self.be32(rb.romId.fnv), s)
+        let own = Self.ownBuild()
+        var hello: [UInt8] = [Self.hello]
+        hello += Self.be32(rb.epoch) + Self.be32(rb.romHash)
+        hello += Self.be32(rb.romId.len) + Self.be32(rb.romId.crc) + Self.be32(rb.romId.fnv)
+        hello += Self.be32(own.hi) + Self.be32(own.lo) + Self.be32(own.built)
+        hello.append(1)  // checks sync
+        send(hello, s)
         send([Self.stateBegin] + Self.be32(UInt32(state.count)), s)
         var off = 0
         while off < state.count {
@@ -846,6 +872,11 @@ final class NetLink: ObservableObject {
             let bits = Int32(UInt16(data[i]) << 8 | UInt16(data[i + 1]))
             if frame > rb.lastRx { rb.lastRx = frame }
             dingbat_rollback_feed(frame, bits)
+            syncPoll(s)
+            resyncStep(s)
+            return
+        case Self.syncKind ... Self.resyncReadyKind:
+            if rb.inited { syncMessage(kind, data, rb, s) }
             return
         case Self.resumeInfo:
             resumeInfoIn(data, rb, s)
@@ -897,6 +928,11 @@ final class NetLink: ObservableObject {
             if answers {
                 rb.remoteRomId = RomIdentity(len: Self.read32(data, 9), crc: Self.read32(data, 13),
                                              fnv: Self.read32(data, 17))
+            }
+            if data.count >= Self.helloBuildLen {
+                rb.peerCore = (Self.read32(data, 21), Self.read32(data, 25))
+                rb.peerBuilt = Self.read32(data, 29)
+                rb.peerSync = data[data.startIndex + 33] & 1 == 1
             }
             if answers ? rb.remoteRomId != rb.romId : rb.remoteRomHash != rb.romHash {
                 rb.needRom = true
@@ -986,6 +1022,8 @@ final class NetLink: ObservableObject {
         }
         let rom0 = rb.localPlayer == 0 ? rb.gamePath : remote.path
         let rom1 = rb.localPlayer == 0 ? remote.path : rb.gamePath
+        rb.rom0Path = rom0
+        rb.rom1Path = rom1
         GameSession.shared.linkWillStart()
         guard dingbat_rollback_init(rom0, rom1, Int32(rb.localPlayer), Double(rb.epoch)) == 1 else {
             let state = rb.localState
@@ -1030,6 +1068,207 @@ final class NetLink: ObservableObject {
         rb.localState = Data()
         rb.remoteState = nil
         rb.stateBuf = Data()
+    }
+
+    // MARK: sync checks (web netplay.js "Sync checks"; tools/formal/WebState/LinkSync.lean)
+
+    /// Both games' fingerprints cross every 120 frames (rollback.nim
+    /// syncEvery). They differ: both stop at the later of two proposed
+    /// frames, send the friend their own game's state, and start the session
+    /// again from the two states. Only to a friend whose HELLO says it checks.
+    private final class Resync {
+        let gen: UInt8
+        let mineT: Int32
+        var target: Int32 = -1
+        var mine: Data?
+        var sent = false
+        var inBuf = Data()
+        var inLen = -1
+        var applied = false
+        var friendReady = false
+        let t0 = CACurrentMediaTime()
+        init(gen: UInt8, mineT: Int32) { self.gen = gen; self.mineT = mineT }
+    }
+
+    private static let resyncMargin: Int32 = 60
+    private static let resyncWarnCount = 3
+    private static let resyncWarnWindow: TimeInterval = 600
+    private static let syncKeep = 8
+
+    /// This build's emulation-core id and build time, for the HELLO.
+    private static func ownBuild() -> (hi: UInt32, lo: UInt32, built: UInt32) {
+        var id: [UInt32] = [0, 0]
+        id.withUnsafeMutableBufferPointer { dingbat_core_id($0.baseAddress) }
+        let built = AppStatus.buildTime.map { UInt32(max(0, $0.timeIntervalSince1970)) } ?? 0
+        return (id[0], id[1], built)
+    }
+
+    /// The session the engine is in: a re-sync's once this side restarted.
+    private func sessionGen(_ rb: RB) -> UInt8 {
+        if let r = rb.resync, r.applied { return r.gen }
+        return rb.resyncGen
+    }
+
+    private func keep(_ d: inout [Int32: (UInt32, UInt32)]) {
+        while d.count > Self.syncKeep, let oldest = d.keys.min() { d.removeValue(forKey: oldest) }
+    }
+
+    /// Fingerprints the core has made final: send each, compare.
+    private func syncPoll(_ s: Session) {
+        guard let rb = s.rb, rb.inited else { return }
+        var out: [UInt32] = [0, 0, 0]
+        while out.withUnsafeMutableBufferPointer({ dingbat_rollback_sync_poll($0.baseAddress) }) == 1 {
+            let frame = Int32(bitPattern: out[0])
+            rb.syncMine[frame] = (out[1], out[2])
+            keep(&rb.syncMine)
+            if rb.peerSync && !rb.reconnecting {
+                send([Self.syncKind, sessionGen(rb)] + Self.be32(out[0]) + Self.be32(out[1]) + Self.be32(out[2]), s)
+            }
+            syncCompare(rb, frame, s)
+        }
+    }
+
+    private func syncCompare(_ rb: RB, _ frame: Int32, _ s: Session) {
+        guard rb.resync == nil || rb.resync?.applied == true,
+              let m = rb.syncMine[frame], let t = rb.syncTheirs[frame] else { return }
+        rb.syncMine.removeValue(forKey: frame)
+        rb.syncTheirs.removeValue(forKey: frame)
+        rb.syncChecks += 1
+        if m == t { return }
+        rb.syncMismatches += 1
+        print("netlink: out of sync at frame \(frame) — re-syncing")
+        resyncBegin(rb, s)
+    }
+
+    private func resyncBegin(_ rb: RB, _ s: Session) {
+        guard rb.resync == nil, rb.inited, !rb.reconnecting, rb.peerSync else { return }
+        let r = Resync(gen: rb.resyncGen &+ 1, mineT: dingbat_rollback_head() + Self.resyncMargin)
+        rb.resync = r
+        send([Self.resyncKind, r.gen] + Self.be32(UInt32(bitPattern: r.mineT)), s)
+    }
+
+    /// The frame loop's barrier (GameSession.linkedFrames): no frame past
+    /// the stop frame, or past our own proposal until the friend's is in.
+    var atBarrier: Bool {
+        // Restarted: a new session the old stop frame says nothing about
+        // (web rbAtBarrier).
+        guard let r = session?.rb?.resync, !r.applied else { return false }
+        return dingbat_rollback_head() > (r.target >= 0 ? r.target : r.mineT)
+    }
+
+    /// Every display tick of linked play, ticked or not.
+    func onLinkedFrame() {
+        guard let s = session, s.started else { return }
+        syncPoll(s)
+        resyncStep(s)
+    }
+
+    private func resyncStep(_ s: Session) {
+        guard let rb = s.rb, let r = rb.resync, r.target >= 0 else { return }
+        // At the stop frame with every input to it: our own game is final.
+        if !r.sent && dingbat_rollback_head() == r.target + 1 && dingbat_rollback_confirmed() == r.target {
+            let n = dingbat_rollback_dump_packed(Int32(rb.localPlayer))
+            guard n > 0, let p = dingbat_rollback_dump_data() else {
+                peerGone("Couldn't re-sync with your friend")
+                return
+            }
+            let mine = Data(bytes: p, count: Int(n))
+            r.mine = mine
+            send([Self.resyncBeginKind, r.gen] + Self.be32(UInt32(n)), s)
+            var off = 0
+            while off < mine.count {
+                let end = min(off + Self.chunk, mine.count)
+                var frame = Data([Self.resyncChunkKind])
+                frame.append(mine[(mine.startIndex + off) ..< (mine.startIndex + end)])
+                s.peer?.send(frame)
+                off = end
+            }
+            r.sent = true
+        }
+        if r.sent && !r.applied && r.inLen >= 0 && r.inBuf.count >= r.inLen { resyncApply(rb, r, s) }
+        if r.applied && r.friendReady {
+            rb.resyncGen = r.gen
+            rb.resync = nil
+            rb.resyncs += 1
+            print("netlink: back in sync with the friend (\(Int((CACurrentMediaTime() - r.t0) * 1000)) ms)")
+            resyncWarn(rb)
+        }
+    }
+
+    /// The session again from the two states, as tryInit starts it (the
+    /// ROMs are still where it put them); frame counts start over at 0.
+    private func resyncApply(_ rb: RB, _ r: Resync, _ s: Session) {
+        guard let mine = r.mine,
+              dingbat_rollback_init(rb.rom0Path, rb.rom1Path, Int32(rb.localPlayer), Double(rb.epoch)) == 1 else {
+            peerGone("Couldn't re-sync with your friend")
+            return
+        }
+        let host = rb.localPlayer == 0 ? mine : r.inBuf
+        let guest = rb.localPlayer == 0 ? r.inBuf : mine
+        func load(_ p: Int32, _ d: Data) -> Bool {
+            d.withUnsafeBytes { dingbat_rollback_load_state(p, $0.baseAddress, Int32($0.count)) == 1 }
+        }
+        guard load(0, host), load(1, guest) else {
+            peerGone("Couldn't re-sync with your friend")
+            return
+        }
+        rb.lastRx = -1
+        rb.sentCount = 0
+        rb.syncMine.removeAll()
+        rb.syncTheirs.removeAll()
+        r.applied = true
+        r.mine = nil
+        r.inBuf = Data()
+        send([Self.resyncReadyKind, r.gen], s)
+    }
+
+    /// Several re-syncs close together: say why (web rbResyncWarn).
+    private func resyncWarn(_ rb: RB) {
+        let now = Date()
+        rb.resyncAt = rb.resyncAt.filter { now.timeIntervalSince($0) < Self.resyncWarnWindow } + [now]
+        guard !rb.resyncWarned, rb.resyncAt.count >= Self.resyncWarnCount else { return }
+        rb.resyncWarned = true
+        let own = Self.ownBuild()
+        var msg = "The link keeps drifting out of sync with your friend's game. If it goes on, report a bug from Settings."
+        if let peer = rb.peerCore, peer.0 != 0 || peer.1 != 0, own.hi != 0 || own.lo != 0,
+           peer.0 != own.hi || peer.1 != own.lo {
+            let older = rb.peerBuilt != 0 && own.built != 0
+                ? (rb.peerBuilt < own.built ? "Your friend's is older: updating it keeps you in step."
+                                             : "Yours is older: updating it keeps you in step.")
+                : "Updating the older one keeps you in step."
+            msg = "You and your friend run different versions of dingbat's emulator, so your games keep drifting apart. " + older
+        }
+        AppModel.shared.toast(msg, duration: 15)
+    }
+
+    private func syncMessage(_ kind: UInt8, _ data: Data, _ rb: RB, _ s: Session) {
+        let b = data.startIndex
+        switch kind {
+        case Self.syncKind:
+            guard data.count >= 14, data[b + 1] == sessionGen(rb) else { return }
+            let frame = Int32(bitPattern: Self.read32(data, 2))
+            rb.syncTheirs[frame] = (Self.read32(data, 6), Self.read32(data, 10))
+            keep(&rb.syncTheirs)
+            syncCompare(rb, frame, s)
+        case Self.resyncKind:
+            guard data.count >= 6, data[b + 1] == rb.resyncGen &+ 1 else { return }
+            if rb.resync == nil { resyncBegin(rb, s) }
+            guard let r = rb.resync else { return }
+            r.target = max(r.mineT, Int32(bitPattern: Self.read32(data, 2)))
+        case Self.resyncBeginKind:
+            guard let r = rb.resync, data.count >= 6, data[b + 1] == r.gen else { return }
+            r.inLen = Int(Self.read32(data, 2))
+            r.inBuf = Data()
+            r.inBuf.reserveCapacity(r.inLen)
+        case Self.resyncChunkKind:
+            guard let r = rb.resync, r.inLen >= 0, r.inBuf.count + data.count - 1 <= r.inLen else { return }
+            r.inBuf.append(data.dropFirst())
+        case Self.resyncReadyKind:
+            if let r = rb.resync, data.count >= 2, data[b + 1] == r.gen { r.friendReady = true }
+        default:
+            return
+        }
+        resyncStep(s)
     }
 
     // MARK: the running session
@@ -1251,6 +1490,11 @@ final class NetLink: ObservableObject {
 
     /// The connection is gone: redial if both sides can, else end as before.
     private func dropped(_ why: String, _ endMsg: String) {
+        // A re-sync's frame counts and states don't survive a redial.
+        if session?.rb?.resync != nil {
+            peerGone("Lost the link while getting back in sync with your friend")
+            return
+        }
         if canResume { beginResume(why) }
         else { peerGone(session?.rb?.byeIn == true ? "Your friend disconnected" : endMsg) }
     }

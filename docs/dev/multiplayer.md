@@ -139,6 +139,57 @@ different CRCs and link fine; incompatible games fail their own handshake.
 * In session the web hides rewind, speed, states, load-save and reset
   (`body.net-mode`); a peer departure toasts and the local core plays on.
 
+## Sync checks (online rollback link)
+
+Both sides of an online link run both games (`gba/rollback.nim`,
+`gb/rollback.nim`) and only inputs cross, so two builds whose cores differ,
+or a determinism bug, can drift apart silently. Builds that check now say
+so in the HELLO: `[21]` core id (`common/linksync.nim CORE_ID`, the git trees
+of `gba/`, `gb/`, `common/`, the same on web and iOS when the core source
+is), `[29]` build time, `[33]` bit 0 "checks". Older builds read the first
+21 bytes and are sent none of the following.
+
+* **Fingerprint.** Every 120 frames the engine hashes both cores' portable
+  state images (`state_bytes`; the in-process snapshot pads cycle counters
+  to the host's width, so web and iOS would never agree on it) once that
+  frame is final (`confirmed >= f - 1`), from the ring slot or the live
+  state (`sync_flush`). Once each: hashing as frames are simulated paid
+  again on every replay (9 ms ticks on Emerald in wasm). Polled by
+  `rollback_sync_poll` / `dingbat_rollback_sync_poll`.
+* **RB_SYNC** `[16][gen][frame u32][hash u64]`, 14 bytes every ~2 s; both
+  sides compare at the same frame.
+* **Re-sync** on a difference: each proposes to stop 60 frames ahead
+  (**RB_RESYNC** `[17][gen][frame]`); both stop at the later (`rbAtBarrier`);
+  at it, with every input to it in, each sends its own game's state, packed
+  (**RB_RESYNC_BEGIN/CHUNK** 18/19); with the friend's in hand each restarts
+  the session from the two states (`rollback_init` and both loads, as at the
+  start; frame counts back to 0) and says so (**RB_RESYNC_READY** 20). Each
+  player's own game is never touched, only its copy of the friend's.
+  Restarting the moment the friend's state is complete (if ours went) keeps
+  every input in its session: the friend's new inputs travel behind its
+  state. A drop during a re-sync ends the session.
+* **Three re-syncs in 10 minutes** show why: different core ids, "different
+  versions of dingbat's emulator", naming the older by build time; the same
+  core, "keeps drifting out of sync … report a bug".
+* **Model:** `tools/formal/WebState/LinkSync.lean` proves an older friend is
+  sent nothing new, own games are untouched, and no side plays past the
+  stop before restarting; traces show a re-sync back in step (proposals
+  equal or apart) and that a restart waiting for a later frame would feed
+  the friend's new input into the old session. That every input reaches
+  its own session in general is argued here and tested
+  (`web/tests/link-sync.test.mjs`), not proved.
+* **Tests:** `dingbat_test --mode=rollbacksync` (CI: real cores, agreement
+  with ground truth, a poked copy caught, a re-sync from both own states);
+  `web/tests/link-sync.test.mjs` (the protocol on two pages);
+  `web/e2e/link-sync.e2e.mjs` (two real wasm cores in Chromium: agreement,
+  a set-back copy caught and re-synced, cost; `DINGBAT_SYNC_ROM=` for a real
+  game); `tests/linksync_bench.nim` (native cost).
+* **Cost** (M-series Mac): a fingerprint is 1.8 ms on Emerald in wasm, 0.4 ms
+  on Crystal (native 1.76 / 0.39, of which serializing is ~85%), once every
+  120 frames; sync messages are ~6 B/s against ~0.4 KB/s of inputs; a
+  re-sync sends 25-105 KB each way and takes ~1 s, most of it the 60-frame
+  margin.
+
 ## Not built
 
 * **GB/GBC online**: the GB serial driver is not hooked to `linkproto`

@@ -7,6 +7,7 @@
 # deterministic RTC (enable_deterministic_rtc).
 
 import ../common/input
+import ../common/linksync
 import link
 import gba
 
@@ -33,10 +34,14 @@ type
     ring: seq[LinkSnapshot]      ## checkpoint ring; slot (f mod cap) holds state BEFORE frame f
     ringFrame: seq[int]          ## frame each ring slot currently holds (-1 = empty)
     cap: int                     ## ring capacity (> maxAhead so the frontier never evicts)
+    syncEvery*: int              ## fingerprint every this many frames (0 = never)
+    syncNext: int                ## the next frame whose state-before is fingerprinted
+    syncOut*: seq[(int, uint64)] ## final fingerprints, oldest first (the transport ships them)
 
 proc bit(v: uint16; i: int): bool {.inline.} = ((v shr i) and 1) != 0
 
-proc new_rollback_session*(link: Link; local: int; maxAhead = 12): RollbackSession =
+proc new_rollback_session*(link: Link; local: int; maxAhead = 12;
+                           syncEvery = 120): RollbackSession =
   ## `link` must be a fresh 2-core Link at frame 0. `local` is the core this
   ## peer's buttons drive. `maxAhead` bounds prediction depth; pick it above
   ## the round-trip in frames.
@@ -45,7 +50,8 @@ proc new_rollback_session*(link: Link; local: int; maxAhead = 12): RollbackSessi
   let cap = maxAhead + 4
   result = RollbackSession(
     link: link, local: local, head: 0, confirmed: -1, maxAhead: maxAhead,
-    ring: newSeq[LinkSnapshot](cap), ringFrame: newSeq[int](cap), cap: cap)
+    ring: newSeq[LinkSnapshot](cap), ringFrame: newSeq[int](cap), cap: cap,
+    syncEvery: syncEvery, syncNext: syncEvery)
   for i in 0 ..< cap: result.ringFrame[i] = -1
 
 proc grow(sess: RollbackSession; f: int) =
@@ -81,10 +87,39 @@ proc load_ckpt(sess: RollbackSession; f: int) =
     "rollback: checkpoint for frame " & $f & " evicted (window too small?)"
   sess.link.restore_state(sess.ring[idx])
 
+proc fingerprint*(sess: RollbackSession): uint64 =
+  ## Both cores' portable state images, hashed (linksync.sync_hash): what the
+  ## two peers compare. Equal images on web and iOS give equal fingerprints.
+  result = 0
+  for core in sess.link.cores:
+    result = sync_hash(core.state_bytes(), result)
+
 proc sim(sess: RollbackSession; f: int) =
   sess.store_ckpt(f)
   sess.apply_inputs(f)
   sess.link.step_frame()
+
+proc sync_flush(sess: RollbackSession) =
+  ## Fingerprint the state before each syncEvery-th frame once it is final:
+  ## every input before it known (confirmed >= f-1), so no replay can change
+  ## it. Once each, here, not as frames are simulated: a replay through f
+  ## would pay for another (measured: 9 ms ticks on Emerald in wasm). The
+  ## state is the live one at f == head, else ring slot f, put in for the
+  ## fingerprint and taken out again. The window keeps f in the ring: f-1
+  ## <= confirmed and head - confirmed <= maxAhead + 1 < cap.
+  if sess.syncEvery <= 0: return
+  while sess.syncNext <= sess.head and sess.confirmed >= sess.syncNext - 1:
+    let f = sess.syncNext
+    var h: uint64
+    if f == sess.head:
+      h = sess.fingerprint()
+    else:
+      let live = sess.link.capture_state()
+      sess.load_ckpt(f)
+      h = sess.fingerprint()
+      sess.link.restore_state(live)
+    sess.syncOut.add((f, h))
+    sess.syncNext = f + sess.syncEvery
 
 proc reconcile(sess: RollbackSession) =
   ## Extend the confirmed frontier over contiguously-known remote frames; if
@@ -115,6 +150,7 @@ proc feed_remote*(sess: RollbackSession; frame: int; bits: uint16) =
   sess.remoteIn[frame] = bits
   sess.remoteKnown[frame] = true
   sess.reconcile()
+  sess.sync_flush()
 
 proc tick*(sess: RollbackSession; localBits: uint16): RollbackStatus =
   ## Simulate one frame with the local input and a remote prediction. Stalls
@@ -132,6 +168,7 @@ proc tick*(sess: RollbackSession; localBits: uint16): RollbackStatus =
   # next arrival, a quiet peer would leave this side stalled at the window
   # with the inputs it needs already in hand.
   sess.reconcile()
+  sess.sync_flush()
   rbAdvanced
 
 proc checksum*(sess: RollbackSession): uint64 =

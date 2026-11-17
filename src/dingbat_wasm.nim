@@ -15,6 +15,7 @@ import dingbat/gb/printer
 import dingbat/common/cheats
 import dingbat/common/lcd_response
 import dingbat/common/rom_exts
+import dingbat/common/linksync
 
 const GBA_W = 240
 const GBA_H = 160
@@ -1650,6 +1651,53 @@ proc rollback_dump_size(player: cint): cint {.exportc.} =
 proc rollback_dump_data(): pointer {.exportc.} =
   ## Pointer to the buffer filled by the last rollback_dump_size call.
   if rbDumpImage.len > 0: addr rbDumpImage[0] else: nil
+
+proc rollback_dump_packed(player: cint): cint {.exportc.} =
+  ## Rollback core `player`'s state, packed (pack_state) as a session's
+  ## STATE transfer is, into the rollback_dump_data buffer: what a re-sync
+  ## sends the friend. Its length, 0 with no session.
+  let n = rollback_dump_size(player)
+  if n <= 0: return 0
+  rbDumpImage = pack_state(rbDumpImage)
+  cint(rbDumpImage.len)
+
+proc rollback_sync_poll(outRaw: pointer): cint {.exportc.} =
+  ## The oldest final sync fingerprint (rollback.nim sync_flush) into
+  ## outp[0..2] = frame, hash high, hash low; 1 if there was one, else 0.
+  let outp = cast[ptr UncheckedArray[uint32]](outRaw)
+  var q: ptr seq[(int, uint64)] = nil
+  if stateGbRollback != nil: q = addr stateGbRollback.syncOut
+  elif stateRollback != nil: q = addr stateRollback.syncOut
+  if q == nil or q[].len == 0 or outp == nil: return 0
+  let (f, h) = q[][0]
+  q[].delete(0)
+  outp[0] = uint32(f)
+  outp[1] = uint32(h shr 32)
+  outp[2] = uint32(h and 0xFFFFFFFF'u64)
+  1
+
+proc rollback_set_sync_every(frames: cint) {.exportc.} =
+  ## Fingerprint interval for the live session (0 = off): for the benchmark.
+  if stateGbRollback != nil: stateGbRollback.syncEvery = max(0, int(frames))
+  elif stateRollback != nil: stateRollback.syncEvery = max(0, int(frames))
+
+proc rollback_fingerprint_live(outRaw: pointer): cint {.exportc.} =
+  ## The fingerprint of both cores as they are now (tests and the benchmark:
+  ## compare only at confirmed == head-1). 1 with a session, else 0.
+  let outp = cast[ptr UncheckedArray[uint32]](outRaw)
+  var h: uint64
+  if stateGbRollback != nil: h = stateGbRollback.fingerprint()
+  elif stateRollback != nil: h = stateRollback.fingerprint()
+  else: return 0
+  outp[0] = uint32(h shr 32)
+  outp[1] = uint32(h and 0xFFFFFFFF'u64)
+  1
+
+proc core_id(outRaw: pointer) {.exportc.} =
+  ## linksync.CORE_ID into outp[0..1] (high, low): sent in the rollback HELLO.
+  let outp = cast[ptr UncheckedArray[uint32]](outRaw)
+  outp[0] = uint32(CORE_ID shr 32)
+  outp[1] = uint32(CORE_ID and 0xFFFFFFFF'u64)
 
 proc rollback_transfers(): cint {.exportc.} =
   ## Monotonic count of SIO transfers on the emulated cable; JS watches it

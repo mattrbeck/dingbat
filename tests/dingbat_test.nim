@@ -10,6 +10,7 @@ import dingbat/gba/netlink
 import dingbat/common/test_output
 import dingbat/common/rewind
 import dingbat/common/input
+import dingbat/common/linksync
 import std/algorithm  # FuzzARM failure-class rollup
 
 type
@@ -17,7 +18,7 @@ type
     tmSerial, tmSram, tmMooneye, tmMgba, tmMgbaSuite, tmScreenshot,
     tmStateRoundtrip, tmRewindTest, tmLinkTest, tmNormLinkTest,
     tmNorm32LinkTest, tmAttachTest, tmNetLink, tmSpecLink, tmSpecLinkBench,
-    tmRollback, tmRollbackNet, tmGbLinkTest, tmJsmolka, tmFuzzArm,
+    tmRollback, tmRollbackNet, tmRollbackSync, tmGbLinkTest, tmJsmolka, tmFuzzArm,
     tmMagenGreen, tmMagenNoRed, tmGambatte, tmMicrotest,
     tmMbc30Test, tmDocboy
 
@@ -1303,6 +1304,152 @@ proc rollback_net_test(rom, bios_path: string): int =
   echo "ROLLBACKNET: FAIL"
   1
 
+proc rollback_sync_test(rom, bios_path: string): int =
+  ## Link sync checks on two RollbackSessions exchanging inputs over a delay
+  ## (as rollback_net_test). The fingerprints (rollback.nim syncEvery) come
+  ## out at the same frames with the same values on both peers and as a
+  ## ground-truth run. Poking one side's copy of the friend's game makes the
+  ## next one differ. A re-sync as netplay.js does it (both stop at a frame,
+  ## swap their own game's state, start fresh sessions from the two states)
+  ## brings them back into agreement, and each player's own game is the
+  ## same state it was.
+  const
+    EVERY = 30
+    DELAY = 3
+    MAXAHEAD = 12
+  let is_hle = bios_path == "hle" or bios_path == ""
+  let actual_bios = if is_hle: "" else: bios_path
+  proc mk(): GBA =
+    result = new_gba(actual_bios, rom, run_bios = false, use_hle = is_hle)
+    result.test_output = new_test_output()
+    result.post_init()
+  proc mask(s: set[Input]): uint16 =
+    for i in s: result = result or (1'u16 shl int(i))
+  proc p0(f: int): uint16 =
+    var s: set[Input]
+    if f mod 2 == 0: s.incl A
+    if f mod 5 == 0: s.incl RIGHT
+    if f mod 7 == 0: s.incl START
+    mask(s)
+  proc p1(f: int): uint16 =
+    var s: set[Input]
+    if f mod 3 == 0: s.incl B
+    if f mod 4 == 0: s.incl LEFT
+    if f mod 9 == 0: s.incl UP
+    mask(s)
+  proc fp(link: Link): uint64 =
+    for c in link.cores: result = sync_hash(c.state_bytes(), result)
+  proc apply(link: Link; f, off: int) =
+    for i in 0 ..< 10:
+      link.cores[0].handle_input(Input(i), ((p0(f + off) shr i) and 1) != 0)
+      link.cores[1].handle_input(Input(i), ((p1(f + off) shr i) and 1) != 0)
+
+  var ok = true
+  template check(cond: bool; msg: string) =
+    if not cond:
+      echo "ROLLBACKSYNC FAIL: ", msg
+      ok = false
+
+  # Both peers run to head == stopAt (frames [0, stopAt) simulated) and on
+  # until both have every input: confirmed == stopAt-1, the re-sync barrier.
+  proc run(a, b: RollbackSession; stopAt, off: int) =
+    var qab, qba: seq[(int, int, uint16)]
+    var step = 0
+    while (a.head < stopAt or b.head < stopAt or
+           a.confirmed < stopAt - 1 or b.confirmed < stopAt - 1) and step < stopAt * 40:
+      inc step
+      var keep: seq[(int, int, uint16)]
+      for m in qab:
+        if m[0] <= step: b.feed_remote(m[1], m[2]) else: keep.add m
+      qab = keep
+      keep = @[]
+      for m in qba:
+        if m[0] <= step: a.feed_remote(m[1], m[2]) else: keep.add m
+      qba = keep
+      if a.head < stopAt and a.tick(p0(a.head + off)) == rbAdvanced:
+        qab.add((step + DELAY, a.head - 1, p0(a.head - 1 + off)))
+      if b.head < stopAt and b.tick(p1(b.head + off)) == rbAdvanced:
+        qba.add((step + DELAY, b.head - 1, p1(b.head - 1 + off)))
+
+  proc prints(s: RollbackSession): seq[(int, uint64)] =
+    result = s.syncOut
+    s.syncOut.setLen(0)
+
+  # Ground truth: one link, every input known, fingerprinted before each
+  # EVERY-th frame as the sessions do.
+  let truth = new_link(@[mk(), mk()])
+  var want: seq[(int, uint64)]
+  for f in 0 ..< 240:
+    if f > 0 and f mod EVERY == 0: want.add((f, fp(truth)))
+    truth.apply(f, 0)
+    truth.step_frame()
+  want.add((240, fp(truth)))
+
+  # 1. Agreement: frames 0..179 on both, delayed inputs (rollbacks happen).
+  let a = new_rollback_session(new_link(@[mk(), mk()]), 0, MAXAHEAD, EVERY)
+  let b = new_rollback_session(new_link(@[mk(), mk()]), 1, MAXAHEAD, EVERY)
+  run(a, b, 180, 0)
+  let pa = prints(a)
+  let pb = prints(b)
+  # Frames 30..180: the state before 180 is final once frame 179's input is in.
+  check(pa.len == 6, "peer A gave " & $pa.len & " fingerprints for 180 frames, not 6 (30..180)")
+  check(pa == pb, "the peers' fingerprints differ with nothing wrong")
+  check(pa == want[0 ..< 6], "the fingerprints differ from the ground-truth run")
+  check(a.rollbacks > 0 and b.rollbacks > 0, "no rollbacks: the replay path went untested")
+
+  # 2. Divergence: B's copy of A's game (core 0 on B) gets one EWRAM byte
+  # A's never had; the next fingerprint must tell them apart.
+  let ew = 0x02000100'u32
+  let was = b.link.cores[0].bus.read_byte_internal(ew)
+  b.link.cores[0].bus.write_byte_internal(ew, was xor 0x5A'u8)
+  run(a, b, 240, 0)
+  let da = prints(a)
+  let db = prints(b)
+  check(da.len == 2 and db.len == 2, "expected fingerprints at 210 and 240")
+  if da.len == 2 and db.len == 2:
+    check(da[0][1] != db[0][1], "a poked copy went unnoticed at frame 210")
+    check(da == want[6 ..< 8], "the unpoked side drifted from the ground truth")
+
+  # 3. Re-sync at the barrier both now sit at (head 240, confirmed 239):
+  # each side's own game is what it sends; both start fresh sessions.
+  let aOwn = a.link.cores[0].state_bytes()
+  let bOwn = b.link.cores[1].state_bytes()
+  proc fromStates(local: int): RollbackSession =
+    let l = new_link(@[mk(), mk()])
+    doAssert l.cores[0].load_state_bytes(aOwn)
+    doAssert l.cores[1].load_state_bytes(bOwn)
+    new_rollback_session(l, local, MAXAHEAD, EVERY)
+  let a2 = fromStates(0)
+  let b2 = fromStates(1)
+  check(a2.fingerprint() == b2.fingerprint(), "the re-synced sessions start apart")
+  check(a2.link.cores[0].state_bytes() == aOwn, "A's own game changed in the re-sync")
+  check(b2.link.cores[1].state_bytes() == bOwn, "B's own game changed in the re-sync")
+
+  # 4. After it: agreement again, and with a run of the same two states with
+  # every input known (frame numbers start at 0 again; inputs continue).
+  run(a2, b2, 120, 240)
+  let ra = prints(a2)
+  let rb2 = prints(b2)
+  let ref2 = new_link(@[mk(), mk()])
+  doAssert ref2.cores[0].load_state_bytes(aOwn)
+  doAssert ref2.cores[1].load_state_bytes(bOwn)
+  var want2: seq[(int, uint64)]
+  for f in 0 ..< 120:
+    if f > 0 and f mod EVERY == 0: want2.add((f, fp(ref2)))
+    ref2.apply(f, 240)
+    ref2.step_frame()
+  want2.add((120, fp(ref2)))
+  check(ra.len == 4 and ra == rb2, "after the re-sync the peers still disagree")
+  check(ra == want2, "after the re-sync the peers differ from a run of the same states")
+
+  if ok:
+    echo "ROLLBACKSYNC: PASS (fingerprints every ", EVERY, " frames match both peers and the",
+      " ground truth; a poked copy caught at the next one; re-synced peers agree again;",
+      " A rollbacks=", a.rollbacks, ", B rollbacks=", b.rollbacks, ")"
+    return 0
+  echo "ROLLBACKSYNC: FAIL"
+  1
+
 # ==================== gambatte suite (batched) ====================
 #
 # sinamas' gambatte ROMs from the c-sp/game-boy-test-roms bundle; scoring
@@ -2087,6 +2234,7 @@ proc main() =
         of "speclinkbench": mode = tmSpecLinkBench
         of "rollback": mode = tmRollback
         of "rollbacknet": mode = tmRollbackNet
+        of "rollbacksync": mode = tmRollbackSync
         of "gblinktest": mode = tmGbLinkTest
         of "jsmolka": mode = tmJsmolka
         of "fuzzarm": mode = tmFuzzArm
@@ -2308,6 +2456,8 @@ proc main() =
     quit(rollback_test(rom_path, bios_path))
   if mode == tmRollbackNet:
     quit(rollback_net_test(rom_path, bios_path))
+  if mode == tmRollbackSync:
+    quit(rollback_sync_test(rom_path, bios_path))
   if mode == tmNetLink:
     if (listen_port > 0) == (connect_to.len > 0):
       echo "netlink mode needs exactly one of --listen PORT or --connect HOST:PORT"
@@ -2545,7 +2695,7 @@ proc main() =
     quit(1)
   of tmStateRoundtrip, tmRewindTest, tmLinkTest, tmNormLinkTest,
      tmNorm32LinkTest, tmAttachTest, tmNetLink, tmSpecLink, tmSpecLinkBench,
-     tmRollback, tmRollbackNet, tmGbLinkTest, tmJsmolka, tmFuzzArm,
+     tmRollback, tmRollbackNet, tmRollbackSync, tmGbLinkTest, tmJsmolka, tmFuzzArm,
      tmMagenGreen, tmMagenNoRed, tmGambatte, tmMbc30Test, tmDocboy:
     discard  # handled (and exited) above
 

@@ -20332,7 +20332,9 @@ var Module = {
           if (!rbStallSince) rbStallSince = timestamp;
           accumulator = 0;
         }
-        while (accumulator >= rbStep && framesRun < rbCap) {
+        // A re-sync's stop frame (netplay.js rbAtBarrier): wait there, as at a stall.
+        const atBarrier = () => typeof window.rbAtBarrier === "function" && window.rbAtBarrier();
+        while (accumulator >= rbStep && framesRun < rbCap && !atBarrier()) {
           const frame = Module._rollback_tick(localButtons);
           if (frame < 0) { // stalled: wait for peer input
             if (!rbStallSince) rbStallSince = timestamp;
@@ -20346,7 +20348,9 @@ var Module = {
           accumulator -= rbStep;
           framesRun++;
         }
+        if (atBarrier()) accumulator = 0;
         if (accumulator > FRAME_TIME * 2) accumulator = 0;
+        if (typeof window.rbOnFrame === "function") window.rbOnFrame();
         blitRollbackCanvas();
         if (typeof window.rbNoteStall === "function") {
           window.rbNoteStall(rbStallSince ? timestamp - rbStallSince : 0);

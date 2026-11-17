@@ -423,6 +423,12 @@ int dingbat_rollback_confirmed(void);
 /* Debug: core `player`'s full state (desync checks); data valid until the next call. */
 int dingbat_rollback_dump_size(int player);
 const void *dingbat_rollback_dump_data(void);
+/* Core `player`'s state packed into the dump buffer: what a re-sync sends. */
+int dingbat_rollback_dump_packed(int player);
+/* The oldest final sync fingerprint: out = {frame, hash high, hash low}; 1 if one. */
+int dingbat_rollback_sync_poll(uint32_t out[3]);
+/* This build's emulation-core id {high, low}, sent in the rollback HELLO. */
+void dingbat_core_id(uint32_t out[2]);
 
 /* Local 2P: two cores of one ROM on the cable. Player 1 on rom0 (the
  * game's own file: its save, its sound), player 2 on rom1 (its own .sav,

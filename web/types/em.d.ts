@@ -129,6 +129,11 @@ interface EmscriptenModule {
   _rollback_load_state?(player: number, data: number, len: number): number;
   _rollback_dump_size?(player: number): number;
   _rollback_dump_data?(): number;
+  _rollback_dump_packed?(player: number): number;
+  _rollback_sync_poll?(outRaw: number): number;
+  _rollback_set_sync_every?(frames: number): void;
+  _rollback_fingerprint_live?(outRaw: number): number;
+  _core_id?(outRaw: number): void;
   _rollback_transfers?(): number;
   _load_cheats?(text: number): number;
   _initFromEmscripten?(rom_path: number): void;

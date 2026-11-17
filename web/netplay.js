@@ -1148,6 +1148,13 @@ manualIn && ["keydown", "keypress", "keyup"].forEach((t) =>
 //  13 resume       : [13][sid u32][last frame u32][flags u8] (first on a redialed channel)
 //  14 bye          : [14][why u8]                  (a deliberate end: don't redial; why 0 =
 //                                                    left, 1 = gave up; builds before it send [14])
+//  15 ping         : [15]                          (keepalive)
+//  16 sync         : [16][gen u8][frame u32][hash u64] (both games' fingerprint, below)
+//  17 resync       : [17][gen u8][stop frame u32]  (fingerprints differ: stop at the later)
+//  18 resync-begin : [18][gen u8][len u32]         (our own game's state at the stop frame)
+//  19 resync-chunk : [19][bytes]
+//  20 resync-ready : [20][gen u8]                  (restarted from both states)
+//  16-20 go only to a friend whose HELLO says it checks (RB_HELLO_BUILD_LEN).
 // Both peers run both cores (core 0 = host's game, core 1 = guest's): each
 // side's save-state is exchanged and loaded into the matching core, then only
 // inputs cross the network. When the hello hashes differ (cross-game trade)
@@ -1162,11 +1169,15 @@ const RB_HELLO = 0, RB_INPUT = 1, RB_STATE_BEGIN = 2, RB_STATE_CHUNK = 3;
 const RB_ROM_BEGIN = 4, RB_ROM_CHUNK = 5, RB_READY = 6, RB_SPEED = 7;
 const RB_PAUSE = 8, RB_HAVE_ROM = 9, RB_NEED_ROM = 10, RB_AWAY = 11;
 const RB_RESUME_INFO = 12, RB_RESUME = 13, RB_BYE = 14, RB_PING = 15;
+const RB_SYNC = 16, RB_RESYNC = 17, RB_RESYNC_BEGIN = 18, RB_RESYNC_CHUNK = 19, RB_RESYNC_READY = 20;
 // A started link says something this often even when nothing else flows
 // (both paused, a stall): a drop after a long pause is judged by how long
 // the friend has been silent, and a quiet link mustn't read as one given up.
 const RB_PING_MS = 20000;
 const RB_HELLO_LEN = 21; // with the whole-ROM identity
+// ... and the build: [21] core id u64, [29] build time u32 (s, 0 = unknown),
+// [33] capabilities (bit 0: sync checks). Older builds read the first 21.
+const RB_HELLO_BUILD_LEN = 34;
 const RB_CHUNK = 16384; // DataChannel-safe chunk size for state + ROM frames
 // Send-buffer high water while streaming a ROM; well under Chrome's ~16 MB
 // cap, past which send() throws and the dropped chunk corrupts the ROM.
@@ -1489,9 +1500,23 @@ const rbConnect = async () => {
     discTimer: 0,
     lastMsgAt: 0,       // wall clock of the friend's last message
     reconnectAt: 0,     // wall clock when redialing began
+    // Sync checks (see "Sync checks" below).
+    peerSync: false,    // the friend's HELLO says it checks
+    peerCore: null,     // the friend's core id [hi, lo]
+    peerBuilt: 0,       // the friend's build time (s)
+    syncMine: new Map(),   // frame -> our fingerprint [hi, lo], until the friend's
+    syncTheirs: new Map(), // frame -> the friend's
+    syncChecks: 0,
+    syncMismatches: 0,
+    resync: null,       // a re-sync under way
+    resyncGen: 0,       // re-syncs done (mod 256 on the wire)
+    resyncs: 0,
+    resyncMs: [],
+    resyncAt: [],       // when recent ones finished (rbResyncWarn)
+    resyncWarned: false,
   };
   netSetStatus("Syncing…");
-  const h = new ArrayBuffer(RB_HELLO_LEN);
+  const h = new ArrayBuffer(RB_HELLO_BUILD_LEN);
   const hv = new DataView(h);
   hv.setUint8(0, RB_HELLO);
   hv.setUint32(1, net.rb.epoch);
@@ -1499,6 +1524,11 @@ const rbConnect = async () => {
   hv.setUint32(9, romId.len);
   hv.setUint32(13, romId.crc);
   hv.setUint32(17, romId.fnv);
+  const own = rbOwnBuild();
+  hv.setUint32(21, own.core[0]);
+  hv.setUint32(25, own.core[1]);
+  hv.setUint32(29, own.built);
+  hv.setUint8(33, rbCanSync() ? 1 : 0);
   rbSend(h);
   rbSendState(localState);
 };
@@ -1513,8 +1543,15 @@ const rbMessage = (data) => {
   if (kind === RB_INPUT) {
     const frame = v.getInt32(1);
     if (frame > rb.lastRx) rb.lastRx = frame;
-    if (rb.inited && Module._rollback_feed)
+    if (rb.inited && Module._rollback_feed) {
       Module._rollback_feed(frame, v.getUint16(5));
+      rbSyncPoll();
+      rbResyncStep();
+    }
+    return;
+  }
+  if (kind >= RB_SYNC && kind <= RB_RESYNC_READY) {
+    if (rb.inited) rbSyncMessage(rb, kind, v, data);
     return;
   }
   if (kind === RB_RESUME_INFO) {
@@ -1572,6 +1609,11 @@ const rbMessage = (data) => {
     // then compare whole ROMs, an older build only the first 1 MB.
     const answers = data.byteLength >= RB_HELLO_LEN;
     if (answers) rb.remoteRomId = { len: v.getUint32(9), crc: v.getUint32(13), fnv: v.getUint32(17) };
+    if (data.byteLength >= RB_HELLO_BUILD_LEN) {
+      rb.peerCore = [v.getUint32(21), v.getUint32(25)];
+      rb.peerBuilt = v.getUint32(29);
+      rb.peerSync = (v.getUint8(33) & 1) === 1 && rbCanSync();
+    }
     if (answers ? !rbSameRom(rb.remoteRomId, rb.romId) : rb.remoteRomHash !== rb.romHash) {
       rb.needRom = true;
       rbShowXferProgress();
@@ -1673,6 +1715,8 @@ const rbStartIfReady = () => {
   window.rbSendInput = rbSendInput;
   window.rbSendSpeed = rbSendSpeed;
   window.rbSendPause = rbSendPause;
+  window.rbOnFrame = rbOnFrame;
+  window.rbAtBarrier = rbAtBarrier;
   window.enterRollbackMode(); // unfreezes into the session
   showToast(net.isHost ? "Player 2 connected — full speed" : "Connected — full speed");
   if (net.isHost) rbOfferResume();
@@ -1689,6 +1733,228 @@ const rbStartIfReady = () => {
   rb.stateBuf = null;
 };
 
+// --- Sync checks (rollback.nim syncEvery; formal/WebState/LinkSync.lean) ---
+// Both sides run both games and only inputs cross, so two builds whose
+// cores differ can drift apart without a word. Every 120 frames each side's
+// core fingerprints both games at a frame both have confirmed, and the two
+// fingerprints cross (RB_SYNC). They differ: a re-sync. Each side proposes a
+// frame a second ahead (RB_RESYNC), both stop at the later of the two, and
+// at it each sends the friend its own game's state (RB_RESYNC_BEGIN/CHUNK);
+// with the friend's in hand each starts the session again from the two
+// states, as at the start, and says so (RB_RESYNC_READY). Each player's own
+// game is never touched, only its copy of the friend's. A friend whose
+// HELLO doesn't say it checks is sent none of this.
+const RB_RESYNC_MARGIN = 60; // frames ahead a re-sync proposes to stop
+const RB_RESYNC_WARN = 3; // re-syncs within RB_RESYNC_WARN_MS before saying so
+const RB_RESYNC_WARN_MS = 10 * 60 * 1000;
+const RB_SYNC_KEEP = 8; // fingerprints held per side waiting for the friend's
+
+let rbScratchPtr = 0;
+const rbScratch = () => {
+  if (!rbScratchPtr && Module._malloc) rbScratchPtr = Module._malloc(16);
+  return rbScratchPtr;
+};
+
+// This build's core id and build time (index.js BUILD_TIME), for the HELLO.
+const rbOwnBuild = () => {
+  let core = [0, 0];
+  const p = rbScratch();
+  if (p && Module._core_id) {
+    Module._core_id(p);
+    const a = new Uint32Array(Module.memory.buffer, p, 2);
+    core = [a[0], a[1]];
+  }
+  const t = typeof BUILD_TIME === "string" ? Date.parse(BUILD_TIME) : NaN;
+  return { core, built: Number.isNaN(t) ? 0 : Math.floor(t / 1000) >>> 0 };
+};
+const rbCanSync = () => !!(Module._rollback_sync_poll && Module._rollback_dump_packed);
+
+// The session the engine is in: a re-sync's once this side has restarted
+// (its fingerprints and inputs are that session's from then on).
+const rbSessionGen = (rb) => (rb.resync?.applied ? rb.resync.gen : rb.resyncGen) & 0xff;
+
+const rbKeep = (map) => {
+  while (map.size > RB_SYNC_KEEP) map.delete(map.keys().next().value);
+};
+
+// Fingerprints our core has made final: send each, compare with the friend's.
+const rbSyncPoll = () => {
+  const rb = net?.rb;
+  if (!rb || !rb.inited || !rbCanSync()) return;
+  const p = rbScratch();
+  while (p && Module._rollback_sync_poll(p) === 1) {
+    const a = new Uint32Array(Module.memory.buffer, p, 3);
+    const frame = a[0], hi = a[1], lo = a[2];
+    rb.syncMine.set(frame, [hi, lo]);
+    rbKeep(rb.syncMine);
+    if (rb.peerSync && !rb.reconnecting) {
+      const buf = new ArrayBuffer(14);
+      const v = new DataView(buf);
+      v.setUint8(0, RB_SYNC);
+      v.setUint8(1, rbSessionGen(rb));
+      v.setUint32(2, frame);
+      v.setUint32(6, hi);
+      v.setUint32(10, lo);
+      rbSend(buf);
+    }
+    rbSyncCompare(rb, frame);
+  }
+};
+
+const rbSyncCompare = (rb, frame) => {
+  const m = rb.syncMine.get(frame), t = rb.syncTheirs.get(frame);
+  if (!m || !t || (rb.resync && !rb.resync.applied)) return;
+  rb.syncMine.delete(frame);
+  rb.syncTheirs.delete(frame);
+  rb.syncChecks++;
+  if (m[0] === t[0] && m[1] === t[1]) return;
+  rb.syncMismatches++;
+  log(`netplay: out of sync at frame ${frame} — re-syncing`, "warn");
+  rbResyncBegin(rb);
+};
+
+const rbResyncBegin = (rb) => {
+  if (rb.resync || !rb.inited || rb.reconnecting || !rb.peerSync) return;
+  const gen = (rb.resyncGen + 1) & 0xff;
+  const mineT = Module._rollback_head() + RB_RESYNC_MARGIN;
+  rb.resync = { gen, mineT, target: -1, mine: null, sent: false,
+    inBuf: null, inLen: 0, inGot: 0, applied: false, friendReady: false, t0: performance.now() };
+  const buf = new ArrayBuffer(6);
+  const v = new DataView(buf);
+  v.setUint8(0, RB_RESYNC);
+  v.setUint8(1, gen);
+  v.setUint32(2, mineT);
+  rbSend(buf);
+};
+
+// The frame loop's barrier (index.js): no frame past the stop frame, or past
+// our own proposal until the friend's is in.
+const rbAtBarrier = () => {
+  const rs = net?.rb?.resync;
+  // Restarted: a new session, whose frames the old stop frame says nothing
+  // about; the friend's new inputs can't come before its state, which ours
+  // went after (formal/WebState/LinkSync.lean inputs_in_session).
+  if (!rs || rs.applied) return false;
+  return Module._rollback_head() > (rs.target >= 0 ? rs.target : rs.mineT);
+};
+
+const rbResyncStep = () => {
+  const rb = net?.rb;
+  const rs = rb?.resync;
+  if (!rs || rs.target < 0 || net.ending) return;
+  // At the stop frame with every input to it: our own game's state is final.
+  if (!rs.sent && Module._rollback_head() === rs.target + 1 && Module._rollback_confirmed() === rs.target) {
+    const n = Module._rollback_dump_packed(rb.localPlayer);
+    if (n <= 0) { netPeerGone("Couldn't re-sync with your friend"); return; }
+    rs.mine = new Uint8Array(Module.memory.buffer, Module._rollback_dump_data(), n).slice();
+    const hdr = new ArrayBuffer(6);
+    const hv = new DataView(hdr);
+    hv.setUint8(0, RB_RESYNC_BEGIN);
+    hv.setUint8(1, rs.gen);
+    hv.setUint32(2, n);
+    rbSend(hdr);
+    for (let off = 0; off < n; off += RB_CHUNK) {
+      const slice = rs.mine.subarray(off, Math.min(off + RB_CHUNK, n));
+      const frame = new Uint8Array(1 + slice.length);
+      frame[0] = RB_RESYNC_CHUNK;
+      frame.set(slice, 1);
+      rbSend(frame);
+    }
+    rs.sent = true;
+  }
+  if (rs.sent && !rs.applied && rs.inBuf && rs.inGot >= rs.inLen) rbResyncApply(rb, rs);
+  if (rs.applied && rs.friendReady) {
+    rb.resyncGen = rs.gen;
+    rb.resync = null;
+    rb.resyncs++;
+    const ms = Math.round(performance.now() - rs.t0);
+    rb.resyncMs.push(ms);
+    log(`netplay: back in sync with the friend (${ms} ms)`);
+    rbResyncWarn(rb);
+  }
+};
+
+// The session again from the two states, as rbTryInit starts it: the ROMs
+// are still in MEMFS, and every frame count starts over at 0 on both sides.
+const rbResyncApply = (rb, rs) => {
+  const rom0 = "rbrom0" + rbExt, rom1 = "rbrom1" + rbExt;
+  const ok = Module.ccall("rollback_init", "number", ["string", "string", "number", "number"],
+    [rom0, rom1, rb.localPlayer, rb.epoch]);
+  const host = net.isHost ? rs.mine : rs.inBuf;
+  const guest = net.isHost ? rs.inBuf : rs.mine;
+  if (ok !== 1 || !rbLoadState(0, host) || !rbLoadState(1, guest)) {
+    netPeerGone("Couldn't re-sync with your friend");
+    return;
+  }
+  pushLinkShades([rom0, rom1]);
+  rb.lastRx = -1;
+  rb.sentCount = 0;
+  rb.syncMine.clear();
+  rb.syncTheirs.clear();
+  rs.applied = true;
+  rs.mine = null;
+  rs.inBuf = null;
+  rbSend(new Uint8Array([RB_RESYNC_READY, rs.gen]));
+};
+
+// Several re-syncs close together: they will keep coming, so say why.
+const rbResyncWarn = (rb) => {
+  const now = Date.now();
+  rb.resyncAt = rb.resyncAt.filter((t) => now - t < RB_RESYNC_WARN_MS);
+  rb.resyncAt.push(now);
+  if (rb.resyncWarned || rb.resyncAt.length < RB_RESYNC_WARN) return;
+  rb.resyncWarned = true;
+  const own = rbOwnBuild();
+  const peer = rb.peerCore;
+  const known = peer && (peer[0] || peer[1]) && (own.core[0] || own.core[1]);
+  let msg = "The link keeps drifting out of sync with your friend's game. If it goes on, report a bug from Settings.";
+  if (known && (peer[0] !== own.core[0] || peer[1] !== own.core[1])) {
+    const theirs = rb.peerBuilt, mine = own.built;
+    msg = "You and your friend run different versions of dingbat's emulator, so your games keep drifting apart. " +
+      (theirs && mine ? (theirs < mine ? "Your friend's is older: updating it keeps you in step." : "Yours is older: updating it keeps you in step.")
+        : "Updating the older one keeps you in step.");
+  }
+  pushToast(msg, 15000, null);
+};
+
+const rbSyncMessage = (rb, kind, v, data) => {
+  if (kind === RB_SYNC) {
+    if (data.byteLength < 14 || v.getUint8(1) !== rbSessionGen(rb)) return;
+    const frame = v.getUint32(2);
+    rb.syncTheirs.set(frame, [v.getUint32(6), v.getUint32(10)]);
+    rbKeep(rb.syncTheirs);
+    rbSyncCompare(rb, frame);
+  } else if (kind === RB_RESYNC) {
+    if (data.byteLength < 6 || v.getUint8(1) !== ((rb.resyncGen + 1) & 0xff)) return;
+    if (!rb.resync) rbResyncBegin(rb);
+    if (!rb.resync) return;
+    rb.resync.target = Math.max(rb.resync.mineT, v.getUint32(2));
+  } else if (kind === RB_RESYNC_BEGIN) {
+    const rs = rb.resync;
+    if (!rs || data.byteLength < 6 || v.getUint8(1) !== rs.gen) return;
+    rs.inLen = v.getUint32(2);
+    rs.inBuf = new Uint8Array(rs.inLen);
+    rs.inGot = 0;
+  } else if (kind === RB_RESYNC_CHUNK) {
+    const rs = rb.resync;
+    if (!rs || !rs.inBuf) return;
+    const part = new Uint8Array(data, 1);
+    if (rs.inGot + part.length > rs.inLen) return;
+    rs.inBuf.set(part, rs.inGot);
+    rs.inGot += part.length;
+  } else if (kind === RB_RESYNC_READY) {
+    const rs = rb.resync;
+    if (rs && data.byteLength >= 2 && v.getUint8(1) === rs.gen) rs.friendReady = true;
+  }
+  rbResyncStep();
+};
+
+// Every frame (index.js), ticked or not: the fingerprints, and the re-sync.
+const rbOnFrame = () => {
+  rbSyncPoll();
+  rbResyncStep();
+};
+
 // Leave the session but keep playing: promote our core to the single-player
 // core and repoint currentRomName at it so battery saves persist to our slot.
 const rbTeardown = async () => {
@@ -1696,6 +1962,8 @@ const rbTeardown = async () => {
   window.rbSendInput = null;
   window.rbSendSpeed = null;
   window.rbSendPause = null;
+  window.rbOnFrame = null;
+  window.rbAtBarrier = null;
   const kept =
     Module._rollback_exit_to_single && Module._rollback_exit_to_single() === 1;
   if (kept) {
@@ -2400,6 +2668,12 @@ const rbLogSent = (rb, frame, bits) => {
 // The connection is gone: redial if both sides can, else end as before.
 const rbDropped = (why, endMsg) => {
   if (!net || net.ending) return;
+  // A re-sync's frame counts and states don't survive a redial: the two
+  // sides may already be on different sessions.
+  if (net.rb?.resync) {
+    netPeerGone("Lost the link while getting back in sync with your friend");
+    return;
+  }
   if (rbCanResume()) rbBeginResume(why);
   else netPeerGone(net?.rb?.byeIn ? "Your friend disconnected" : endMsg);
 };

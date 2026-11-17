@@ -78,6 +78,8 @@ interface Window {
   rbSendSpeed?: (on: boolean | number) => void;
   applyRemoteSpeed2x?: (on: boolean | number) => void;
   rbSendPause?: ((on: boolean | number) => void) | null;
+  rbOnFrame?: (() => void) | null;
+  rbAtBarrier?: (() => boolean) | null;
   applyRemotePause?: (on: boolean | number) => void;
   rbNoteStall?: (stalledMs: number) => void;
   setNetConnectLabel?: (connected: boolean) => void;
