@@ -91,7 +91,7 @@ proc render*(w: CheatsWidget) =
           igTextColored(red(), "  %s", cstring(err))
         else:
           let summary = w.engine.cheats[i].codes.replace("\n", "  ")
-          with_font(fMono, MONO_PX):
+          with_font(fMono, CODE_PX):
             igTextColored(dim(), "  %s", cstring(summary))
         igPopID()
       if delete_idx >= 0:
@@ -107,7 +107,7 @@ proc render*(w: CheatsWidget) =
     discard igInputTextWithHint("##name", "name (optional)",
       cast[cstring](addr w.name_buf[0]), csize_t(w.name_buf.len), 0, nil, nil)
     let hint = if w.platform == cpGBA: HINT_GBA else: HINT_GB
-    with_font(fMono, MONO_PX):
+    with_font(fMono, BODY_PX):   # the name field's, as the web's
       discard igInputTextMultiline("##codes",
         cast[cstring](addr w.code_buf[0]), csize_t(w.code_buf.len),
         ImVec2(x: -1, y: ui_px(64)), 0, nil, nil)

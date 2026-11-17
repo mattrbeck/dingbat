@@ -54,7 +54,8 @@ type Face* = enum
 const
   BODY_PX* = 14'f32    ## the web's body text
   SMALL_PX* = 12'f32   ## hints, notes
-  MONO_PX* = 13'f32    ## debug windows, the overlay, cheat codes
+  MONO_PX* = 12'f32    ## debug windows, the overlay (the web's #log, #status)
+  CODE_PX* = 11'f32    ## a cheat's codes, listed (.cheat-row-code)
   PROGGY_PX = 13'f32   ## ProggyClean is crisp at 13 px only
 
 const FONT_DIR* = currentSourcePath().parentDir & "/vendor/fonts"  ## Inter's and JetBrains Mono's files

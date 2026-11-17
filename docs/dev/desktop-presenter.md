@@ -76,8 +76,8 @@ advances on whole pixels. `add_ttf` moves a font's glyphs so its capitals
 sit in the middle of its line (`ttf_cap_low_em`, from hhea and OS/2): Segoe
 UI's tall ascender otherwise puts a button's label about a pixel low;
 Inter's and JetBrains Mono's need no move. Sizes are the web's CSS px (body
-14, small 12, mono 13); ImGui sizes a font by its line, so `font_px`
-converts. ImGui 1.92 bakes the
+14, small 12, mono 12 as its log and status, a cheat's listed codes 11);
+ImGui sizes a font by its line, so `font_px` converts. ImGui 1.92 bakes the
 glyphs at the display's density and the UI scale, so text stays crisp on
 Retina and at 125 / 150 %. `tests/desktop_ui_shots.sh` takes screenshots of
 every surface (CI uploads `ui-shots-linux` and `ui-shots-windows`);
