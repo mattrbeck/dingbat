@@ -107,10 +107,6 @@ const pair = async (game) => {
 const script = ({ page }, stop, every) => page.evaluate(([stop, every]) => {
   const tick = Module._rollback_tick;
   window.__ticks = [];
-  // A game's title screen never uses the cable: keep the link's idle
-  // auto-end (RB_IDLE_QUIET_MS) from ending a slow run.
-  clearInterval(window.__awake);
-  window.__awake = setInterval(() => { rbLastActivity = performance.now(); }, 1000);
   window.__stop = stop;
   Module._rollback_tick = () => {
     const h = Module._rollback_head();
