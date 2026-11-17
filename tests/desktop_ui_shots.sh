@@ -1,7 +1,8 @@
 #!/bin/sh
 # Screenshots of the desktop's ImGui UI, for looking at (not compared with
 # anything): the home screen empty, with a few games and with many; the
-# menus open; every Settings tab; Cheats, Save States, Link Cable; a notice.
+# hero after Close Game; the menus open; every Settings tab; Cheats, Save
+# States, Link Cable; a notice.
 # At UI scale 1 and 1.5 (DINGBAT_UI_SCALE, a Windows display at 150%), in a
 # hidden, muted window with a scratch HOME, through the GUI driver. ImGui's
 # menu bar and Settings window on macOS too (DINGBAT_IMGUI_MENU=1): what
@@ -118,6 +119,30 @@ $few"
 3 sleep 200
 4 shot $(shot home-many)
 5 quit"
+
+  # The hero: a game closed (Close Game) heads the page, in the game's own
+  # window (a column), a wide one (beside its words) and with no other games
+  for h in hero:"" hero-wide:"frame_size: 5
+" hero-solo:"frame_size: 5
+"; do
+    name=${h%%:*} extra=${h#*:}
+    if [ "$name" = hero-solo ]; then
+      fresh "${extra}recents:
+- \"$(native "$games/Blend Probe.gba")\"
+"
+    else
+      fresh "${extra}recents:
+$few"
+    fi
+    run "$name" "1 frames 240
+2 app cmd mcCloseGame
+3 frames 10
+4 sleep 500
+5 move 5 300
+6 sleep 200
+7 shot $(shot "$name")
+8 quit" "$(native "$games/Blend Probe.gba")"
+  done
 
   # A game running, with each window over it
   fresh "recents:
