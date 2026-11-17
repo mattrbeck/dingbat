@@ -44,30 +44,53 @@ var
   line_em: array[Face, float32] = [1'f32, 1, 1]
   proggy_mono = false
 
-proc ttf_line_em*(data: string): float32 =
-  ## A TrueType/OpenType font's (hhea ascender - descender) / unitsPerEm, the
-  ## line stb_truetype sizes it by; 0 when `data` is not one.
-  if data.len < 12: return 0
-  if data[0 .. 3] notin ["\0\1\0\0", "OTTO", "true"]: return 0
-  proc u16(o: int): int = (ord(data[o]) shl 8) or ord(data[o + 1])
-  proc i16(o: int): int = (let v = u16(o); if v >= 0x8000: v - 0x10000 else: v)
-  proc u32(o: int): int = (u16(o) shl 16) or u16(o + 2)
-  var head, hhea = -1
-  for i in 0 ..< u16(4):
+proc ttf_table(data: string; tag: string): int =
+  ## Where a TrueType/OpenType font's table is; -1 if `data` has none
+  if data.len < 12 or data[0 .. 3] notin ["\0\1\0\0", "OTTO", "true"]: return -1
+  for i in 0 ..< ((ord(data[4]) shl 8) or ord(data[5])):
     let r = 12 + 16 * i
-    if r + 16 > data.len: return 0
-    case data[r .. r + 3]
-    of "head": head = u32(r + 8)
-    of "hhea": hhea = u32(r + 8)
-    else: discard
+    if r + 16 > data.len: return -1
+    if data[r .. r + 3] == tag:
+      return (ord(data[r + 8]) shl 24) or (ord(data[r + 9]) shl 16) or
+             (ord(data[r + 10]) shl 8) or ord(data[r + 11])
+  -1
+
+proc u16(data: string; o: int): int =
+  if o < 0 or o + 2 > data.len: -1 else: (ord(data[o]) shl 8) or ord(data[o + 1])
+
+proc ttf_line_em*(data: string): float32 =
+  ## A font's (hhea ascender - descender) / unitsPerEm, the line
+  ## stb_truetype sizes it by; 0 when `data` is not one.
+  let head = ttf_table(data, "head")
+  let hhea = ttf_table(data, "hhea")
   if head < 0 or hhea < 0 or head + 20 > data.len or hhea + 8 > data.len: return 0
-  let upem = u16(head + 18)
+  proc i16(o: int): int = (let v = data.u16(o); if v >= 0x8000: v - 0x10000 else: v)
+  let upem = data.u16(head + 18)
   let line = i16(hhea + 4) - i16(hhea + 6)
   if upem <= 0 or line <= 0: 0 else: float32(line) / float32(upem)
 
+proc stb_cmap_format*(data: string): int =
+  ## The format of the character map stb_truetype would read (the last
+  ## Unicode or Windows Unicode one); -1 for none. It asserts on any but
+  ## 0, 4, 6, 12 and 13 at the first glyph looked up.
+  let cmap = ttf_table(data, "cmap")
+  result = -1
+  if cmap < 0: return
+  for i in 0 ..< max(0, data.u16(cmap + 2)):
+    let rec = cmap + 4 + 8 * i
+    let platform = data.u16(rec)
+    if platform == 0 or (platform == 3 and data.u16(rec + 2) in [1, 10]):
+      let off = cmap + ((data.u16(rec + 4) shl 16) or data.u16(rec + 6))
+      result = data.u16(off)
+
 proc add_ttf*(atlas: ptr ImFontAtlas; data: string; name: string): ptr ImFont =
-  ## A font from its file's bytes (ImGui keeps a copy); nil if not a font
+  ## A font from its file's bytes (ImGui keeps a copy); nil if not one
+  ## stb_truetype can read
   if ttf_line_em(data) <= 0: return nil
+  let fmt = stb_cmap_format(data)
+  if fmt notin [0, 4, 6, 12, 13]:
+    echo "UI font ", name, ": character map format ", fmt, ", not loaded"
+    return nil
   let cfg = ImFontConfig_ImFontConfig()
   cfg.FontDataOwnedByAtlas = false
   for i, c in name:
