@@ -10,8 +10,9 @@
 //
 // The test ROM never touches the serial port, so each page counts nine
 // transfers per simulated frame, as a GBA link game clocks its cable: the
-// idle windows see a busy link that goes quiet only when told to, or when
-// the core stalls.
+// idle window sees a busy link that goes quiet only when told to, or when
+// the core stalls. The window is shortened to 20 s here (rbIdleMs; the app's
+// is RB_IDLE_MS, 90 s).
 //
 //   node --test e2e/link-away.e2e.mjs      # from web/, after the wasm build
 //
@@ -104,10 +105,11 @@ const pair = async () => {
   await sleep(500);
   await connect(b, code);
   await until(async () => (await linked(a)) && (await linked(b)), "both linked", 60000);
+  for (const s of [a, b]) await s.page.evaluate(() => { rbIdleMs = 20000; });
   await busyCable(a);
   await busyCable(b);
-  await until(async () => (await a.page.evaluate(() => rbLinkWasActive)) &&
-                          (await b.page.evaluate(() => rbLinkWasActive)), "both cables in real use", 10000);
+  await until(async () => (await a.page.evaluate(() => rbWasLinked)) &&
+                          (await b.page.evaluate(() => rbWasLinked)), "both cables in use", 10000);
   return { a, b, done: async () => { await a.ctx.close(); await b.ctx.close(); } };
 };
 

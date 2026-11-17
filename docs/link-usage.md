@@ -61,6 +61,9 @@ channel and input rollback, so every pairing of the three works
 (`src/dingbat/frontend/online_link.nim`, a port of the iOS app's `NetLink.swift`; the
 manual code exchange is iOS and web only). A dropped connection resumes, pause and 2x
 are shared, and rewind, fast forward, cheats and state loading are off while linked.
+On every platform a link ends by itself only once the emulated cable has carried
+traffic and then been silent for 90 s (paused or stalled time doesn't count), so
+linking early and walking to the game's link spot is fine.
 `--online CODE` connects on start; `--signal ws://host:port` points at another server.
 
 It links libdatachannel and mbedTLS statically: `nimble webrtc` builds them into

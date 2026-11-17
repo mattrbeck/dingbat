@@ -105,13 +105,15 @@ const link = async (name, rom, busy = BUSY) => {
   if (existsSync(log)) rmSync(log);
   simctl("launch", "--stderr=" + log, UDID, BUNDLE, ...MUTED,
          "-autoplay", rom.split("/").pop(), "-signal", "ws://127.0.0.1:" + PORT, "-link", code,
-         "-link-busy-cable", String(busy));
+         "-link-busy-cable", String(busy), "-link-idle", "20");
   await sleep(1500);
   await page.click("#menu-btn");
   await page.click("#net-connect");
   await page.fill("#net-code-input", code);
   await page.click("#net-join-go");
   await page.waitForFunction(() => rollbackMode && !!net?.started, null, { timeout: 60000 });
+  // Both sides' idle window shortened to 20 s (the apps' is 90 s).
+  await page.evaluate(() => { rbIdleMs = 20000; });
   const s = {
     page, ctx, log,
     appLog: () => (existsSync(log) ? readFileSync(log, "utf8") : ""),
@@ -149,7 +151,7 @@ const link = async (name, rom, busy = BUSY) => {
 
 const suspended = async (name, thaw) => {
   const s = await link(name, LINKTEST);
-  await until(() => s.page.evaluate(() => rbLinkWasActive), "the cable in real use", 10000);
+  await until(() => s.page.evaluate(() => rbWasLinked), "the cable in real use", 10000);
   const t0 = Date.now();
   const at = () => (Date.now() - t0) / 1000;
   s.appAway();
@@ -174,7 +176,7 @@ const suspended = async (name, thaw) => {
 const cases = {
   async "browser away past the app's idle window"() {
     const s = await link("idle-guard", LINKTEST);
-    await until(() => s.page.evaluate(() => rbLinkWasActive), "the cable in real use", 10000);
+    await until(() => s.page.evaluate(() => rbWasLinked), "the cable in real use", 10000);
     await s.hide(true);
     await until(() => s.netlink().includes("friend switched away"), () => "app told: " + s.netlink(), 5000);
     await sleep(27000); // past the 20 s window
@@ -201,7 +203,7 @@ const cases = {
   },
   async "app in the background 25 s"() {
     const s = await link("app-away", LINKTEST);
-    await until(() => s.page.evaluate(() => rbLinkWasActive), "the cable in real use", 10000);
+    await until(() => s.page.evaluate(() => rbWasLinked), "the cable in real use", 10000);
     s.appAway();
     await until(() => s.card(), "the browser's away card", 8000);
     for (let i = 0; i < 25; i++) {

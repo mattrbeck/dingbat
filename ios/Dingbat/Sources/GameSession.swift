@@ -749,15 +749,23 @@ final class GameSession: NSObject, ObservableObject {
 
     // MARK: online link
 
-    /// The link idle watch (web RB_IDLE_*): only the emulated cable's
-    /// activity counts, never game knowledge. Lenient until the cable has
-    /// seen real use, tight after; both reset on every transfer.
-    /// Neither window runs while the clock is stalled on the friend's inputs
+    /// The link idle watch (web RB_IDLE_MS): only the emulated cable's
+    /// activity counts, never game knowledge. Once the cable has carried
+    /// traffic, `linkIdleLimit` of silence ends the link; before any,
+    /// nothing does. It resets on every transfer.
+    /// It doesn't run while the clock is stalled on the friend's inputs
     /// (their app or tab is away, or the network is slow): a frozen game
     /// makes no transfers without the link being done. A dead network ends
     /// the session through the peer connection instead.
     private var linkUsed = false
-    private var linkBusy = false
+    /// web RB_IDLE_MS. DEBUG builds take `-link-idle S` (ios/e2e/link-away.mjs).
+    static let linkIdleLimit: CFTimeInterval = {
+        #if DEBUG
+        let a = ProcessInfo.processInfo.arguments
+        if let i = a.firstIndex(of: "-link-idle"), i + 1 < a.count, let v = Double(a[i + 1]) { return v }
+        #endif
+        return 90
+    }()
     private var linkTransfers: Int32 = 0
     private var linkActivity: CFTimeInterval = 0
     private var linkLastWatch: CFTimeInterval = 0
@@ -926,10 +934,9 @@ final class GameSession: NSObject, ObservableObject {
             linkTransfers = t
             linkActivity = now
             if t > 0 { linkUsed = true }
-            if t >= 300 { linkBusy = true }
         } else if linkStallSince > 0 {
             linkActivity = now
-        } else if linkUsed && now - linkActivity > (linkBusy ? 20 : 90) {
+        } else if linkUsed && now - linkActivity > Self.linkIdleLimit {
             linkUsed = false
             NetLink.shared.idleDisconnect()
             return
@@ -951,7 +958,6 @@ final class GameSession: NSObject, ObservableObject {
     /// Linked: the session's core is the game now (web enterRollbackMode).
     func enterLinked() {
         linkUsed = false
-        linkBusy = false
         linkTransfers = 0
         linkActivity = CACurrentMediaTime()
         linkLastWatch = linkActivity

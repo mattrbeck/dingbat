@@ -12321,18 +12321,18 @@ var rbLastTransfers = 0;  // last-seen SIO transfer count (activity probe)
 var rbLastActivity = 0;   // timestamp of the last transfer-count change
 var rbStallSince = 0;     // when rollback_tick began returning "stalled", or 0
 // Auto-end of an online link keys only off serial-cable activity
-// (_rollback_transfers), never game knowledge. Two windows, both reset on
-// every transfer: QUIET (lenient, before the cable has seen sustained use;
-// a game can hold a link open idle for a long time) and ACTIVE (tight, once
-// meaningful traffic has crossed: a linking game keeps the cable busy).
-// Neither runs while the clock is stalled on the friend's inputs: their tab
-// is hidden (rAF stops) or the network is slow, and a frozen game makes no
-// transfers without the link being done. A dead network ends the session
-// through the peer connection's own state instead.
-var rbLinkWasActive = false; // the cable has seen a sustained burst of traffic
-const RB_IDLE_QUIET_MS  = 90000; // silence tolerated before the link is used
-const RB_IDLE_ACTIVE_MS = 20000; // silence tolerated after real traffic flowed
-const RB_ACTIVE_LINK_TRANSFERS = 300; // SIO transfers that mean "link in real use"
+// (_rollback_transfers), never game knowledge: once the cable has carried
+// traffic, RB_IDLE_MS of silence ends it; before any, nothing does (players
+// link early and walk to the game's link spot). The window resets on every
+// transfer and is long because a game probes the cable and then waits on
+// its players: FireRed's Cable Club counter clocks ~480 transfers, then none
+// through the menus and the save until both are in the Trade Center.
+// It doesn't run while the clock is stalled on the friend's inputs: their
+// tab is hidden (rAF stops) or the network is slow, and a frozen game makes
+// no transfers without the link being done. A dead network ends the
+// session through the peer connection's own state instead.
+const RB_IDLE_MS = 90000;
+var rbIdleMs = RB_IDLE_MS;  // e2e tests shorten it
 // When the idle check last ran: it runs only in an unpaused, visible tick,
 // so a gap since (a pause, a hidden tab with no rAF) restarts the clock
 // instead of counting as idle time.
@@ -15210,7 +15210,6 @@ window.enterRollbackMode = () => {
   gpPrev.fill(false);
   rollbackMode = true;
   rbWasLinked = false;
-  rbLinkWasActive = false;
   rbLastTransfers = 0;
   rbLastActivity = performance.now();
   rbStallSince = 0;
@@ -20136,19 +20135,18 @@ var Module = {
         if (typeof window.rbNoteStall === "function") {
           window.rbNoteStall(rbStallSince ? timestamp - rbStallSince : 0);
         }
-        // Auto-end via serial-cable inactivity (the RB_IDLE_* windows). Skip
+        // Auto-end via serial-cable inactivity (RB_IDLE_MS). Skip
         // while the tab is hidden or stalled on the friend: neither is "link
         // done"; reset the clock so the timer restarts once frames flow.
         if (Module._rollback_transfers) {
           const t = Module._rollback_transfers();
-          const idleLimit = rbLinkWasActive ? RB_IDLE_ACTIVE_MS : RB_IDLE_QUIET_MS;
+          const idleLimit = rbIdleMs;
           if (timestamp - rbLastIdleCheck > 1000) rbLastActivity = timestamp;
           rbLastIdleCheck = timestamp;
           if (t !== rbLastTransfers) {
             rbLastTransfers = t;
             rbLastActivity = timestamp;
             if (t > 0) rbWasLinked = true;
-            if (t >= RB_ACTIVE_LINK_TRANSFERS) rbLinkWasActive = true;
           } else if (document.hidden || rbStallSince) {
             rbLastActivity = timestamp; // don't accrue idle time while frozen
           } else if (rbWasLinked && timestamp - rbLastActivity > idleLimit) {

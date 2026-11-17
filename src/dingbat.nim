@@ -2606,6 +2606,10 @@ proc service_online() =
   ## friend (both run both games, so a one-sided change would just stall).
   if app.online == nil: return
   app.online.service()
+  # Running: not paused, and a frame came within a few frames' time (else
+  # it is stalled on the friend)
+  app.online.watch_idle(running = not app.paused and
+                        getTicks() - app.online_moved_at < 250)
   for t in app.online.toasts: show_toast(t)
   app.online.toasts.setLen(0)
   if app.online_froze:
