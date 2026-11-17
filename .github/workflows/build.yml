@@ -1,8 +1,8 @@
 name: Build
 
 # Desktop binaries for all three platforms on every push and PR, downloadable
-# from the run's Artifacts. Unsigned; the .dmg reports 0.0.0 unless built
-# from a tag.
+# from the run's Artifacts. The .dmg is notarized once the signing secrets
+# exist (docs/dev/macos-signing.md), and reports 0.0.0 unless built from a tag.
 on:
   push:
     branches: [main]
@@ -14,6 +14,8 @@ on:
 jobs:
   artifacts:
     uses: ./.github/workflows/build-artifacts.yml
+    # The macOS signing secrets; pull requests never sign (build-artifacts.yml).
+    secrets: inherit
 
   # Publish the same files to a rolling "Latest build" prerelease. A release
   # must hang off a tag, so `latest` is force-pushed to the head of main each
@@ -32,6 +34,16 @@ jobs:
           path: artifacts
       - name: Stage + checksum
         run: .github/scripts/stage-release.sh artifacts release
+      - name: Signing line for the notes
+        id: notes
+        env:
+          NOTARIZED: ${{ needs.artifacts.outputs.macos-notarized }}
+        run: |
+          if [ "$NOTARIZED" = true ]; then
+            echo "signing=The macOS build is signed and notarized. The Windows build is **unsigned**: *More info → Run anyway*, once." >> "$GITHUB_OUTPUT"
+          else
+            echo "signing=All binaries are **unsigned**: macOS needs *System Settings → Privacy & Security → Open Anyway*, Windows needs *More info → Run anyway*, once each." >> "$GITHUB_OUTPUT"
+          fi
       - name: Move the rolling tag to this commit
         # action-gh-release creates a missing tag but never moves an existing one.
         run: |
@@ -57,9 +69,7 @@ jobs:
             | macOS (Apple Silicon) | `dingbat-macos.dmg` |
             | Windows x64 | `dingbat-windows-x64.exe` |
 
-            All binaries are **unsigned**: macOS needs *System Settings →
-            Privacy & Security → Open Anyway*, Windows needs *More info → Run
-            anyway*, once each. The Linux build links SDL 3 statically
-            and is built against glibc 2.34.
+            ${{ steps.notes.outputs.signing }} The Linux build links SDL 3
+            statically and is built against glibc 2.34.
 
             Verify with `shasum -a 256 -c SHA256SUMS.txt`.

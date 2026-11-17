@@ -2,7 +2,8 @@ name: Release
 
 # Build all three desktop artifacts on a version tag and publish a Release.
 # The builds live in build-artifacts.yml, shared with the per-push Build
-# workflow. Binaries are unsigned — see README.
+# workflow. The macOS build is notarized once its secrets exist
+# (docs/dev/macos-signing.md); the others are unsigned.
 on:
   push:
     tags: ["v*"]
@@ -14,6 +15,7 @@ permissions:
 jobs:
   build:
     uses: ./.github/workflows/build-artifacts.yml
+    secrets: inherit
 
   # Collect the artifacts, checksum them, and publish a Release.
   release:

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- The hardened runtime with no exceptions. dingbat is an interpreter with no
+     JIT and no writable code pages, links SDL statically and loads only
+     Apple's own libraries, and uses no camera, microphone, location, contacts,
+     photos or Apple Events. It is not sandboxed, so the sandbox's network and
+     file entitlements would do nothing: link play's sockets and the ROMs,
+     saves and settings it reads and writes need none. -->
+<plist version="1.0">
+<dict/>
+</plist>

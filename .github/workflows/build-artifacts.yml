@@ -7,6 +7,10 @@ name: Build artifacts
 # either workflow can publish it.
 on:
   workflow_call:
+    outputs:
+      macos-notarized:
+        description: "true when the .dmg was signed, notarized and stapled"
+        value: ${{ jobs.macos.outputs.notarized }}
 
 jobs:
   linux:
@@ -87,8 +91,16 @@ jobs:
 
   macos:
     # Native build with -d:macdist, which statically links SDL3 so the .app has
-    # no Homebrew dependency, then bundled into a .app inside a .dmg.
+    # no Homebrew dependency, then bundled into a .app inside a .dmg: signed
+    # and notarized when the signing secrets exist (docs/dev/macos-signing.md),
+    # unsigned otherwise.
     runs-on: macos-15
+    outputs:
+      notarized: ${{ steps.bundle.outputs.notarized }}
+    env:
+      # Info.plist's LSMinimumSystemVersion, for SDL and dingbat alike: by
+      # default both would require the runner's own macOS.
+      MACOSX_DEPLOYMENT_TARGET: "11.0"
     steps:
       - uses: actions/checkout@v4
       # Every fetch below is retried.
@@ -98,7 +110,7 @@ jobs:
         with:
           path: ~/sdl3-prefix
           # Keyed on build-sdl3.sh's version: bump both together.
-          key: sdl3-static-${{ runner.os }}-${{ runner.arch }}-3.4.16-nocamera
+          key: sdl3-static-${{ runner.os }}-${{ runner.arch }}-3.4.16-nocamera-macos11
       - name: Build SDL 3 (static, from source)
         # Not `brew install sdl3`: it ships dylibs only, and -d:macdist links
         # /opt/homebrew/lib/libSDL3.a explicitly. Installed under /opt/homebrew
@@ -150,9 +162,22 @@ jobs:
           name: smoke-macos
           path: smoke-blendprobe.png
           if-no-files-found: ignore
+      - name: Signing keychain
+        # Skipped for pull requests; a no-op until the secrets are added.
+        if: github.event_name != 'pull_request'
+        env:
+          MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
+          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+          MACOS_NOTARY_KEY_P8: ${{ secrets.MACOS_NOTARY_KEY_P8 }}
+          MACOS_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
+          MACOS_NOTARY_ISSUER: ${{ secrets.MACOS_NOTARY_ISSUER }}
+        run: .github/scripts/macos-ci-keychain.sh setup
       - name: Bundle .app + .dmg
+        id: bundle
         # Tag builds carry the tag as the bundle version; branch builds are not
-        # releases and get 0.0.0 rather than a fake version number.
+        # releases and get 0.0.0 rather than a fake version number. Signed,
+        # notarized and stapled when the step above set it up.
+        timeout-minutes: 75
         run: |
           if [ "$GITHUB_REF_TYPE" = "tag" ]; then
             VERSION="${GITHUB_REF_NAME#v}"
@@ -160,6 +185,15 @@ jobs:
             VERSION="0.0.0"
           fi
           .github/scripts/make-macos-app.sh dingbat_dist "$VERSION" dist/macos
+          if [ -n "${MACOS_NOTARY_KEY:-}" ]; then echo notarized=true >> "$GITHUB_OUTPUT"; fi
+      - name: Smoke test the signed app
+        # The hardened runtime is what could break it: run the bundled binary.
+        if: env.MACOS_SIGN_IDENTITY != ''
+        timeout-minutes: 5
+        run: .github/scripts/smoke-desktop.sh dist/macos/dingbat.app/Contents/MacOS/dingbat
+      - name: Delete the signing keychain
+        if: always()
+        run: .github/scripts/macos-ci-keychain.sh cleanup
       - uses: actions/upload-artifact@v4
         with:
           name: dingbat-macos
