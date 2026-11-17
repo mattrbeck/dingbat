@@ -53,6 +53,22 @@ jobs:
         run: |
           sudo cp -R "$HOME/sdl3-prefix/lib/." /usr/local/lib/
           sudo cp -R "$HOME/sdl3-prefix/include/." /usr/local/include/
+      - name: Cache the static FreeType build
+        id: freetype-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/freetype-prefix
+          # Keyed on build-freetype.sh's version: bump both together.
+          key: freetype-static-${{ runner.os }}-22.04-2.15.0
+      - name: Build FreeType (static, from source)
+        # The UI's text rasteriser (ui_fonts.nim). Linked from
+        # /usr/local/lib/libfreetype.a, so the binary needs no libfreetype.
+        if: steps.freetype-cache.outputs.cache-hit != 'true'
+        run: .github/scripts/build-freetype.sh "$HOME/freetype-prefix"
+      - name: Install FreeType where ui_fonts.nim looks
+        run: |
+          sudo cp -R "$HOME/freetype-prefix/lib/." /usr/local/lib/
+          sudo cp -R "$HOME/freetype-prefix/include/." /usr/local/include/
       - name: Install dependencies
         # One at a time from outside the checkout: inside it nimble resolves
         # the whole project graph and `--depsOnly` fails to solve. Each is
@@ -66,6 +82,14 @@ jobs:
           done
       - name: Build
         run: nim c -d:release -o:dingbat src/dingbat.nim
+      - name: Verify no libfreetype or libSDL3 dependency
+        # Both are linked statically; a dynamic link would work here and
+        # fail where the library is missing or another version.
+        run: |
+          if readelf -d dingbat | grep NEEDED | grep -qiE 'freetype|SDL3'; then
+            echo "::error::dingbat links libfreetype or libSDL3 dynamically"
+            readelf -d dingbat | grep NEEDED; exit 1
+          fi
       - name: Smoke test (Xvfb, Mesa's software OpenGL)
         timeout-minutes: 5
         run: xvfb-run -a -s "-screen 0 1280x1024x24" .github/scripts/smoke-desktop.sh ./dingbat
@@ -238,6 +262,25 @@ jobs:
           sudo cp -r "$HOME/sdl3-mingw/lib/." /usr/x86_64-w64-mingw32/lib/
           test -f /usr/x86_64-w64-mingw32/lib/libSDL3.a
           test -f /usr/x86_64-w64-mingw32/include/SDL3/SDL.h
+      - name: Cache the static FreeType build
+        id: freetype-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/freetype-mingw
+          # Keyed on build-freetype.sh's version: bump both together.
+          key: freetype-static-mingw64-2.15.0
+      - name: Build FreeType for the mingw sysroot (static, from source)
+        # The UI's text rasteriser (ui_fonts.nim). The Dockerfile builds it
+        # the same way.
+        if: steps.freetype-cache.outputs.cache-hit != 'true'
+        run: .github/scripts/build-freetype.sh "$HOME/freetype-mingw" --mingw
+      - name: Install FreeType into the mingw sysroot
+        run: |
+          set -e
+          sudo cp -r "$HOME/freetype-mingw/include/." /usr/x86_64-w64-mingw32/include/
+          sudo cp -r "$HOME/freetype-mingw/lib/." /usr/x86_64-w64-mingw32/lib/
+          test -f /usr/x86_64-w64-mingw32/lib/libfreetype.a
+          test -f /usr/x86_64-w64-mingw32/include/freetype2/ft2build.h
       - name: Install dependencies
         # See the Linux job: one at a time, from outside the checkout.
         shell: bash
@@ -253,11 +296,11 @@ jobs:
           DINGBAT_DEPS_INSTALLED: "1"
         run: ./tools/docker/windows-cross/build.sh
       - name: Verify dingbat.exe ships alone
-        # Only Windows' own DLLs: an SDL3 or mingw runtime DLL import would
-        # work here and fail on a player's machine.
+        # Only Windows' own DLLs: an SDL3, FreeType or mingw runtime DLL
+        # import would work here and fail on a player's machine.
         run: |
           if x86_64-w64-mingw32-objdump -p dist/windows/dingbat.exe | grep 'DLL Name' \
-               | grep -qiE 'sdl|libwinpthread|libgcc|libstdc'; then
+               | grep -qiE 'sdl|freetype|libwinpthread|libgcc|libstdc'; then
             echo "::error::dingbat.exe imports a DLL that does not ship with Windows"
             x86_64-w64-mingw32-objdump -p dist/windows/dingbat.exe | grep 'DLL Name'; exit 1
           fi
