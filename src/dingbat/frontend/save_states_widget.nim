@@ -12,7 +12,7 @@ type
   StateSlot* = object
     used*:  bool
     label*: string     ## timestamp text, or "" when empty
-    tex*:   uint64     ## GL texture id (0 = none), used as ImTextureID
+    tex*:   uint64     ## its ImTextureID (presenter.ui_texture; 0 = none)
     w*, h*: float32    ## thumbnail display size in pixels
   SaveStatesWidget* = ref object
     window*:   bool

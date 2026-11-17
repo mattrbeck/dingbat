@@ -21,6 +21,7 @@ licence asks to be kept.
 | nim-lang/sdl3 bindings | MIT | the nim-lang/sdl3 contributors |
 | SDL 3 (static in the release builds) | zlib | Sam Lantinga |
 | imguin, cimgui, Dear ImGui and its SDL 3/OpenGL3 backends | MIT | the imguin authors; Stephan Dilly; Omar Cornut |
+| Dear ImGui's Metal backend (macOS; `src/dingbat/frontend/vendor/`, unmodified from v1.92.4-docking, which imguin does not ship) | MIT | Omar Cornut |
 | glad OpenGL loader | public domain / CC0 | David Herberth |
 | NimYAML | MIT | Felix Krause |
 | stb_image, stb_image_write | public domain / MIT | Sean Barrett |

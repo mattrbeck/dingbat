@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Run a release binary on the runner before it can be published: it must
-# start, open a window with an OpenGL 3.3 context, load a ROM, present 600
-# frames and quit by itself, and the game frame it read back from the GL
-# back buffer (--capture) must match tests/golden/desktop-blendprobe.png.
+# start, open a window drawn by OpenGL 3.3 (Metal on macOS), load a ROM,
+# present 600 frames and quit by itself, and the game frame it read back from
+# the back buffer (--capture) must match tests/golden/desktop-blendprobe.png.
 #
 #   .github/scripts/smoke-desktop.sh ./dingbat           (Linux: under xvfb-run)
 #   .github/scripts/smoke-desktop.sh ./dingbat_dist      (macOS)
@@ -15,8 +15,8 @@
 # exact bytes either: the present shader's float math (the 5-bit texture's
 # conversion, color correction) rounds differently per renderer. Mesa's
 # llvmpipe, on the Linux runner and as Windows' opengl32.dll, gives the
-# golden file exactly; the macOS runner and an Apple GPU are 1-2 levels off
-# on the blended patches. blendprobe.gba's picture is still from frame ~300
+# golden file exactly; Metal and macOS's OpenGL on an Apple GPU are 1-2
+# levels off on the blended patches. blendprobe.gba's picture is still from frame ~300
 # on, so how many frames the runner emulated per present cannot move it. A
 # mismatch leaves the capture at smoke-blendprobe.png for the workflow to
 # upload.
