@@ -5,8 +5,8 @@
 # reads it and presses its keys:
 #
 #   order     a damaged settings file and a missing ROM: the Settings notice
-#             first, the Open ROM one after its OK; a failed Quick Save
-#             takes over, and the Open ROM notice comes back after it;
+#             first, the game one after its OK; a failed Quick Save
+#             takes over, and the game notice comes back after it;
 #             Return, Escape and Enter each answer (Z does not); then none
 #             is left
 #   window    no ImGui modal in the game's window meanwhile
@@ -115,10 +115,10 @@ check "the alert draws" "$(ack 5)" "ok"
 check "no ImGui modal over the game" "$(shade "$work/game.png")" "white"
 check "Z answers nothing" "$(title "$work/a1z.txt" | cut -c1-36)" \
       "Your settings file could not be read"
-check "Return: the Open ROM notice next" "$(title "$work/a2.txt")" "missing.gba isn't there any more."
+check "Return: the game notice next" "$(title "$work/a2.txt")" "missing.gba isn't there any more."
 check "its hint below" "$(sed -n 3p "$work/a2.txt")" "/nonexistent/dir/missing.gba"
 check "a failed Quick Save takes over" "$(title "$work/a3.txt" | cut -c1-24)" "Quick Save didn't work, "
-check "Escape: the Open ROM notice is back" "$(title "$work/a4.txt")" "missing.gba isn't there any more."
+check "Escape: the game notice is back" "$(title "$work/a4.txt")" "missing.gba isn't there any more."
 check "Enter: none left" "$(cat "$work/a5.txt")" "none"
 check "nothing to answer" "$(ack 20)" "error no alert"
 

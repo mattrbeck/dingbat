@@ -1642,7 +1642,7 @@ proc render_load_notice() =
   ## A ROM that could not be loaded. After the other notices, never over one:
   ## two modals opened at the same level replace each other every frame.
   if app.state_notice.len > 0 or app.cfg.notice.len > 0: return
-  render_notice("Open ROM##notice", app.load_notice, app.load_notice_hint)
+  render_notice("Couldn't open the game##notice", app.load_notice, app.load_notice_hint)
 
 proc render_config_notice() =
   ## The settings file was moved aside or could not be written (config.nim).
@@ -1668,7 +1668,7 @@ when defined(macosx):
       app.state_notice = ""
       app.state_notice_hint = ""
     of "Settings": app.cfg.notice = ""
-    of "Open ROM":
+    of "Game":
       app.load_notice = ""
       app.load_notice_hint = ""
     of "Save file": app.battery.dismiss()
@@ -1678,7 +1678,7 @@ when defined(macosx):
     elif app.cfg.notice.len > 0:
       mac_alert_show(app.window, "Settings", app.cfg.notice, "")
     elif app.load_notice.len > 0:
-      mac_alert_show(app.window, "Open ROM", app.load_notice, app.load_notice_hint)
+      mac_alert_show(app.window, "Game", app.load_notice, app.load_notice_hint)
     elif app.battery.text.len > 0:
       mac_alert_show(app.window, "Save file", app.battery.text, app.battery.hint)
     else:

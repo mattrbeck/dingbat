@@ -1,10 +1,11 @@
-## The app's modal notices (src/dingbat/frontend/notice.nim: Open ROM, State,
-## Settings, Save file) in a real Dear ImGui context with no window: Return,
-## keypad Enter and Escape close a notice as OK does; a key pressed on the
-## frame a notice appears, or the press that closed the one before it, does
-## not; a held key closes one notice at most; and the keyboard is ImGui's
-## (WantCaptureKeyboard) for as long as one is up, which is what keeps the
-## key from the game (held_input.nim `modal_key_of`, desktop_input_test).
+## The app's modal notices (src/dingbat/frontend/notice.nim: a game that
+## won't open, State, Settings, Save file) in a real Dear ImGui context with
+## no window: Return, keypad Enter and Escape close a notice as OK does; a
+## key pressed on the frame a notice appears, or the press that closed the
+## one before it, does not; a held key closes one notice at most; and the
+## keyboard is ImGui's (WantCaptureKeyboard) for as long as one is up, which
+## is what keeps the key from the game (held_input.nim `modal_key_of`,
+## desktop_input_test).
 ## And every string the desktop draws has its characters in every UI font it
 ## may draw with (ui_fonts.nim): this platform's (SF on macOS, Segoe UI on
 ## Windows) and the bundled Inter, which Linux and any fallback use; a
@@ -91,7 +92,7 @@ proc frame(n = 1) =
     wants_keyboard = io.WantCaptureKeyboard
     render_notice("State##notice", first, first_hint)
     if first.len == 0:
-      render_notice("Open ROM##notice", second, second_hint)
+      render_notice("Couldn't open the game##notice", second, second_hint)
     igRender()
 
 proc key(k: ImGuiKey; down: bool) = ImGuiIO_AddKeyEvent(io, k, down)
