@@ -15,7 +15,7 @@ game is the old code with the setting false:
 
 | | Off |
 |---|---|
-| Open ROM dialog | lists `.gba .gb .gbc .cgb .sgb .zip` (`ROM_DIALOG_EXTS`), no `.nds`. |
+| Add a game dialog | lists `.gba .gb .gbc .cgb .sgb .zip` (`ROM_DIALOG_EXTS`), no `.nds`. |
 | Drop on the window | `is_rom_file` only: a `.nds` is ignored. |
 | A zip | only `ROM_EXTS` are looked for: a zip holding just a `.nds` says "No Game Boy or GBA ROM could be read". |
 | Command line, Recent | `load_rom` builds a GB/GBA core as before (a `.nds` named on the command line goes to the GBA core, as it always did). |

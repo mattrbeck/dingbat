@@ -17,7 +17,7 @@ type
     mcRecentMenu, mcChannelsMenu
     # File (and the macOS app menu)
     mcOpenRom, mcOpenRecent, mcClearRecents, mcQuickSave, mcQuickLoad,
-    mcSaveStates, mcScreenshot, mcSettings, mcQuit, mcHelp
+    mcSaveStates, mcScreenshot, mcCloseGame, mcSettings, mcQuit, mcHelp
     # Emulation
     mcReset, mcPause, mcFrameAdvance, mcRewind, mcTurbo, mcFastForward,
     mcCloseLid, mcCheats, mcLinkCable
@@ -53,7 +53,7 @@ type
     arg*:      int
     key*:      string    ## a Cmd (macOS) / Ctrl shortcut, lowercase ("s", ",")
     alt*:      bool      ## `key` with Option too (macOS Hide Others)
-    shift*:    bool      ## `key` with Shift too (macOS Redo)
+    shift*:    bool      ## `key` with Shift too (macOS Redo, Close Window)
     hint*:     string    ## ImGui's shortcut column ("Tab"), not bound
     shown*:    ShownKey
     enabled*:  bool
@@ -83,9 +83,9 @@ proc edit*(title: string; cmd: MenuCmd; selector, key: string; shift = false): M
   MenuItem(kind: mkEdit, title: title, cmd: cmd, selector: selector, key: key,
            shift: shift, enabled: true)
 
-proc system*(title, selector: string; key = ""; alt = false): MenuItem =
+proc system*(title, selector: string; key = ""; alt = false; shift = false): MenuItem =
   MenuItem(kind: mkSystem, title: title, selector: selector, key: key,
-           alt: alt, enabled: true)
+           alt: alt, shift: shift, enabled: true)
 
 proc apply_state*(items: var seq[MenuItem];
                   state: proc(cmd: MenuCmd; arg: int): MenuState) =

@@ -11,7 +11,7 @@ import ../gb/gb
 
 export rom_exts
 
-# The Open ROM dialog's filter: what `is_rom_file` takes, without the dots.
+# The Add a game dialog's filter: what `is_rom_file` takes, without the dots.
 const ROM_DIALOG_EXTS* = block:
   var exts: seq[string]
   for ext in ROM_EXTS: exts.add ext[1 .. ^1]

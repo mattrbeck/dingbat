@@ -41,6 +41,13 @@
 ##                                     [off] greyed, [Cmd+S] its shortcut)
 ##   menu pick <Menu>Item[>Sub]>       choose an item as a click would; acked
 ##                                     `error greyed` or `error no item`
+##   explorer dump <path.txt>          the ImGui file dialog (Add a game, Find the
+##                                     File): `<row label>|x y w h` for each file
+##                                     and folder shown and its Open button, or
+##                                     `none` when it is closed
+##   menu imgui <path.txt>             the in-window ImGui bar's menus as data,
+##                                     as it labels them ("Quick Save  Ctrl+S",
+##                                     [x] ticked, [off] greyed); any platform
 ##   settings dump <path.txt>          macOS Settings window: each tab's rows
 ##                                     as they show ([x] ticked or chosen, [off]
 ##                                     greyed, [waiting] for a key, [invalid])
@@ -62,10 +69,14 @@
 ##                                     macOS also `ns=<w>:<h> inc=<w>:<h>`, the
 ##                                     NSWindow's content aspect ratio and
 ##                                     resize increments (free: 0:0 and 1:1)
-##   home dump <path.txt>              the home screen's tiles as last drawn,
-##                                     one a line: `<name>|x y w h|missing or
-##                                     present|picture or cart` (window points),
-##                                     or `empty`
+##   home dump <path.txt>              the home screen as last drawn, one a
+##                                     line (window points): each tile
+##                                     `<name>|x y w h|missing or present|picture
+##                                     or cart`, or `empty`; first the hero,
+##                                     `@hero|<name>|resume play` (or `play`),
+##                                     `@picture|...` as a tile and `@resume|x y
+##                                     w h`, `@play|...`; an open game menu's
+##                                     items `@menu <title>|x y w h`
 ##
 ## With the macOS menu bar, a `key ... down cmd` also goes through it, as a
 ## real Cmd shortcut does (the key handler leaves those to the menus).
@@ -101,6 +112,8 @@ var
   mouse_x, mouse_y: cint
   mouse_in* = false
   home_dump*: proc(): string   ## set by the app: the home screen's tiles
+  imgui_menu_dump*: proc(): string  ## set by the app: the in-window bar's menus
+  explorer_dump*: proc(): string    ## set by the app: the ImGui file dialog's rows
   dropped* = ""       # a `drop` path for handle_input (a pushed SDL drop
                       # event cannot own its path)
   texts: seq[string]  # `text` strings, alive until handle_input has read them
@@ -362,10 +375,16 @@ proc run(window: Window; s: Step): bool =
   of "pad":
     ack(s.id, pad_cmd(w))
     return true
+  of "explorer":
+    if w.len < 3 or w[1] != "dump": raise newException(ValueError, "explorer dump <path>")
+    writeFile(w[2], if explorer_dump != nil: explorer_dump() else: "")
   of "home":
     if w.len < 3 or w[1] != "dump": raise newException(ValueError, "home dump <path>")
     writeFile(w[2], if home_dump != nil: home_dump() else: "")
   of "menu":
+    if w.len >= 3 and w[1] == "imgui":
+      writeFile(w[2], if imgui_menu_dump != nil: imgui_menu_dump() else: "")
+      return true
     when defined(macosx):
       if not mac_menu.installed: raise newException(ValueError, "no macOS menu bar")
       case w[1]

@@ -113,6 +113,47 @@ block grid:
   check l.cols == 3, "two games under 760px keep the row's columns: " & $l
   l = grid_layout(240, 4, pad = 16)
   check l.cols == 1 and near(l.track, 208), "a small window: " & $l
+  # Under a hero (web body.home-card): one or two tiles take the hero's
+  # floor, and a phone keeps two columns for one
+  l = grid_layout(1280, 1, under_hero = true)
+  check l.cols == 1 and near(l.track, 300) and near(l.width, 860), "hero, one: " & $l
+  l = grid_layout(1280, 2, under_hero = true)
+  check l.cols == 2 and near(l.track, 425) and near(l.width, 860), "hero, two: " & $l
+  l = grid_layout(1280, 3, under_hero = true)
+  check near(l.width, 1000), "hero, three: as without: " & $l
+  l = grid_layout(700, 1, under_hero = true)
+  check l.cols == 3, "hero, one, a phone's width: the row's columns: " & $l
+
+block hero:
+  var lib: Library
+  lib.note_played(LibGame(path: "/a.gba", system: "GBA"), now = 1)
+  lib.note_played(LibGame(path: "/b.nds", system: "DS"), now = 2)
+  lib.note_played(LibGame(path: "/c.gb", system: "GB"), now = 3)
+  check lib.hero_of(@[], ds_beta = true).path == "", "nothing played here: no hero"
+  check lib.hero_of(@["/a.gba"], true).path == "/a.gba",
+        "the game played here, not the library's newest"
+  check lib.hero_of(@["/b.nds", "/a.gba"], true).path == "/b.nds", "the latest played here"
+  check lib.hero_of(@["/b.nds", "/a.gba"], false).path == "/a.gba", "no DS game without DS Beta"
+  check lib.hero_of(@["/gone.gba"], true).path == "", "one removed since: none"
+
+block relink:
+  var lib: Library
+  lib.note_played(LibGame(path: "/old/A.gba", rom: "A.gba", system: "GBA",
+                          identity: "0000ABCD"), now = 5)
+  lib.note_played(LibGame(path: "/new/A2.gba", rom: "A2.gba", system: "GBA"), now = 9)
+  lib.note_played(LibGame(path: "/x.gb", rom: "x.gb", system: "GB"), now = 7)
+  lib.relink("/old/A.gba", LibGame(path: "/new/A2.gba", rom: "A2.gba", system: "GBA",
+                                   identity: "0000ABCD"))
+  check lib.games.paths == @["/x.gb", "/new/A2.gba"], "one tile for the file: " & $lib.games.paths
+  let e = lib.games[lib.find_game("/new/A2.gba")]
+  check e.played == 5 and e.rom == "A2.gba" and e.identity == "0000ABCD",
+        "the old entry's, at the new file: " & $e
+  lib.relink("/nope", LibGame(path: "/y.gb"))
+  check lib.games.len == 2, "no such entry: nothing"
+  check session_file_name("/r/Game.gba", 0xABCD'u32) == "Game.gba-0000ABCD.session.state",
+        "the session's file"
+  check session_file_name("/r/Game.gba", 1) != state_file_name("/r/Game.gba", 1, 0),
+        "never a slot's"
 
 block pictures:
   let dir = createTempDir("dingbat_library_", "")

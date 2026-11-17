@@ -13,6 +13,8 @@
 #   aspect    the window's aspect lock (SDL's and the NSWindow's): free on the
 #             home screen and in fullscreen (Fullscreen on the hidden window
 #             only sets the flag), 3:2 in a GBA game
+#   close     Cmd+W is Close Game while a game runs (Close Window moves to
+#             Shift+Cmd+W) and Close Window at home; Close Game goes home
 #   imgui     DINGBAT_IMGUI_MENU=1 keeps the in-window bar: no macOS menus
 #
 # macOS only. From the repo root:
@@ -63,7 +65,12 @@ check "menus" "$(grep -v '^ ' "$work/home.txt" | tr '\n' ' ')" \
       "dingbat File Edit Emulation Audio/Video Debug Window Help "
 check "Settings… in the app menu" "$(item "$work/home.txt" 'Settings… [Cmd+,]')" present
 check "Quit dingbat" "$(item "$work/home.txt" 'Quit dingbat [Cmd+Q]')" present
-check "Open ROM…" "$(item "$work/home.txt" 'Open ROM… [Cmd+O]')" present
+check "Add a Game…" "$(item "$work/home.txt" 'Add a Game… [Cmd+O]')" present
+check "no Open ROM" "$(grep -c 'Open ROM' "$work/home.txt")" "0"
+# Close Window is greyed here only because the driver's hidden window is not
+# the key window
+check "home: Cmd+W closes the window" "$(item "$work/home.txt" 'Close Window [off] [Cmd+W]')" present
+check "home: no Close Game" "$(grep -c 'Close Game' "$work/home.txt")" "0"
 check "Quick Save greyed" "$(item "$work/home.txt" 'Quick Save [off] [Cmd+S]')" present
 check "Open Recent greyed" "$(item "$work/home.txt" 'Open Recent [off]')" present
 check "Volume slider" "$(item "$work/home.txt" 'Volume [slider 100]')" present
@@ -90,6 +97,8 @@ check "Quick Save enabled" "$(item "$work/game.txt" 'Quick Save [Cmd+S]')" prese
 check "Fast Forward shows Tab" "$(item "$work/game.txt" 'Fast Forward [Tab]')" present
 check "2x Speed shows Shift+Tab" "$(item "$work/game.txt" '2x Speed [Shift+Tab]')" present
 check "Open Recent lists the game" "$(item "$work/game.txt" 'inputrec.gba')" present
+check "a game: Cmd+W is Close Game" "$(item "$work/game.txt" 'Close Game [Cmd+W]')" present
+check "Close Window takes Shift+Cmd+W" "$(item "$work/game.txt" 'Close Window [off] [Shift+Cmd+W]')" present
 check "Pause from the menu ticks it" "$(item "$work/paused.txt" 'Pause [x] [Cmd+P]')" present
 check "Frame Advance enabled while paused" "$(item "$work/paused.txt" 'Frame Advance [Cmd+N]')" present
 check "Cmd+P through the menu bar unticks it" "$(item "$work/resumed.txt" 'Pause [Cmd+P]')" present
@@ -123,6 +132,25 @@ check "Frame size keeps it" "$(ack 8 | cut -d' ' -f1-4)" "ok min=1.5000 max=1.50
 check "fullscreen: free" "$(ack 11)" "ok min=0.0000 max=0.0000 ns=0:0 inc=1:1"
 check "back: 3:2" "$(ack 14 | cut -d' ' -f1-4)" "ok min=1.5000 max=1.5000 ns=3:2"
 check "the window as it was" "$(ack 15)" "ok fullscreen=0 window=480x320"
+
+echo "Close Game"
+run tests/roms/inputrec.gba "1 frames 60
+2 key W down cmd
+3 key W up cmd
+4 frames 10
+5 sleep 200
+6 home dump $work/closed.txt
+7 menu dump $work/closed-menu.txt
+8 drop tests/roms/inputrec.gba
+9 frames 30
+10 menu pick File>Close Game
+11 frames 10
+12 sleep 200
+13 home dump $work/picked.txt
+14 quit"
+check "Cmd+W: home, the game heading it" "$(grep -c '^@hero|inputrec|resume play' "$work/closed.txt")" "1"
+check "home again: Cmd+W closes the window" "$(item "$work/closed-menu.txt" 'Close Window [off] [Cmd+W]')" present
+check "File > Close Game: the same" "$(grep -c '^@hero|inputrec|resume play' "$work/picked.txt")" "1"
 
 echo "DINGBAT_IMGUI_MENU=1"
 run "" "1 frames 10

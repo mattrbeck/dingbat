@@ -43,6 +43,8 @@ when defined(gui_driver):
   import dingbat/frontend/gui_driver
 import dingbat/common/cheats
 import dingbat/common/serialize
+from dingbat/common/audio_out import audio_close
+from dingbat/nds/savestate as nds_savestate import nil
 
 const VERSION = "0.1.0"
 const GBA_W   = 240
@@ -189,7 +191,11 @@ type AppState = ref object
   home:            LibraryView
   home_stale:      bool    # the library changed since the view last took it
   home_open:       string  # a game the home screen chose; the main loop opens it
-  open_rom_request: bool # Open ROM chosen: the ImGui explorer opens next frame
+  home_resume:     string  # the hero's Resume: the main loop opens it with its session
+  played_here:     seq[string]  # library paths played in this run, latest first (the hero's)
+  find_for:        string  # Find the File: the missing game's path, while its dialog is up
+  find_request:    bool    # Find the File chosen: the ImGui explorer opens next frame
+  open_rom_request: bool # Add a game chosen: the ImGui explorer opens next frame
 
 var app: AppState
 
@@ -521,10 +527,14 @@ proc nds_paths(): NdsPaths =
            firmware: app.cfg.nds_firmware_path,
            flash: config_dir() / "nds" / "flash.bin")
 
-proc load_rom(path: string; keep_ds = false) =
+proc states_dir(): string = config_dir() / "states"
+
+proc load_rom(path: string; keep_ds = false; resume = false) =
   ## Every failure leaves the running game (or the home screen) as it was and
   ## says why. A DS game loads only with DS Beta on (`keep_ds`: a Reset of
-  ## the DS game running, whatever the setting says now).
+  ## the DS game running, whatever the setting says now). `resume`: the
+  ## caller puts the game's session back; any other boot reads the in-game
+  ## save, so the session would roll it back and goes.
   if not fileExists(path):
     load_notice(&"{path.extractFilename()} isn't there any more.", path)
     return
@@ -604,6 +614,14 @@ proc load_rom(path: string; keep_ds = false) =
   store_last_screen()
   # The old game's files are written out; its locks go to the new game
   app.game_lock.commit(claim)
+  if not resume:
+    let session = states_dir() / session_file_name(rom_path, identity)
+    if fileExists(session):
+      try:
+        removeFile(session)
+        echo "Session dropped: ", session
+      except OSError as e:
+        echo "Session not dropped: ", e.msg
   let was_ds = app.emu_kind == ekNDS
   if as_ds:
     app.nds = built_ds.game
@@ -685,6 +703,7 @@ proc load_rom(path: string; keep_ds = false) =
     if native_menu:
       mac_note_recent(path)
       mac_set_document(app.window, path)
+      mac_menu_refresh()
   discard setWindowPosition(app.window, WINDOW_CENTERED, WINDOW_CENTERED)
   app.paused = false
   app.pending_save = false
@@ -755,8 +774,6 @@ proc on_cheats_changed() =
   refresh_cheat_rom_patches()
   save_cheats()
 
-proc states_dir(): string = config_dir() / "states"
-
 proc state_identity(): uint32 =
   case app.emu_kind
   of ekGBA: app.gba_emu.state_rom_identity()
@@ -808,13 +825,12 @@ proc save_state_slot(slot: int): bool =
     of ekNone: false
   if result: echo "State saved: ", path
 
-proc load_state_slot(slot: int): bool =
+proc load_state_at(path: string): bool =
   # Loading into a linked core would desync the two games. Checked here so
-  # every caller (menu, hotkey, Save States window) gets it.
+  # every caller (menu, hotkey, Save States window, Resume) gets it.
   if app.netlink != nil:
     last_state_error = ""
     return false
-  let path = state_slot_read_path(slot)
   if path.len == 0: return false
   result = case app.emu_kind
     of ekGBA: app.gba_emu.load_state(path)
@@ -826,6 +842,8 @@ proc load_state_slot(slot: int): bool =
     input_log_event("state_load")
     # The ring holds the timeline the load replaced (the web drops it too).
     app.rewind.clear()
+
+proc load_state_slot(slot: int): bool = load_state_at(state_slot_read_path(slot))
 
 proc state_reject_sentence(): string =
   ## One sentence per StateRejectKind, saying what to do about it; never raw
@@ -927,6 +945,50 @@ proc process_pending_state() =
     if not load_state_slot(0):
       app.state_notice = state_reject_sentence()
       app.state_notice_hint = last_state_error
+
+# ──────────────────────────── The session ────────────────────────────
+# Close Game takes a session snapshot, a save state outside the slots
+# (persist.nim session_file_name), after the battery is written; the home
+# screen's Resume boots the game and loads it, so the game is exactly where
+# it was left. Any other boot of the game drops it (load_rom): it would put
+# back the battery it was taken with, over anything saved in the game since.
+
+proc session_path(): string =
+  let rom = current_rom_path()
+  if rom.len == 0: "" else: states_dir() / session_file_name(rom, state_identity())
+
+proc session_path_of(g: LibGame): string =
+  ## Where a library game's session is; "" for a game not known well enough
+  if g.rom.len == 0 or g.identity.len != 8: return ""
+  try: states_dir() / session_file_name(g.rom, uint32(parseHexInt(g.identity)))
+  except ValueError: ""
+
+proc state_hash(): string =
+  ## The running game's whole state, for the GUI driver's tests to compare a
+  ## session put back against the one taken
+  let payload = case app.emu_kind
+    of ekGBA: app.gba_emu.state_payload()
+    of ekGB: app.gb_emu.state_payload()
+    of ekNDS: app.nds.rewind_payload()
+    of ekNone: ""
+  fnv1a(payload).toHex(8)
+
+proc save_session() =
+  ## At a frame boundary. A session that cannot be taken goes: an older one
+  ## would put back a moment from before this play.
+  let path = session_path()
+  if path.len == 0: return
+  let ok = case app.emu_kind
+    of ekGBA: app.gba_emu.save_state(path, thumbnail = true)
+    of ekGB: app.gb_emu.save_state(path, thumbnail = true)
+    of ekNDS: app.nds.save_state_file(path)
+    of ekNone: false
+  if ok:
+    echo "Session saved: ", path
+    when defined(gui_driver): echo "session hash ", state_hash()
+  else:
+    echo "Session not saved: ", last_state_error
+    discard tryRemoveFile(path)
 
 # ──────────────────────────── Screenshots ────────────────────────────
 
@@ -1054,6 +1116,9 @@ proc record_played(g: LibGame) =
   app.library = read_library(library_file(), @[]).lib
   app.library.note_played(g)
   save_library()
+  let i = app.played_here.find(g.path)
+  if i >= 0: app.played_here.delete(i)
+  app.played_here.insert(g.path, 0)
   app.home_stale = true
 
 proc remove_from_library(path: string) =
@@ -1123,6 +1188,109 @@ proc load_library_picture(path: string; g: LibGame): Picture =
     result.rgba[i * 4 + 2] = c[2]
     result.rgba[i * 4 + 3] = 255
 
+proc rom_file_identity(rom_path: string): uint32 =
+  ## What the cores name a ROM's slot files by, from the file alone: the
+  ## whole file's FNV-1a (GB and GBA: state_rom_identity), or a DS game's
+  ## header and ARM9 start (nds savestate rom_identity). Raises on a read.
+  let data = readFile(rom_path)
+  if is_nds_file(rom_path):
+    nds_savestate.rom_identity(toOpenArrayByte(data, 0, data.high))
+  else: fnv1a(data)
+
+proc copy_if_missing(src, dst: string) =
+  ## Never over a file already there: that one is the newer game's
+  if src == dst or not fileExists(src) or fileExists(dst): return
+  try:
+    createDir(dst.parentDir)
+    copyFile(src, dst)
+    echo "Kept for the game's new file: ", dst
+  except CatchableError as e:
+    echo "Couldn't copy ", src, ": ", e.msg
+
+proc relink_game(old, chosen: string) =
+  ## Find the File: the missing game is the chosen file now, if it is the
+  ## same game (the library's ROM identity). Its slots, session and picture
+  ## are named by ROM file name and identity, and its battery and cheats sit
+  ## beside the ROM: under a new name or folder they are copied across,
+  ## never over files already there. Another game is refused and changes
+  ## nothing.
+  app.library = read_library(library_file(), @[]).lib
+  let i = app.library.find_game(old)
+  if i < 0: return
+  let entry = app.library.games[i]
+  let name = chosen.extractFilename()
+  if not (is_rom_file(chosen) or (app.cfg.ds_beta and is_nds_file(chosen))):
+    load_notice(&"{name} isn't a game dingbat can open.", chosen)
+    return
+  var rom_path = chosen
+  if chosen.splitFile().ext.toLowerAscii() == ".zip":
+    rom_path = if app.cfg.ds_beta: extract_zip_rom(config_dir() / "zip-cache", chosen, ROM_EXTS_DS)
+               else: extract_zip_rom(config_dir() / "zip-cache", chosen)
+    if rom_path.len == 0:
+      load_notice(&"No game could be read from {name}.", "")
+      return
+  var identity: uint32
+  try: identity = rom_file_identity(rom_path)
+  except CatchableError as e:
+    load_notice(&"Couldn't read {name}.", e.msg)
+    return
+  if entry.identity.len == 8 and entry.identity.toUpperAscii() != identity.toHex(8):
+    load_notice(&"{name} is a different game from {entry.display_name}, so it " &
+                "wasn't put in its place.",
+                &"{entry.display_name} keeps its saves and save states for when its " &
+                "own file is found. To play this one, add it as a game of its own.")
+    return
+  let rom = rom_path.extractFilename()
+  if entry.rom.len > 0 and entry.rom != rom:
+    for slot in 0 ..< NUM_SLOTS:
+      copy_if_missing(states_dir() / state_file_name(entry.rom, identity, slot),
+                      states_dir() / state_file_name(rom, identity, slot))
+    copy_if_missing(states_dir() / session_file_name(entry.rom, identity),
+                    states_dir() / session_file_name(rom, identity))
+    copy_if_missing(pictures_dir() / picture_name(entry.rom, identity),
+                    pictures_dir() / picture_name(rom, identity))
+  # Where the old file's battery was: beside it, or a zip's cache folder
+  let old_rom = if old.splitFile().ext.toLowerAscii() == ".zip" and entry.rom.len > 0:
+                  zip_cache_dir(config_dir() / "zip-cache", old) / entry.rom
+                else: old
+  for ext in [".sav", ".cht"]:
+    copy_if_missing(old_rom.changeFileExt(ext), rom_path.changeFileExt(ext))
+  var system = if is_nds_file(rom_path): "DS" else: system_of(rom)
+  if system.len == 0: system = entry.system
+  app.library.relink(old, LibGame(path: chosen, rom: rom, system: system,
+                                  identity: identity.toHex(8)))
+  save_library()
+  let r = app.cfg.recents.find(old)
+  if r >= 0:
+    if chosen in app.cfg.recents: app.cfg.recents.delete(r)
+    else: app.cfg.recents[r] = chosen
+    save_config(app.cfg)
+  let p = app.played_here.find(old)
+  if p >= 0: app.played_here[p] = chosen
+  echo "Found ", entry.display_name, ": ", chosen
+  app.home_stale = true
+
+proc take_find_for(): string =
+  ## The game Find the File was for, once: a copy, never app.find_for itself
+  ## (a string parameter aliases what it is passed)
+  result = move app.find_for
+  app.find_for = ""
+
+proc find_file(path: string) =
+  ## The missing game's Find the File: a file dialog, in its old folder when
+  ## that is still there
+  app.find_for = path
+  let dir = path.parentDir
+  when defined(macosx):
+    if native_menu:
+      mac_open_panel(app.window,
+                     if app.cfg.ds_beta: ROM_DIALOG_EXTS_DS else: ROM_DIALOG_EXTS,
+                     if dirExists(dir): dir else: app.cfg.explorer_dir, purpose = "find",
+                     message = "Where is " & LibGame(path: path).display_name & " now?")
+      return
+  app.fe.show_dir(dir)
+  app.find_request = true
+
 proc make_home_texture(p: Picture): uint64 =
   pr.ui_texture(result, unsafeAddr p.rgba[0], p.w, p.h, bgr555 = false,
                 linear = true, mipmaps = true)
@@ -1145,6 +1313,9 @@ proc home_view(): LibraryView =
     v.make_texture = make_home_texture
     v.free_texture = free_home_texture
     v.on_open = proc(path: string) = app.home_open = path
+    v.on_play = proc(path: string) = app.home_open = path
+    v.on_resume = proc(path: string) = app.home_resume = path
+    v.on_find = find_file
     v.on_add = proc() = push_cmd(mcOpenRom)
     v.on_remove = remove_from_library
     v.on_sort = set_library_sort
@@ -1155,7 +1326,87 @@ proc home_view(): LibraryView =
     app.home.sort = app.library.sort
     app.home.set_games(app.library.shown(app.cfg.recents, app.cfg.ds_beta))
     app.home_stale = false
+  let hero = app.library.hero_of(app.played_here, app.cfg.ds_beta)
+  app.home.set_hero(hero, session_path_of(hero))
   app.home
+
+# ──────────────────────────── Close Game and Resume ────────────────────────────
+
+proc close_game() =
+  ## Back to the home screen, the game heading it (web hero, closed): its
+  ## battery written, its session taken, its last screen kept, then the core
+  ## gone. A battery that cannot be written keeps the game open: closing
+  ## would lose what was saved in it.
+  if app.emu_kind == ekNone: return
+  # The link ends politely, as on loading another game
+  if app.netlink == nil and app.link.setup != lsNone:
+    app.link.status = "Link ended: the game was closed."
+  link_auto_stop()
+  link_cancel_setup()
+  teardown_netlink("the game was closed")
+  if app.pending_save:
+    app.pending_save = false
+    if not save_state_slot(0):
+      app.state_notice = QUICK_SAVE_FAILED
+      app.state_notice_hint = last_state_error
+  app.pending_load = false
+  app.pending_step = false
+  app.rewinding = false
+  let (save_file, err) =
+    case app.emu_kind
+    of ekGBA: (app.gba_emu.storage.save_path, flush_batteries(app.gba_emu, nil))
+    of ekGB: (app.gb_emu.cartridge.sav_path, flush_batteries(nil, app.gb_emu))
+    of ekNDS: (app.nds.save_path, app.nds.flush())
+    of ekNone: ("", "")
+  if err.len > 0:
+    app.battery.text = CLOSE_BATTERY_FAILED & "\n\n" & save_file
+    app.battery.hint = err
+    return
+  save_session()
+  store_last_screen()
+  input_log_close()
+  app.gba_emu = nil
+  app.gb_emu = nil
+  app.nds = nil
+  app.emu_kind = ekNone
+  audio_close()
+  app.dbg = nil
+  app.gb_dbg = nil
+  # Its windows: the cheats and slots were the game's, the link needs one
+  app.cheats.attach(nil, cpGBA)
+  app.cheats.window = false
+  app.save_states.window = false
+  app.save_states.mark_stale()
+  app.link_window = false
+  app.game_lock.release()
+  app.cur_path = ""
+  app.paused = false
+  app.rewind.clear()
+  app.border_shown = false
+  lcd_resp.reset()
+  frame_ticks = gbx_frame_ticks
+  apply_color_correction()
+  when defined(macosx):
+    if native_menu:
+      mac_set_document(app.window, "")
+      mac_menu_refresh()
+  discard setWindowTitle(app.window, "dingbat")
+  app.home_stale = true
+  echo "Game closed"
+
+proc resume_game(path: string) =
+  ## The hero's Resume: boot the game and put its session back before its
+  ## first frame. A session refused (another version, damaged) leaves the
+  ## game booted from its save, as Play, and says why.
+  load_rom(path, resume = true)
+  if app.emu_kind == ekNone or app.cur_path != path: return
+  let session = session_path()
+  if load_state_at(session):
+    echo "Session resumed: ", session
+    when defined(gui_driver): echo "resumed hash ", state_hash()
+  else:
+    app.state_notice = state_reject_sentence()
+    app.state_notice_hint = last_state_error
 
 # ──────────────────────────── Rendering ────────────────────────────
 
@@ -1423,6 +1674,7 @@ proc menu_state(cmd: MenuCmd; arg: int): MenuState =
   case cmd
   of mcNone, mcOpenRom, mcOpenRecent, mcClearRecents, mcSettings, mcQuit,
      mcHelp, mcReset, mcVolume, mcVolumeDone: (true, false)
+  of mcCloseGame: (game, false)
   # The game window's ImGui field being typed in (the Cheats code, the Link
   # Cable address)
   of mcUndo, mcRedo, mcCut, mcCopy, mcPaste, mcSelectAll:
@@ -1505,6 +1757,11 @@ proc run_menu(cmd: MenuCmd; arg: int) =
   of mcQuickLoad: app.pending_load = true
   of mcSaveStates: app.save_states.window = true
   of mcScreenshot: save_screenshot()
+  of mcCloseGame:
+    # Settings (or a panel) in front: Cmd+W is its close, as in any Mac app
+    when defined(macosx):
+      if native_menu and mac_close_key_window(): return
+    close_game()
   of mcSettings:
     when defined(macosx):
       if app.ce.native:
@@ -1596,8 +1853,9 @@ proc menu_bar(native: bool): seq[MenuItem] =
     recent.add action(if native: extractFilename(r) else: r, mcOpenRecent, i)
   recent.add separator()
   recent.add action(if native: "Clear Menu" else: "Clear", mcClearRecents)
+  # One name for it everywhere, the home screen's button's and the web's
   var file = @[
-    action("Open ROM" & (if native: "..." else: ""), mcOpenRom,
+    action(if native: "Add a Game..." else: "Add a game", mcOpenRom,
            key = if native: "o" else: ""),
     submenu(if native: "Open Recent" else: "Recent", recent, mcRecentMenu),
     separator(),
@@ -1607,9 +1865,15 @@ proc menu_bar(native: bool): seq[MenuItem] =
     (if native: action("Screenshot", mcScreenshot, shown = skF12)
      else: action("Screenshot  F12", mcScreenshot)),
     separator()]
+  # Cmd/Ctrl+W closes the game; with none, on macOS, it closes the window
   if native:
-    file.add system("Close Window", "performClose:", key = "w")
+    if app.emu_kind != ekNone:
+      file.add action("Close Game", mcCloseGame, key = "w")
+      file.add system("Close Window", "performClose:", key = "w", shift = true)
+    else:
+      file.add system("Close Window", "performClose:", key = "w")
   else:
+    file.add action("Close Game", mcCloseGame, key = "w")
     file.add action("Settings", mcSettings)
     file.add separator()
     file.add action("Exit", mcQuit, key = "q")
@@ -1700,10 +1964,12 @@ proc run_menu_cmds() =
   ## Items chosen since the last iteration, and the Open panel's choice.
   for (cmd, arg) in take_cmds(): run_menu(cmd, arg)
   when defined(macosx):
-    let path = mac_take_opened()
+    let (purpose, path) = mac_take_opened()
     if path.len > 0:
       app.cfg.explorer_dir = parentDir(path)  # the panel opens there next time
-      load_rom(path)
+      if purpose == "find": relink_game(take_find_for(), path)
+      else: load_rom(path)
+    elif purpose == "find": app.find_for = ""
 
 var imgui_skipped = false  # the last render_imgui returned before igNewFrame
 
@@ -1718,7 +1984,7 @@ proc render_imgui() =
      (app.gb_dbg == nil or not app.gb_dbg.any_window_open) and
      not app.link_window and not app.cheats.window and
      not app.save_states.window and not app.drag_hover and
-     not app.open_rom_request and
+     not app.open_rom_request and not app.find_request and
      # A notice must still draw with the menu bar idle-hidden (Quick Load
      # key); with the macOS menu bar it is an alert (mac_notices)
      (native_menu or app.state_notice.len == 0 and app.cfg.notice.len == 0 and
@@ -1753,6 +2019,10 @@ proc render_imgui() =
                 if app.cfg.ds_beta: ROM_DIALOG_EXTS_DS else: ROM_DIALOG_EXTS,
                 proc(path: string) = load_rom(path))
   app.open_rom_request = false
+  app.fe.render("Find the File", app.find_request,
+                if app.cfg.ds_beta: ROM_DIALOG_EXTS_DS else: ROM_DIALOG_EXTS,
+                proc(path: string) = relink_game(take_find_for(), path))
+  app.find_request = false
 
   if not native_menu:   # else alerts (mac_notices)
     render_state_notice()
@@ -2010,6 +2280,7 @@ proc handle_input() =
                   of cint(SDLK_S): mcQuickSave
                   of cint(SDLK_L): mcQuickLoad
                   of cint(SDLK_F): mcFullscreen
+                  of cint(SDLK_W): mcCloseGame
                   of cint(SDLK_Q): mcQuit
                   else: mcNone
         if cmd != mcNone and not native_menu: run_menu(cmd, 0)
@@ -2515,6 +2786,23 @@ proc main() =
   when defined(gui_driver):
     gui_driver.home_dump = proc(): string =
       if app.home != nil and app.emu_kind == ekNone: app.home.dump() else: "none\n"
+    gui_driver.explorer_dump = proc(): string = app.fe.dump()
+    gui_driver.imgui_menu_dump = proc(): string =
+      ## The in-window bar's menus as data: a title a line, indented under
+      ## its menu, as the ImGui bar labels it ([off] greyed, [x] ticked)
+      proc walk(items: seq[MenuItem]; depth: int; s: var string) =
+        for it in items:
+          if it.kind in {mkSystem, mkEdit}: continue
+          s.add repeat("  ", depth)
+          if it.kind == mkSeparator:
+            s.add "---\n"
+            continue
+          s.add imgui_label(it, MOD_KEY_STR)
+          if it.checked: s.add " [x]"
+          if not it.enabled: s.add " [off]"
+          s.add "\n"
+          if it.kind == mkSubmenu: walk(it.items, depth + 1, s)
+      walk(menu_bar(native = false), 0, result)
   when defined(macosx):
     if native_menu:
       mac_menu_install(window, proc(): seq[MenuItem] = menu_bar(native = true),
@@ -2831,6 +3119,10 @@ proc main() =
       let path = app.home_open
       app.home_open = ""
       load_rom(path)
+    if app.home_resume.len > 0:
+      let path = app.home_resume
+      app.home_resume = ""
+      resume_game(path)
     when defined(macosx):
       mac_settings_tick()
       if native_menu: mac_notices()

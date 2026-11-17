@@ -181,6 +181,12 @@ proc commit*(held: var GameLock; c: var GameLock) =
   commit_one(held.files, c.files)
   commit_one(held.states, c.states)
 
+proc release*(held: var GameLock) =
+  ## The game was closed: nothing of it is open in this window any more.
+  held.files.release()
+  held.states.release()
+  held = GameLock()
+
 # What the Link Cable window and a refused load say about pairing two
 # windows on one computer.
 const LINK_SAME_MACHINE_HINT* =
