@@ -3134,10 +3134,12 @@ proc main() =
   var pace_last   = 0'u64
   # DINGBAT_FRAME_TRACE=<path>: one CSV row per present, written at quit:
   # slot due, emulation start/end, swap issued/returned, on the glass
-  # (performance-counter ticks; due is 0 for a present with no new frame,
-  # shown 0 where unknown: OpenGL, or a hidden window)
+  # (performance-counter ticks; due is 0 for a present with no new frame and
+  # only paced play keeps it, shown 0 where unknown: OpenGL, or a hidden
+  # window), and the frames emulated since the last present
   let trace_path = getEnv("DINGBAT_FRAME_TRACE")
-  var trace: seq[array[7, uint64]]
+  var trace: seq[array[8, uint64]]
+  var trace_frames = 0'u64  # frames emulated since the last present
   var trace_due, trace_end, trace_ready, trace_swap: uint64
   # DINGBAT_LATENCY_TEST=<trials>: inject an UP press where SDL keys are
   # applied; time until (a) the framebuffer differs and (b) that frame is
@@ -3245,7 +3247,9 @@ proc main() =
         trace_due = next_frame_due
         if trace_path.len > 0: trace_end = getPerformanceCounter()
         scheduler_frame_ran()
-      if emulated: inc frames_run
+      if emulated:
+        inc frames_run
+        inc trace_frames
       if emulated and app.emu_kind == ekGBA and app.gba_emu != nil:
         note_gba_frame()
       if emulated and app.cfg.rewind and app.netlink == nil:
@@ -3372,7 +3376,8 @@ proc main() =
       if trace_path.len > 0:
         trace.add([(if emulated: trace_due else: 0'u64), frame_start,
                    trace_end, trace_ready, trace_swap, getPerformanceCounter(),
-                   present_seq])
+                   present_seq, trace_frames])
+        trace_frames = 0
       if lat_trials > 0 and lat_state == 2:
         let t2 = getPerformanceCounter()
         lat_change_ms.add(lat_ms(lat_t0, lat_t1))
@@ -3402,7 +3407,7 @@ proc main() =
         delay(1)
   if trace_path.len > 0:
     var csv = &"# freq={getPerformanceFrequency()} " &
-              &"frame_ticks={frame_ticks}\ndue,start,emulated,ready,swap,swapped,shown\n"
+              &"frame_ticks={frame_ticks}\ndue,start,emulated,ready,swap,swapped,shown,frames\n"
     for r in trace:
       var row = r
       row[6] = pr.shown_at(r[6], uint64(getPerformanceFrequency()))
