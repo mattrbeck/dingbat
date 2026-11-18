@@ -1174,7 +1174,10 @@ proc draw*(v: LibraryView; rom_types: string) =
   let css_w = inner_w / s
   let avail = size.y / s
   template X(q: float32): float32 = pos.x + q * s
-  template Y(q: float32): float32 = pos.y - scroll + v.bounce + q * s
+  # The page moves in whole points: the tiles are drawn on whole points and
+  # the rest not, which a fractional offset would shift against each other
+  let shift = round(scroll - v.bounce)
+  template Y(q: float32): float32 = pos.y - shift + q * s
   let n = v.visible.len
   let gutter = if css_w < 360: 16'f32 else: LIB_PAD
   let hero = v.hero_shown
