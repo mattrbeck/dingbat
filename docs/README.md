@@ -5,7 +5,6 @@ One line per document: what it is for and who reads it. Scores live only in
 
 ## Using dingbat
 
-- [downloads.md](downloads.md) — prebuilt desktop binaries per platform.
 - [usage.md](usage.md) — loading ROMs, BIOS files, saves, GB renderer choice.
 - [features.md](features.md) — what the front-ends and the emulated systems support.
 - [link-usage.md](link-usage.md) — local 2P, online room codes, native TCP link: the practical guide.

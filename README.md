@@ -24,7 +24,6 @@ upscaling, color correction, and more.
 
 ### Documentation
 
-- [Downloads](docs/downloads.md) - prebuilt desktop binaries for Linux, macOS, Windows
 - [Building](docs/building.md) - native, WebAssembly, and Windows cross-builds
 - [Index](docs/README.md) - the index of every reference doc
 

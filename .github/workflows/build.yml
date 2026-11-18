@@ -1,8 +1,8 @@
 name: Build
 
-# Desktop binaries for all three platforms on every push and PR, downloadable
-# from the run's Artifacts. Unsigned; the .dmg reports 0.0.0 unless built
-# from a tag.
+# Checks that the desktop app builds on all three platforms, on every push and
+# PR. The binaries stay in the run's Artifacts for testing; they are not
+# published, and are unsigned.
 on:
   push:
     branches: [main]
@@ -14,52 +14,3 @@ on:
 jobs:
   artifacts:
     uses: ./.github/workflows/build-artifacts.yml
-
-  # Publish the same files to a rolling "Latest build" prerelease. A release
-  # must hang off a tag, so `latest` is force-pushed to the head of main each
-  # run; prerelease keeps the "Latest release" badge for real v* tags.
-  # Push-to-main only (a fork PR could not get a write token anyway).
-  publish-latest:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: artifacts
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
-        with:
-          path: artifacts
-      - name: Stage + checksum
-        run: .github/scripts/stage-release.sh artifacts release
-      - name: Move the rolling tag to this commit
-        # action-gh-release creates a missing tag but never moves an existing one.
-        run: |
-          git tag -f latest
-          git push -f origin latest
-      - uses: softprops/action-gh-release@v2
-        with:
-          tag_name: latest
-          name: Latest build (main)
-          prerelease: true
-          # Stable names so /releases/download/latest/<name> keeps working.
-          # (/releases/latest/download/<name> is the latest NON-prerelease and
-          # 404s while this is the only release.)
-          files: release/*
-          body: |
-            Automatically rebuilt from `main` on every push — these are
-            development builds, not a tagged release, and they change without
-            notice.
-
-            | Platform | File |
-            |---|---|
-            | Linux x64 | `dingbat-linux-x64.tar.gz` |
-            | macOS (Apple Silicon) | `dingbat-macos.dmg` |
-            | Windows x64 | `dingbat-windows-x64.exe` |
-
-            All binaries are **unsigned**: macOS needs *System Settings →
-            Privacy & Security → Open Anyway*, Windows needs *More info → Run
-            anyway*, once each. The Linux build links SDL 3 statically
-            and is built against glibc 2.34.
-
-            Verify with `shasum -a 256 -c SHA256SUMS.txt`.
