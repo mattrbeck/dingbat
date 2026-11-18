@@ -1665,6 +1665,18 @@ proc run_gb_rev6() =
           "an OAM scan an OAM DMA interrupted does not claim the same LY a " &
           "frame later", $stale & " of 20 boundaries still held its line")
 
+  # Channel 4's last restart edge (rev 11) travels while a retrigger can
+  # still read it.
+  block:
+    let emu = new_gb_for(GB_ROMS[0][0])
+    for _ in 0 ..< 5: emu.step_frame()
+    let edge = emu.scheduler.cycles + gb_apu_tick(emu)
+    emu.apu.channel4.restart_edge = edge
+    let twin = new_gb_for(GB_ROMS[0][0])
+    check(twin.load_state_bytes(emu.state_bytes()) and
+          twin.apu.channel4.restart_edge == edge,
+          "GB channel 4's restart edge travels with the state")
+
   # Refusals: what stays impossible, and a newer payload revision.
   block:
     let emu = new_gb_for(GB_ROMS[1][0])

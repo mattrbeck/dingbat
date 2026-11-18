@@ -215,9 +215,8 @@ type
     div_next*:     CycleCount
     # GB: the 1 MHz edge of the last trigger that restarted the divisor
     # stage, PSG_NO_STEP if none; only ch4_restart_edge reads it, and only
-    # within two ticks of it. Not serialized (a state saved inside that
-    # window takes the next trigger as a plain restart): GB payload rev
-    # deferred list.
+    # within two ticks of it. Serialized from GB payload rev 11 (none
+    # once past those two ticks).
     restart_edge*: CycleCount
 
 proc new_psg_square_sweep*(): PsgSweepSquare =

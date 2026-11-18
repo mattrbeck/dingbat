@@ -550,6 +550,8 @@ proc read_deadline(r: var Reader; now: CycleCount; field: string): CycleCount =
   # Every deadline carried is within a frame of the payload's clock;
   # anything further is damage.
   check_range(d, -(1 shl 20), 1 shl 20, field)
+  if int64(now) + int64(d) < 0:
+    raise state_error("save state field '" & field & "' is before the clock's start")
   CycleCount(int64(now) + int64(d))
 
 proc save_apu_state(apu: GbApu; gb: GB; w: var Writer) =
@@ -646,6 +648,11 @@ proc save_apu_state(apu: GbApu; gb: GB; w: var Writer) =
   for ch in [PsgSquare(apu.channel1), apu.channel2]:
     w.write_deadline(if ch.start_at != GB_NO_STEP and ch.start_at >= now:
                        ch.start_at else: GB_NO_STEP, now)
+  # rev 11: channel 4's last divisor restart edge, while a retrigger could
+  # still read it (ch4_restart_edge: two ticks); an older one is none.
+  let edge = apu.channel4.restart_edge
+  w.write_deadline(if edge != GB_NO_STEP and edge + 2 * gb_apu_tick(gb) >= now:
+                     edge else: GB_NO_STEP, now)
 
 proc ch1_sweep_from_rev8(ch: GbChannel1) =
   ## A rev <= 8 state's sweep unit: those builds computed each clock's value
@@ -666,8 +673,6 @@ proc ch1_sweep_from_rev8(ch: GbChannel1) =
 
 proc load_apu_state(apu: GbApu; gb: GB; r: var Reader; rev: uint32) =
   r.expect_tag(GB_SEC_APU)
-  # Not in the payload (psg.nim, PsgNoise.restart_edge).
-  apu.channel4.restart_edge = GB_NO_STEP
   apu.sound_enabled = r.read_bool()
   apu.frame_sequencer_stage = int(r.read_u8())
   apu.first_half_of_length_period = r.read_bool()
@@ -774,6 +779,10 @@ proc load_apu_state(apu: GbApu; gb: GB; r: var Reader; rev: uint32) =
     # trigger within two APU ticks of the frame boundary would have seen.
     for ch in [PsgSquare(apu.channel1), apu.channel2]:
       ch.start_at = if rev >= 10: r.read_deadline(now, "start_at") else: GB_NO_STEP
+    # Before rev 11 the restart edge was not kept: none, which only a
+    # retrigger within two ticks of the frame boundary would have seen.
+    apu.channel4.restart_edge =
+      if rev >= 11: r.read_deadline(now, "ch4.restart_edge") else: GB_NO_STEP
   else:
     # Before rev 6: the grids' phases and the KEY1 lag stay as the running
     # machine had them, as those builds did; the rest is live for a few
@@ -786,6 +795,7 @@ proc load_apu_state(apu: GbApu; gb: GB; r: var Reader; rev: uint32) =
     apu.env_late_pending = false
     apu.channel1.start_at = GB_NO_STEP
     apu.channel2.start_at = GB_NO_STEP
+    apu.channel4.restart_edge = GB_NO_STEP
   # Restart audio pacing cleanly (see GBA load_apu_state)
   apu.buffer_pos = 0
   when not defined(test_harness) and not defined(emscripten):
