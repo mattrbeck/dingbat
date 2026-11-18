@@ -1445,7 +1445,7 @@ const rbAskMismatch = (rb) => {
   rb.needRom = true;
   rb.mismatchAsked = true;
   netShowMismatch(true);
-  netModal.querySelector("#net-mismatch-yes")?.focus?.();
+  document.getElementById("net-mismatch-yes")?.focus();
 };
 
 const rbMismatchAnswer = (yes) => {
