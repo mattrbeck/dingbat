@@ -19,7 +19,7 @@
 
 import { createServer } from "node:http";
 import { execFileSync } from "node:child_process";
-import { readdirSync, existsSync } from "node:fs";
+import { readdirSync, existsSync, mkdirSync, copyFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import assert from "node:assert/strict";
 import {
@@ -189,6 +189,39 @@ try {
   assert.ok(!left.includes(NEW), "the iPhone dropped the deleted game");
   const lingering = drive.files.filter((f) => f.name.includes(NEW));
   assert.equal(lingering.length, 0, "Drive holds nothing of it: " + lingering.map((f) => f.name));
+
+  // 6. Another game of the same name. The account's Drive gets the game
+  // again from the web; a fresh install starts with a different file under
+  // that name. Signed in, the iPhone's moves to a numbered name and goes up
+  // as its own game; Drive's keeps the name and its save.
+  await addGame(web);
+  await play(web, 40);
+  await mainMenu(web);
+  await syncNow(web);
+  await idle(web);
+  const theirs = Buffer.from(drive.get("rom:" + GAME).bytes);
+  const theirSave = Buffer.from(drive.get("save:" + GAME).bytes);
+  const OTHER = new URL("../../tests/roms/gblinktest.gb", import.meta.url).pathname;
+  const mine = readFileSync(OTHER);
+  assert.ok(!mine.equals(theirs), "two different files");
+  trySimctl("terminate", UDID, BUNDLE);
+  trySimctl("uninstall", UDID, BUNDLE);
+  simctl("install", UDID, APP);
+  const data = simctl("get_app_container", UDID, BUNDLE, "data").trim();
+  mkdirSync(join(data, "Documents/roms"), { recursive: true });
+  copyFileSync(OTHER, join(data, "Documents/roms", GAME));
+  launchApp(["-drive-stub", stub.base]);
+  const SECOND = GAME.replace(/(\.[^.]+)$/, " (2)$1");
+  await until("the iPhone's game to go up under its numbered name",
+    () => !!drive.get("rom:" + SECOND), 40000);
+  await sleep(4000);
+  const roms = readdirSync(join(data, "Documents/roms")).sort();
+  console.log("ROM files on the iPhone:", roms.join(", "));
+  assert.deepEqual(roms, [SECOND], "its file is under the numbered name, and Drive's is not fetched");
+  assert.ok(readFileSync(join(data, "Documents/roms", SECOND)).equals(mine), "the same bytes it had");
+  assert.ok(Buffer.from(drive.get("rom:" + SECOND).bytes).equals(mine), "and those went up");
+  assert.ok(Buffer.from(drive.get("rom:" + GAME).bytes).equals(theirs), "Drive's game is untouched");
+  assert.ok(Buffer.from(drive.get("save:" + GAME).bytes).equals(theirSave), "and so is its save");
   console.log("PASS");
 } catch (e) {
   failed = true;

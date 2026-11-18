@@ -51,8 +51,8 @@ struct RomEntry: Identifiable, Equatable, Hashable {
     /// and controls, and nothing of it on Drive.
     var isNDS: Bool { system == "DS" }
 
-    var url: URL { RomLibrary.romsDir.appendingPathComponent(fileName) }
-    var dir: URL { RomLibrary.gamesDir.appendingPathComponent(fileName, isDirectory: true) }
+    var url: URL { RomLibrary.inside(RomLibrary.romsDir, fileName) }
+    var dir: URL { RomLibrary.inside(RomLibrary.gamesDir, fileName, isDirectory: true) }
     /// The path the core loads: a link to the ROM inside the game's folder, so
     /// the battery save it writes beside it (rom.sav) is this game's alone.
     var coreURL: URL { dir.appendingPathComponent("rom." + (ext.isEmpty ? "gb" : ext)) }
@@ -182,7 +182,7 @@ final class RomLibrary: ObservableObject {
         if let data = try? Data(contentsOf: Self.recentURL),
            let arr = JSValue.parse(data)?.arrayValue {
             recents = arr.compactMap { v in
-                guard let o = v.objectValue, let n = o.string("name"), !n.isEmpty else { return nil }
+                guard let o = v.objectValue, let n = o.string("name"), Self.validName(n) else { return nil }
                 return Lib.entry(name: n, ts: o.number("ts") ?? 0, imp: o.number("imp"), gen: Lib.gen(o))
             }
         }
@@ -197,6 +197,26 @@ final class RomLibrary: ObservableObject {
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
     }
 
+    /// A game name from outside (Drive's file names and library, a zip, a
+    /// picked file) that may key a game: one plain path component, no
+    /// longer than a file's name can be.
+    static func validName(_ n: String) -> Bool {
+        if n.isEmpty || n == "." || n == ".." || n.utf8.count > 255 { return false }
+        if n.contains("/") || n.contains("\\") { return false }
+        return !n.unicodeScalars.contains(where: { $0.value < 0x20 || (0x7f...0x9f).contains($0.value) })
+    }
+
+    /// `dir/name`. A name that would land anywhere else gets a path under
+    /// /dev/null instead, where every write, read and delete fails.
+    static func inside(_ dir: URL, _ name: String, isDirectory: Bool = false) -> URL {
+        let u = dir.appendingPathComponent(name, isDirectory: isDirectory)
+        guard !name.isEmpty, !name.contains("/"), !name.contains("\0"),
+              u.standardizedFileURL.path == dir.standardizedFileURL.path + "/" + name else {
+            return URL(fileURLWithPath: "/dev/null/refused", isDirectory: isDirectory)
+        }
+        return u
+    }
+
     // MARK: the index
 
     /// ROMs that arrived in Documents/roms through the Files app join the
@@ -205,7 +225,8 @@ final class RomLibrary: ObservableObject {
         let files = (try? FileManager.default.contentsOfDirectory(
             at: Self.romsDir, includingPropertiesForKeys: [.contentModificationDateKey])) ?? []
         var added: [RomEntry] = []
-        for f in files where Self.romExtensions.contains(f.pathExtension.lowercased()) {
+        for f in files where Self.romExtensions.contains(f.pathExtension.lowercased())
+            && Self.validName(f.lastPathComponent) {
             let name = f.lastPathComponent
             if !recents.contains(where: { $0.string("name") == name }) {
                 let date = (try? f.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
@@ -382,8 +403,8 @@ final class RomLibrary: ObservableObject {
     }
 
     /// Import from the document picker (security-scoped URL) or an Open-in.
-    /// The same file name again replaces the ROM and keeps its saves (the web
-    /// keys games by file name too).
+    /// The same game again keeps its saves (the web keys games by file name
+    /// too); a different game under a name in use is numbered (`add`).
     @discardableResult
     @MainActor
     func importRom(from source: URL) async throws -> RomEntry {
@@ -413,9 +434,49 @@ final class RomLibrary: ObservableObject {
         return try await add(romData: data, fileName: source.lastPathComponent)
     }
 
+    /// "Game.gba" -> "Game (2).gba", as a file system names a second copy
+    /// (web numberedRomName).
+    static func numberedName(_ name: String, _ n: Int) -> String {
+        guard let dot = name.lastIndex(of: "."), dot != name.startIndex else { return "\(name) (\(n))" }
+        return "\(name[..<dot]) (\(n))\(name[dot...])"
+    }
+
+    /// The name a ROM being added goes under (web claimRomName): its own, or
+    /// the first numbered one, that `taken` (a different game holds it) does
+    /// not refuse.
+    static func claimName(_ name: String, taken: (String) -> Bool) -> String {
+        for n in 1..<1000 {
+            let cand = n == 1 ? name : numberedName(name, n)
+            if !taken(cand) { return cand }
+        }
+        return name
+    }
+
+    /// A different game holds `name`: other ROM bytes, or, known here
+    /// without its file, a size on record that is not this file's. Every
+    /// record of a game hangs off its name, so a different game under it
+    /// would boot on that game's save and write over it.
+    private func nameTaken(_ name: String, by rom: Data) -> Bool {
+        let e = RomEntry(fileName: name)
+        if e.isLocal { return (try? Data(contentsOf: e.url, options: .mappedIfSafe)) != rom }
+        guard recents.contains(where: { $0.string("name") == name }) || hasAnyLocalRecord(name) else { return false }
+        let size = romSize(name)
+        if size != 0 && size != rom.count { return true }
+        // The same size says little: Drive's digest of its file, if listed.
+        if let theirs = DriveSync.shared.driveRomSha[name] { return DriveSync.sha256(rom) != theirs }
+        return false
+    }
+
     /// Bytes first, index second (web addRecentRom).
     @MainActor
-    func add(romData: Data, fileName: String) async throws -> RomEntry {
+    func add(romData: Data, fileName asked: String) async throws -> RomEntry {
+        guard Self.validName(asked) else {
+            throw ImportError.unreadable("That file's name can't be used — rename it and try again")
+        }
+        let fileName = Self.claimName(asked) { nameTaken($0, by: romData) }
+        if fileName != asked {
+            AppModel.shared.toast("Added as “\(DriveSync.display(fileName))” — a different game named “\(DriveSync.display(asked))” is already in your library", duration: 5)
+        }
         let e = RomEntry(fileName: fileName)
         do { try romData.write(to: e.url, options: .atomic) } catch {
             throw ImportError.unreadable("Couldn't keep that file: \(error.localizedDescription)")
@@ -549,6 +610,7 @@ final class RomLibrary: ObservableObject {
         if name.lowercased().hasSuffix("-p2") { return "A name can't end in “-p2”" }
         if name == e.stem { return "That's already its name" }
         let full = name + "." + (e.fileName as NSString).pathExtension
+        if !Self.validName(full) { return "That name is too long" }
         if recents.contains(where: { $0.string("name") == full }) ||
             Self.perGameKeys(full).all.contains(where: Self.hasKey) {
             return "Another game already has that name"

@@ -6,6 +6,7 @@
 // a map, because Drive does: two devices can each create a file called
 // "library", and a listing can come back in pages.
 
+import { createHash } from "node:crypto";
 import { jsonRes, bytesRes, u8 } from "./helpers.mjs";
 
 export const FILES = "https://www.googleapis.com/drive/v3/files";
@@ -76,10 +77,12 @@ export const makeDrive = ({ seed = {}, clock, pageSize = Infinity } = {}) => {
       const start = Number(q.get("pageToken") || 0);
       // Drive returns appProperties only to a listing that asks for them.
       const props = (q.get("fields") || "").includes("appProperties");
+      const sha = (q.get("fields") || "").includes("sha256Checksum");
       const page = files.slice(start, start + size).map((f) => ({
         id: f.id, name: f.name, size: String(f.bytes.length),
         modifiedTime: f.modifiedTime, createdTime: f.createdTime,
         ...(props && f.appProperties ? { appProperties: { ...f.appProperties } } : {}),
+        ...(sha ? { sha256Checksum: createHash("sha256").update(f.bytes).digest("hex") } : {}),
       }));
       const more = start + size < files.length;
       return jsonRes(more ? { files: page, nextPageToken: String(start + size) }

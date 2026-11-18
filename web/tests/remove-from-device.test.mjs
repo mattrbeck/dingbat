@@ -241,7 +241,9 @@ test("a flush that skips an already-present ROM still records the copy", async (
   const app = await loadApp();
   app.setFetch(makeDrive(["rom:A.gba"]).fetch);
   signIn(app);
-  seedLocal(app, "A.gba");
+  // The file this Drive serves: one of another size would be another game
+  // of the same name, and moved aside (settleRomClashes).
+  seedLocal(app, "A.gba", u8(65, 66, 67));
   app.api.syncState.queueUp.push("rom:A.gba");
 
   await app.api.flushSync();

@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import Network
 import SwiftUI
@@ -72,13 +73,15 @@ struct DriveLibrary {
     static func parse(_ data: Data) -> DriveLibrary {
         guard let o = JSValue.parse(data)?.objectValue else { return DriveLibrary() }
         var lib = DriveLibrary()
+        let ok = RomLibrary.validName
         lib.recents = (o["recents"]?.arrayValue ?? []).compactMap { $0.objectValue }
+            .filter { ok($0.string("name") ?? "") }
         lib.tomb = (o["tomb"]?.arrayValue ?? []).compactMap { v in
-            guard let t = v.objectValue, let n = t.string("name") else { return nil }
+            guard let t = v.objectValue, let n = t.string("name"), ok(n) else { return nil }
             return Tomb(name: n, ts: t.number("ts") ?? 0, gen: Lib.gen(t))
         }
         lib.ren = (o["ren"]?.arrayValue ?? []).compactMap { v in
-            guard let r = v.objectValue, let f = r.string("from"), let t = r.string("to") else { return nil }
+            guard let r = v.objectValue, let f = r.string("from"), let t = r.string("to"), ok(f), ok(t) else { return nil }
             return Ren(from: f, to: t, ts: r.number("ts") ?? 0)
         }
         return lib
@@ -187,9 +190,15 @@ func driveExcluded(_ key: String) -> Bool {
     return RomLibrary.isNdsName(p.game)
 }
 
-/// Drive file name -> (game, kind); nil for anything unknown. Slot 0 keeps
-/// "state"/"statemeta", slots 1..8 append ":slotN".
+/// Drive file name -> (game, kind); nil for anything unknown, and for a
+/// game name that could not be a file's (the game is a folder here). Slot 0
+/// keeps "state"/"statemeta", slots 1..8 append ":slotN".
 func parseDriveFileName(_ n: String) -> (game: String, kind: String)? {
+    guard let p = splitDriveFileName(n), RomLibrary.validName(p.game) else { return nil }
+    return p
+}
+
+private func splitDriveFileName(_ n: String) -> (game: String, kind: String)? {
     if n.hasPrefix("rom:") { return (String(n.dropFirst(4)), "rom") }
     if n.hasPrefix("frame:") { return (String(n.dropFirst(6)), "frame") }
     for (prefix, cat) in [("statemeta:", "statemeta"), ("state:", "state")] where n.hasPrefix(prefix) {
@@ -302,6 +311,10 @@ final class DriveSync: ObservableObject {
         var url = ""
         var ts: Double = 0
         var dirty = false
+        /// Allowed on this device, and never synced: whoever can write the
+        /// account's Drive files could otherwise have every save sent to
+        /// them. Nil is a record from before it, which counts as allowed.
+        var ok: Bool?
     }
 
     @Published private(set) var status: Status = .idle
@@ -337,6 +350,9 @@ final class DriveSync: ObservableObject {
         if let data = try? Data(contentsOf: Self.stateURL),
            let s = try? JSONDecoder().decode(State.self, from: data) {
             state = s
+            // Kept by a build that took any name Drive gave.
+            state.tomb.removeAll { !RomLibrary.validName($0.name) }
+            state.ren.removeAll { !RomLibrary.validName($0.from) || !RomLibrary.validName($0.to) }
         }
         #if DEBUG
         // Dev hook: `-drive-stub http://127.0.0.1:PORT` talks to a fake Drive
@@ -579,7 +595,9 @@ final class DriveSync: ObservableObject {
         let sl = (o["state"] as? NSNumber)?.intValue ?? 0
         let pl = (o["pic"] as? NSNumber)?.intValue ?? 0
         let at = 12 + hl
-        guard sl > 0, at + sl + pl <= bytes.count else { return nil }
+        // Each on its own: a negative picture length would let a state
+        // length past the end through the sum.
+        guard sl > 0, pl >= 0, sl <= bytes.count - at, pl <= bytes.count - at - sl else { return nil }
         let pic = pl > 0 ? Data(bytes[(at + sl)..<(at + sl + pl)]) : nil
         return (head, Data(bytes[at..<(at + sl)]), pic, meta)
     }
@@ -870,6 +888,7 @@ final class DriveSync: ObservableObject {
         setStatus(.syncing)
         do {
             var remote = try await listMap(); try live()
+            await settleRomClashes(remote)
             var lib = mergeLibrary(try await readLibrary(&remote, live: live), localLibrary())
             try live()
             // A tombstone the merge dropped: a later play elsewhere says the
@@ -969,6 +988,7 @@ final class DriveSync: ObservableObject {
         let game = parsed?.game
         if let game, lib.deleted(game) { state.queueUp.removeAll { $0 == name }; return }
         if let game, lib.ren.contains(where: { $0.from == game }) { return }
+        if let game, romClashHeld.contains(game) { return }
         let gen = game.map { RomLibrary.shared.gen(of: $0) } ?? 0
         if let game, let p = parsed, genBound(p.kind), lib.gen(game) > gen {
             state.queueUp.removeAll { $0 == name }
@@ -1031,6 +1051,7 @@ final class DriveSync: ObservableObject {
             var remote = try await listMap(); try live()
             if firstListing == nil { firstListing = remote }
             try await syncSaveHook(remote, live: live)
+            await settleRomClashes(remote)
             var lib = mergeLibrary(try await readLibrary(&remote, live: live), localLibrary())
             try live()
 
@@ -1105,6 +1126,8 @@ final class DriveSync: ObservableObject {
                     if f.size > 0 { RomLibrary.shared.noteRomSize(p.game, f.size) }
                     continue
                 }
+                // Drive's files of that name are another game's.
+                if romClashHeld.contains(p.game) { continue }
                 if p.kind == "oldsave" {
                     let t = lib.tomb.first { $0.name == p.game }
                     let from = t?.ts ?? Self.parseTime(f.modifiedTime) ?? 0
@@ -1168,7 +1191,8 @@ final class DriveSync: ObservableObject {
             try live()
             // Reconcile upward: anything held here that the listing lacks.
             for (name, p) in local {
-                if remote.map[name] != nil || lib.deleted(p.game) || renPending.contains(p.game) { continue }
+                if remote.map[name] != nil || lib.deleted(p.game) || renPending.contains(p.game)
+                    || romClashHeld.contains(p.game) { continue }
                 if !state.queueUp.contains(name) { state.queueUp.append(name); queuedMissing = true }
             }
             // Merged again with the library as it is now, under the lock.
@@ -1222,6 +1246,58 @@ final class DriveSync: ObservableObject {
     /// Another device's rename, applied here: every record moves; a
     /// collision keeps both unless the bytes match. Nil when the game is
     /// open (deferred to a later pull); else how many records moved.
+    static func sha256(_ d: Data) -> String {
+        SHA256.hash(data: d).map { String(format: "%02x", $0) }.joined()
+    }
+
+    /// Before a sync touches a file (web settleRomClashes): a game here whose
+    /// ROM this account's Drive has never had from this device, under a name
+    /// Drive holds another ROM by. Synced as they are each would take the
+    /// other's save. The one here moves to the first free numbered name with
+    /// all it has and goes up as a game of its own; Drive's keeps the name.
+    /// `sigs` holds a ROM once this device has synced it: those are left.
+    @MainActor
+    private func settleRomClashes(_ remote: Listing) async {
+        romClashHeld = []
+        driveRomSha = [:]
+        for (name, f) in remote.map where name.hasPrefix("rom:") {
+            if let s = f.sha256 { driveRomSha[String(name.dropFirst(4))] = s }
+        }
+        let lib = RomLibrary.shared
+        for (key, p) in localSyncFiles() where p.kind == "rom" {
+            guard let f = remote.map[key], state.sigs[key] == nil, let bytes = readSyncBytes(key) else { continue }
+            let game = p.game
+            var same = true
+            if f.size > 0 && f.size != bytes.count { same = false }
+            else if let theirs = f.sha256 { same = Self.sha256(bytes) == theirs }
+            if same { continue }
+            let to = (2..<1000).lazy.map { RomLibrary.numberedName(game, $0) }.first { cand in
+                remote.map["rom:" + cand] == nil && !lib.recents.contains { $0.string("name") == cand }
+                    && !lib.hasAnyLocalRecord(cand)
+            }
+            guard let to, let moved = applyRemoteRename(game, to), moved > 0,
+                  !RomLibrary.hasKey("rom:" + game) else {
+                // Being played, or not all of it moved: nothing of it syncs yet.
+                romClashHeld.insert(game)
+                continue
+            }
+            // Nothing of the moved game is on Drive, whatever followed its keys.
+            for k in RomLibrary.perGameKeys(to).all { state.sigs[k] = nil; state.rmt[k] = nil }
+            _ = await lib.updateRecent { recents in
+                recents.map { r in
+                    guard r.string("name") == game else { return r }
+                    var o = r
+                    o["name"] = .string(to)
+                    return o
+                }
+            }
+            lib.noteRomSize(to, bytes.count)
+            saveState()
+            markGameUpload(to)
+            AppModel.shared.toast("“\(Self.display(game))” on this device is now “\(Self.display(to))” — your account already has a different game named “\(Self.display(game))”", duration: 6)
+        }
+    }
+
     private func applyRemoteRename(_ from: String, _ to: String) -> Int? {
         renamedAway.remove(to)
         if GameSession.shared.game?.fileName == from { return nil }
@@ -1356,9 +1432,23 @@ final class DriveSync: ObservableObject {
 
     // MARK: save webhook (its own file, newest ts wins)
 
+    var saveHookApproved: Bool { state.saveHook.ok ?? true }
+
+    /// Games kept out of a sync round: a different game of the same name is
+    /// on Drive and this one could not be moved aside yet (settleRomClashes).
+    private var romClashHeld = Set<String>()
+    /// Drive's SHA-256 of each ROM it holds, by game, as last listed.
+    private(set) var driveRomSha: [String: String] = [:]
+
+    func allowSaveHook() {
+        state.saveHook.ok = true
+        saveState()
+    }
+
+    /// An address entered on this device.
     func setSaveHook(_ url: String) {
         guard url != state.saveHook.url else { return }
-        state.saveHook = SaveHookRec(url: url, ts: Self.now(), dirty: true)
+        state.saveHook = SaveHookRec(url: url, ts: Self.now(), dirty: true, ok: true)
         saveState()
         if active { Task { @MainActor in await self.pull() } }
     }
@@ -1373,7 +1463,9 @@ final class DriveSync: ObservableObject {
                 let ts = (o["ts"] as? NSNumber)?.doubleValue ?? 0
                 let url = (o["url"] as? String) ?? ""
                 if ts > state.saveHook.ts, url.isEmpty || url.hasPrefix("http://") || url.hasPrefix("https://") {
-                    state.saveHook = SaveHookRec(url: url, ts: ts, dirty: false)
+                    // Removing it, or the address already here, needs no asking.
+                    let ok = url.isEmpty ? true : url == state.saveHook.url ? state.saveHook.ok : false
+                    state.saveHook = SaveHookRec(url: url, ts: ts, dirty: false, ok: ok)
                     Settings.shared.adoptSyncedWebhook(url)
                 }
             }

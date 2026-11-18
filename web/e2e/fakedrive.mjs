@@ -5,6 +5,7 @@
 // node:vm fake in web/tests/drivefake.mjs this one carries real binary
 // bodies: a session is a save state and a JPEG.
 
+import { createHash } from "node:crypto";
 export const makeDrive = () => {
   const files = [];
   const log = [];
@@ -15,6 +16,7 @@ export const makeDrive = () => {
   const stamp = () => new Date((clock += 1000)).toISOString();
   const meta = (f) => ({
     id: f.id, name: f.name, size: String(f.bytes.length),
+    sha256Checksum: createHash("sha256").update(f.bytes).digest("hex"),
     modifiedTime: f.modifiedTime, createdTime: f.createdTime,
     ...(f.appProperties ? { appProperties: f.appProperties } : {}),
   });

@@ -9,6 +9,8 @@ struct DriveFile {
     var createdTime: String
     /// The generation the file was written for (appProperties.gen; absent 0).
     var gen: Int
+    /// Drive's SHA-256 of the bytes, lowercase hex, where the listing gave one.
+    var sha256: String? = nil
 }
 
 /// The Drive v3 REST calls the sync makes (web index.js driveFetch and the
@@ -84,7 +86,7 @@ final class DriveClient {
             var c = URLComponents(string: Self.files)!
             var q = [URLQueryItem(name: "spaces", value: "appDataFolder"),
                      URLQueryItem(name: "pageSize", value: "1000"),
-                     URLQueryItem(name: "fields", value: "nextPageToken,files(id,name,size,modifiedTime,createdTime,appProperties)")]
+                     URLQueryItem(name: "fields", value: "nextPageToken,files(id,name,size,modifiedTime,createdTime,appProperties,sha256Checksum)")]
             if let page { q.append(URLQueryItem(name: "pageToken", value: page)) }
             c.queryItems = q
             let (data, _) = try await fetch(c.url!)
@@ -96,7 +98,8 @@ final class DriveClient {
                 let g = Int((props?["gen"] as? String) ?? "") ?? 0
                 out.append(DriveFile(id: id, name: name, size: Int((f["size"] as? String) ?? "") ?? 0,
                                      modifiedTime: f["modifiedTime"] as? String ?? "",
-                                     createdTime: f["createdTime"] as? String ?? "", gen: max(0, g)))
+                                     createdTime: f["createdTime"] as? String ?? "", gen: max(0, g),
+                                     sha256: f["sha256Checksum"] as? String))
             }
             page = o["nextPageToken"] as? String
         } while page != nil

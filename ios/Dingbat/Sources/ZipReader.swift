@@ -71,7 +71,10 @@ enum ZipReader {
         // make the library thumbnail or a printed photo the cover.
         let kinds = ExportCore.exportKinds(entries.first { $0.name == "info.json" }.flatMap { data($0) })
         let ofKind = { (k: String) in kinds.flatMap { kinds in entries.first { kinds[$0.name] == k } } }
-        guard let romEntry = ofKind("rom") ?? visible.first(where: { romExts.contains(ext($0.name)) }),
+        // The entry's name becomes the game's, whatever info.json calls it.
+        let usable = { (e: Entry) in romExts.contains(ext(e.name)) && RomLibrary.validName(base(e.name)) }
+        guard let romEntry = ofKind("rom").flatMap({ RomLibrary.validName(base($0.name)) ? $0 : nil })
+                ?? visible.first(where: usable),
               let rom = data(romEntry) else { return nil }
         // Anyone else's zip: the largest image is almost always the box art.
         let art = kinds != nil ? ofKind("art").flatMap { data($0) }

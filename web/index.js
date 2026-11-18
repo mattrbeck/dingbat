@@ -3047,7 +3047,7 @@ const driveListAll = async () => {
   let page = null;
   do {
     let url = GDRIVE_FILES + "?spaces=appDataFolder&pageSize=1000&fields=" +
-      encodeURIComponent("nextPageToken,files(id,name,size,modifiedTime,createdTime,appProperties)") +
+      encodeURIComponent("nextPageToken,files(id,name,size,modifiedTime,createdTime,appProperties,sha256Checksum)") +
       (page ? "&pageToken=" + encodeURIComponent(page) : "");
     let body = await (await driveFetch(url)).json();
     files.push(...(body.files || []));
@@ -3646,7 +3646,7 @@ const writeSyncBytes = async (name, bytes) => {
     return;
   }
   if (name.startsWith("statemeta:")) {
-    try { await dbPut(name, JSON.parse(new TextDecoder().decode(bytes))); }
+    try { await dbPut(name, cleanStateMeta(JSON.parse(new TextDecoder().decode(bytes)))); }
     catch {}
     return;
   }
@@ -4215,6 +4215,7 @@ const flushSyncInner = async () => {
   setSyncStatus("syncing");
   try {
     let remote = live(await driveListMap());
+    live(await settleRomClashes(remote, live));
     // What the library says about existence and naming, settled before a
     // single file is touched, so the files cannot end up disagreeing with it.
     let lib = mergeLibrary(live(await readDriveLibrary(remote)), live(await localLibrary()));
@@ -4313,6 +4314,7 @@ const flushSyncInner = async () => {
         return;
       }
       if (game && lib.ren.some((r) => r.from === game)) return;
+      if (game && romClashHeld.has(game)) return;
       // The generation this device holds the game at, read now: an import
       // made since the merge starts a new one.
       let gen = game
@@ -4683,6 +4685,7 @@ const pullSyncInner = async ({ silent = true } = {}) => {
     firstListingSettled(remote);
     // Not the library's business: a setting riding the same pull.
     live(await syncSaveHook(remote, live));
+    live(await settleRomClashes(remote, live));
     let lib = mergeLibrary(live(await readDriveLibrary(remote)), live(await localLibrary()));
 
     // Remote renames before the tombstone pass, so anything still under an
@@ -4843,6 +4846,7 @@ const pullSyncInner = async ({ silent = true } = {}) => {
       if (!p || p.kind === "rom" || syncState.rmt[name] === f.modifiedTime) return false;
       if (genBound(p.kind) && fileGen(f) < libGen(lib, p.game)) return false;
       if (isRomLoaded(p.game) || loadingName === p.game) return false;
+      if (romClashHeld.has(p.game)) return false;
       return p.kind === "frame" ? lib.recents.some((r) => r.name === p.game)
         : romsHere.has(p.game) || (p.kind === "oldsave" && local.has(name));
     }).map(([, f]) => f));
@@ -4862,6 +4866,8 @@ const pullSyncInner = async ({ silent = true } = {}) => {
         if (f.size) await noteRomSize(p.game, Number(f.size) || 0);
         continue;
       }
+      // Drive's files of that name are another game's.
+      if (romClashHeld.has(p.game)) continue;
       if (p.kind === "oldsave") {
         // A kept save past its 30 days, whoever kept it: from the delete the
         // library records, or failing that from when it reached Drive.
@@ -4962,6 +4968,7 @@ const pullSyncInner = async ({ silent = true } = {}) => {
       // A deferred rename still holds files under the old name; re-uploading
       // them would resurrect the retired names.
       if (renPending.has(p.game)) continue;
+      if (romClashHeld.has(p.game)) continue;
       if (!syncState.queueUp.includes(name)) {
         syncState.queueUp.push(name);
         queuedMissing = true;
@@ -6956,11 +6963,28 @@ const loadSystemSettings = async () => {
 // library, which older builds rewrite with only the fields they know; they
 // skip a file they cannot name, parseDriveFileName): { url, ts }, the newest
 // ts wins (syncSaveHook). `dirty` = changed here and not yet on Drive.
+// `ok` = allowed on this device, and never synced: an address typed here is,
+// one that arrived from Drive is not until the player allows it, since
+// whoever can write the account's Drive files could otherwise have every
+// save sent to them. A record from before `ok` counts as allowed.
 const SAVE_HOOK_KEY = "save-hook";
 const SAVE_HOOK_FILE = "save-hook";
-let saveHook = { url: "", ts: 0, dirty: false };
+let saveHook = { url: "", ts: 0, dirty: false, ok: true };
 const saveHookInput = /** @type {HTMLInputElement} */ (document.getElementById("save-hook-url"));
 const saveHookStatus = document.getElementById("save-hook-status");
+const saveHookAsk = document.getElementById("save-hook-ask");
+const saveHookAskText = document.getElementById("save-hook-ask-text");
+
+const paintSaveHookAsk = () => {
+  if (!saveHookAsk) return;
+  let asking = !!saveHook.url && !saveHook.ok;
+  saveHookAsk.hidden = !asking;
+  if (!asking || !saveHookAskText) return;
+  let host = saveHook.url;
+  try { host = new URL(saveHook.url).host; } catch {}
+  saveHookAskText.textContent =
+    "Set on another device. Saves aren't sent to " + host + " until you allow it.";
+};
 
 const setSaveHookStatus = (text) => {
   if (saveHookStatus) saveHookStatus.textContent = text;
@@ -6978,28 +7002,40 @@ const normalizeSaveHookUrl = (s) => {
 
 const adoptSaveHook = async (rec) => {
   let changed = rec.url !== saveHook.url;
-  saveHook = { url: rec.url, ts: rec.ts, dirty: !!rec.dirty };
+  saveHook = { url: rec.url, ts: rec.ts, dirty: !!rec.dirty, ok: !!rec.ok };
   if (db) await dbPut(SAVE_HOOK_KEY, saveHook);
   if (saveHookInput && document.activeElement !== saveHookInput) saveHookInput.value = saveHook.url;
   if (changed) setSaveHookStatus("");
+  paintSaveHookAsk();
 };
 
 const loadSaveHook = async () => {
   let s = await dbGet(SAVE_HOOK_KEY);
   if (s && typeof s === "object") {
     let url = normalizeSaveHookUrl(s.url);
-    saveHook = { url: url || "", ts: Number(s.ts) || 0, dirty: !!s.dirty };
+    saveHook = { url: url || "", ts: Number(s.ts) || 0, dirty: !!s.dirty, ok: s.ok !== false };
   }
   if (saveHookInput) saveHookInput.value = saveHook.url;
+  paintSaveHookAsk();
 };
 
 // A change made here: kept, stamped, and sent to Drive at once when signed
 // in (an enrolled device that is signed out sends it at its next pull).
 const setSaveHookUrl = async (url) => {
-  if (url === saveHook.url) return;
-  await adoptSaveHook({ url, ts: Date.now(), dirty: true });
+  if (url === saveHook.url) {
+    // Entered again here: the same as allowing it.
+    if (!saveHook.ok) await adoptSaveHook({ ...saveHook, ok: true });
+    return;
+  }
+  await adoptSaveHook({ url, ts: Date.now(), dirty: true, ok: true });
   if (syncActive()) pullSync();
 };
+
+document.getElementById("save-hook-allow")?.addEventListener("click", async () => {
+  if (!saveHook.url || saveHook.ok) return;
+  await adoptSaveHook({ ...saveHook, ok: true });
+  setSaveHookStatus("Saves will be sent here");
+});
 
 if (saveHookInput) saveHookInput.addEventListener("change", async () => {
   let url = normalizeSaveHookUrl(saveHookInput.value);
@@ -7024,7 +7060,11 @@ const syncSaveHook = async (remote, live) => {
     syncState.rmt[SAVE_HOOK_FILE] = f.modifiedTime;
     let ts = Number(o?.ts) || 0;
     let url = normalizeSaveHookUrl(o?.url);
-    if (url !== null && ts > saveHook.ts) live(await adoptSaveHook({ url, ts, dirty: false }));
+    if (url !== null && ts > saveHook.ts) {
+      // Removing it, or the address already allowed here, needs no asking.
+      let ok = url === "" || (url === saveHook.url && saveHook.ok);
+      live(await adoptSaveHook({ url, ts, dirty: false, ok }));
+    }
   }
   if (!saveHook.dirty) return;
   let sent = { url: saveHook.url, ts: saveHook.ts };
@@ -7033,13 +7073,13 @@ const syncSaveHook = async (remote, live) => {
   let meta = live(await res?.json?.().catch(() => null));
   if (meta?.modifiedTime) syncState.rmt[SAVE_HOOK_FILE] = meta.modifiedTime;
   // Changed again while on the wire: still dirty, sent next time.
-  if (saveHook.ts === sent.ts) await adoptSaveHook({ ...sent, dirty: false });
+  if (saveHook.ts === sent.ts) await adoptSaveHook({ ...sent, dirty: false, ok: saveHook.ok });
 };
 
 // Fire and forget.
 const postSaveToHook = (game, data) => {
   let url = saveHook.url;
-  if (!url || !data || !data.length) return;
+  if (!url || !saveHook.ok || !data || !data.length) return;
   let form = new FormData();
   form.append("game", game);
   form.append("savedAt", new Date().toISOString());
@@ -7527,6 +7567,129 @@ const requestPersistentStorage = () => {
     .then((p) => p || navigator.storage.persist())
     .then((p) => log("persistent storage: " + (p ? "granted" : "best-effort")))
     .catch(() => {});
+};
+
+// Drive's SHA-256 of each ROM it holds, by game, as the last listing gave
+// them; and the same of bytes here (null where the page has no WebCrypto,
+// an http: dev serve).
+let driveRomSha = new Map();
+const romSha256 = async (bytes) => {
+  try {
+    let d = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
+    return [...d].map((b) => b.toString(16).padStart(2, "0")).join("");
+  } catch { return null; }
+};
+
+// Games kept out of a sync round: a different game of the same name is on
+// Drive, and this one could not be moved aside yet (settleRomClashes).
+let romClashHeld = new Set();
+
+// Before a sync touches a file: a game here whose ROM this account's Drive
+// has never had from this device, under a name Drive holds another ROM by.
+// Two devices each added a different "Game.gba". Everything of a game goes
+// by its name, so synced as they are each would take the other's save. The
+// one here moves to the first free numbered name, with all it has, and
+// goes up as a game of its own; Drive's keeps the name. `sigs` holds a ROM
+// once this device has synced it: those are left as they are.
+const settleRomClashes = async (remote, live) => {
+  romClashHeld = new Set();
+  driveRomSha = new Map();
+  for (let [name, f] of remote) {
+    if (name.startsWith("rom:") && f.sha256Checksum) driveRomSha.set(name.slice(4), f.sha256Checksum);
+  }
+  for (let key of live(await dbKeys())) {
+    if (typeof key !== "string" || !key.startsWith("rom:")) continue;
+    let f = remote.get(key);
+    if (!f || key in syncState.sigs) continue;
+    let game = key.slice(4);
+    let bytes = live(await readSyncBytes(key));
+    if (!bytes) continue;
+    let same = true;
+    if (f.size && Number(f.size) !== bytes.length) same = false;
+    else if (f.sha256Checksum) {
+      let mine = live(await romSha256(bytes));
+      if (mine) same = mine === f.sha256Checksum;
+    }
+    if (same) continue;
+    let recent = live(await getRecentMeta());
+    let to = null;
+    for (let n = 2; n < 1000 && !to; n++) {
+      let cand = numberedRomName(game, n);
+      if (remote.has(romKey(cand)) || recent.some((r) => r?.name === cand) ||
+          live(await hasAnyLocalRecord(cand))) continue;
+      to = cand;
+    }
+    let moved = to ? live(await applyRemoteRename(game, to)) : null;
+    if (!moved || moved.leftover) {
+      // Open in a link, or mid-load: nothing of it syncs until it has moved.
+      romClashHeld.add(game);
+      continue;
+    }
+    // Nothing of the moved game is on Drive, whatever followed its keys.
+    for (let k of allPerGameKeys(to)) {
+      delete syncState.sigs[k];
+      delete syncState.rmt[k];
+    }
+    live(await updateRecent((all) => all.map((r) => (r?.name === game ? { ...r, name: to } : r))));
+    await noteRomSize(to, bytes.length);
+    live(await saveSyncState());
+    markGameUpload(to);
+    refreshHomeRecent();
+    pushToast("“" + displayName(game) + "” on this device is now “" + displayName(to) +
+              "” — your account already has a different game named “" + displayName(game) + "”",
+              6000, null);
+  }
+};
+
+// "Game.gba" -> "Game (2).gba", as a file system names a second copy.
+const numberedRomName = (name, n) => {
+  let dot = name.lastIndexOf(".");
+  return dot > 0 ? name.slice(0, dot) + " (" + n + ")" + name.slice(dot) : name + " (" + n + ")";
+};
+
+const sameRomBytes = (a, b) => {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+  return true;
+};
+
+// The name a file being added goes under. Everything of a game hangs off
+// its file name (its save, states, picture, its files on Drive), so a
+// different game given a name already in the library would boot on that
+// game's save and write over it. It takes the first numbered name that is
+// free, or that already holds these very bytes; the same bytes under the
+// same name are the same game. A game known here without its file (the file
+// made room, or is only on Drive) is being given its file back, unless the
+// size on record says it is another.
+const claimRomName = async (name, bytes) => {
+  bytes = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+  await loadRomSizes();
+  let recent = (await dbGet("recent").catch(() => null)) || [];
+  let listed = (n) => Array.isArray(recent) && recent.some((r) => r?.name === n);
+  for (let n = 1; n < 1000; n++) {
+    let cand = n === 1 ? name : numberedRomName(name, n);
+    let have = (await dbGet(romKey(cand)).catch(() => null))?.data;
+    if (have) {
+      if (sameRomBytes(have instanceof Uint8Array ? have : new Uint8Array(have), bytes)) return cand;
+      continue;
+    }
+    if (!listed(cand) && !(await hasAnyLocalRecord(cand))) return cand;
+    let size = romSizes?.[cand];
+    if (size && size !== bytes.length) continue;
+    // The same size says little (GBA ROMs come in a few): Drive's digest of
+    // its file, where the last listing gave one, says which.
+    let theirs = driveRomSha.get(cand);
+    let mine = theirs ? await romSha256(bytes) : null;
+    if (!mine || mine === theirs) return cand;
+  }
+  return name;
+};
+
+const noteRomRenamed = (asked, name) => {
+  if (name !== asked) {
+    pushToast("Added as “" + displayName(name) + "” — a different game named “" +
+              displayName(asked) + "” is already in your library", 5000, null);
+  }
 };
 
 const addRecentRom = async (name, bytes, art) => {
@@ -9466,6 +9629,19 @@ const slotStateKey = (name, slot) =>
 const slotMetaKey = (name, slot) =>
   "statemeta:" + name + (slot === 0 ? "" : ":slot" + slot);
 
+// A slot's { thumb, ts } as this app writes it, whatever was stored: the
+// record also arrives from Drive, where anything may have been put under
+// its name. The picture is a canvas data URL or nothing.
+const STATE_THUMB_URL = /^data:image\/(?:png|jpeg|webp|gif);base64,[A-Za-z0-9+/]+=*$/;
+const cleanStateMeta = (v) => {
+  let out = {};
+  if (!v || typeof v !== "object") return out;
+  if (typeof v.thumb === "string" && v.thumb.length <= 4 * 1024 * 1024 &&
+      STATE_THUMB_URL.test(v.thumb)) out.thumb = v.thumb;
+  if (typeof v.ts === "number" && Number.isFinite(v.ts)) out.ts = v.ts;
+  return out;
+};
+
 const fmtStateTime = (ts) => {
   try {
     return new Date(ts).toLocaleString([], {
@@ -10427,7 +10603,7 @@ const renderStatesGrid = async () => {
   }
   for (let s = 0; s < NUM_STATE_SLOTS; s++) {
     const bytes = await dbGet(slotStateKey(name, s)).catch(() => null);
-    const meta = await dbGet(slotMetaKey(name, s)).catch(() => null);
+    const meta = cleanStateMeta(await dbGet(slotMetaKey(name, s)).catch(() => null));
     const has = !!bytes;
     slotHasState[s] = has;
     const cell = document.createElement("button");
@@ -10435,16 +10611,22 @@ const renderStatesGrid = async () => {
     cell.className =
       "state-slot" + (has ? "" : " empty") + (s === selectedSlot ? " selected" : "");
     cell.dataset.slot = /** @type {*} */ (s);
-    const thumb =
-      meta && meta.thumb
-        ? `<img class="slot-thumb" src="${meta.thumb}" alt="">`
-        : `<div class="slot-thumb"></div>`;
-    const when =
-      meta && meta.ts ? fmtStateTime(meta.ts) : has ? "saved" : "empty";
-    const label = s === 0 ? "1 · Quick" : String(s + 1);
-    cell.innerHTML =
-      thumb +
-      `<div class="slot-label"><span class="slot-num">${label}</span><span>${when}</span></div>`;
+    // Built as nodes: the picture and the time are stored values.
+    const thumb = document.createElement(meta.thumb ? "img" : "div");
+    thumb.className = "slot-thumb";
+    if (meta.thumb) {
+      /** @type {HTMLImageElement} */ (thumb).src = meta.thumb;
+      /** @type {HTMLImageElement} */ (thumb).alt = "";
+    }
+    const labelRow = document.createElement("div");
+    labelRow.className = "slot-label";
+    const num = document.createElement("span");
+    num.className = "slot-num";
+    num.textContent = s === 0 ? "1 · Quick" : String(s + 1);
+    const when = document.createElement("span");
+    when.textContent = meta.ts ? fmtStateTime(meta.ts) : has ? "saved" : "empty";
+    labelRow.append(num, when);
+    cell.append(thumb, labelRow);
     cell.addEventListener("click", () => selectSlot(s));
     statesGrid.appendChild(cell);
   }
@@ -13856,7 +14038,10 @@ const handleZipFile = async (file) => {
   // initStorage (DOMContentLoaded) opens the database and reads the sync
   // state - the tombstones a re-imported game's generation is judged by.
   await storageReady;
+  const asked = innerName;
+  innerName = await claimRomName(innerName, romBytes);
   await addRecentRom(innerName, romBytes, art);
+  noteRomRenamed(asked, innerName);
   await ensureRuntimeReady(); // a zip dropped before the wasm runtime is up
   // In the library either way; booted only if nothing was opened since.
   if (gen !== loadGen) return;
@@ -13881,11 +14066,13 @@ let handleRomFile = (file) => {
         !(await confirmSuspectRom(file.name, ext))) return;
     // Storage, the library, then the core: see handleZipFile.
     await storageReady;
-    await addRecentRom(file.name, bytes);
+    const name = await claimRomName(file.name, bytes);
+    await addRecentRom(name, bytes);
+    noteRomRenamed(file.name, name);
     await ensureRuntimeReady(); // a ROM picked/dropped before the runtime is up
     // In the library either way; booted only if nothing was opened since.
     if (gen !== loadGen) return;
-    loadRom(romName, file.name, { gen, rom: bytes });
+    loadRom(romName, name, { gen, rom: bytes });
   });
   reader.readAsArrayBuffer(file);
 };

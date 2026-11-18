@@ -59,7 +59,18 @@ Signing in turns sync on; signed out, none of it runs.
   "save-hook" file, `{ url, ts }`, newest wins. When set, every in-game save the web app
   writes (solo, and player 1's in link mode; never player 2's) is also POSTed there as
   multipart form data: `save` (the file), `game`, `savedAt`. It goes no-cors, so the receiver
-  needs no CORS headers, and its response is never read.
+  needs no CORS headers, and its response is never read. An address typed on a device is
+  used there at once; one that arrives from Drive is kept but not sent to until that device
+  allows it (Settings shows "Set on another device" and an Allow button), since anyone who
+  could write the account's Drive files could otherwise collect every save. Removing the
+  address needs no asking.
+- Everything of a game goes by its file name, so two different ROMs cannot share one. A
+  file added under a name another game in the library has is stored as "Name (2).ext" (then
+  3, and so on), like a second copy in a file system; the same bytes under the same name
+  are the same game. The same holds across devices: a device that signs in holding a
+  different ROM than Drive's under one name has its own game moved to the numbered name,
+  with its saves and states, before anything syncs. Sizes are compared first, then Drive's
+  SHA-256 of its file.
 
 Scope is `drive.appdata` (dingbat sees only its own hidden app folder). The OAuth client
 ID ships in source (GIS implicit flow, no secret; gated by the Authorized JavaScript
