@@ -2618,9 +2618,11 @@ proc main() =
                        frame_ticks div 2)
 
   var sched_refilling = true  # start with an empty queue: fill to target
+  var frame_early = false     # this frame refills the queue ahead of its slot
 
   proc scheduler_frame_due(queued, low, target, high: uint32): bool =
     let now = getPerformanceCounter()
+    frame_early = false
     if next_frame_due + frame_ticks < now:
       # Stalled: resync instead of bursting missed slots
       next_frame_due = now
@@ -2629,7 +2631,9 @@ proc main() =
     # the cadence follow audio drain granularity, not the wall clock.
     if queued < low: sched_refilling = true
     if sched_refilling:
-      if queued < target: return true
+      if queued < target:
+        frame_early = now < next_frame_due
+        return true
       sched_refilling = false
     now >= next_frame_due
 
@@ -2886,12 +2890,12 @@ proc main() =
     # compositor), so every refresh shows a new frame and the loop never
     # stalls behind a full queue; after two refreshes it presents anyway.
     let glass_free = pr.waiting() < 2 or now - last_present >= 2 * present_interval
-    # macOS: paced frames present as they run, except the scheduler's catch-up
-    # bursts (filling the audio queue as play starts). Presented, they queue
-    # ahead of the glass, and paced play, a little slower than the display,
-    # takes ~10 s to drain them, each frame 15-30 ms later until then.
+    # macOS: paced frames present as they run, except those a refill runs ahead
+    # of their slots (filling the audio queue as play starts). Presented, they
+    # queue ahead of the glass, and paced play, a little slower than the
+    # display, takes ~10 s to drain them, each frame 15-30 ms later until then.
     let paced = is_paced()
-    let burst = defined(macosx) and sched_refilling
+    let burst = defined(macosx) and frame_early
     if (emulated and paced and not burst) or
        (not (emulated and paced) and now - last_present >= ui_interval and glass_free):
       last_present = now
