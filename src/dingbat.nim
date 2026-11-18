@@ -2592,6 +2592,8 @@ var fps_us        = 0'i64
 var fps_last_time = getTime()
 var fps_second    = getTime().toUnix() mod 60
 
+var pending_title = ""
+
 proc update_fps_title(emulated: bool) =
   # Count emulated frames only: the loop runs at the display's refresh rate
   if emulated: inc fps_frames
@@ -2609,7 +2611,9 @@ proc update_fps_title(emulated: bool) =
                 elif app.emu_kind == ekNDS and app.nds != nil and
                      app.nds.asleep(): "dingbat - SLEEPING"
                 else: fmt"dingbat - {fps:.1f} fps"
-    discard setWindowTitle(app.window, cstring(title))
+    # Set after the next present, when the loop has the most time to spare
+    # (setting it takes ~2.7 ms on macOS, enough to make a frame miss)
+    pending_title = title
     fps_frames = 0
     fps_us     = 0
     fps_second = cur_sec
@@ -3380,6 +3384,9 @@ proc main() =
       if trace_path.len > 0: trace_swap = getPerformanceCounter()
       let present_seq = pr.present(window)
       presented = true
+      if pending_title.len > 0:
+        discard setWindowTitle(app.window, cstring(pending_title))
+        pending_title = ""
       if trace_path.len > 0:
         trace.add([(if emulated: trace_due else: 0'u64), frame_start,
                    trace_end, trace_ready, trace_swap, getPerformanceCounter(),
