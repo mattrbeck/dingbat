@@ -45,7 +45,7 @@ when defined(gui_driver):
   import dingbat/frontend/gui_driver
 import dingbat/common/cheats
 import dingbat/common/serialize
-from dingbat/common/audio_out import audio_close, audio_rate
+from dingbat/common/audio_out import audio_close
 from dingbat/nds/savestate as nds_savestate import nil
 
 const VERSION = "0.1.0"
@@ -2592,8 +2592,6 @@ var fps_us        = 0'i64
 var fps_last_time = getTime()
 var fps_second    = getTime().toUnix() mod 60
 
-var pending_title = ""
-
 proc update_fps_title(emulated: bool) =
   # Count emulated frames only: the loop runs at the display's refresh rate
   if emulated: inc fps_frames
@@ -2611,9 +2609,7 @@ proc update_fps_title(emulated: bool) =
                 elif app.emu_kind == ekNDS and app.nds != nil and
                      app.nds.asleep(): "dingbat - SLEEPING"
                 else: fmt"dingbat - {fps:.1f} fps"
-    # Set after the next present, when the loop has the most time to spare
-    # (setting it takes ~2.7 ms on macOS, enough to make a frame miss)
-    pending_title = title
+    discard setWindowTitle(app.window, cstring(title))
     fps_frames = 0
     fps_us     = 0
     fps_second = cur_sec
@@ -3049,7 +3045,6 @@ proc main() =
       present_interval = uint64(1000'f32 / refresh_hz)
   follow_refresh()
   var last_present = getTicks()
-  var was_paced = false
   # Normal play: fixed 16.743 ms wall-clock slot (280896 cycles / 16.777216
   # MHz, GB too); the audio queue is only a bounds check. Turbo and
   # fast-forward pace by audio.
@@ -3080,46 +3075,9 @@ proc main() =
 
   var sched_refilling = true  # start with an empty queue: fill to target
 
-  # macOS: on a display at a multiple of 60 Hz, normal speed runs one frame
-  # a refresh (60 a second, as iOS and the web do), not the console's 59.73,
-  # which drifted across the refreshes: every 3.7 s a refresh showed a frame
-  # twice, and a frame queued behind a missed refresh stayed a refresh late
-  # for seconds. The audio plays 0.46% faster to match (audio_rate, rate
-  # control on the queue's depth). Each frame's slot is also nudged toward
-  # the point where its present reaches the glass soonest without missing
-  # its refresh, from the drawables' presented times.
-  var locked_ticks = 0'u64  # a frame's slot, display-paced; 0: the console's
-  proc update_lock() =
-    locked_ticks = 0
-    when defined(macosx):
-      let k = round(refresh_hz / 60)
-      if k >= 1 and abs(refresh_hz / 60 - k) < 0.03:
-        locked_ticks = uint64(float(sched_freq) * k / float(refresh_hz))
-  update_lock()
-  proc slot_ticks(): uint64 = (if locked_ticks > 0: locked_ticks else: frame_ticks)
-
-  # Rate control: the queue held at the scheduler's target depth
-  var drc_fill = -1.0
-  var drc_integ = 0.0
-  var drc_on = false
-  proc drc(queued, target: uint32) =
-    if drc_fill < 0: drc_fill = float(queued)
-    drc_fill += (float(queued) - drc_fill) * 0.1
-    let err = (drc_fill - float(target)) / float(target)
-    drc_integ = clamp(drc_integ + err * 0.001, -0.01, 0.01)
-    audio_rate(float32(clamp(1.0 + err * 0.02 + drc_integ, 0.985, 1.015)))
-    drc_on = true
-  proc drc_off() =
-    if drc_on:
-      audio_rate(1)
-      drc_on = false
-    drc_fill = -1
-    drc_integ = 0
-
   proc scheduler_frame_due(queued, low, target, high: uint32): bool =
     let now = getPerformanceCounter()
-    let slot = slot_ticks()
-    if next_frame_due + slot < now:
+    if next_frame_due + frame_ticks < now:
       # Stalled: resync instead of bursting missed slots
       next_frame_due = now
     if queued > high: return false  # queue ran away: hold until it drains
@@ -3129,87 +3087,13 @@ proc main() =
     if sched_refilling:
       if queued < target: return true
       sched_refilling = false
-    result = now >= next_frame_due
-    if result:
-      if locked_ticks > 0: drc(queued, target) else: drc_off()
+    now >= next_frame_due
 
   proc scheduler_frame_ran() =
     # Clamp to one period from now: refill bursts must not bank future slots
     # (a burst/hold sawtooth)
-    let slot = slot_ticks()
-    next_frame_due = min(next_frame_due + slot, getPerformanceCounter() + slot)
-
-  # The lock: paced presents' issue times, until their glass times are known.
-  # Searching, frames go out a little later each time until one misses its
-  # refresh (its trip to the glass a refresh longer): the deadline, found.
-  # Locked, they go out GLASS_MARGIN_MS before it, the trip at its shortest.
-  # A trip that stays a refresh long (a refresh the display missed left a
-  # frame queued) drops one frame, which empties the queue.
-  var glass_wait: seq[(uint64, uint64)]   # (present, issued)
-  var glass_best = 0'u64      # locked: the trip just before the deadline
-  var glass_prev = 0'u64      # the last trip seen
-  var glass_long = 0          # trips in a row a refresh longer than glass_best
-  var glass_drop = false      # the next paced frame goes unpresented
-  var glass_found = false
-  var glass_settle = 0        # trips still to ignore as play starts
-  var glass_jump = 0'u64      # searching: the trip before a jump, to confirm
-  const GLASS_MARGIN_MS = 4'u64
-  proc glass_reset() =
-    glass_found = false
-    glass_best = 0
-    glass_prev = 0
-    glass_long = 0
-    glass_jump = 0
-    glass_settle = 60         # a second: the start's own hiccups are not misses
-  proc glass_lock() =
-    var i = 0
-    while i < glass_wait.len:
-      let (sq, issued) = glass_wait[i]
-      let shown = pr.shown_at(sq, sched_freq)
-      if shown == 0:
-        # Never shown (a hidden window), or not yet
-        if getPerformanceCounter() - issued > sched_freq div 5: glass_wait.delete(i)
-        else: inc i
-        continue
-      glass_wait.delete(i)
-      if shown <= issued or locked_ticks == 0: continue
-      let trip = shown - issued
-      let refresh = locked_ticks div uint64(max(1'f32, round(refresh_hz / 60)))
-      let half = refresh div 2
-      if glass_settle > 0:
-        dec glass_settle
-        continue
-      if not glass_found:
-        if glass_jump != 0:
-          if trip > glass_jump + half:
-            # Missed, twice: the deadline lies just before these frames' issue
-            # (and the two steps taken since)
-            glass_found = true
-            glass_best = glass_jump
-            next_frame_due -= sched_freq * GLASS_MARGIN_MS div 1000 + sched_freq div 2000
-            glass_prev = trip
-            continue
-          glass_jump = 0              # one long trip only: a hiccup
-        elif glass_prev != 0 and trip > glass_prev + half and
-             trip < glass_prev + refresh + half:
-          glass_jump = glass_prev
-        else:
-          next_frame_due += sched_freq div 4000   # 0.25 ms a frame later
-        glass_prev = trip
-        continue
-      glass_prev = trip
-      if trip > glass_best + half:
-        inc glass_long
-        if glass_long >= 3:
-          glass_drop = true
-          glass_long = 0
-        continue
-      glass_long = 0
-      # The clocks drift a hair: hold the trip at its best, 50 us a step
-      let target = glass_best + sched_freq * GLASS_MARGIN_MS div 1000
-      let step = sched_freq div 20_000
-      if trip > target + step: next_frame_due += step
-      elif trip + step < target: next_frame_due -= step
+    next_frame_due = min(next_frame_due + frame_ticks,
+                         getPerformanceCounter() + frame_ticks)
 
   proc is_paced(): bool =
     ## True while emulation is meant to run at exactly hardware speed
@@ -3307,12 +3191,7 @@ proc main() =
     when defined(gui_driver): driver_poll(window)
     if getTicks() - refresh_checked >= 1000:
       refresh_checked = getTicks()
-      let was = locked_ticks
       follow_refresh()
-      update_lock()
-      if locked_ticks != was: glass_reset()
-    glass_lock()
-    if locked_ticks == 0 or not is_paced(): drc_off()
     var emulated = false
     # Frame advance bypasses audio pacing: exactly one frame
     let stepping = app.paused and app.pending_step
@@ -3470,11 +3349,7 @@ proc main() =
     # display, took ~10 s to drain them, each frame 15-30 ms later on the
     # glass until then.
     let paced = is_paced()
-    if paced and not was_paced: glass_reset()
-    was_paced = paced
-    let dropped = emulated and paced and glass_drop
-    if dropped: glass_drop = false
-    if (emulated and paced and not sched_refilling and not dropped) or
+    if (emulated and paced and not sched_refilling) or
        (not (emulated and paced) and now - last_present >= ui_interval and glass_free):
       last_present = now
       # Black letterbox behind a game; the home screen's page behind it.
@@ -3503,14 +3378,8 @@ proc main() =
           delayPrecise((present_at - ready) * 1_000_000_000'u64 div sched_freq)
         hold_learn(ready - frame_start)
       if trace_path.len > 0: trace_swap = getPerformanceCounter()
-      let issued = getPerformanceCounter()
       let present_seq = pr.present(window)
       presented = true
-      if pending_title.len > 0:
-        discard setWindowTitle(app.window, cstring(pending_title))
-        pending_title = ""
-      if emulated and paced and locked_ticks > 0 and present_seq != 0:
-        glass_wait.add((present_seq, issued))
       if trace_path.len > 0:
         trace.add([(if emulated: trace_due else: 0'u64), frame_start,
                    trace_end, trace_ready, trace_swap, getPerformanceCounter(),

@@ -31,10 +31,7 @@
 ##   sleep <ms>
 ##   shot <path.png>                   the next presented frame, whole window
 ##   state                             acked `ok fullscreen=0|1 window=WxH`
-##   show [front]                      show the window (fullscreen needs it);
-##                                     front: above other apps' windows, the
-##                                     keyboard left where it is (macOS), so
-##                                     its frames reach the glass
+##   show                              show the window (fullscreen needs it)
 ##   fullscreen os                     macOS: AppKit's own toggle, what the
 ##                                     green button and Ctrl+Cmd+F do
 ##   pad attach                        plug in a virtual SDL gamepad
@@ -172,18 +169,6 @@ when defined(macosx):
                                 PROP_WINDOW_COCOA_WINDOW_POINTER, nil)
     if ns == nil: raise newException(IOError, "no NSWindow")
     cast[Send](objc_msgSend)(ns, sel_registerName("toggleFullScreen:"), nil)
-
-  proc ns_float(window: Window) =
-    ## Above every other app's windows without taking the keyboard
-    ## (`level` floating, `orderFrontRegardless`): a shown window whose frames
-    ## really reach the glass while the user keeps working.
-    type SetLevel = proc (self, op: pointer; level: int) {.cdecl.}
-    type Send0 = proc (self, op: pointer) {.cdecl.}
-    let ns = getPointerProperty(getWindowProperties(window),
-                                PROP_WINDOW_COCOA_WINDOW_POINTER, nil)
-    if ns == nil: raise newException(IOError, "no NSWindow")
-    cast[SetLevel](objc_msgSend)(ns, sel_registerName("setLevel:"), 3)  # NSFloatingWindowLevel
-    cast[Send0](objc_msgSend)(ns, sel_registerName("orderFrontRegardless"))
 
   type NsSize {.bycopy.} = object
     w, h: float64
@@ -424,9 +409,6 @@ proc run(window: Window; s: Step): bool =
     return true
   of "show":
     discard showWindow(window)
-    if w.len > 1 and w[1] == "front":
-      when defined(macosx): ns_float(window)
-      else: discard raiseWindow(window)
   of "fullscreen":
     when defined(macosx): ns_toggle_fullscreen(window)
     else: raise newException(ValueError, "fullscreen os: macOS only")
