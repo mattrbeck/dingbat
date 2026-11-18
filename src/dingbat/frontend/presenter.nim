@@ -24,7 +24,7 @@ when defined(macosx):
   import imgui_paths
   {.compile("vendor/imgui_impl_metal.mm", "-fobjc-arc").}
   {.compile("presenter_metal.mm", "-fobjc-arc").}
-  {.passL: "-framework Metal -framework QuartzCore".}
+  {.passL: "-framework Foundation -framework Metal -framework QuartzCore".}
 
   {.push cdecl, importc.}
   proc dbmtl_available(): cint
