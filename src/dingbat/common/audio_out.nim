@@ -39,7 +39,6 @@ when defined(ios) or defined(test_harness):
     ## Sleep while the queue drains. Breaks a stall (the audio engine
     ## stopped mid-frame) by dropping the queue after ~250 ms.
     ios_audio_wait(ms)
-  proc audio_rate*(ratio: float32) = discard  # the ring's reader does its own
 
 else:
   import sdl3
@@ -81,10 +80,3 @@ else:
       stream = nil
 
   proc audio_wait*(ms: uint32) = delay(ms)
-
-  proc audio_rate*(ratio: float32) =
-    ## Play the queue this much faster than it was opened at (1: as opened).
-    ## Emulation paced by the display's clock drifts a hair from the sound
-    ## device's; this keeps the queue at its depth (a few hundredths of a
-    ## percent off pitch).
-    if stream != nil: discard setAudioStreamFrequencyRatio(stream, ratio)
