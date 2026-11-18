@@ -2573,10 +2573,17 @@ proc main() =
   #    display rate (upload + swap is ~1 ms per frame).
   #  - Emulation slower (60 fps on 120 Hz): pacing happens here, skipping
   #    emulation while audio is ahead, so the loop never blocks in the APU.
+  # The rate is the window's display's, now: read again each second, as the
+  # window moves to another display or the display's rate changes.
   var present_interval = 8'u64
-  let display_mode = getDesktopDisplayMode(getPrimaryDisplay())
-  if display_mode != nil and display_mode.refresh_rate > 0:
-    present_interval = uint64(1000'f32 / display_mode.refresh_rate)
+  var refresh_hz = 0'f32
+  var refresh_checked = 0'u64
+  proc follow_refresh() =
+    let mode = getCurrentDisplayMode(getDisplayForWindow(window))
+    if mode != nil and mode.refresh_rate > 0 and mode.refresh_rate != refresh_hz:
+      refresh_hz = mode.refresh_rate
+      present_interval = uint64(1000'f32 / refresh_hz)
+  follow_refresh()
   var last_present = getTicks()
   # Normal play: fixed 16.743 ms wall-clock slot (280896 cycles / 16.777216
   # MHz, GB too); the audio queue is only a bounds check. Turbo and
@@ -2717,9 +2724,12 @@ proc main() =
       lat_state = 1
   if lat_trials > 0:
     echo "LATENCY: present_interval=", present_interval, " ms, ",
-         "display refresh=", display_mode.refresh_rate, " Hz"
+         "display refresh=", refresh_hz, " Hz"
   while app.running:
     when defined(gui_driver): driver_poll(window)
+    if getTicks() - refresh_checked >= 1000:
+      refresh_checked = getTicks()
+      follow_refresh()
     var emulated = false
     # Frame advance bypasses audio pacing: exactly one frame
     let stepping = app.paused and app.pending_step
