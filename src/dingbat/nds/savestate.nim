@@ -1070,13 +1070,9 @@ proc save_state*(n: NDS; thumbnail = false): seq[uint8] =
 
 proc state_is_for*(n: NDS; data: string): bool =
   ## A DS state image (plain or packed) made for this game: what a slot
-  ## list shows as loadable. Never raises.
-  var img: string
-  let kind = last_state_reject_kind
-  try: img = unpack_state(data)
-  except CatchableError: img = ""
-  last_state_reject_kind = kind
-  state_names_rom(img, ckNDS, rom_identity(n.cart.rom), uint32(n.cart.rom.len))
+  ## list shows as loadable. Never raises. The header answers, and a packed
+  ## state's header is not deflated: nothing is unpacked, as for GB.
+  state_names_rom(data, ckNDS, rom_identity(n.cart.rom), uint32(n.cart.rom.len))
 
 proc apply_checked(n: NDS; payload: string): bool =
   ## Apply a payload; on any refusal put the machine back as it was.

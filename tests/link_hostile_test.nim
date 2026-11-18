@@ -164,7 +164,7 @@ block:
   except StateError: refused = true
   check refused and bomb.len < 512 * 1024 and getOccupiedMem() - before < (1 shl 20),
         "a " & $(bomb.len div 1024) & " KiB body that inflates to " &
-        $(2 * STATE_PLAIN_MAX shr 20) & " MiB is refused before it is inflated"
+        $(2 * STATE_PLAIN_MAX shr 20) & " MiB is refused at the limit, and nothing is kept"
   check not g.load_state_bytes(bomb) and g.state_bytes() == plain,
         "and the core it was sent to is untouched"
 

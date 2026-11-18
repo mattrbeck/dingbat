@@ -252,9 +252,9 @@ jobs:
         # the limit. Each is ignored or refused and the session carries on.
         shell: bash
         run: ./dingbat_link_hostile_test
-      - name: Inflated-size walk agrees with zippy
-        # common/inflate_bound.nim measures a packed state before it is
-        # inflated: the same length as zippy on real streams and on damage.
+      - name: Capped inflate agrees with zippy
+        # common/inflate_bound.nim inflates a packed state to a limit: the
+        # same bytes as zippy on real streams, the same refusals on damage.
         shell: bash
         run: ./dingbat_inflate_bound_test
       - name: Desktop online link (two links, local signaling server)

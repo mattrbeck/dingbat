@@ -56,7 +56,7 @@ task test_savestate_compat, "Run the save-state format compatibility guards":
 task test_linkhostile, "Run the hostile link-peer checks (input frames, state fields, compressed size)":
   exec "nim c -r -d:test_harness -d:release --path:src " &
        "-o:dingbat_link_hostile_test tests/link_hostile_test.nim"
-  exec "nim c -r -d:test_harness -d:release --path:src " &
+  exec "nim c -r -d:test_harness -d:release -d:inflate_checks --path:src " &
        "-o:dingbat_inflate_bound_test tests/inflate_bound_test.nim"
 
 task test_gbartc,"Run the GBA cartridge RTC, battery-save RTC trailer and EEPROM frame tests":

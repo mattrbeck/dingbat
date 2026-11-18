@@ -490,19 +490,19 @@ proc unpack_state*(data: string): string =
   if not is_packed_state(data): return data
   if data.len == STATE_HEADER_SIZE:
     raise state_error("save state is truncated (nothing after its header)", srkTruncated)
-  # A body that small cannot inflate past the limit (deflate tops out near
-  # 1032:1); a larger one is measured before it is inflated.
-  let packed_len = data.len - STATE_HEADER_SIZE
-  if packed_len > STATE_PLAIN_MAX div 1032 and
-     zlib_inflated_len(unsafeAddr data[STATE_HEADER_SIZE], packed_len,
-                       STATE_PLAIN_MAX) > STATE_PLAIN_MAX:
-    raise state_error("save state is corrupt (its compressed body unpacks to " &
-                      "more than a state can hold)")
+  # The header's payload_len is the inflated payload's; a thumbnail and the
+  # whole-ROM trailer follow it.
+  var payload_len = 0
+  for i in 0 .. 3: payload_len = payload_len or (int(uint8(data[24 + i])) shl (8 * i))
   var body: string
   try:
-    body = uncompress(unsafeAddr data[STATE_HEADER_SIZE],
-                      data.len - STATE_HEADER_SIZE, dfZlib)
-  except ZippyError:
+    body = zlib_inflate_capped(unsafeAddr data[STATE_HEADER_SIZE],
+                               data.len - STATE_HEADER_SIZE, STATE_PLAIN_MAX,
+                               hint = (payload_len and 0x7FFFFFFF) + 64 * 1024)
+  except InflateError as e:
+    if e.too_big:
+      raise state_error("save state is corrupt (its compressed body unpacks " &
+                        "to more than a state can hold)")
     raise state_error("save state is truncated or corrupt (its compressed " &
                       "body does not unpack)")
   result = newStringOfCap(STATE_HEADER_SIZE + body.len)

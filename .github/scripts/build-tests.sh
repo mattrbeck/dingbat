@@ -55,7 +55,8 @@ build mbc3            dingbat_mbc3_test             tests/mbc3_test.nim
 build desktopnetlink  dingbat_desktop_netlink_test  tests/desktop_netlink_test.nim
 build gbrollbackkeys  dingbat_gb_rollback_keys_test tests/gb_rollback_keys_test.nim
 build linkhostile     dingbat_link_hostile_test     tests/link_hostile_test.nim
-build inflatebound    dingbat_inflate_bound_test    tests/inflate_bound_test.nim
+# -d:inflate_checks: the decode loop with its runtime checks left in.
+build inflatebound    dingbat_inflate_bound_test    tests/inflate_bound_test.nim -d:inflate_checks
 build gbartc          dingbat_gbartc_test           tests/gba_rtc_test.nim
 build desktopinput    dingbat_desktop_input_test    tests/desktop_input_test.nim
 build desktopsettings dingbat_desktop_settings_test tests/desktop_settings_test.nim
