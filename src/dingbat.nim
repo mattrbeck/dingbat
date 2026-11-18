@@ -2047,7 +2047,7 @@ proc menu_bar(native: bool): seq[MenuItem] =
     if not native: "Fullscreen"
     elif app.fullscreen: "Exit Full Screen"
     else: "Enter Full Screen"
-  let view = @[
+  let video = @[
     submenu("Filter", filters),
     action("Preserve Aspect Ratio", mcPreserveAspect),
     action("LCD Response", mcLcdResponse),
@@ -2095,7 +2095,7 @@ proc menu_bar(native: bool): seq[MenuItem] =
       edit("Copy", mcCopy, "copy:", "c"),
       edit("Paste", mcPaste, "paste:", "v"),
       edit("Select All", mcSelectAll, "selectAll:", "a")])
-  result.add submenu("View", view)
+  result.add submenu("Video", video)
   result.add submenu("Emulation", emu)
   result.add submenu("Audio", audio)
   result.add submenu("Debug", debug)

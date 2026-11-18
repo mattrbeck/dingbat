@@ -3,14 +3,14 @@
 # real event loop (-d:gui_driver) in a hidden, muted window with a scratch
 # HOME, as tests/desktop_gui_test.sh drives the rest:
 #
-#   home      the app, File, Edit, View, Emulation, Audio, Debug, Window and
+#   home      the app, File, Edit, Video, Emulation, Audio, Debug, Window and
 #             Help menus; with no game, the game's items greyed out
 #   game      a GBA game: its items enabled, Open Recent lists it, the speed
 #             items show Tab and Shift+Tab
 #   choose    Pause from the menu, then Cmd+P through the menu bar, ticks
 #             and unticks it; Mute and Frame Size from the menu change the
 #             setting and the window
-#   view      a filter, Preserve Aspect Ratio and LCD Response from the View
+#   video     a filter, Preserve Aspect Ratio and LCD Response from the Video
 #             menu are saved, and an open Settings window shows them
 #   aspect    the window's aspect lock (SDL's and the NSWindow's): free on the
 #             home screen and in fullscreen (Fullscreen on the hidden window
@@ -64,7 +64,7 @@ run "" "1 frames 30
 3 menu pick File>Quick Save
 4 quit"
 check "menus" "$(grep -v '^ ' "$work/home.txt" | tr '\n' ' ')" \
-      "dingbat File Edit View Emulation Audio Debug Window Help "
+      "dingbat File Edit Video Emulation Audio Debug Window Help "
 check "Settings… in the app menu" "$(item "$work/home.txt" 'Settings… [Cmd+,]')" present
 check "Quit dingbat" "$(item "$work/home.txt" 'Quit dingbat [Cmd+Q]')" present
 check "Add a Game…" "$(item "$work/home.txt" 'Add a Game… [Cmd+O]')" present
@@ -89,7 +89,7 @@ run tests/roms/inputrec.gba "1 frames 30
 8 frames 3
 9 menu dump $work/resumed.txt
 10 menu pick Audio>Mute
-11 menu pick View>Frame Size>2x
+11 menu pick Video>Frame Size>2x
 12 frames 5
 13 state
 14 menu dump $work/after.txt
@@ -109,13 +109,13 @@ check "Frame Size 2x ticked" "$(item "$work/after.txt" '2x [x]')" present
 check "the window is 2x" "$(ack 13 | sed 's/.*window=//')" "480x320"
 check "Quit from the menu ends the session" "$(ack 16)" ""
 
-echo "View menu"
+echo "Video menu"
 run tests/roms/inputrec.gba "1 frames 30
 2 menu pick dingbat>Settings...
 3 sleep 300
-4 menu pick View>Filter>xBR
-5 menu pick View>LCD Response
-6 menu pick View>Preserve Aspect Ratio
+4 menu pick Video>Filter>xBR
+5 menu pick Video>LCD Response
+6 menu pick Video>Preserve Aspect Ratio
 7 frames 5
 8 menu dump $work/view.txt
 9 settings dump $work/view_settings.txt
@@ -141,13 +141,13 @@ run "" "1 frames 10
 3 drop tests/roms/inputrec.gba
 4 frames 10
 5 aspect
-6 menu pick View>Frame Size>2x
+6 menu pick Video>Frame Size>2x
 7 frames 5
 8 aspect
-9 menu pick View>Enter Full Screen
+9 menu pick Video>Enter Full Screen
 10 frames 5
 11 aspect
-12 menu pick View>Exit Full Screen
+12 menu pick Video>Exit Full Screen
 13 frames 5
 14 aspect
 15 state

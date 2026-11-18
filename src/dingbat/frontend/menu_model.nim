@@ -21,7 +21,7 @@ type
     # Emulation
     mcReset, mcPause, mcFrameAdvance, mcRewind, mcTurbo, mcFastForward,
     mcCloseLid, mcCheats, mcLinkCable
-    # View
+    # Video
     mcFilter, mcPreserveAspect, mcLcdResponse, mcColorCorrection, mcFrameSize,
     mcFullscreen
     # Audio
