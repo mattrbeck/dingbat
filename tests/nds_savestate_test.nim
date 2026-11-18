@@ -465,6 +465,10 @@ proc hostile_fields() =
         proc (n: NDS) = n.spu.next_tick -= 1'i64 shl 56)
   offer("a line that began a second ago",
         proc (n: NDS) = n.line_start -= MASTER_HZ)
+  offer("a sound capture writing at an address that is not a word's",
+        proc (n: NDS) = n.spu.cap[0].addr_cur = 0x023F_FFFF'u32)
+  offer("a sound capture set to start at one",
+        proc (n: NDS) = n.spu.cap[1].dad = 0x0380_FFFE'u32)
   offer("an ARM7 instruction that turns its clock back",
         proc (n: NDS) = n.arm7.base_cycles = -1)
   offer("a timer unit booking another unit's events",
@@ -525,6 +529,40 @@ proc hostile_fields() =
   b.run_frame()
   check(b.gpu.frame_count == f + 1, "and the machine runs on")
 
+proc aligned_pc() =
+  ## The fetch paths read a block of host memory on the strength of a PC
+  ## aligned to its opcode size, which every branch keeps. Neither a ROM's
+  ## header nor a state gets to start one in between.
+  echo "the PC is aligned however the machine is started"
+  let path = rom_dir / "fb_both.nds"
+  if not fileExists(path):
+    check(false, "missing " & path)
+    return
+  var rom = file(path)
+  rom[0x24] = rom[0x24] or 2    # ARM9 entry
+  rom[0x34] = rom[0x34] or 3    # ARM7 entry
+  let n = new_nds(rom, @[], @[], @[], force_hle = true, boot = nbDirect)
+  check((n.arm9.next_pc and 3) == 0 and (n.arm7.next_pc and 3) == 0,
+        "a header's entry points between words boot on the word")
+  for _ in 0 ..< 3: n.run_frame()
+  check(n.gpu.frame_count == 3, "and the machine runs")
+
+  let a = machine(path)
+  for _ in 0 ..< 5: a.run_frame()
+  let want9 = a.arm9.next_pc
+  let want7 = a.arm7.next_pc
+  a.arm9.next_pc = want9 or 2
+  a.arm7.next_pc = want7 or 1
+  let img = a.state_bytes()
+  let b = machine(path)
+  check(b.load_state_bytes(img), "a state with the PCs between opcodes loads", last_state_error)
+  let ok9 = (b.arm9.next_pc and (if b.arm9.thumb: 1'u32 else: 3'u32)) == 0
+  let ok7 = (b.arm7.next_pc and (if b.arm7.thumb: 1'u32 else: 3'u32)) == 0
+  check(ok9 and ok7, "on the opcode each was in")
+  let f = b.gpu.frame_count
+  b.run_frame()
+  check(b.gpu.frame_count == f + 1, "and the machine runs on")
+
 when isMainModule:
   let cases = [
     Case(name: "3d_sort", rom: "3d/3d_sort.nds", frames: 10, moment: "mid-frame"),
@@ -558,6 +596,7 @@ when isMainModule:
   hd_history()
   wifi_pair()
   refusals()
+  aligned_pc()
   hostile_fields()
   if failures > 0:
     echo failures, " check(s) failed"

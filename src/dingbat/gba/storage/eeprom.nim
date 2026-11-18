@@ -145,7 +145,10 @@ method `[]=`*(ep: EEPROM; address: uint32; value: uint8) =
       # the cart bus), so its count is this command's length
       ep.set_eeprom_size(some(eeprom_size_from_dma_length(int(ep.gba_ref.dma.dmacnt_l[3]))))
     if ep.buffer.size == ep.eeprom_size.get.addr_bits:
-      ep.address = uint32(ep.buffer.value) and 0x3FF'u32
+      # No wider than the part's address: a 4 Kbit chip has 64 blocks, and
+      # the store below is not bounds-checked (a loaded state sets `buffer`).
+      ep.address = uint32(ep.buffer.value) and
+        (if ep.eeprom_size.get == eeprom4k: 0x3F'u32 else: 0x3FF'u32)
       if esWrite in ep.state:
         cast[ptr UncheckedArray[uint64]](unsafeAddr ep.memory[0])[ep.address] = 0
       ep.state.excl(esAddress)

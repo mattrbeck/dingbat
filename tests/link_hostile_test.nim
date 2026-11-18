@@ -2,7 +2,7 @@
 ## input, fields of the state it sends, and that state's compressed size. Each
 ## is refused or ignored and the session carries on.
 
-import std/[os, strutils]
+import std/[os, strutils, options]
 import zippy
 import dingbat/common/serialize
 import dingbat/gb/gb
@@ -143,6 +143,39 @@ block:
   check g.refuses(b, "mem.dma_position"), "a negative OAM DMA position is refused"
   for i in 0 .. 3: b[at + i] = char(if i == 3: 0x80 else: 0)   # low(int32)
   check g.refuses(b, "mem.dma_position"), "the most negative OAM DMA position is refused"
+
+block:
+  # A 4 Kbit EEPROM is 512 bytes, 64 blocks of 8. A state taken as the
+  # address is clocked in can hold anything in the shift register; the
+  # block the chip then clears is still one of its 64.
+  var rom = newString(0x1000)
+  let tag = "EEPROM_V124"
+  for i, c in tag: rom[0x200 + i] = c
+  let path = getTempDir() / "dingbat_hostile_eeprom.gba"
+  writeFile(path, rom)
+  proc mk(): GBA =
+    result = new_gba("", path, run_bios = false, use_hle = true)
+    result.post_init()
+  let src = mk()
+  doAssert src.storage of EEPROM
+  let ep = EEPROM(src.storage)
+  ep.eeprom_size = some(eeprom4k)
+  ep.memory.setLen(0x200)
+  ep.state = {esAddress, esWrite}
+  ep.buffer.size = 5                  # one address bit to go
+  ep.buffer.value = 0xFFFF_FFFF'u64   # and far more than five bits in it
+  let img = src.state_bytes()
+  let dst = mk()
+  if dst.load_state_bytes(img):
+    let got = EEPROM(dst.storage)
+    dst.bus.dma_active = true
+    got[0x0D00_0000'u32] = 1'u8       # the last address bit
+    check got.memory.len == 0x200 and int(got.address) * 8 + 8 <= got.memory.len,
+          "GBA EEPROM: a state's shift register cannot address past a 4 Kbit chip (block " &
+          $got.address & ")"
+  else:
+    check true, "GBA EEPROM: the state is refused (" & last_state_error & ")"
+  removeFile(path)
 
 # ---------------- compressed size ----------------
 

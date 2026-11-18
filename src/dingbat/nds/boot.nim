@@ -247,13 +247,15 @@ proc direct_boot*(n: NDS) =
   n.arm9.set_mode_sp(mIRQ, 0x00803FA0'u32)
   n.arm9.set_mode_sp(mSVC, 0x00803FC0'u32)
   n.arm9.r[12] = arm9_entry; n.arm9.r[14] = arm9_entry
-  n.arm9.next_pc = arm9_entry
+  # ARM state: the PC's low two bits are not there. The fetch paths count
+  # on a word-aligned PC to stay inside the block they read.
+  n.arm9.next_pc = arm9_entry and not 3'u32
   n.arm7.set_cpsr(uint32(mSYS) or FLAG_F)
   n.arm7.set_mode_sp(mSYS, 0x0380FF00'u32)
   n.arm7.set_mode_sp(mIRQ, 0x0380FFB0'u32)
   n.arm7.set_mode_sp(mSVC, 0x0380FFDC'u32)
   n.arm7.r[12] = arm7_entry; n.arm7.r[14] = arm7_entry
-  n.arm7.next_pc = arm7_entry
+  n.arm7.next_pc = arm7_entry and not 3'u32
   n.arm7.vector_base = 0
   discard b9
   discard b7

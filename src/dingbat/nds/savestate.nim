@@ -990,7 +990,15 @@ proc after_load(n: NDS) =
   # DMAxCNT can ask for (count_of)
   for (d, most) in [(n.dma9, 0x20_0000'i64), (n.dma7, 0x1_0000'i64)]:
     for c in d.ch: check_range64(int64(c.cur_count), 0, most, "dma.cur_count")
+  # Every branch aligns the PC to its state's opcode size, and the fetch
+  # paths count on it: a state cannot say otherwise.
+  n.arm9.next_pc = n.arm9.next_pc and (if n.arm9.thumb: not 1'u32 else: not 3'u32)
+  n.arm7.next_pc = n.arm7.next_pc and (if n.arm7.thumb: not 1'u32 else: not 3'u32)
   for k in n.spu.cap:
+    # A capture stores whole words at an address SNDCAPxDAD keeps aligned;
+    # the store is one host word, tested against its buffer at its first byte.
+    if (k.addr_cur and 3) != 0 or (k.dad and 3) != 0:
+      raise state_error("save state has a sound capture at an address that is not a word's")
     # bytes of a word gathered (a shift: `capture_store`), words left of LEN
     check_range(k.acc_bytes, 0, 3, "capture.acc_bytes")
     check_range64(int64(k.words_left), 0, 0x1_0000, "capture.words_left")
