@@ -4,6 +4,7 @@
 
 import std/[os, strutils]
 import zippy
+import inflate_bound
 import atomicfile
 
 type
@@ -478,12 +479,25 @@ proc pack_state*(image: string): string =
   result.add(compress(unsafeAddr image[STATE_HEADER_SIZE],
                       image.len - STATE_HEADER_SIZE, STATE_DEFLATE_LEVEL, dfZlib))
 
+const STATE_PLAIN_MAX* = 128 * 1024 * 1024
+  ## The most a packed state may inflate to: several times a DS image with
+  ## an Expansion Pak, the largest there is. A link peer or an imported file
+  ## chooses the bytes.
+
 proc unpack_state*(data: string): string =
   ## The plain image of a packed state; anything else as it is. Raises a
   ## StateError (srkCorrupt) when the deflated body does not inflate.
   if not is_packed_state(data): return data
   if data.len == STATE_HEADER_SIZE:
     raise state_error("save state is truncated (nothing after its header)", srkTruncated)
+  # A body that small cannot inflate past the limit (deflate tops out near
+  # 1032:1); a larger one is measured before it is inflated.
+  let packed_len = data.len - STATE_HEADER_SIZE
+  if packed_len > STATE_PLAIN_MAX div 1032 and
+     zlib_inflated_len(unsafeAddr data[STATE_HEADER_SIZE], packed_len,
+                       STATE_PLAIN_MAX) > STATE_PLAIN_MAX:
+    raise state_error("save state is corrupt (its compressed body unpacks to " &
+                      "more than a state can hold)")
   var body: string
   try:
     body = uncompress(unsafeAddr data[STATE_HEADER_SIZE],

@@ -260,6 +260,9 @@ proc load_mem_state(mem: GbMemory; r: var Reader; rev: uint32) =
   mem.current_dma_source = r.read_u16()
   mem.internal_dma_timer = int(r.read_i32())
   mem.dma_position = int(r.read_i32())
+  # An OAM index while the unit runs (0..0xA0), 0xA1 at rest; anything at or
+  # below 0xA0 counts as running, a negative one included.
+  check_range(mem.dma_position, 0, 0xA1, "mem.dma_position")
   mem.requested_oam_dma = r.read_bool()
   mem.next_dma_counter = r.read_u8()
   mem.requested_speed_switch = r.read_bool()
@@ -1013,6 +1016,9 @@ proc load_mbc_state(cart: Mbc; r: var Reader) =
     c.ram_enabled = r.read_bool()
     c.ram_bank_a  = r.read_u8()
     c.ram_bank_b  = r.read_u8()
+    # Index the 32 KiB RAM as bank * 4 KiB, unreduced: eight banks.
+    check_range(int(c.ram_bank_a), 0, 7, "mbc6.ram_bank_a")
+    check_range(int(c.ram_bank_b), 0, 7, "mbc6.ram_bank_b")
     c.rom_bank_a  = r.read_u8()
     c.rom_bank_b  = r.read_u8()
     c.flash_select_a = r.read_bool()
@@ -1051,6 +1057,8 @@ proc load_mbc_state(cart: Mbc; r: var Reader) =
   elif cart of Tama5:
     let c = Tama5(cart)
     c.reg_index = r.read_u8()
+    # Indexes the 16-entry register file.
+    check_range(int(c.reg_index), 0, 15, "tama5.reg_index")
     for i in 0 ..< c.regs.len: c.regs[i] = r.read_u8()
     for p in 0 .. 3:
       for i in 0 .. 12: c.rtc_pages[p][i] = r.read_u8()

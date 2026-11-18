@@ -120,7 +120,7 @@ different CRCs and link fine; incompatible games fail their own handshake.
 * `dingbat_test --mode=netlink --listen PORT` / `--connect HOST:PORT`,
   `--netlink-delay-ms N` (each process asserts its own unit's EWRAM log).
 * Web: `?linkdelay=NN` injects send latency; `?signal=URL` overrides the
-  signaling endpoint.
+  signaling endpoint (loopback, LAN and `.local` pages only).
 * `web/signaling/server.nim` (deployed; ~7 MB RSS) and `server.js` are
   protocol twins: both players send `rendezvous` with the code they agreed
   and their page's id; the first holds the room (`waiting`, ~10 min TTL), the

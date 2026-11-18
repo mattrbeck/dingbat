@@ -4,9 +4,9 @@
 // shares its top-level bindings; the index.js RAF loop calls netStep /
 // netAfterTick while netMode is set.
 
-// ?signal=ws://... overrides the signaling server; ?linkdelay=N adds N ms of
-// latency to every outgoing message. Loopback, RFC 1918 and .local origins
-// use a same-host server on :8790 (plain ws); everything else the production
+// ?linkdelay=N adds N ms of latency to every outgoing message. Loopback,
+// RFC 1918 and .local origins use a same-host server on :8790 (plain ws)
+// unless ?signal=ws://... names another; everything else the production
 // endpoint (GitHub Pages cannot proxy WebSockets). An https dev serve needs
 // ?signal=, since ws: from https: is mixed content.
 const NET_PARAMS = new URLSearchParams(location.search);
@@ -18,8 +18,11 @@ const NET_LOCAL_HOST =
   /^10\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(location.hostname) ||
   /^192\.168\.\d{1,3}\.\d{1,3}$/.test(location.hostname) ||
   /^172\.(1[6-9]|2[0-9]|3[01])\.\d{1,3}\.\d{1,3}$/.test(location.hostname);
+// The override is a dev serve's only: the Drive broker shares this host
+// (index.js driveBrokerBase), so on the public site a link carrying ?signal=
+// would send a signed-in visitor's refresh token wherever it points.
 const NET_SIGNAL_URL =
-  NET_PARAMS.get("signal") ||
+  (NET_LOCAL_HOST && NET_PARAMS.get("signal")) ||
   (NET_LOCAL_HOST
     ? "ws://" + location.hostname + ":8790"
     : "wss://signal.dingbat.gg/signal");
@@ -1642,8 +1645,10 @@ const rbMessage = (data) => {
     rb.stateGot = 0;
   } else if (kind === RB_STATE_CHUNK) {
     if (!rb.stateBuf) return;
-    rb.stateBuf.set(new Uint8Array(data, 1), rb.stateGot);
-    rb.stateGot += data.byteLength - 1;
+    const part = new Uint8Array(data, 1);
+    if (rb.stateGot + part.length > rb.stateBuf.length) return;
+    rb.stateBuf.set(part, rb.stateGot);
+    rb.stateGot += part.length;
     if (rb.stateGot >= rb.stateBuf.length) rb.remoteState = rb.stateBuf;
   } else if (kind === RB_ROM_BEGIN) {
     const len = v.getUint32(1);

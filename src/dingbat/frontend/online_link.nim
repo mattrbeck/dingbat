@@ -1138,6 +1138,8 @@ proc rb_message(ol: OnlineLink; data: string; s: Session) =
       return
     rb.state_buf = newStringOfCap(rb.state_len)
   of K_STATE_CHUNK:
+    if rb.state_len <= 0 or rb.state_len > STATE_MAX or
+       rb.state_buf.len + data.len - 1 > rb.state_len: return
     rb.state_buf.add data[1 .. ^1]
     if rb.state_buf.len >= rb.state_len:
       rb.remote_state = rb.state_buf

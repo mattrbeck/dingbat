@@ -53,7 +53,13 @@ task test_savestate_compat, "Run the save-state format compatibility guards":
   exec "nim c -r -d:test_harness -d:release --path:src " &
        "-o:dingbat_savestate_compat_test tests/savestate_compat_test.nim"
 
-task test_gbartc, "Run the GBA cartridge RTC, battery-save RTC trailer and EEPROM frame tests":
+task test_linkhostile, "Run the hostile link-peer checks (input frames, state fields, compressed size)":
+  exec "nim c -r -d:test_harness -d:release --path:src " &
+       "-o:dingbat_link_hostile_test tests/link_hostile_test.nim"
+  exec "nim c -r -d:test_harness -d:release --path:src " &
+       "-o:dingbat_inflate_bound_test tests/inflate_bound_test.nim"
+
+task test_gbartc,"Run the GBA cartridge RTC, battery-save RTC trailer and EEPROM frame tests":
   exec "nim c -r -d:test_harness -d:release --path:src -o:dingbat_gbartc_test tests/gba_rtc_test.nim"
 
 task test_ndsspu, "Run the DS ARM7 sound (SPU) tests":

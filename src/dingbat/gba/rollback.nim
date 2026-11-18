@@ -54,6 +54,9 @@ proc new_rollback_session*(link: Link; local: int; maxAhead = 12;
     syncEvery: syncEvery, syncNext: syncEvery)
   for i in 0 ..< cap: result.ringFrame[i] = -1
 
+const FEED_AHEAD_SLACK = 600
+  ## Frames past head + maxAhead a peer's input is still taken at (10 s).
+
 proc grow(sess: RollbackSession; f: int) =
   if f >= sess.localIn.len:
     let n = f + 1
@@ -152,7 +155,10 @@ proc reconcile(sess: RollbackSession) =
 proc feed_remote*(sess: RollbackSession; frame: int; bits: uint16) =
   ## Ingest the remote input for `frame`: reconciles an already-predicted
   ## frame, buffers a future one. Duplicates are ignored.
-  if frame < 0: return
+  # A peer runs at most maxAhead past the inputs it has from us, so its
+  # frames stay near head; the input log grows to the frame it is given,
+  # and one far-off number from the wire must not size it.
+  if frame < 0 or frame > sess.head + sess.maxAhead + FEED_AHEAD_SLACK: return
   sess.grow(frame)
   if sess.remoteKnown[frame]: return
   sess.remoteIn[frame] = bits

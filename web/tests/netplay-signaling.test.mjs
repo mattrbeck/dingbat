@@ -109,7 +109,8 @@ const setup = async (opts = {}) => {
   sandbox.RTCPeerConnection = FakeRTCPeerConnection;
   sandbox.BroadcastChannel = FakeBroadcastChannel;
   sandbox.navigator.onLine = true;
-  sandbox.location.hostname = "localhost"; // read at netplay.js module scope
+  sandbox.location.hostname = opts.hostname ?? "localhost"; // read at netplay.js module scope
+  if (opts.search) sandbox.location.search = opts.search;
   sandbox.crypto = { getRandomValues: (a) => { a[0] = 0x1234; return a; } };
 
   vm.runInContext(NET_SOURCE, app.context, { filename: "web/netplay.js" });
@@ -485,4 +486,19 @@ test("two pairings that exchanged descriptions and never opened are the NAT verd
   const dials = t.sockets.length;
   await t.advance(60 * 1000);
   assert.equal(t.sockets.length, dials, "the verdict stops dialing");
+});
+
+// The Drive broker is reached on the signaling host (index.js
+// driveBrokerBase): an override the public site honoured would hand a
+// signed-in visitor's refresh token to whatever host a link named.
+test("?signal= is a dev serve's: the public site keeps the production server", async () => {
+  const pub = await setup({ hostname: "dingbat.gg", search: "?signal=wss://evil.example/signal" });
+  assert.equal(pub.sockets[0].url, "wss://signal.dingbat.gg/signal");
+  assert.equal(vm.runInContext("driveBrokerBase()", pub.app.context), "https://signal.dingbat.gg");
+
+  const dev = await setup({ search: "?signal=ws://127.0.0.1:9999" });
+  assert.equal(dev.sockets[0].url, "ws://127.0.0.1:9999");
+
+  const lan = await setup({ hostname: "192.168.1.5" });
+  assert.equal(lan.sockets[0].url, "ws://192.168.1.5:8790");
 });

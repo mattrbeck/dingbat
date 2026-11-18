@@ -246,6 +246,17 @@ jobs:
         # and a straight run (checkpoints keep each joypad's held keys).
         shell: bash
         run: ./dingbat_gb_rollback_keys_test
+      - name: Hostile link peer (input frames, state fields, compressed size)
+        # What a peer chooses: a far-off input frame, out-of-range mapper and
+        # OAM DMA fields in the state it sends, and a body that inflates past
+        # the limit. Each is ignored or refused and the session carries on.
+        shell: bash
+        run: ./dingbat_link_hostile_test
+      - name: Inflated-size walk agrees with zippy
+        # common/inflate_bound.nim measures a packed state before it is
+        # inflated: the same length as zippy on real streams and on damage.
+        shell: bash
+        run: ./dingbat_inflate_bound_test
       - name: Desktop online link (two links, local signaling server)
         # frontend/online_link.nim over real WebRTC data channels: pairing,
         # both sides' rollback cores bit-identical, attachtest.gba's rounds

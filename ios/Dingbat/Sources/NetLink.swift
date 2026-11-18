@@ -964,6 +964,8 @@ final class NetLink: ObservableObject {
             rb.stateBuf = Data()
             rb.stateBuf.reserveCapacity(rb.stateLen)
         case Self.stateChunk:
+            guard rb.stateLen > 0, rb.stateLen <= Self.stateMax,
+                  rb.stateBuf.count + data.count - 1 <= rb.stateLen else { return }
             rb.stateBuf.append(data.dropFirst())
             if rb.stateBuf.count >= rb.stateLen { rb.remoteState = rb.stateBuf }
         case Self.romBegin:
