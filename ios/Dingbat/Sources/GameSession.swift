@@ -631,12 +631,10 @@ final class GameSession: NSObject, ObservableObject {
     /// not floored, so a refresh that lands a hair early or late still runs
     /// its one frame; a missed refresh is made up on the next.
     private func framesOwed(_ link: DisplayTick, dt: CFTimeInterval) -> Int {
-        let period = link.period
-        let hz = period > 0 ? 1 / period : 60
-        let k = (hz / 60).rounded()
-        // A display at a multiple of 60 Hz: one frame per refresh, exactly
-        // (a DS's 59.83 too: the audio reader absorbs the 0.29%).
-        let base = k >= 1 && abs(hz / 60 - k) < 0.03 ? 60.0 : isNDS ? NdsUtil.fps : 59.7275
+        // The console's true rate at every refresh rate, as the web runs:
+        // at 60 Hz a refresh every ~3.7 s shows the frame before again
+        // (a DS's 59.83 every ~6 s); at 30 Hz, mostly two frames a refresh.
+        let base = isNDS ? NdsUtil.fps : 59.7275
         let mult = speed == .double ? 2.0 : speed == .slow ? 0.5 : 1.0
         let cap = speed == .double ? 8 : 4
         frameDebt += dt * base * mult
