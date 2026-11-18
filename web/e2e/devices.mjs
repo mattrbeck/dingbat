@@ -22,6 +22,14 @@ export const GAME = SYNCTEST_NAME;
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // Built? em.js/em.wasm come from `nim c -d:emscripten src/dingbat_wasm.nim`.
+// Answer netplay.js's different-game question yes whenever it comes up.
+export const agreeToDifferentGame = (page) => page.evaluate(() => {
+  const q = document.getElementById("net-mismatch");
+  const yes = () => { if (!q.hidden) document.getElementById("net-mismatch-yes").click(); };
+  new MutationObserver(yes).observe(q, { attributes: true });
+  yes();
+});
+
 export const builtWeb = () => existsSync(join(WEB, "em.wasm")) && existsSync(join(WEB, "em.js"));
 
 const TYPES = { ".html": "text/html", ".js": "text/javascript", ".mjs": "text/javascript",

@@ -77,7 +77,8 @@ const runCase = async (name, { appRom, peerRom, appFirst }) => {
   let peer = null;
   if (!appFirst) { peer = runPeer(peerRom, code); await sleep(1500); }
   const data = launchApp(appRom, ["-autoplay", appRom.split("/").pop(), "-signal", `ws://127.0.0.1:${PORT}`,
-                                  "-link", code, "-link-stop-at", String(STOP), "-link-press"], log);
+                                  "-link", code, "-link-stop-at", String(STOP), "-link-press",
+                                  "-link-accept-mismatch"], log);
   if (appFirst) { await sleep(15000); peer = runPeer(peerRom, code); }
   const dumpFile = join(data, "tmp/linkdump.txt");
   let appDump = "";

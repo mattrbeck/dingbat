@@ -1804,6 +1804,15 @@
             <span class="net-transfer-name">Your friend</span>
           </div>
         </div>
+        <!-- The friend's game is not this one: asked before either game
+             crosses (netplay.js rbAskMismatch). -->
+        <div id="net-mismatch" class="net-mismatch" hidden>
+          <p>Your friend is playing a different game than you. Are you sure you want to connect?</p>
+          <div class="modal-actions">
+            <button type="button" class="button" id="net-mismatch-no">Cancel</button>
+            <button type="button" class="button button-primary" id="net-mismatch-yes">Connect</button>
+          </div>
+        </div>
         <div id="net-connect-view">
           <p>Enter the same code as your friend.</p>
           <div class="net-join-row">

@@ -8556,6 +8556,16 @@ body.rewind-off #report-slider {
 #net-modal.net-transferring :is(.net-join-row, .net-view-toggle, #net-connect-view > p:first-child, #net-manual-view > p:first-child) {
   display: none;
 }
+/* The different-game question stands alone in the modal. */
+#net-modal.net-asking :is(#net-connect-view, #net-manual-view, .net-transfer) {
+  display: none;
+}
+.net-mismatch[hidden] {
+  display: none;
+}
+.net-mismatch p {
+  margin: 0 0 16px;
+}
 .net-transfer-end {
   display: flex;
   flex-direction: column;

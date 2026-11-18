@@ -21,7 +21,7 @@ import { join } from "node:path";
 import { readFileSync, writeFileSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { createRequire } from "node:module";
-import { serveWeb, builtWeb, sleep, WEB } from "./devices.mjs";
+import { serveWeb, builtWeb, sleep, WEB, agreeToDifferentGame } from "./devices.mjs";
 import { synctestRom, SYNCTEST_NAME } from "./synctest-rom.mjs";
 
 const playwright = createRequire(join(WEB, "package.json"))("playwright");
@@ -68,6 +68,7 @@ const page_player = async (game, drift = 0, bios = null, stop = STOP, random = f
   await page.goto(web.url + "?signal=ws://127.0.0.1:" + SIGNAL_PORT);
   await page.waitForFunction(() => typeof Module !== "undefined" && runtimeReady &&
     typeof db !== "undefined" && !!db, null, { timeout: 60000 });
+  await agreeToDifferentGame(page);
   await page.evaluate(() => dbPut(THUMBS_OFFER_KEY, Date.now()));
   await sleep(500);
   const [chooser] = await Promise.all([page.waitForEvent("filechooser"),

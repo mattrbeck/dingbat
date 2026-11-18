@@ -45,6 +45,8 @@ final class NetLink: ObservableObject {
     @Published private(set) var connecting = false
     /// The session runs: the game ticks linked.
     @Published private(set) var linked = false
+    /// The different-game question is up (LinkCableView's alert).
+    @Published private(set) var askingMismatch = false
     /// The manual exchange is on screen instead of the shared code.
     @Published private(set) var manualView = false
     /// Our code, nil while it is being minted.
@@ -129,6 +131,12 @@ final class NetLink: ObservableObject {
         var stateLen = 0
         var remoteHello = false
         var needRom = false
+        /// The friend's game is not ours: asked once, and until the player
+        /// agrees nothing of theirs boots and nothing of ours is sent
+        /// (web rbAskMismatch). `romWanted`: the friend asked meanwhile.
+        var mismatchAsked = false
+        var mismatchOk = false
+        var romWanted = false
         var remoteRomHash: UInt32 = 0
         var remoteRomLen = 0
         var romBuf = Data()
@@ -256,6 +264,15 @@ final class NetLink: ObservableObject {
         return 180
     }()
     static let resumePairDeadline: TimeInterval = 20
+    /// DEBUG builds take `-link-accept-mismatch` (tests): the different-game
+    /// question answers itself yes.
+    static let acceptMismatch: Bool = {
+        #if DEBUG
+        return ProcessInfo.processInfo.arguments.contains("-link-accept-mismatch")
+        #else
+        return false
+        #endif
+    }()
     /// The friend's gap is at most about twice the prediction window.
     static let sentLogMax = 128
     /// web RB_AWAY_CARD_MS / RB_AWAY_TOAST_MS
@@ -864,8 +881,25 @@ final class NetLink: ObservableObject {
         pumpRom(s)
     }
 
+    /// The player's answer to the different-game question.
+    func answerMismatch(_ yes: Bool) {
+        askingMismatch = false
+        guard let s = session, let rb = s.rb, rb.mismatchAsked, !rb.mismatchOk else { return }
+        guard yes else {
+            shutdown()
+            return
+        }
+        rb.mismatchOk = true
+        showTransfer(rb)
+        // A friend that names its whole ROM is told whether we have it and
+        // asks for ours if it needs it; an older build is just sent ours.
+        if let want = rb.remoteRomId { answerRom(want, rb, s) } else { sendOurRom(s) }
+        if rb.romWanted { sendOurRom(s) }
+        tryInit(s)
+    }
+
     private func showTransfer(_ rb: RB) {
-        guard rb.needRom else { return }
+        guard rb.needRom, rb.mismatchOk else { return }
         // The friend's ROM is estimated at ours until its rom-begin lands.
         let total = rb.romBytes.count + (rb.remoteRomLen > 0 ? rb.remoteRomLen : rb.romBytes.count)
         guard total > 0 else { return }
@@ -924,7 +958,8 @@ final class NetLink: ObservableObject {
             showTransfer(rb)
             return
         case Self.needRom:
-            sendOurRom(s)
+            // Only to a friend this player agreed to connect to.
+            if rb.mismatchOk { sendOurRom(s) } else { rb.romWanted = true }
             return
         case Self.away:
             if data.count >= 2 { peerAway(data[data.startIndex + 1] == 1) }
@@ -949,10 +984,10 @@ final class NetLink: ObservableObject {
             if data.count >= Self.helloBiosLen {
                 rb.peerBios = (UInt32(data[data.startIndex + 34]), Self.read32(data, 35))
             }
-            if answers ? rb.remoteRomId != rb.romId : rb.remoteRomHash != rb.romHash {
+            if (answers ? rb.remoteRomId != rb.romId : rb.remoteRomHash != rb.romHash), !rb.mismatchAsked {
                 rb.needRom = true
-                showTransfer(rb)
-                if let want = rb.remoteRomId { answerRom(want, rb, s) } else { sendOurRom(s) }
+                rb.mismatchAsked = true
+                if Self.acceptMismatch { answerMismatch(true) } else { askingMismatch = true }
             }
         case Self.stateBegin:
             guard data.count >= 5 else { return }
@@ -1025,7 +1060,7 @@ final class NetLink: ObservableObject {
     /// cores, load each player's snapshot, say ready.
     private func tryInit(_ s: Session) {
         guard let rb = s.rb, !rb.inited, rb.remoteHello, let remoteState = rb.remoteState else { return }
-        if rb.needRom && rb.remoteRom == nil { return }
+        if rb.needRom && (rb.remoteRom == nil || !rb.mismatchOk) { return }
         rb.inited = true
         // This player's core runs on the game's own files (its battery save
         // is the game's); the friend's on a copy in Caches/link.
@@ -1980,6 +2015,7 @@ final class NetLink: ObservableObject {
             Self.clearLive()
         }
         session = nil
+        askingMismatch = false
         clearPeerAway()
         s.timer?.cancel()
         s.ping?.cancel()

@@ -29,6 +29,7 @@ import { readFileSync, writeFileSync, copyFileSync, mkdirSync, existsSync, rmSyn
 import { join } from "node:path";
 import { createRequire } from "node:module";
 import assert from "node:assert/strict";
+import { agreeToDifferentGame } from "../../web/e2e/devices.mjs";
 
 // Each player's buttons, by linked frame: [from, to, buttons, every] taps
 // every `every` frames (held 4), or "hold" for the whole span. Player 0 (the
@@ -119,6 +120,7 @@ try {
   page.on("console", (m) => { if (/netplay/.test(m.text())) console.log("  web:", m.text()); });
   await page.goto(web.url + "?signal=" + sig);
   await page.waitForFunction(() => typeof Module !== "undefined" && !!Module._rollback_tick, null, { timeout: 30000 });
+  await agreeToDifferentGame(page);
 
   const have = process.env.HAVE || "";
   // The browser: FireRed, at the counter (LeafGreen in its library first).
@@ -169,7 +171,7 @@ try {
   if (existsSync(log)) rmSync(log);
   simctl("launch", "--stderr=" + log, UDID, BUNDLE, ...MUTED, "-autoplay", "PokemonLeafGreen.gba",
          "-load-state", "lg.state", "-signal", sig, "-link", code,
-         "-link-script", "trade", "-link-stop-at", String(STOP));
+         "-link-script", "trade", "-link-stop-at", String(STOP), "-link-accept-mismatch");
   await sleep(3000);
   await page.click("#menu-btn");
   await page.click("#net-connect");

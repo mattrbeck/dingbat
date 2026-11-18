@@ -54,6 +54,7 @@ const netJoinGo = /** @type {HTMLButtonElement} */ (document.getElementById("net
 const netStallBadge = document.getElementById("net-stall");
 const netSpinner = document.getElementById("net-spinner");
 const netTransfer = document.getElementById("net-transfer");
+const netMismatch = document.getElementById("net-mismatch");
 
 const netModalOpen = () => netModal.classList.contains("open");
 
@@ -147,10 +148,16 @@ const SIG_REDIAL_DELAYS = [1000, 2000, 4000];
 // since a slow STUN round can legitimately take 10s+.
 const RTC_CONNECT_DEADLINE = 20000;
 
+const netShowMismatch = (on) => {
+  if (netMismatch) netMismatch.hidden = !on;
+  netModal.classList.toggle("net-asking", on);
+};
+
 const closeNetModal = () => {
   netModal.classList.remove("open");
   if (netTransfer) netTransfer.hidden = true;
   netModal.classList.remove("net-transferring");
+  netShowMismatch(false);
   netSetConnecting(false);
   releaseWakeLock();
   clearTimeout(manualFallbackTimer);
@@ -1422,13 +1429,41 @@ const rbSendRom = async (bytes, onProgress) => {
 // Joint progress over both directions; both must finish before either boots.
 const rbShowXferProgress = () => {
   const rb = net?.rb;
-  if (!rb || !rb.needRom) return;
+  if (!rb || !rb.needRom || !rb.mismatchOk) return;
   // Estimate the peer's ROM at our own size until its rom-begin lands.
   const total = (rb.romLen || 0) + (rb.remoteRomLen || rb.romLen || 0);
   if (total <= 0) return;
   const done = (rb.romSent || 0) + (rb.remoteRomGot || 0);
   const pct = Math.min(100, Math.floor((done / total) * 100));
   netSetStatus("Transferring games… " + pct + "%");
+};
+
+// The friend's game is not ours: nothing of theirs boots here and nothing
+// of ours goes to them until the player says so. The friend's side asks its
+// own player the same; its game and state may arrive meanwhile and wait.
+const rbAskMismatch = (rb) => {
+  rb.needRom = true;
+  rb.mismatchAsked = true;
+  netShowMismatch(true);
+  netModal.querySelector("#net-mismatch-yes")?.focus?.();
+};
+
+const rbMismatchAnswer = (yes) => {
+  const rb = net?.rb;
+  if (!rb || !rb.mismatchAsked || rb.mismatchOk) return;
+  netShowMismatch(false);
+  if (!yes) {
+    netDismissModal();
+    return;
+  }
+  rb.mismatchOk = true;
+  rbShowXferProgress();
+  // A friend that names its whole ROM is told whether we have it, and asks
+  // for ours if it needs it; an older build is just sent ours.
+  if (rb.remoteRomId) rbAnswerRom(rb, rb.remoteRomId);
+  else rbSendOurRom();
+  if (rb.romWanted) rbSendOurRom();
+  rbTryInit();
 };
 
 const rbSendOurRom = () => {
@@ -1612,7 +1647,9 @@ const rbMessage = (data) => {
     return;
   }
   if (kind === RB_NEED_ROM) {
-    rbSendOurRom();
+    // Only to a friend this player agreed to connect to with another game.
+    if (rb.mismatchOk) rbSendOurRom();
+    else rb.romWanted = true;
     return;
   }
   if (kind === RB_HELLO) {
@@ -1630,10 +1667,7 @@ const rbMessage = (data) => {
     }
     if (data.byteLength >= RB_HELLO_BIOS_LEN) rb.peerBios = { mode: v.getUint8(34), hash: v.getUint32(35) };
     if (answers ? !rbSameRom(rb.remoteRomId, rb.romId) : rb.remoteRomHash !== rb.romHash) {
-      rb.needRom = true;
-      rbShowXferProgress();
-      if (answers) rbAnswerRom(rb, rb.remoteRomId);
-      else rbSendOurRom();
+      if (!rb.mismatchAsked) rbAskMismatch(rb);
     }
   } else if (kind === RB_STATE_BEGIN) {
     const len = v.getUint32(1);
@@ -1694,7 +1728,7 @@ const rbLoadState = (player, bytes) => {
 const rbTryInit = () => {
   const rb = net.rb;
   if (!rb || rb.inited || !rb.remoteHello || !rb.remoteState) return;
-  if (rb.needRom && !rb.remoteRom) return;
+  if (rb.needRom && (!rb.remoteRom || !rb.mismatchOk)) return;
   rb.inited = true;
   // Both peers write the same {host, guest} pair.
   const localRom = rb.romBytes;
@@ -2255,6 +2289,7 @@ const netShutdown = async (opts) => {
   if (net?.rb) rbClearLive();
   netStallBadge.hidden = true;
   netStallText.textContent = "Waiting for your friend…";
+  netShowMismatch(false);
   rbHideAwayCard();
   rbHiddenSince = 0;
   clearTimeout(manualFallbackTimer);
@@ -3041,6 +3076,8 @@ document.getElementById("net-to-manual").addEventListener("click", () => {
 document.getElementById("net-to-code").addEventListener("click", manualBack);
 
 document.getElementById("net-close").addEventListener("click", netDismissModal);
+document.getElementById("net-mismatch-yes")?.addEventListener("click", () => rbMismatchAnswer(true));
+document.getElementById("net-mismatch-no")?.addEventListener("click", () => rbMismatchAnswer(false));
 netModal.addEventListener("click", (e) => {
   if (e.target === netModal) netDismissModal();
 });

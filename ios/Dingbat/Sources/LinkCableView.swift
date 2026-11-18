@@ -31,6 +31,11 @@ struct LinkCableView: View {
         }
         .onAppear { DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { focused = true } }
         .onDisappear { link.sheetClosed() }
+        .alert("Your friend is playing a different game than you. Are you sure you want to connect?",
+               isPresented: Binding(get: { link.askingMismatch }, set: { _ in })) {
+            Button("Cancel", role: .cancel) { link.answerMismatch(false) }
+            Button("Connect") { link.answerMismatch(true) }
+        }
     }
 
     private var shared: some View {

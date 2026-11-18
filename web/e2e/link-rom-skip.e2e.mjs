@@ -16,7 +16,7 @@ import { spawn } from "node:child_process";
 import { join } from "node:path";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
-import { serveWeb, builtWeb, sleep, WEB } from "./devices.mjs";
+import { serveWeb, builtWeb, sleep, WEB, agreeToDifferentGame } from "./devices.mjs";
 
 const playwright = createRequire(join(WEB, "package.json"))("playwright");
 const skip = !builtWeb() ? "web/em.wasm not built (nim c -d:emscripten src/dingbat_wasm.nim)" : false;
@@ -90,13 +90,14 @@ const addGame = async (page, game) => {
 
 // One player: its own context, `library` added in turn (the last one left
 // running), and the session ticking to STOP under scripted buttons.
-const player = async (library, initScript) => {
+const player = async (library, initScript, agree = true) => {
   const ctx = await browser.newContext({ viewport: { width: 1000, height: 800 } });
   const page = await ctx.newPage();
   if (initScript) await page.addInitScript(initScript);
   await page.goto(web.url + "?signal=ws://127.0.0.1:" + SIGNAL_PORT);
   await page.waitForFunction(() => typeof Module !== "undefined" && runtimeReady &&
     typeof db !== "undefined" && !!db, null, { timeout: 60000 });
+  if (agree) await agreeToDifferentGame(page);
   await page.evaluate(() => dbPut(THUMBS_OFFER_KEY, Date.now()));
   await sleep(500);
   for (const [i, game] of library.entries()) {
@@ -204,5 +205,84 @@ test("an older build gets the ROM as before, and sends its own", { skip, timeout
   const [ta, tb] = [await transfer(a), await transfer(b)];
   assert.deepEqual([ta.got, tb.got], [Y.bytes.length, X.bytes.length], "both games crossed the wire");
   assert.ok(!ta.friendHas && !tb.fromLibrary);
+  await a.ctx.close(); await b.ctx.close();
+});
+
+// A different game is the player's call: until each says yes, nothing of the
+// friend's boots and nothing of the player's own is sent.
+// The server takes ten rendezvous a minute from one address, and the tests
+// above use them: these start it afresh.
+const freshServer = async () => {
+  signal?.kill("SIGKILL");
+  signal = null;
+  await sleep(300);
+  await setup();
+};
+
+const asked = (p) => p.page.evaluate(() => !document.getElementById("net-mismatch").hidden);
+const crossed = (p) => p.page.evaluate(() => ({
+  sent: net?.rb?.romSent || 0, sending: !!net?.rb?.romSendStarted, inited: !!net?.rb?.inited,
+  cores: Module._rollback_head() }));
+
+test("a different game asks first: no ROM leaves or boots until both agree", { skip, timeout: 180000 }, async () => {
+  await freshServer();
+  const a = await player([X], null, false), b = await player([Y], null, false);
+  await connect(a, "ASKE2E");
+  await until(() => a.page.evaluate(() => net?.ws?.readyState === 1), "A at the server", 10000);
+  await sleep(500);
+  await connect(b, "ASKE2E");
+  await until(async () => (await asked(a)) && (await asked(b)), "both asked", 30000);
+  assert.equal(await a.page.evaluate(() => document.querySelector("#net-mismatch p").textContent),
+    "Your friend is playing a different game than you. Are you sure you want to connect?");
+  await sleep(1500);
+  for (const p of [a, b]) {
+    const c = await crossed(p);
+    assert.deepEqual([c.sending, c.sent, c.inited], [false, 0, false], "asked, and nothing has moved");
+  }
+  // One yes is not both: A's ROM goes nowhere until B, who must ask for it, agrees.
+  await a.page.locator("#net-mismatch-yes").click();
+  await sleep(1500);
+  assert.deepEqual([(await crossed(a)).sent, (await crossed(b)).sent, (await crossed(a)).inited], [0, 0, false],
+    "A agreed alone: still nothing sent either way");
+  await b.page.locator("#net-mismatch-yes").click();
+  await until(async () => (await crossed(a)).inited && (await crossed(b)).inited, "both booted", 60000);
+  const [ta, tb] = [await transfer(a), await transfer(b)];
+  assert.deepEqual([ta.got, tb.got], [Y.bytes.length, X.bytes.length], "then each got the other's game");
+  await a.ctx.close(); await b.ctx.close();
+});
+
+test("a different game refused: the link ends and no ROM crossed", { skip, timeout: 180000 }, async () => {
+  await freshServer();
+  const a = await player([X], null, false), b = await player([Y], null, false);
+  await connect(a, "NOE2E");
+  await until(() => a.page.evaluate(() => net?.ws?.readyState === 1), "A at the server", 10000);
+  await sleep(500);
+  await connect(b, "NOE2E");
+  await until(async () => (await asked(a)) && (await asked(b)), "both asked", 30000);
+  await b.page.locator("#net-mismatch-yes").click();
+  await sleep(500);
+  const sent = await b.page.evaluate(() => net.rb.romSent || 0);
+  await a.page.locator("#net-mismatch-no").click();
+  await until(() => a.page.evaluate(() => !document.getElementById("net-modal").classList.contains("open")),
+    "A's link screen closed", 10000);
+  assert.equal(sent, 0, "B, who agreed, had sent nothing to a friend who had not");
+  await until(async () => !(await asked(b)) && /\S/.test(await status(b)), "B told the link ended", 30000);
+  assert.equal(await b.page.evaluate(() => !!net?.rb?.inited), false, "B booted nothing");
+  await a.ctx.close(); await b.ctx.close();
+});
+
+test("the same game on both sides is never asked", { skip, timeout: 180000 }, async () => {
+  await freshServer();
+  const a = await player([X], null, false), b = await player([X], null, false);
+  let seen = false;
+  for (const p of [a, b]) {
+    await p.page.evaluate(() => {
+      const q = document.getElementById("net-mismatch");
+      new MutationObserver(() => { if (!q.hidden) window.__asked = true; }).observe(q, { attributes: true });
+    });
+  }
+  await link(a, b, "SAMEE2E");
+  for (const p of [a, b]) seen ||= await p.page.evaluate(() => !!window.__asked);
+  assert.equal(seen, false);
   await a.ctx.close(); await b.ctx.close();
 });

@@ -29,7 +29,7 @@ import { readFileSync, writeFileSync, copyFileSync, mkdirSync, existsSync, rmSyn
 import { join } from "node:path";
 import { createRequire } from "node:module";
 import assert from "node:assert/strict";
-import { serveWeb, builtWeb, WEB, sleep } from "../../web/e2e/devices.mjs";
+import { serveWeb, builtWeb, WEB, sleep, agreeToDifferentGame } from "../../web/e2e/devices.mjs";
 
 const APP = process.argv[2];
 const UDID = process.argv[3] || process.env.SIMDEV || "20B3E400-B140-4C0D-A981-A87BDBEDAEF9";
@@ -89,6 +89,7 @@ const runCase = async (name, { webRom, appRom, appGame, manual = false, webHas =
   const sig = "ws://127.0.0.1:" + (manual ? 9 : PORT);
   await page.goto(web.url + "?signal=" + sig);
   await page.waitForFunction(() => typeof Module !== "undefined" && !!Module._rollback_tick, null, { timeout: 30000 });
+  await agreeToDifferentGame(page);
   // Games already in the browser's library: each added, then Menu > Library.
   for (const r of webHas) {
     const [c] = await Promise.all([page.waitForEvent("filechooser"),
@@ -136,7 +137,7 @@ const runCase = async (name, { webRom, appRom, appGame, manual = false, webHas =
 
   launchApp(appRom, ["-autoplay", appGame, "-signal", sig,
                      ...(manual ? ["-link-manual"] : ["-link", code]),
-                     "-link-stop-at", String(STOP), "-link-press"], log, appHas);
+                     "-link-stop-at", String(STOP), "-link-press", "-link-accept-mismatch"], log, appHas);
   await sleep(1500);
   await page.click("#menu-btn");
   await page.click("#net-connect");
