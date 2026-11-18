@@ -1668,11 +1668,11 @@ proc build_gba_misc_tests(): seq[TestDef] =
   # hades-emu/Hades-Tests (GPL-2.0): per-check PASS/FAIL and a "Total: a/b"
   # line. dma-start-delay's eight values match an AGB SP where the rig can
   # run them (its IWRAM and board-WRAM rows, tests/roms/payloads/hadesdsd.s).
-  # dma-latch (3/4) has never drawn its all-pass frame here, so nothing is
-  # pinned for it yet.
+  # dma-latch's check 4 reads the refill's word at five NOPs, as an AGB SP
+  # does (tests/roms/payloads/hadeslatch.s; FIFO_CHAIN_GOES_ON).
   for (rom, hash) in [("bios-openbus", "2E1EF1B0B52F22CA"),
                       ("timer-basic", "65ABD86A89664A82"),
-                      ("dma-latch", "unpinned"),
+                      ("dma-latch", "3AFCD8AEBF4E993A"),
                       ("dma-start-delay", "827A85AE0D672D8E")]:
     result.add(TestDef(
       name: "hades/" & rom,

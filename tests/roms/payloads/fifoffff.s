@@ -22,12 +22,10 @@
 @  k = 1 over a stopped 0xFFFF: the same, a NOP earlier (n = 11).
 @  k = 2: 20 for n <= 20, then 30.   k = 3: 11 at n = 0, 19 to n = 28, then 29.
 @  k = 4: 0 at n = 0, 10 at n = 1..2, 20 from n = 3 on (to 39).
-@ dingbat (single 10-cycle bursts a request apart) has k = 1: 20, then +10
-@ every 6 NOPs; k = 2: 30 from n = 19; k = 3: 20 to n = 36; k = 4: 20 from
-@ n = 1. Unmodelled: at k <= 3 the console runs refills in groups (18 =
-@ one burst and one chained without its two lead cycles?) and holds them
-@ off longer. A request delay of 3 at k = 1 against 4 at k = 20 (fifodma)
-@ would put Hades-Tests dma-latch's word at its five NOPs.
+@ Modelled 2026-11-18 (apu/dma_channels.nim FIFO_CHAIN_GOES_ON and the
+@ rules beside it): an 18 is a burst whose hand-back read goes straight
+@ on into the next. dingbat matches every cell but the `ob` opcode cells,
+@ which read the word after the payload (the monitor's code on the console).
 @
 @ SAFETY: as fifospk.s -- DMA0 armed on V-blank to write 0 to DMA1CNT_H,
 @ TM0 stopped ~160 cycles before DMA1 is disabled, every register it

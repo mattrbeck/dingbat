@@ -292,7 +292,68 @@ proc trigger_fifo*(dma: DMA; fifo_channel: int) =
             dma.fifo_chain[fifo_channel] = 1
             dma.request(ch)
         return
+      # FIFO_CHAIN_GOES_ON: one landing as that hand-back read ends keeps the
+      # bus for the rest of its burst
+      when FIFO_CHAIN_GOES_ON:
+        if now == dma.busy_until[ch] and dma.fifo_chain[fifo_channel] == 2:
+          dma.fifo_chain[fifo_channel] = 4
     dma.request(ch)
+
+proc fifo_request_due(dma: DMA; f: int; at: CycleCount): bool =
+  ## Whether sound FIFO f's refill request can land on cycle `at`: one is
+  ## booked there, or its timer overflows FIFO_DMA_REQUEST_DELAY before.
+  let s = dma.gba.scheduler
+  let kind = if f == 0: etFifoARequest else: etFifoBRequest
+  for ev in s.pending:
+    if ev.kind == kind and ev.cycles == at: return true
+  let cnt = dma.gba.apu.soundcnt_h
+  let tn = int(if f == 0: cnt.dma_sound_a_timer else: cnt.dma_sound_b_timer)
+  let tim = dma.gba.timer
+  if not tim.tmcnt[tn].enable or tim.tmcnt[tn].cascade: return false
+  let ovf = at - CycleCount(FIFO_DMA_REQUEST_DELAY)
+  let next = s.pending_at(TIMER_EVENT_TYPES[tn])
+  if next == high(CycleCount) or ovf < next: return false
+  let period = TIMER_PERIODS[tim.tmcnt[tn].frequency] * (0x10000 - int(tim.tmd[tn]))
+  (ovf - next) mod CycleCount(period) == 0
+
+proc fifo_drain(dma: DMA) =
+  ## Dispatch the events due by the burst's cycle, as preempt_point does
+  let bus = dma.gba.bus
+  dma.gba.apu.apu_catchup_all()
+  if bus.sched.cycles + CycleCount(bus.cycles) >=
+     min(bus.sched.next_event, dma.gba.apu.apu_next_step()):
+    let inside = bus.in_catch_up
+    bus.catch_up()
+    bus.in_catch_up = inside
+
+proc fifo_handback_read(dma: DMA; channel: int; delta_source: int): bool =
+  ## FIFO_CHAIN_GOES_ON, at a sound-FIFO burst's hand-back cycle: a request
+  ## landing there takes the next burst's first read (FIFO_HANDBACK_CHAIN);
+  ## true when the next lands as that read ends, and the burst goes on.
+  let f = channel - 1
+  let bus = dma.gba.bus
+  let bit = uint8(1 shl channel)
+  let h = bus.sched.cycles + CycleCount(bus.cycles)
+  if dma.fifo_chain[f] != 0 or not dma.fifo_request_due(f, h): return false
+  dma.busy_until[channel] = h + 1
+  dma.fifo_drain()
+  if (dma.pending and bit) == 0 or dma.fifo_chain[f] != 1: return false
+  dma.pending = dma.pending and not bit
+  dma.latch[channel] = bus.read_word(dma.src[channel])
+  if bus.sd_tw_active:
+    dma.latch[channel] = bus.sd_tw_word(dma.src[channel], dma.latch[channel])
+  bus.dma_open_bus = dma.latch[channel]
+  dma.src[channel] = uint32(int(dma.src[channel]) + delta_source)
+  dma.fifo_chain[f] = 2
+  let e = bus.sched.cycles + CycleCount(bus.cycles)
+  dma.busy_until[channel] = e
+  if not dma.fifo_request_due(f, e): return false
+  dma.fifo_drain()
+  if (dma.pending and bit) == 0 or dma.fifo_chain[f] != 4: return false
+  dma.pending = dma.pending and not bit
+  dma.fifo_chain[f] = 0
+  dma.busy_until[channel] = high(CycleCount)
+  true
 
 proc run_channel(dma: DMA; channel: int; nested: bool) =
   let start_timing   = int(dma.dmacnt_h[channel].start_timing)
@@ -349,6 +410,11 @@ proc run_channel(dma: DMA; channel: int; nested: bool) =
   dma.gba.bus.dma_request_at =
     if dma.gba.bus.dma_deferred: dma.gba.bus.dma_deferred_from
     else: dma.gba.bus.sched.cycles
+  # FIFO_OBUS_TAKEOVER: a sound-FIFO request takes the bus a cycle before its
+  # event (defer_fifo_request)
+  when FIFO_OBUS_TAKEOVER:
+    if start_timing == 3 and (channel == 1 or channel == 2):
+      dma.gba.bus.dma_request_at -= 1
   dma.gba.bus.dma_deferred = false
   dma.gba.bus.dma_has_run = true
   inc dma.gba.dma_bursts
@@ -380,7 +446,7 @@ proc run_channel(dma: DMA; channel: int; nested: bool) =
   let fifo_burst = start_timing == 3 and (channel == 1 or channel == 2)
   let chain_read = FIFO_HANDBACK_CHAIN and fifo_burst and
                    dma.fifo_chain[channel - 1] in {1'u8, 3'u8}
-  let resumed = FIFO_HANDBACK_CHAIN and fifo_burst and dma.fifo_chain[channel - 1] == 2
+  let resumed = FIFO_HANDBACK_CHAIN and fifo_burst and dma.fifo_chain[channel - 1] in {2'u8, 4'u8}
   if not nested:
     if dma.chained: dma.chained = false
     elif not (chain_read or resumed): dma.gba.bus.add_cycles(DMA_LEAD_CYCLES)
@@ -450,7 +516,11 @@ proc run_channel(dma: DMA; channel: int; nested: bool) =
       return
     if resumed:
       # The word read in that hand-back goes first: its write alone
+      when FIFO_HELD_WORD_LOST:
+        let kept = dma.gba.apu.dma_channels.sizes[channel - 1]
       dma.gba.bus.write_word(dma.dst[channel], dma.latch[channel])
+      when FIFO_HELD_WORD_LOST:
+        dma.gba.apu.dma_channels.sizes[channel - 1] = kept
       when FIFO_LEVEL_AT_OVERFLOW:
         dma.fifo_word_at[channel - 1][0] =
           dma.gba.bus.sched.cycles + CycleCount(dma.gba.bus.cycles)
@@ -484,6 +554,9 @@ proc run_channel(dma: DMA; channel: int; nested: bool) =
             # a sound FIFO DMA during an HLE SoundDriverMain pass (bus.nim)
             dma.latch[channel] = dma.gba.bus.sd_tw_word(dma.src[channel], dma.latch[channel])
         when DMA_PREEMPT_AFTER_READ: preempt_point()
+        # a burst gone on writes on the FIFO's level of its cycle
+        when stamp and FIFO_CHAIN_GOES_ON:
+          if went_on: dma.fifo_drain()
         if dst_writable:
           dma.gba.bus.write_word(dma.dst[channel], dma.latch[channel])
         when stamp:
@@ -503,11 +576,26 @@ proc run_channel(dma: DMA; channel: int; nested: bool) =
         if touches_iwram: dma.gba.bus.iwram_latch = dma.latch[channel]
       dma.src[channel] = uint32(int(dma.src[channel]) + delta_source)
       dma.dst[channel] = uint32(int(dma.dst[channel]) + delta_dest)
-  when FIFO_LEVEL_AT_OVERFLOW:
-    if fifo_burst: transfers(true)
-    else: transfers(false)
-  else:
-    transfers(false)
+  var goes_on = true
+  var went_on = false
+  while goes_on:
+    goes_on = false
+    when FIFO_LEVEL_AT_OVERFLOW:
+      if fifo_burst: transfers(true)
+      else: transfers(false)
+    else:
+      transfers(false)
+    when FIFO_CHAIN_GOES_ON:
+      if fifo_burst and not nested and dma.fifo_handback_read(channel, delta_source):
+        # the read's write, then the other three, with no hand-back between
+        dma.gba.bus.write_word(dma.dst[channel], dma.latch[channel])
+        when FIFO_LEVEL_AT_OVERFLOW:
+          dma.fifo_word_at[channel - 1][0] =
+            dma.gba.bus.sched.cycles + CycleCount(dma.gba.bus.cycles)
+        dma.dst[channel] = uint32(int(dma.dst[channel]) + delta_dest)
+        first_xfer = 1
+        goes_on = true
+        went_on = true
 
   when FIFO_HANDBACK_CHAIN:
     if fifo_burst: dma.fifo_rom_next[channel - 1] = dma.gba.bus.rom_next_addr
@@ -569,11 +657,11 @@ proc run_pending*(dma: DMA) =
     if fifo_window: dma.gba.bus.sync_bits = dma.gba.bus.sync_bits or 32
     # A burst between request and grant may have rewritten this channel's CNT_H.
     if not dma.dmacnt_h[ch].enable: continue
-    # FIFO requests are level-conditioned on the FIFO, not edge-latched: else
-    # a timer overflow inside the channel's own burst latches a second grant
-    # that overfills the FIFO (Densetsu no Sutafi 3 lost ~4% of its stream).
-    # Assumed; no ROM pins this.
-    if (ch == 1 or ch == 2) and dma.dmacnt_h[ch].start_timing == 3:
+    # FIFO_GRANT_RECHECK (refuted, off): a request is granted as made. One
+    # inside the channel's own burst is dropped at the request instead
+    # (FIFO_DROP_BUSY; Densetsu no Sutafi 3 lost ~4% of its stream when such
+    # requests were latched).
+    if FIFO_GRANT_RECHECK and (ch == 1 or ch == 2) and dma.dmacnt_h[ch].start_timing == 3:
       if dma.gba.apu.dma_channels.sizes[ch - 1] >= 16:
         # a hand-back read not granted at once is not taken later
         if dma.fifo_chain[ch - 1] in {1'u8, 3'u8}: dma.fifo_chain[ch - 1] = 0
@@ -609,6 +697,7 @@ proc run_pending*(dma: DMA) =
     var pf_extra = if fifo_irq_credit_kind and saved == 4 and bus.prefetch_on and
                       bus.fetch_page - 0x8 <= 5 and not dma.gba.cpu.halted:
                      FIFO_IRQ_PF_EXTRA else: 0
+    let own_end = dma.busy_until[ch]   # this channel's burst before
     dma.run_channel(ch, nested = saved < 4)
     when DMA_BUS_WHILE_HALTED:
       if saved == 4: bus.dma_bus_left = dma.gba.cpu.halted
@@ -674,6 +763,12 @@ proc run_pending*(dma: DMA) =
               bus.cycles -= int(free)
               held -= free
               bus.dma_held = 0
+            elif FIFO_BACK_TO_BACK_HELD and fifo_irq_credit_kind and granted_at <= bus.dma_end_at + 1 and
+                 own_end == bus.dma_end_at:
+              # FIFO_BACK_TO_BACK_HELD: taking the bus (a cycle before its
+              # event) as the burst before let go, the CPU has finished no
+              # access between: what it waits on is unchanged
+              if bus.dma_held > 0: bus.dma_held += int(held)
             else:
               bus.dma_held = if bus.dma_before_access: 0 else: int(held)
             bus.dma_end_at = bus.sched.cycles + CycleCount(bus.cycles)

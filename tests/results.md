@@ -1,14 +1,14 @@
 # Dingbat Test Results
 
-*Generated: 2026-11-17 12:36:30 · commit 4679e6ab · game-boy-test-roms v7.0*
+*Generated: 2026-11-18 11:19:00 · commit 03eb2457 · game-boy-test-roms v7.0*
 
 Device column: the hardware the row is scored on. `cart` = the cart header picks the device (DMG-ABC for a DMG cart, CPU CGB C for a CGB one); `DMG`/`CGB`/`SGB` = forced; a trailing token is a specific boot table/revision (`--model`); `—` = GBA, which has no device axis here. A row name ending `@<model>` is one ARM of a test whose name declares several machines: a ROM that states the devices it was verified on (AGE's `ei-halt-dmgC-cgbBCE`, mealybug's `_cgb_c`/`_cgb_d` capture pair, mooneye's `-GS` family) gets one row per revision rather than one row on whichever machine happened to be the default, so each revision is actually covered. A suite where every row passes has only its summary row — its per-row section comes back as soon as anything in it fails.
 
 ## Summary
 
 - **Total:** 1587
-- **Pass:** 1568
-- **Fail:** 19
+- **Pass:** 1569
+- **Fail:** 18
 
 | Suite | Pass | Total | Status |
 |-------|------|-------|--------|
@@ -36,7 +36,7 @@ Device column: the hardware the row is scored on. `cart` = the cart header picks
 | GBA - hwverified (AGS-001) | 12 | 12 | 👌 |
 | GBA - jsmolka gba-tests | 13 | 13 | 👌 |
 | [GBA - mGBA Test Suite](results_mgba_suite.md) | 13 | 13 | 👌 |
-| GBA - Other test ROMs | 12 | 13 | 👀 |
+| GBA - Other test ROMs | 13 | 13 | 👌 |
 | GBA - PeterLemon BIOS | 25 | 25 | 👌 |
 | [GBA - SingleStepTests ARM7TDMI](results_singlestep.md) | 45 | 45 | 👌 |
 
@@ -116,24 +116,6 @@ Device column: the hardware the row is scored on. `cart` = the cart header picks
 | docboy/cgb_dmg_ext_mode/undocumented | CGB cgbE | 👀 3/4 passed |
 
 Each row is one section of a DocBoy manifest (`docboy/<manifest>/<section>`). See [detailed results](results_docboy.md) for individual test outcomes.
-
-## GBA - Other test ROMs (12/13)
-
-| Test | Device | Result |
-|------|--------|--------|
-| gba-rtc-test/RtcTestROM | — | 👌 |
-| hades/bios-openbus | — | 👌 |
-| hades/timer-basic | — | 👌 |
-| hades/dma-latch | — | 👀 no all-pass frame pinned yet (frame hash 009077408465C7EE) |
-| hades/dma-start-delay | — | 👌 |
-| swp/SwpBusLocking | — | 👌 |
-| agbeeg/rom_access_during_prefetch | — | 👌 |
-| agbeeg/toggle_prefetcher | — | 👌 |
-| agbeeg/swp_locks_bus | — | 👌 |
-| agbeeg/ldm_does_not_lock_bus | — | 👌 |
-| agbeeg/stm_does_not_lock_bus | — | 👌 |
-| agbeeg/cpu_runs_idles_during_dma | — | 👌 |
-| dingbat/semiobjwin | — | 👌 |
 
 ## Deliberately not scored
 

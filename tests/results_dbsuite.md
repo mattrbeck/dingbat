@@ -1,6 +1,6 @@
 # dbsuite - Detailed Results
 
-*Generated: 2026-11-17 12:36:30 · commit 4679e6ab · game-boy-test-roms v7.0*
+*Generated: 2026-11-18 11:19:00 · commit 03eb2457 · game-boy-test-roms v7.0*
 
 tests/roms/dbsuite/dbsuite.gba (cartridge build) in dingbat. Every expected value is an AGB SP (AGS-001) answer; each case's source comment in tests/roms/dbsuite/ gives its provenance. A case that is not PASS here is dingbat disagreeing with the console.
 

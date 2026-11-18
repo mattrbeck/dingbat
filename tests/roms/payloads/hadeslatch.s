@@ -11,9 +11,8 @@
 @ On an AGB SP (2026-09-25), with or without the FIFO reset: 0xFEEDC0DE at
 @ k = 5 only -- the ROM's own count, so its expected value is the console's
 @ -- and the prefetched opcode (0xE58D3008, `str r3, [sp, #8]`) at every
-@ other k from 0 to 11. dingbat has the word at k = 8 only: its FIFO refill
-@ burst comes 3 cycles late here (FIFO_DMA_REQUEST_DELAY 4 is a fit to
-@ alyosha fifo_2; see the header there). Not a cycle law: dingbat fails it.
+@ other k from 0 to 11. dingbat had it at k = 8 until the refills at
+@ period 1 ran back to back (FIFO_CHAIN_GOES_ON, 2026-11-18); now k = 5.
 @
 @ r0 bits 0..3 k (0..11)   bit 4: leave FIFO A as found (else reset it first)
 @ answer: the loaded word

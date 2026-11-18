@@ -440,7 +440,7 @@
   }
  },
  "fifo": {
-  "_about": "Sound-FIFO refill timing (hades/dma-latch is still red). fifospk: the pairs and residue cells behind TIMER_START_OVERFLOW; fifoffff: refills at timer periods 1..4. '<set>#list' keeps a set's argument order.",
+  "_about": "Sound-FIFO refill timing (modelled 2026-11-18; hades/dma-latch passes). fifospk: the pairs and residue cells behind TIMER_START_OVERFLOW; fifoffff: refills at timer periods 1..4. '<set>#list' keeps a set's argument order.",
   "fifospk": {
    "payload": "tests/roms/payloads/fifospk.s",
    "sets": {
