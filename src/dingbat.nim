@@ -3338,19 +3338,18 @@ proc main() =
     let ui_interval = if is_paced() and not app.paused:
                         max(present_interval, 2 * frame_ticks * 1000 div sched_freq)
                       else: present_interval
-    # At most two presents are on their way to the glass (Metal:
+    # Unpaced, at most two presents are on their way to the glass (Metal:
     # each waits for a refresh, and a window's takes one more in the
     # compositor), so every refresh shows a new frame and the loop never
     # stalls behind a full queue; after two refreshes it presents anyway.
     let glass_free = pr.waiting() < 2 or now - last_present >= 2 * present_interval
-    # Paced frames present as they run, unless the glass is behind: the
-    # scheduler's catch-up bursts (filling the audio queue as play starts),
-    # or a refresh the display missed, queue frames ahead of it, and paced
-    # play, a little slower than the display, takes seconds to drain one,
-    # each frame a refresh later on the glass until then. So the burst's
-    # frames go unpresented, and so does a frame with two still waiting.
+    # Paced frames present as they run, except the scheduler's catch-up
+    # bursts (filling the audio queue as play starts): presented, they queued
+    # frames ahead of the glass, and paced play, a little slower than the
+    # display, took ~10 s to drain them, each frame 15-30 ms later on the
+    # glass until then.
     let paced = is_paced()
-    if (emulated and paced and not sched_refilling and glass_free) or
+    if (emulated and paced and not sched_refilling) or
        (not (emulated and paced) and now - last_present >= ui_interval and glass_free):
       last_present = now
       # Black letterbox behind a game; the home screen's page behind it.
