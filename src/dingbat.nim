@@ -45,7 +45,7 @@ when defined(gui_driver):
   import dingbat/frontend/gui_driver
 import dingbat/common/cheats
 import dingbat/common/serialize
-from dingbat/common/audio_out import audio_close
+from dingbat/common/audio_out import audio_close, audio_rate
 from dingbat/nds/savestate as nds_savestate import nil
 
 const VERSION = "0.1.0"
@@ -3079,8 +3079,141 @@ proc main() =
 
   var sched_refilling = true  # start with an empty queue: fill to target
 
+  # macOS: normal speed as the web runs it. Each display refresh has a tick,
+  # early enough for its picture to make that refresh; the tick runs the
+  # frames a true-speed clock owes by then (one, or none every ~3.7 s at
+  # 60 Hz; one every other refresh at 120 Hz; two at 30 Hz), then presents
+  # the last. Input is read just before, so a press shows in the next
+  # picture. The refreshes are the drawables' presented times; how early a
+  # tick must run is found by stepping it later until a picture misses its
+  # refresh (once, as play starts), then kept a margin before that. With
+  # one picture a refresh, aimed at its own, no queue builds. Without
+  # presented times (a hidden window) the ticks follow the wall clock.
+  # Elsewhere frames run on fixed wall-clock slots, as they did.
+  const TICKED = defined(macosx)
+  var tick_owed = 0           # frames the current tick still has to run
+  var tick_acc = 0.0          # owed time not yet a whole frame (s)
+  var tick_aim = 0'u64        # the glass time the current tick aims at
+  var tick_prev_aim = 0'u64
+  var grid_at = 0'u64         # a refresh's glass time (0: unknown)
+  var grid_period = 0'u64     # the refresh interval
+  var tick_lead = 0'u64       # how long before its refresh a tick runs
+  var lead_found = false      # the deadline found (the lead stops shrinking)
+  var lead_floor = 0'u64      # the lead found; a hiccup's extra eases back to it
+  var lead_clean = 0          # ticks since the last miss
+  var aims: seq[(uint64, uint64, uint64)]  # (present, aimed glass, issued)
+  var aim_skip = 0'u64        # presents up to this one are not judged
+  var last_present_seq = 0'u64
+  var skip_present = false    # after a miss: leave a refresh for the queue
+  proc tick_reset() =
+    grid_period = uint64(float(sched_freq) / max(1.0, float(refresh_hz)))
+    tick_lead = 2 * grid_period
+    lead_found = false
+    tick_owed = 0
+    tick_acc = 0
+    tick_prev_aim = 0
+    aims.setLen(0)
+  tick_reset()
+
+  proc true_fps(): float =
+    if app.emu_kind == ekNDS: float(NDS_MASTER_HZ) / float(NDS_FRAME_CYCLES)
+    else: 16777216.0 / 280896.0
+
+  proc tick_start(now: uint64) =
+    ## A new tick: the refresh it aims at, the frames owed by then, the next
+    let p = grid_period
+    var aim: uint64
+    if tick_prev_aim != 0 and now + tick_lead < tick_prev_aim + p + p div 2:
+      aim = tick_prev_aim + p                     # the next refresh, on time
+    else:
+      aim = now + tick_lead                       # the first, or after a stall
+    if grid_at != 0:
+      # On the refresh grid: the nearest refresh to it
+      let n = if aim >= grid_at: (aim - grid_at + p div 2) div p else: 0
+      aim = grid_at + n * p
+      if tick_prev_aim != 0 and aim <= tick_prev_aim: aim = tick_prev_aim + p
+    let dt = if tick_prev_aim == 0: float(p) / float(sched_freq)
+             else: float(aim - tick_prev_aim) / float(sched_freq)
+    tick_prev_aim = aim
+    tick_aim = aim
+    # Whole refreshes, so the owed count snaps to the grid, as the web's does
+    tick_acc = min(tick_acc + min(dt, 0.1) * true_fps(), 4.0)
+    tick_owed = int(tick_acc + 1e-6)
+    tick_acc -= float(tick_owed)
+    # The next tick: a refresh later, its lead before it
+    next_frame_due = aim + p - tick_lead
+
+  proc glass_judge() =
+    ## Pictures' presented times: the refresh grid, and whether each made the
+    ## refresh it aimed at
+    var i = 0
+    while i < aims.len:
+      let (sq, aimed, issued) = aims[i]
+      let shown = pr.shown_at(sq, sched_freq)
+      if shown == 0:
+        if getPerformanceCounter() - issued > sched_freq div 5: aims.delete(i)
+        else: inc i
+        continue
+      aims.delete(i)
+      grid_at = shown
+      if sq <= aim_skip: continue
+      let half = grid_period div 2
+      if shown > aimed + half:
+        # Missed: run ticks earlier. The pictures already sent are late too
+        # (one queued behind another): skip one to empty the queue, and
+        # judge none of them.
+        if not lead_found:
+          # The deadline: just before this lead
+          tick_lead += sched_freq * 3 div 1000
+          lead_floor = tick_lead
+        else:
+          # Late by the compositor (which at times needs a refresh more) or
+          # a stall: all of it at once, one picture skipped
+          tick_lead += (shown - aimed) + sched_freq div 1000
+        tick_lead = min(tick_lead, 4 * grid_period)
+        lead_found = true
+        lead_clean = 0
+        skip_present = true
+        aim_skip = last_present_seq
+      elif not lead_found:
+        tick_lead -= min(tick_lead div 2, sched_freq div 5000)  # 0.2 ms a tick
+      else:
+        # Three clean seconds: back toward the lead found, 0.5 ms a second
+        inc lead_clean
+        if lead_clean > 180 and tick_lead > lead_floor and lead_clean mod 6 == 0:
+          tick_lead -= min(tick_lead - lead_floor, sched_freq div 20_000)
+
+  # The sound device's clock drifts a hair from the display's: the queue
+  # held at its depth by playing a few hundredths of a percent off pitch
+  var drc_fill = -1.0
+  var drc_integ = 0.0
+  proc drc(queued, target: uint32) =
+    if drc_fill < 0: drc_fill = float(queued)
+    drc_fill += (float(queued) - drc_fill) * 0.1
+    let err = (drc_fill - float(target)) / float(target)
+    drc_integ = clamp(drc_integ + err * 0.0005, -0.003, 0.003)
+    audio_rate(float32(clamp(1.0 + err * 0.01 + drc_integ, 0.995, 1.005)))
+
   proc scheduler_frame_due(queued, low, target, high: uint32): bool =
     let now = getPerformanceCounter()
+    if TICKED:
+      # The display is the clock; the queue follows it (drc). Only a runaway
+      # holds frames back.
+      if queued > 3 * high: return false
+      # Refill only an underrun: the device takes the queue in uneven
+      # chunks, and an early frame would show nothing and make its tick late
+      if queued < low div 4: sched_refilling = true
+      if sched_refilling:
+        if queued < target: return true
+        sched_refilling = false
+      if tick_owed == 0:
+        if now < next_frame_due: return false
+        if now > next_frame_due + 4 * grid_period:
+          next_frame_due = now                    # stalled: start afresh
+          tick_prev_aim = 0
+        tick_start(now)
+        drc(queued, target)
+      return tick_owed > 0
     if next_frame_due + frame_ticks < now:
       # Stalled: resync instead of bursting missed slots
       next_frame_due = now
@@ -3094,6 +3227,9 @@ proc main() =
     now >= next_frame_due
 
   proc scheduler_frame_ran() =
+    if TICKED:
+      if not sched_refilling and tick_owed > 0: dec tick_owed
+      return
     # Clamp to one period from now: refill bursts must not bank future slots
     # (a burst/hold sawtooth)
     next_frame_due = min(next_frame_due + frame_ticks,
@@ -3150,6 +3286,7 @@ proc main() =
   # swapped. Needs a GBA ROM static until UP, responding next frame (tonc
   # m7_demo.gba).
   var lat_trials = 0
+  var lat_glass: seq[(uint64, uint64)]  # (present, inject time): press to glass
   try: lat_trials = parseInt(getEnv("DINGBAT_LATENCY_TEST", "0"))
   except ValueError: discard
   var lat_state = 0            # 0 settle, 1 awaiting fb change, 2 awaiting present
@@ -3195,7 +3332,12 @@ proc main() =
     when defined(gui_driver): driver_poll(window)
     if getTicks() - refresh_checked >= 1000:
       refresh_checked = getTicks()
+      let was_hz = refresh_hz
       follow_refresh()
+      if refresh_hz != was_hz: tick_reset()
+    when TICKED:
+      if not is_paced() or app.paused: aims.setLen(0)
+      glass_judge()
     var emulated = false
     # Frame advance bypasses audio pacing: exactly one frame
     let stepping = app.paused and app.pending_step
@@ -3353,7 +3495,12 @@ proc main() =
     # display, took ~10 s to drain them, each frame 15-30 ms later on the
     # glass until then.
     let paced = is_paced()
-    if (emulated and paced and not sched_refilling) or
+    # Ticked: the tick's last frame presents; after a miss one goes unshown
+    var tick_done = not TICKED or tick_owed == 0
+    if TICKED and emulated and paced and tick_done and skip_present:
+      skip_present = false
+      tick_done = false
+    if (emulated and paced and not sched_refilling and tick_done) or
        (not (emulated and paced) and now - last_present >= ui_interval and glass_free):
       last_present = now
       # Black letterbox behind a game; the home screen's page behind it.
@@ -3374,7 +3521,7 @@ proc main() =
         app.running = false
       render_imgui()
       when defined(gui_driver): driver_frame(window)
-      if emulated and is_paced() and not app.rewinding:
+      if emulated and is_paced() and not app.rewinding and not TICKED:
         let ready = getPerformanceCounter()
         if trace_path.len > 0: trace_ready = ready
         let present_at = frame_start + present_hold
@@ -3382,8 +3529,12 @@ proc main() =
           delayPrecise((present_at - ready) * 1_000_000_000'u64 div sched_freq)
         hold_learn(ready - frame_start)
       if trace_path.len > 0: trace_swap = getPerformanceCounter()
+      let issued = getPerformanceCounter()
       let present_seq = pr.present(window)
       presented = true
+      if present_seq != 0: last_present_seq = present_seq
+      if TICKED and emulated and paced and present_seq != 0:
+        aims.add((present_seq, tick_aim, issued))
       if pending_title.len > 0:
         discard setWindowTitle(app.window, cstring(pending_title))
         pending_title = ""
@@ -3394,6 +3545,7 @@ proc main() =
         trace_frames = 0
       if lat_trials > 0 and lat_state == 2:
         let t2 = getPerformanceCounter()
+        if present_seq != 0: lat_glass.add((present_seq, lat_t0))
         lat_change_ms.add(lat_ms(lat_t0, lat_t1))
         lat_present_ms.add(lat_ms(lat_t0, t2))
         echo &"LATENCY trial {lat_present_ms.len}: " &
@@ -3419,6 +3571,19 @@ proc main() =
         lat_poll_input()
       else:
         delay(1)
+  if lat_glass.len > 0:
+    # The pictures that showed each press, on the glass (macOS; the last
+    # ones may not have arrived yet)
+    let t_end = getPerformanceCounter()
+    while getPerformanceCounter() - t_end < sched_freq div 10: delay(5)
+    var ms: seq[float]
+    for (sq, t0) in lat_glass:
+      let shown = pr.shown_at(sq, sched_freq)
+      if shown > t0: ms.add(lat_ms(t0, shown))
+    if ms.len > 0:
+      ms.sort()
+      echo &"LATENCY inject→glass ms: min {ms[0]:.2f} p50 {ms[ms.len div 2]:.2f} " &
+           &"p90 {ms[ms.len * 9 div 10]:.2f} max {ms[^1]:.2f} (n={ms.len})"
   if trace_path.len > 0:
     var csv = &"# freq={getPerformanceFrequency()} " &
               &"frame_ticks={frame_ticks}\ndue,start,emulated,ready,swap,swapped,shown,frames\n"
