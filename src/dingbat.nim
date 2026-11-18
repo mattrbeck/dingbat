@@ -3343,14 +3343,13 @@ proc main() =
     # compositor), so every refresh shows a new frame and the loop never
     # stalls behind a full queue; after two refreshes it presents anyway.
     let glass_free = pr.waiting() < 2 or now - last_present >= 2 * present_interval
-    # Paced frames present as they run, but never closer together than most
-    # of a display period: the scheduler's catch-up bursts (filling the audio
-    # queue as play starts) queued frames ahead of the glass, and paced play,
-    # a little slower than the display, took ~10 s to drain them, each frame
-    # 15-30 ms later on the glass until then.
+    # Paced frames present as they run, except the scheduler's catch-up
+    # bursts (filling the audio queue as play starts): presented, they queued
+    # frames ahead of the glass, and paced play, a little slower than the
+    # display, took ~10 s to drain them, each frame 15-30 ms later on the
+    # glass until then.
     let paced = is_paced()
-    let burst = now - last_present < present_interval * 3 div 4
-    if (emulated and paced and not burst) or
+    if (emulated and paced and not sched_refilling) or
        (not (emulated and paced) and now - last_present >= ui_interval and glass_free):
       last_present = now
       # Black letterbox behind a game; the home screen's page behind it.
