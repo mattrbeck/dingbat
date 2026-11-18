@@ -27,7 +27,8 @@
 #             is gone; a drop, and a tile menu's Play, boot from the battery
 #   find      Find the File relinks a missing game to its renamed file and
 #             keeps its save states; another game's file is refused
-#   labels    the in-window bar says Add a game and Close Game, never Open ROM
+#   labels    the in-window bar says Add a game and Close Game, never Open ROM;
+#             Video and Audio menus, in Settings' wording
 #   scrolling macOS: a trackpad's points scroll the page as many points, a
 #             wheel mouse's line 40 (mac_scroll.nim); pulled past the top it
 #             stretches and springs back
@@ -573,6 +574,10 @@ check "Add a game" "$(grep -c '^  Add a game$' "$work/bar.txt")" "1"
 check "Close Game, greyed at home" \
       "$(grep -cF "  Close Game  $modname+W [off]" "$work/bar.txt")" "1"
 check "no Open ROM" "$(grep -c 'Open ROM' "$work/bar.txt")" "0"
+check "Video and Audio, not Audio/Video" "$(grep -v '^ ' "$work/bar.txt" | tr '\n' ' ')" \
+      "File Video Emulation Audio Debug "
+check "Settings' wording: Preserve aspect ratio" \
+      "$(grep -c '^  Preserve aspect ratio' "$work/bar.txt")" "1"
 
 if [ "$(uname)" = Darwin ]; then
   echo "scrolling (macOS: as AppKit hands it over)"

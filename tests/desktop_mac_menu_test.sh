@@ -122,7 +122,7 @@ run tests/roms/inputrec.gba "1 frames 30
 10 quit"
 yml="$work/home/.config/dingbat/dingbat.yml"
 check "xBR ticked" "$(item "$work/view.txt" 'xBR [x]')" present
-check "None unticked" "$(item "$work/view.txt" 'None (crisp)')" present
+check "None unticked" "$(item "$work/view.txt" 'None (Crisp)')" present
 check "LCD Response ticked" "$(item "$work/view.txt" 'LCD Response [x]')" present
 check "Preserve Aspect Ratio unticked (it started on)" "$(item "$work/view.txt" 'Preserve Aspect Ratio')" present
 check "Enter Full Screen, Cmd+F" "$(item "$work/view.txt" 'Enter Full Screen [Cmd+F]')" present
