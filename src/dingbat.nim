@@ -3045,6 +3045,7 @@ proc main() =
       present_interval = uint64(1000'f32 / refresh_hz)
   follow_refresh()
   var last_present = getTicks()
+  var was_paced, draining = false
   # Normal play: fixed 16.743 ms wall-clock slot (280896 cycles / 16.777216
   # MHz, GB too); the audio queue is only a bounds check. Turbo and
   # fast-forward pace by audio.
@@ -3343,7 +3344,17 @@ proc main() =
     # compositor), so every refresh shows a new frame and the loop never
     # stalls behind a full queue; after two refreshes it presents anyway.
     let glass_free = pr.waiting() < 2 or now - last_present >= 2 * present_interval
-    if (emulated and is_paced()) or (now - last_present >= ui_interval and glass_free):
+    # Paced play presents every frame, a little slower than the display, so
+    # a queue it starts behind (the home page's, fast-forward's) would take
+    # seconds to drain, each frame that much later on the glass: on entering
+    # it, frames are skipped until at most one waits.
+    let paced = is_paced()
+    if paced and not was_paced: draining = true
+    was_paced = paced
+    if draining and (pr.waiting() <= 1 or now - last_present >= 4 * present_interval):
+      draining = false
+    if (emulated and paced and not draining) or
+       (not (emulated and paced) and now - last_present >= ui_interval and glass_free):
       last_present = now
       # Black letterbox behind a game; the home screen's page behind it.
       if app.emu_kind == ekNone:
