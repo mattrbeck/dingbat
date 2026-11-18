@@ -62,7 +62,7 @@ static size_t bytes_per_frame(void) {
  * Target depth: one video frame's worth of samples (they arrive in a burst
  * while the frame emulates) plus the render quantum and some slack for a
  * late display tick. The integral term carries the steady offset between
- * the clocks (60 Hz vs the GBA's 59.73 is +0.46%), so the depth settles on
+ * the clocks (the display's and the sound hardware's), so the depth settles on
  * the target instead of above it. */
 #define DRC_TARGET   g_target   /* frames at 32768 Hz */
 #define DRC_GAIN     0.02       /* ratio change per unit of relative depth error */
