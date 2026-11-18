@@ -2879,7 +2879,14 @@ proc main() =
     # compositor), so every refresh shows a new frame and the loop never
     # stalls behind a full queue; after two refreshes it presents anyway.
     let glass_free = pr.waiting() < 2 or now - last_present >= 2 * present_interval
-    if (emulated and is_paced()) or (now - last_present >= ui_interval and glass_free):
+    # macOS: paced frames present as they run, except the scheduler's catch-up
+    # bursts (filling the audio queue as play starts). Presented, they queue
+    # ahead of the glass, and paced play, a little slower than the display,
+    # takes ~10 s to drain them, each frame 15-30 ms later until then.
+    let paced = is_paced()
+    let burst = defined(macosx) and sched_refilling
+    if (emulated and paced and not burst) or
+       (not (emulated and paced) and now - last_present >= ui_interval and glass_free):
       last_present = now
       # Black letterbox behind a game; brand purple on the home screen.
       if app.emu_kind == ekNone:
