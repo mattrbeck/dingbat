@@ -32,8 +32,10 @@ Direction is Joystick.
 
 ## Rules
 
-- Words: a row is a label plus at most one short line. Explanations go in the section footer, two
-  sentences at most.
+- Words: a row is a label plus at most one short line. A footer is one short sentence, and only
+  when it changes what someone picks ("Black-and-white games only.", "Optional."); otherwise none.
+- A check row always reserves its trailing slot (check, lock or empty) so swatches and values line
+  up down the list.
 - Choices: 2-4 short options → segmented; 5+ or long names → menu showing the value; options that
   need a description → check list.
 - Paid things are shown in place, locked. Never hidden, never a banner inside a pane. The only
@@ -48,8 +50,30 @@ Direction is Joystick.
 - Destructive actions use the system confirmation (action sheet / dialog), not arm-then-tap.
 - A row that only matters for one choice appears with it; a row whose dependency is directly above
   it stays visible but disabled.
-- Beta / Experimental are neutral capsules after the label; the pink Supporter pill only on the
-  banner and in the sheet.
+- Experimental is a neutral capsule after the label; Highly experimental an amber warning capsule
+  (the Nintendo DS games switch in General, and the Nintendo DS row). The pink Supporter pill only
+  on the banner and in the sheet.
+
+## Decided (2026-11-19)
+
+- No grandfathering: paid extras lock on the update (one user today).
+- The web is fully free: no locks, no banner, a Support link instead.
+- Holiday icons default off.
+- Prices $2.99 / $4.99 / $9.99, all three non-consumable and unlocking the same thing, $4.99
+  preselected.
+
+## The web
+
+Same schema, map and words; the renderer takes a platform and swaps the skin, not the structure:
+
+- Density: 44 px rows, 15 px body, 12.5 px footers, 12 px radius groups with a hairline border,
+  sentence-case section headers, 24 px icon tiles.
+- Desktop: a dialog (about 940 × 640) with a sidebar of sections; Esc closes; each pane has a URL
+  (`#settings/audio`) so Back and links work.
+- Phone browsers: one pane at a time under a plain page header ("‹ Settings"), no glass buttons.
+- Real controls: `<button>`, `<select>` for menus, `role="switch"` checkboxes, radio groups for
+  segmented; hover states and `:focus-visible` rings; the controller ring stays for gamepads.
+- Tokens: the same roles, mapped onto the web's existing `:root[data-theme]` custom properties.
 
 ## Map
 
@@ -66,7 +90,7 @@ Direction is Joystick.
 | Game Boy Advance | BIOS: file, Play BIOS intro · BIOS calls: HLE / Real BIOS / Real boot, HLE calls (check) |
 | Nintendo DS | Screens: Layout (menu), Bottom screen first, Gap (menu), Turn (menu), Hide the top bar (phone) · 3D: Resolution (seg), Drawn by (menu) · BIOS and firmware: three files |
 | Google Drive | account (email, last sync), Sync Now · Sign Out, Sign Out Everywhere (destructive) |
-| General | Advanced: Save webhook ›, DS Beta · About: Version, Acknowledgements, Privacy · Reset All Settings (destructive) |
+| General | Advanced: Save webhook ›, Nintendo DS games (Highly experimental) · About: Version, Acknowledgements, Privacy · Reset All Settings (destructive) |
 
 ## Tokens
 
