@@ -618,6 +618,10 @@ proc fifo_scx_store_stall*(ppu: GbFifoPpu; old_scx: uint8) =
        (int(ppu.scx) and 7) < (int(old_scx) and 7):
       ppu.scx_stall += SCX_STORE_STALL_DOTS
 
+proc win_wx0_tile1(ppu: GbFifoPpu): bool {.inline.} =
+  ## CGB_WX0_TILE1_ZERO: a CGB window line at WX = 0 with a fine scroll.
+  ppu.cgb and ppu.fetching_window and ppu.wx == 0'u8 and ppu.scx_fine != 0
+
 proc win_line_start_lx(ppu: GbFifoPpu; wx: int32) {.inline.} =
   ## `lx` for a line that starts as a window line: the window's own `7 - WX`
   ## discard plus the fine scroll's SCX & 7. At WX = 1..5 the fine scroll's
@@ -625,6 +629,10 @@ proc win_line_start_lx(ppu: GbFifoPpu; wx: int32) {.inline.} =
   ## (WIN_FINE_PAD), so only the window's `7 - WX` come off its tile.
   let s = int32(ppu.scx and 7)
   ppu.lx = -max(0'i32, 7'i32 - wx) - s
+  when WIN_WX0_SCX_DOT != 0:
+    # WIN_WX0_SCX_DOT: at WX = 0 with SCX & 7 = 1..6 the head's extra dot
+    # discards one more window pixel (DocBoy window_wx0_scx1..6, DMG and CGB).
+    ppu.lx -= int32(wx == 0'i32 and s in 1'i32 .. 6'i32)
   when WIN_FINE_PAD != 0:
     ppu.win_pad = if wx > 0'i32 and wx < int32(WIN_LINE_START_WX): s else: 0'i32
     # The re-trigger compare it is served on: `WX - 8`, s - 1 pops in.
@@ -679,7 +687,12 @@ proc fifo_sample_smooth_scroll*(ppu: GbFifoPpu) =
       # SCX latch riding on it do not move. Spent here, the dot SCX is latched
       # on: two dots earlier, at the head, SCX is still the previous line's.
       # An add, not a branch (a branch costs +0.03%).
-      ppu.fetch_counter += ord(ppu.wx == 0'u8 and (ppu.scx and 7) == 0'u8)
+      # With WIN_WX0_SCX_DOT the dot SCX & 7 = 1..6 add is a discard dot, so
+      # their fetch is short too: the same dots, one window pixel further on.
+      when WIN_WX0_SCX_DOT != 0:
+        ppu.fetch_counter += ord(ppu.wx == 0'u8 and (ppu.scx and 7) != 7'u8)
+      else:
+        ppu.fetch_counter += ord(ppu.wx == 0'u8 and (ppu.scx and 7) == 0'u8)
   else:
     ppu.lx = int32(-(7 and int(ppu.scx)))
 
@@ -1003,6 +1016,8 @@ proc tick_bg_fetcher*(ppu: GbFifoPpu; gb: GB) =
     ppu.tile_attrs = ppu.vram[1][map + offset]
     when CGB_WIN_CUT_PLANES:
       if unlikely(residue >= 0): ppu.tile_num = uint8(residue)
+    when CGB_WX0_TILE1_ZERO != 0:
+      if unlikely(ppu.fetcher_x == 1 and win_wx0_tile1(ppu)): ppu.tile_num = 0
     inc ppu.fetch_counter
 
   of fsGetTileDataLow, fsGetTileDataHigh:
@@ -1505,6 +1520,10 @@ proc fifo_win_retrig_cgb(ppu: GbFifoPpu; gb: GB) {.noinline.} =
   ## fetcher's tile-number latch for the fetch in flight. Called after this
   ## dot's fetcher step, so `fetch_counter` 0 is the dot of a push and 2 the
   ## dot the tile number was read.
+  when CGB_WX0_TILE1_ZERO != 0:
+    # The WX = 0 head's re-trigger (`WX - 8`) on column 1's fetch: tile 0
+    # for both planes (CGB_WX0_TILE1_ZERO; DocBoy window_wx0_scx2).
+    if ppu.fetcher_x == 1 and win_wx0_tile1(ppu): return
   case ppu.fetch_counter
   of 0:
     # The next fetch never latches its number: the one just pushed stays.
@@ -2582,6 +2601,7 @@ proc fifo_plain_ok(ppu: GbFifoPpu; gb: GB; n: int): bool {.inline.} =
     # the retire owes no tail fetch (fetcher_retired).
     (not ppu.fetching_window or
      (ppu.fetcher_x != 0 and window_enabled(ppu) and not ppu.win_revoking and
+      (CGB_WX0_TILE1_ZERO == 0 or ppu.fetcher_x != 1 or not win_wx0_tile1(ppu)) and
       (CGB_WE_ENABLE_FETCH_LATE == 0 or cc >= gb.we_on_dot))) and
     ppu.fetch_counter >= 0 and
     lx_end < ppu.m3_retire_lx and

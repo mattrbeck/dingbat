@@ -62,6 +62,7 @@ Each of these is a candidate Pan Docs correction (docs/dev/pandocs-upstream.md).
 | OAM_DMA_Transfer: the PPU reads $FF during OAM DMA | the PPU reads the DMA unit's bus byte | `strikethrough.gb` pixel-exact (the mode-2 scan lock is hwprobe row 17) |
 | STAT: the DMG STAT-write glitch fires in "OAM scan" | mode 2 excluded (only the hblank→mode-2 edge) | GBMicrotest `stat_write_glitch_l0_c/l1_d/l154_c`; −11 gambatte rows to put it back |
 | OAM: writes blocked throughout mode 2 | admitted in mode 2's last M-cycle | mooneye `lcdon_write_timing-GS`, GBMicrotest `oam_write_l1_c` |
+| Window: at WX = 0 the window "is switched to before the initial fine scroll adjustment, causing it to be shifted left by SCX % 8 pixels" | shifted by `SCX % 8 + 1` for SCX % 8 = 1..6 and by 7 at 7 (`WIN_WX0_SCX_DOT`); on a CGB the second tile's slot reads tile 0 (`CGB_WX0_TILE1_ZERO`) | the sentence is unsourced prose (gbdev/pandocs PR #626, no ROM or hardware cited); DocBoy `{dmg,cgb}/ppu/visual/window_wx0_scx*` (14 rows), ROMs run on its maintainer's DMG / CGB E; mealybug `m3_window_timing_wx_0` pins only the timing, unchanged |
 | pixel_fifo.md: X=0 object penalty depends on SCX (Rendering.md says flat 11) | flat 11 dots | GBMicrotest `ppu_spritex_vs_scx` (153/153 cells) |
 | Timer_and_Divider_Registers: TMA written during the reload cycle → old value | new value | mooneye `tma_write_reloading`; Pan Docs' own Obscure page says new |
 | Audio_details envelope "zombie mode" rule | a larger truth table | SameSuite `channel_1_volume`, `nrx2_glitch` |
