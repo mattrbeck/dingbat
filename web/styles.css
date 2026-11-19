@@ -5859,21 +5859,6 @@ body.lib-has-games #home-notes {
   display: none;
 }
 
-.settings-pane #save-hook-row > .save-hook-ask {
-  grid-area: 5 / 1 / span 1 / span 2;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px 12px;
-  margin-top: 8px;
-  font-size: 13px;
-  color: var(--danger);
-}
-
-.settings-pane #save-hook-row > .save-hook-ask[hidden] {
-  display: none;
-}
-
 /* Phones: stacked like the .row-flow rows around it (label, description,
    field), not the two-column grid, whose row gap reads as a stray blank. */
 @media (max-width: 419px) {

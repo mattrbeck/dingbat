@@ -311,10 +311,6 @@ final class DriveSync: ObservableObject {
         var url = ""
         var ts: Double = 0
         var dirty = false
-        /// Allowed on this device, and never synced: whoever can write the
-        /// account's Drive files could otherwise have every save sent to
-        /// them. Nil is a record from before it, which counts as allowed.
-        var ok: Bool?
     }
 
     @Published private(set) var status: Status = .idle
@@ -1432,23 +1428,15 @@ final class DriveSync: ObservableObject {
 
     // MARK: save webhook (its own file, newest ts wins)
 
-    var saveHookApproved: Bool { state.saveHook.ok ?? true }
-
     /// Games kept out of a sync round: a different game of the same name is
     /// on Drive and this one could not be moved aside yet (settleRomClashes).
     private var romClashHeld = Set<String>()
     /// Drive's SHA-256 of each ROM it holds, by game, as last listed.
     private(set) var driveRomSha: [String: String] = [:]
 
-    func allowSaveHook() {
-        state.saveHook.ok = true
-        saveState()
-    }
-
-    /// An address entered on this device.
     func setSaveHook(_ url: String) {
         guard url != state.saveHook.url else { return }
-        state.saveHook = SaveHookRec(url: url, ts: Self.now(), dirty: true, ok: true)
+        state.saveHook = SaveHookRec(url: url, ts: Self.now(), dirty: true)
         saveState()
         if active { Task { @MainActor in await self.pull() } }
     }
@@ -1463,9 +1451,7 @@ final class DriveSync: ObservableObject {
                 let ts = (o["ts"] as? NSNumber)?.doubleValue ?? 0
                 let url = (o["url"] as? String) ?? ""
                 if ts > state.saveHook.ts, url.isEmpty || url.hasPrefix("http://") || url.hasPrefix("https://") {
-                    // Removing it, or the address already here, needs no asking.
-                    let ok = url.isEmpty ? true : url == state.saveHook.url ? state.saveHook.ok : false
-                    state.saveHook = SaveHookRec(url: url, ts: ts, dirty: false, ok: ok)
+                    state.saveHook = SaveHookRec(url: url, ts: ts, dirty: false)
                     Settings.shared.adoptSyncedWebhook(url)
                 }
             }

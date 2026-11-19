@@ -834,7 +834,6 @@ private struct GeneralPane: View {
     @State private var hook = Settings.shared.saveWebhook
     @State private var hookStatus = ""
     @ObservedObject private var hookSent = SaveWebhook.Status.shared
-    @ObservedObject private var drive = DriveSync.shared
 
     var body: some View {
         SheetSubhead(text: "App theme", rule: false)
@@ -855,11 +854,6 @@ private struct GeneralPane: View {
         DriveSettingsBlock()
             .padding(.bottom, 18)
         SheetDisclosure(title: "Advanced", open: $advancedOpen)
-            // An address Drive brought while this is open: leaving must not
-            // enter the old one again as typed here.
-            .onChange(of: s.saveWebhook) { url in
-                if hook.trimmingCharacters(in: .whitespaces) != url { hook = url; hookStatus = "" }
-            }
         if advancedOpen {
             VStack(alignment: .leading, spacing: 6) {
                 Text("Save webhook").font(.system(size: 14.5, weight: .medium))
@@ -879,14 +873,7 @@ private struct GeneralPane: View {
                     .padding(.vertical, 8)
                     .background(RoundedRectangle(cornerRadius: 8).fill(palette.surface2))
                     .overlay(RoundedRectangle(cornerRadius: 8).stroke(palette.border2, lineWidth: 1))
-                if !s.saveWebhook.isEmpty && !drive.saveHookApproved {
-                    SheetWarning(text: "Set on another device. Saves aren't sent to \(URL(string: s.saveWebhook)?.host ?? s.saveWebhook) until you allow it.")
-                    Button("Allow") {
-                        drive.allowSaveHook()
-                        hookStatus = "Saves will be sent here"
-                    }
-                    .buttonStyle(SheetButtonStyle())
-                } else if !hookStatus.isEmpty {
+                if !hookStatus.isEmpty {
                     Text(hookStatus).font(.system(size: 12)).foregroundColor(palette.textDim)
                 } else if !hookSent.text.isEmpty && !s.saveWebhook.isEmpty {
                     Text(hookSent.text).font(.system(size: 12)).foregroundColor(palette.textDim)
@@ -924,6 +911,6 @@ private struct GeneralPane: View {
             return
         }
         if s.saveWebhook != t { s.saveWebhook = t }
-        hookStatus = drive.saveHookApproved ? "Saves will be sent here" : ""
+        hookStatus = "Saves will be sent here"
     }
 }

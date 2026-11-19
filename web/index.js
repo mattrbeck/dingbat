@@ -6963,28 +6963,11 @@ const loadSystemSettings = async () => {
 // library, which older builds rewrite with only the fields they know; they
 // skip a file they cannot name, parseDriveFileName): { url, ts }, the newest
 // ts wins (syncSaveHook). `dirty` = changed here and not yet on Drive.
-// `ok` = allowed on this device, and never synced: an address typed here is,
-// one that arrived from Drive is not until the player allows it, since
-// whoever can write the account's Drive files could otherwise have every
-// save sent to them. A record from before `ok` counts as allowed.
 const SAVE_HOOK_KEY = "save-hook";
 const SAVE_HOOK_FILE = "save-hook";
-let saveHook = { url: "", ts: 0, dirty: false, ok: true };
+let saveHook = { url: "", ts: 0, dirty: false };
 const saveHookInput = /** @type {HTMLInputElement} */ (document.getElementById("save-hook-url"));
 const saveHookStatus = document.getElementById("save-hook-status");
-const saveHookAsk = document.getElementById("save-hook-ask");
-const saveHookAskText = document.getElementById("save-hook-ask-text");
-
-const paintSaveHookAsk = () => {
-  if (!saveHookAsk) return;
-  let asking = !!saveHook.url && !saveHook.ok;
-  saveHookAsk.hidden = !asking;
-  if (!asking || !saveHookAskText) return;
-  let host = saveHook.url;
-  try { host = new URL(saveHook.url).host; } catch {}
-  saveHookAskText.textContent =
-    "Set on another device. Saves aren't sent to " + host + " until you allow it.";
-};
 
 const setSaveHookStatus = (text) => {
   if (saveHookStatus) saveHookStatus.textContent = text;
@@ -7002,40 +6985,28 @@ const normalizeSaveHookUrl = (s) => {
 
 const adoptSaveHook = async (rec) => {
   let changed = rec.url !== saveHook.url;
-  saveHook = { url: rec.url, ts: rec.ts, dirty: !!rec.dirty, ok: !!rec.ok };
+  saveHook = { url: rec.url, ts: rec.ts, dirty: !!rec.dirty };
   if (db) await dbPut(SAVE_HOOK_KEY, saveHook);
   if (saveHookInput && document.activeElement !== saveHookInput) saveHookInput.value = saveHook.url;
   if (changed) setSaveHookStatus("");
-  paintSaveHookAsk();
 };
 
 const loadSaveHook = async () => {
   let s = await dbGet(SAVE_HOOK_KEY);
   if (s && typeof s === "object") {
     let url = normalizeSaveHookUrl(s.url);
-    saveHook = { url: url || "", ts: Number(s.ts) || 0, dirty: !!s.dirty, ok: s.ok !== false };
+    saveHook = { url: url || "", ts: Number(s.ts) || 0, dirty: !!s.dirty };
   }
   if (saveHookInput) saveHookInput.value = saveHook.url;
-  paintSaveHookAsk();
 };
 
 // A change made here: kept, stamped, and sent to Drive at once when signed
 // in (an enrolled device that is signed out sends it at its next pull).
 const setSaveHookUrl = async (url) => {
-  if (url === saveHook.url) {
-    // Entered again here: the same as allowing it.
-    if (!saveHook.ok) await adoptSaveHook({ ...saveHook, ok: true });
-    return;
-  }
-  await adoptSaveHook({ url, ts: Date.now(), dirty: true, ok: true });
+  if (url === saveHook.url) return;
+  await adoptSaveHook({ url, ts: Date.now(), dirty: true });
   if (syncActive()) pullSync();
 };
-
-document.getElementById("save-hook-allow")?.addEventListener("click", async () => {
-  if (!saveHook.url || saveHook.ok) return;
-  await adoptSaveHook({ ...saveHook, ok: true });
-  setSaveHookStatus("Saves will be sent here");
-});
 
 if (saveHookInput) saveHookInput.addEventListener("change", async () => {
   let url = normalizeSaveHookUrl(saveHookInput.value);
@@ -7060,11 +7031,7 @@ const syncSaveHook = async (remote, live) => {
     syncState.rmt[SAVE_HOOK_FILE] = f.modifiedTime;
     let ts = Number(o?.ts) || 0;
     let url = normalizeSaveHookUrl(o?.url);
-    if (url !== null && ts > saveHook.ts) {
-      // Removing it, or the address already allowed here, needs no asking.
-      let ok = url === "" || (url === saveHook.url && saveHook.ok);
-      live(await adoptSaveHook({ url, ts, dirty: false, ok }));
-    }
+    if (url !== null && ts > saveHook.ts) live(await adoptSaveHook({ url, ts, dirty: false }));
   }
   if (!saveHook.dirty) return;
   let sent = { url: saveHook.url, ts: saveHook.ts };
@@ -7073,13 +7040,13 @@ const syncSaveHook = async (remote, live) => {
   let meta = live(await res?.json?.().catch(() => null));
   if (meta?.modifiedTime) syncState.rmt[SAVE_HOOK_FILE] = meta.modifiedTime;
   // Changed again while on the wire: still dirty, sent next time.
-  if (saveHook.ts === sent.ts) await adoptSaveHook({ ...sent, dirty: false, ok: saveHook.ok });
+  if (saveHook.ts === sent.ts) await adoptSaveHook({ ...sent, dirty: false });
 };
 
 // Fire and forget.
 const postSaveToHook = (game, data) => {
   let url = saveHook.url;
-  if (!url || !saveHook.ok || !data || !data.length) return;
+  if (!url || !data || !data.length) return;
   let form = new FormData();
   form.append("game", game);
   form.append("savedAt", new Date().toISOString());

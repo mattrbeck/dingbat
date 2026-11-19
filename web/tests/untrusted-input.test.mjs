@@ -1,6 +1,6 @@
-// What reaches the page from outside the player's own hands: a webhook
-// address and state metadata from Drive (whoever can write the account's
-// files chooses them), and a ROM file named like a game already here.
+// What reaches the page from outside the player's own hands: state metadata
+// from Drive (whoever can write the account's files chooses it), and a ROM
+// file named like a game already here.
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -12,112 +12,17 @@ import { makeDrive, makeClock, useClock } from "./drivefake.mjs";
 const device = async (drive, clock) => {
   const app = await loadApp();
   useClock(app, clock);
-  app.sandbox.FormData = FormData;
-  app.sandbox.Blob = Blob;
-  const posts = [];
-  app.setFetch((url, opts) => {
-    if (!/googleapis|google\.com/.test(String(url)) && opts?.method === "POST" && opts?.mode === "no-cors") {
-      posts.push(String(url));
-      return Promise.resolve({ ok: true });
-    }
-    return drive.fetch(url, opts);
-  });
+  app.setFetch(drive.fetch);
   app.api.gdriveToken = "tok";
   app.api.gdriveTokenExp = clock.peek() + 3600e3;
   app.api.syncState = {
     queueUp: [], queueDel: [], queueRen: [], tomb: [], ren: [], delTs: {},
     sigs: {}, rmt: {}, acct: "a1", parked: {}, connected: true, email: "e@x",
   };
-  app.posts = posts;
   return app;
 };
 const eqBytes = (a, b) => a.length === b.length && a.every((v, i) => v === b[i]);
 const pull = async (app) => { await app.api.pullSync(); await settle(); };
-const save = async (app) => { app.api.postSaveToHook("Game.gba", u8(1, 2, 3)); await settle(); };
-const onDrive = (drive) => JSON.parse(new TextDecoder().decode(drive.get("save-hook").bytes));
-
-// ---------------------------------------------------------------------------
-// The save webhook
-// ---------------------------------------------------------------------------
-
-test("an address typed here is used; one that arrives from Drive waits to be allowed", async () => {
-  const clock = makeClock();
-  const drive = makeDrive({ clock });
-  const d0 = await device(drive, clock);
-  const d1 = await device(drive, clock);
-  const ask = d1.document.getElementById("save-hook-ask");
-
-  await d0.api.setSaveHookUrl("http://mine.example/hook");
-  await pull(d0);
-  await save(d0);
-  eq(d0.posts, ["http://mine.example/hook"], "typed here: sent");
-  eq(Object.keys(onDrive(drive)).sort(), ["ts", "url"], "the allowance is this device's, not on Drive");
-
-  await pull(d1);
-  eq(d1.api.saveHook.url, "http://mine.example/hook", "the other device has the address");
-  eq(d1.api.saveHook.ok, false, "and has not allowed it");
-  assert.equal(ask.hidden, false, "it asks");
-  assert.match(d1.document.getElementById("save-hook-ask-text").textContent, /mine\.example/);
-  await save(d1);
-  eq(d1.posts, [], "nothing is sent meanwhile");
-  eq(d1.idb.get("save-hook").ok, false, "nor after a reload");
-
-  d1.document.getElementById("save-hook-allow").click();
-  await settle();
-  assert.equal(ask.hidden, true);
-  await save(d1);
-  eq(d1.posts, ["http://mine.example/hook"], "allowed: sent");
-
-  // The same address coming round again does not ask again.
-  await pull(d1);
-  eq(d1.api.saveHook.ok, true);
-});
-
-test("an address swapped on Drive is not sent to, and typing it here allows it", async () => {
-  const clock = makeClock();
-  const drive = makeDrive({ clock });
-  const d0 = await device(drive, clock);
-  const d1 = await device(drive, clock);
-  await d0.api.setSaveHookUrl("http://mine.example/hook");
-  await pull(d0);
-  await pull(d1);
-  d1.document.getElementById("save-hook-allow").click();
-  await settle();
-
-  // Someone else's write to the account's Drive file.
-  await d0.api.setSaveHookUrl("http://theirs.example/take");
-  await pull(d0);
-  await pull(d1);
-  eq(d1.api.saveHook.url, "http://theirs.example/take");
-  eq(d1.api.saveHook.ok, false, "a different address is a new question");
-  await save(d1);
-  eq(d1.posts, []);
-
-  await d1.api.setSaveHookUrl("http://theirs.example/take");
-  eq(d1.api.saveHook.ok, true, "entered here by hand");
-  await save(d1);
-  eq(d1.posts, ["http://theirs.example/take"]);
-});
-
-test("removing the address needs no asking, and a record from an older build stays allowed", async () => {
-  const clock = makeClock();
-  const drive = makeDrive({ clock });
-  const d0 = await device(drive, clock);
-  const d1 = await device(drive, clock);
-  await d0.api.setSaveHookUrl("http://mine.example/hook");
-  await pull(d0);
-  await pull(d1);
-  await d0.api.setSaveHookUrl("");
-  await pull(d0);
-  await pull(d1);
-  eq(d1.api.saveHook.url, "");
-  assert.equal(d1.document.getElementById("save-hook-ask").hidden, true);
-
-  const old = await loadApp();
-  await old.api.dbPut("save-hook", { url: "http://kept.example/hook", ts: 5, dirty: false });
-  await old.api.loadSaveHook();
-  eq(old.api.saveHook.ok, true);
-});
 
 // ---------------------------------------------------------------------------
 // State metadata
