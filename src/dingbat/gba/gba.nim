@@ -1351,7 +1351,7 @@ proc dyn_loop*(cpu: CPU; start_addr, end_addr: uint32; arm: bool)
 # stream); clang left it out of line, ~1% of retired instructions. Forced on
 # clang only (GCC makes a failed always_inline a hard error).
 when defined(clang):
-  {.pragma: pf_inline, codegenDecl: "__attribute__((always_inline)) inline $# $#$#".}
+  {.pragma: pf_inline, inline, codegenDecl: "static inline __attribute__((always_inline)) $# $#$#".}
 else:
   {.pragma: pf_inline, inline.}
 proc pf_serve(bus: Bus; now: CycleCount; page: int; halves: int): int {.pf_inline.}
@@ -1608,7 +1608,7 @@ proc read_word*(bus: Bus; address: uint32): uint32
 # them inline: -3.4% retired instructions on FireRed native, +4% fps on web
 # (clang only: GCC makes a failed always_inline a hard error).
 when defined(clang):
-  {.pragma: fetch_inline, codegenDecl: "__attribute__((always_inline)) inline $# $#$#".}
+  {.pragma: fetch_inline, inline, codegenDecl: "static inline __attribute__((always_inline)) $# $#$#".}
 else:
   {.pragma: fetch_inline, inline.}
 proc fetch_half*(bus: Bus; address: uint32): uint16 {.fetch_inline.}

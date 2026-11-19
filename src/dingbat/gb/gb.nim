@@ -3375,14 +3375,16 @@ include joypad
 # Video: shared PPU base + the FIFO renderer
 # Forward declarations needed by ppu.nim (defined in memory.nim included later).
 # hot_bus_inline is defined here rather than in memory.nim because the forward
-# declarations below must carry the same pragma as their implementations: on
-# non-clang targets it expands to `inline`, and Nim rejects an implementation
-# whose pragmas the forward declaration lacks (the clang codegenDecl form
-# slips through, so only the gcc/mingw builds catch a mismatch).
+# declarations below must carry the same pragma as their implementations: it
+# includes `inline`, and Nim rejects an implementation whose pragmas the
+# forward declaration lacks.
+# `inline` with a `static` declaration, not a bare C `inline`: the proc is
+# then emitted into every C file that calls it, so it still links when the
+# module is compiled as more than one (--ic:on splits it).
 # The rationale for the pragma itself lives with mem_tick_bus in memory.nim.
 when defined(clang):
   {.pragma: hot_bus_inline,
-    codegenDecl: "__attribute__((always_inline)) inline $# $#$#".}
+    inline, codegenDecl: "static inline __attribute__((always_inline)) $# $#$#".}
 else:
   {.pragma: hot_bus_inline, inline.}
 proc mem_tick_components*(mem: GbMemory; gb: GB; cycles: int; from_cpu = true; ignore_speed = false) {.inline.}
