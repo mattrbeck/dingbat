@@ -2180,3 +2180,63 @@ source consulted, no other emulator run.
   stores are two ticks apart at single speed, so the late pickup reaches
   there untested. Probe (m) `c1_absorb`, `c3_absorb`, `c3_defer` on a CGB
   settle it (docs/dev/hwprobe-questions.md 20).
+
+### A noise start holds the counter's input for four ticks
+- Claim: a channel 4 trigger from off holds the counter's increment input
+  for four 1 MHz ticks after its edge; a 512 kHz stage pulse inside the hold
+  waits in a latch and counts on the next grid edge. Every restart of a
+  code >= 1 stage rounds down onto the grid; only code 1 off the grid pulses
+  inside the hold (three ticks), which is its "round up". A restart clears
+  the stage, not the latch: a retrigger between the held pulse and the edge
+  it counts on leaves that increment.
+- Default: `psg_noise_first_inc` (`held`), `ch4_held_start_pulse`
+  (`common/psg_channels.nim`; GB only, the AGB keeps code 1's zero-counter
+  round-up).
+- Evidence: DocBoy `cgb/double_speed/apu/ch4`, every write and read cycle
+  taken from the ROM sources: the trigger-only rows `shift{1,2,4}_divider1_
+  nops{0..3}` (code 1 one grid edge later from an off-grid start) against
+  `shift2_divider{2..7}_nops{0..3}` (no phase dependence), SameSuite
+  `channel_4_frequency_alignment`'s code-1 rows, and the retrigger family:
+  `retrigger_shift{1,4}_divider1_delay{5,6}_nops3`, `_delay{6,7}_nops2`
+  (start at M-cycle 28, pulse 34, counted 38, retrigger 36: the clock lands
+  one increment earlier than any restart that drops the pending pulse),
+  against `delay{4,5}_nops0`, `delay{3,4}_nops1` (pulse at 34 unheld, lost
+  to the same retrigger).
+- Two-sided (code >= 1 single and double retrigger round pairs, 604 scored,
+  860 with DocBoy's 640 disabled `double_retrigger_*` rows): this model
+  604 / 856 (the 4 misses expect an odd M-cycle); before 596 / 804; a hold
+  of 3 or 5 ticks 550 / 702 and 565 / 770; the latch cleared by the restart
+  596 / 808; "ignore that one retrigger" 604 / 826.
+- Open: DocBoy's word (SameBoy fails the code-1 rows); no hardware-verified
+  row moves. Probe (m) built as `c1_absorb` but with the retrigger four
+  ticks after an off-grid start (`-DNR43V=0x09`, the PRE giving the off-grid
+  phase, D1 5 or 6) settles it on a CGB.
+
+### A step of 0 on the sweep calculation's last tick does not hold it
+- Claim: the calculation's tick on an NR10 write's own 1 MHz edge runs on the
+  step it had, so a step of 0 landing on the last tick freezes nothing and
+  the check stops the note on the step the calculation took.
+- Default: `ch1_write` (NR10, step 0 during a calculation), the guard in
+  `ch1_sweep_complete`.
+- Evidence: DocBoy double speed `change_step_7_to_0_during_recalc_delay15_
+  after_trigger` (step 0 17 M-cycles after the NR14 write: on at the read,
+  three M-cycles on) and `_delay16_` (18: off). The natural stop is visible
+  20 M-cycles after the write (`disable_on_trigger_step7`).
+- Open: DocBoy only (SameBoy fails `_delay16_`); no other row moves.
+
+### Sweep triggers share channel 4's restart window
+- Claim: a trigger reaching the sweep unit one tick after the last one rides
+  on it, and one two ticks after waits a tick (the edge the next is measured
+  from), whether the last one started the calculation from idle or
+  restarted a running one.
+- Default: `ch1_sweep_arrive`, `PsgSweepSquare.sweep_arrived_at` (GB payload
+  rev 12).
+- Evidence: DocBoy double speed `disable_on_double_trigger_step{1,6}_delay0*`
+  (from idle) and `disable_on_triple_trigger_step4_delay4_{2,3}` (two ticks
+  after a restart: stop at 59, where restarting at once gives 57); the old
+  "one tick into the calculation" form is the same rule from idle only.
+- Dead end: a restart that keeps one shift and starts as from idle (the
+  same check times) passes the triple rows but moves the step-0 freeze of a
+  restarted calculation a tick (`change_step_7_to_0_during_recalc_then_7_
+  delay{1,2}_after_double_trigger_round1` fail).
+- Open: DocBoy only; SameBoy fails the triple rows.

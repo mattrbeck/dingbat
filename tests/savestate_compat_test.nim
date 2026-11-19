@@ -1677,6 +1677,17 @@ proc run_gb_rev6() =
           twin.apu.channel4.restart_edge == edge,
           "GB channel 4's restart edge travels with the state")
 
+  # Channel 1's last sweep arrival (rev 12) travels the same way.
+  block:
+    let emu = new_gb_for(GB_ROMS[0][0])
+    for _ in 0 ..< 5: emu.step_frame()
+    let at = emu.scheduler.cycles
+    emu.apu.channel1.sweep_arrived_at = at
+    let twin = new_gb_for(GB_ROMS[0][0])
+    check(twin.load_state_bytes(emu.state_bytes()) and
+          twin.apu.channel1.sweep_arrived_at == at,
+          "GB channel 1's last sweep arrival travels with the state")
+
   # Refusals: what stays impossible, and a newer payload revision.
   block:
     let emu = new_gb_for(GB_ROMS[1][0])

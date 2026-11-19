@@ -152,6 +152,10 @@ type
     # GB: a trigger written while a clock's write-back is still on its way
     # to NR13/NR14 (SWEEP_LOAD_REASSERT) arrives after it. GB payload rev 9.
     sweep_arrival_after*: bool
+    # GB: the tick the last trigger reached the sweep unit on, PSG_NO_STEP if
+    # none; only ch1_sweep_arrive reads it, two ticks on. GB payload rev 12
+    # (none once past those two ticks).
+    sweep_arrived_at*:   CycleCount
     # GBA: the AGB's shift-0 trigger check is armed (ch1_write). Saved in
     # bit 15 of frequency_shadow's field; the format has no bit of its own.
     sweep_armed*:        bool
@@ -214,15 +218,16 @@ type
     div_counter*:  uint16
     div_next*:     CycleCount
     # GB: the 1 MHz edge of the last trigger that restarted the divisor
-    # stage, PSG_NO_STEP if none; only ch4_restart_edge reads it, and only
-    # within two ticks of it. Serialized from GB payload rev 11 (none
-    # once past those two ticks).
+    # stage, PSG_NO_STEP if none; ch4_restart_edge reads it within two ticks
+    # of it, ch4_held_start_pulse within four. Serialized from GB payload
+    # rev 11 (none once past those four ticks).
     restart_edge*: CycleCount
 
 proc new_psg_square_sweep*(): PsgSweepSquare =
   PsgSweepSquare(next_step: PSG_NO_STEP, last_step_at: PSG_NO_STEP,
                  start_at: PSG_NO_STEP, sweep_check_at: PSG_NO_STEP, sweep_stop_at: PSG_NO_STEP,
-                 sweep_load_at: PSG_NO_STEP, sweep_armed: true,
+                 sweep_load_at: PSG_NO_STEP, sweep_arrived_at: PSG_NO_STEP,
+                 sweep_armed: true,
                  kill_at: PSG_NO_STEP)
 
 proc new_psg_square*(): PsgSquare =

@@ -652,10 +652,16 @@ proc save_apu_state(apu: GbApu; gb: GB; w: var Writer) =
     w.write_deadline(if ch.start_at != GB_NO_STEP and ch.start_at >= now:
                        ch.start_at else: GB_NO_STEP, now)
   # rev 11: channel 4's last divisor restart edge, while a retrigger could
-  # still read it (ch4_restart_edge: two ticks); an older one is none.
+  # still read it (ch4_restart_edge: two ticks; ch4_held_start_pulse: four);
+  # an older one is none.
   let edge = apu.channel4.restart_edge
-  w.write_deadline(if edge != GB_NO_STEP and edge + 2 * gb_apu_tick(gb) >= now:
+  w.write_deadline(if edge != GB_NO_STEP and edge + 4 * gb_apu_tick(gb) >= now:
                      edge else: GB_NO_STEP, now)
+  # rev 12: the tick channel 1's last trigger reached the sweep unit on, while
+  # a trigger's arrival could still read it (ch1_sweep_arrive: two ticks).
+  let arrived = apu.channel1.sweep_arrived_at
+  w.write_deadline(if arrived != GB_NO_STEP and arrived + 2 * gb_apu_tick(gb) >= now:
+                     arrived else: GB_NO_STEP, now)
 
 proc ch1_sweep_from_rev8(ch: GbChannel1) =
   ## A rev <= 8 state's sweep unit: those builds computed each clock's value
@@ -786,6 +792,10 @@ proc load_apu_state(apu: GbApu; gb: GB; r: var Reader; rev: uint32) =
     # retrigger within two ticks of the frame boundary would have seen.
     apu.channel4.restart_edge =
       if rev >= 11: r.read_deadline(now, "ch4.restart_edge") else: GB_NO_STEP
+    # Before rev 12 the sweep unit's last arrival was not kept: none, which
+    # only a trigger within two ticks of the frame boundary would have seen.
+    apu.channel1.sweep_arrived_at =
+      if rev >= 12: r.read_deadline(now, "ch1.sweep_arrived_at") else: GB_NO_STEP
   else:
     # Before rev 6: the grids' phases and the KEY1 lag stay as the running
     # machine had them, as those builds did; the rest is live for a few
@@ -799,6 +809,7 @@ proc load_apu_state(apu: GbApu; gb: GB; r: var Reader; rev: uint32) =
     apu.channel1.start_at = GB_NO_STEP
     apu.channel2.start_at = GB_NO_STEP
     apu.channel4.restart_edge = GB_NO_STEP
+    apu.channel1.sweep_arrived_at = GB_NO_STEP
   # Restart audio pacing cleanly (see GBA load_apu_state)
   apu.buffer_pos = 0
   when not defined(test_harness) and not defined(emscripten):
