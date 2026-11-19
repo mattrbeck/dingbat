@@ -608,7 +608,7 @@ proc snapshot_pass(m: Mp2kHle; sound_info: uint32) =
     p.freq   = m.rd32(base + SC_FREQ)
     p.ct     = m.rd32(base + SC_COUNT)
   m.pend_reverb = m.rd8(sound_info + SI_REVERB)
-  m.pend_rate   = int(m.rd32(sound_info + SI_PCM_RATE))
+  m.pend_rate   = int(min(m.rd32(sound_info + SI_PCM_RATE), 0x7FFFFFFF'u32))  # int is 32 bits in wasm
   m.pend_period = int(m.rd8(sound_info + SI_DMA_PERIOD))
   m.pend_spv    = int(m.rd16(sound_info + SI_SPV))
   m.pend_cnt    = int(m.rd8(sound_info + SI_DMA_COUNTER))
@@ -1677,7 +1677,11 @@ proc render_voices(m: Mp2kHle; n: int) =
     # The driver steps each voice by rate / pcmFreq a byte, and the timer
     # plays the bytes at play_rate.
     let rate = (if s.use_pcm_rate: float32(m.pcm_sample_rate) else: float32(s.freq))
-    let step = rate * STEP_PER_HZ * m.play_rate / float32(max(m.pcm_sample_rate, 1))
+    let raw_step = rate * STEP_PER_HZ * m.play_rate / float32(max(m.pcm_sample_rate, 1))
+    # The phase indexes the sinc tables unchecked, and advance_cursor keeps
+    # it in 0..1 only for a step it can split exactly: any other (negative,
+    # NaN, past 2^24) holds the voice still.
+    let step = (if raw_step >= 0 and raw_step <= 16777216.0'f32: raw_step else: 0.0'f32)
     let vl = s.vol_l
     let vr = s.vol_r
     let dl = s.vol_l_to - s.vol_l
