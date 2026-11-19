@@ -15,7 +15,7 @@ rendered clearer than on hardware.
 
 <ins>Cross-device backups</ins> - Games and saves sync through Google Drive.
 
-<ins>Accuracy</ins> - One of the most accurate Game Boy, Game Boy Color, and Game Boy Advance emulators. See for yourself in [tests/results.md](tests/results.md).
+<ins>[High Accuracy](tests/results.md)</ins> - One of the most accurate Game Boy, Game Boy Color, and Game Boy Advance emulators.
 
 <ins>No BIOS required</ins> - An accurate HLE BIOS is built in.
 
