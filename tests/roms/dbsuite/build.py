@@ -816,8 +816,12 @@ def main():
         # first 0x1C000 bytes of the 114864-byte image (2026-11-05), so the
         # payload records at the end read as junk and dma/imm-dma-none, the
         # first case whose record lay past that point, copied junk over
-        # IWRAM and hung the console (cart-agb-2026-11-05.json)
-        rom += b'\xff' * ((1 << (len(rom) - 1).bit_length()) - len(rom))
+        # IWRAM and hung the console (cart-agb-2026-11-05.json).
+        # At least 512 KB: an emulator may take a file of 256 KB or less for
+        # a multiboot image and run it from EWRAM. mGBA 0.10.5 does when the
+        # word at 0xC0 is a forward branch (GBAIsMB), and this one's is.
+        size = max(1 << (len(rom) - 1).bit_length(), 0x80000)
+        rom += b'\xff' * (size - len(rom))
         patch_header(rom, 'DBSUITE', 'ADBE')
         open(cart, 'wb').write(rom)
         romfix.gba_logo(cart)
