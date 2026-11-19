@@ -27,3 +27,12 @@ test("the page has nothing a policy without 'unsafe-inline' refuses", () => {
 test("the policy survives the deploy's comment strip", () => {
   assert.equal(problem(html.replace(/<!--[\s\S]*?-->/g, "")), null);
 });
+
+// Google's redirect page: its own policy, refusing all but its one script
+// and one style block.
+const callback = readFileSync(new URL("../oauth-callback.html", import.meta.url), "utf8");
+
+test("oauth-callback.html carries the policy its inline code needs", () => {
+  assert.equal(problem(callback, "oauth-callback.html"), null);
+  assert.match(problem(callback.replace("<style>", "<style> "), "oauth-callback.html"), /run node tools\/csp\.mjs/);
+});

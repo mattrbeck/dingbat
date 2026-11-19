@@ -195,10 +195,11 @@ jobs:
           }
 
       - name: Check the page's Content-Security-Policy
-        # After the last step that rewrites index.html: the page as it ships
-        # still names each of its inline scripts by hash (tools/csp.mjs). A
-        # stale hash and the browser refuses that script.
-        run: node tools/csp.mjs --check web/index.html
+        # After the last step that rewrites index.html: each page with a
+        # policy (index.html, oauth-callback.html) still names its inline
+        # code by hash as it ships (tools/csp.mjs). A stale hash and the
+        # browser refuses that script.
+        run: node tools/csp.mjs --check
 
       - name: Write the asset manifest
         # Every precached file's digest (sw.js checks each copy its install
