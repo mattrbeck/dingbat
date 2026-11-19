@@ -10,535 +10,635 @@ enum AppBuild {
         return "dingbat " + (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "")
     }
 }
-import UniformTypeIdentifiers
 
-/// Settings › sections, in the web's order (web #settings-tabs).
-enum SettingsSection: String, CaseIterable, Identifiable {
-    case controls, video, audio, play, gb, gba, ds, general
-
-    var id: String { rawValue }
-
-    var name: String {
-        switch self {
-        case .controls: return "Controls"
-        case .video: return "Video"
-        case .audio: return "Audio"
-        case .play: return "Play"
-        case .gb: return "Game Boy"
-        case .gba: return "Game Boy Advance"
-        case .ds: return "Nintendo DS"
-        case .general: return "General"
-        }
-    }
-
-    /// The row's second line (web .settings-tab-desc).
-    var desc: String {
-        switch self {
-        case .controls: return "Touch, run-ahead, rumble, controller"
-        case .video: return "Color, filters, LCD response, glow"
-        case .audio: return "Quality, filtering, fast-forward"
-        case .play: return "Resuming a game, rewind"
-        case .gb: return "Palette, Super Game Boy, boot ROM"
-        case .gba: return "BIOS file, BIOS calls, intro"
-        case .ds: return "Screen layout, 3D, BIOS and firmware"
-        case .general: return "Theme, Google Drive, save webhook, reset"
-        }
-    }
-
-    static let storageKey = "settings-section"
-
-    /// The sections shown: Nintendo DS only with DS Beta on.
-    static var shown: [SettingsSection] { allCases.filter { $0 != .ds || Settings.shared.dsBeta } }
-}
-
-/// Settings (web #settings-modal). One tree, two layouts as on the web: a
-/// rail of sections beside the open one when the sheet is wide, and on a
-/// phone a list screen that pushes each section (with the up/down stepper).
-/// `initialSection` opens straight to one; the last one is remembered.
+/// Settings (docs/dev/settings-design.md): a navigation stack of panes on a
+/// phone, a sidebar beside the open pane from 700 pt wide. `initialSection`
+/// opens straight to a pane.
 struct SettingsView: View {
     var initialSection: String?
     @Environment(\.palette) private var palette
-    /// DS Beta changes the sections (SettingsSection.shown).
     @ObservedObject private var settings = Settings.shared
     @ObservedObject private var supporter = Supporter.shared
-    @State private var current: SettingsSection = .controls
-    @State private var pushed = false
+    @ObservedObject private var nav = SettingsNav.shared
     @State private var ready = false
-    @State private var wideLayout = false
 
     var body: some View {
         GeometryReader { geo in
             Group {
-                if geo.size.width >= 600 { rail } else { phone }
+                if geo.size.width >= 700 { wide } else { phone }
             }
-            .onAppear { wideLayout = geo.size.width >= 600 }
-            .onChange(of: geo.size.width) { wideLayout = $0 >= 600 }
+            .onAppear { nav.wide = geo.size.width >= 700 }
+            .onChange(of: geo.size.width) { nav.wide = $0 >= 700 }
         }
-        .foregroundColor(palette.text)
-        .background(palette.surface1.ignoresSafeArea())
+        .background(palette.bg.ignoresSafeArea())
+        .tint(palette.accent)
         .sheetToasts()
-        .onAppear {
-            guard !ready else { return }
-            ready = true
-            let stored = UserDefaults.standard.string(forKey: SettingsSection.storageKey)
-            if let s = initialSection.flatMap(SettingsSection.init(rawValue:)) {
-                current = s
-                pushed = true
-            } else {
-                current = stored.flatMap(SettingsSection.init(rawValue:))
-                    .flatMap { SettingsSection.shown.contains($0) ? $0 : nil } ?? .controls
-            }
-        }
-        .onChange(of: current) { s in UserDefaults.standard.set(s.rawValue, forKey: SettingsSection.storageKey) }
         .sheet(isPresented: $supporter.sheetUp) {
             SupporterView(onClose: { supporter.sheetUp = false })
                 .environment(\.palette, settings.palette)
         }
-        .onChange(of: supporter.jumpTo) { s in
-            guard let s, let section = SettingsSection(rawValue: s) else { return }
+        .onChange(of: supporter.jumpTo) { p in
+            guard let p else { return }
             supporter.jumpTo = nil
-            current = section
-            withAnimation(.easeOut(duration: 0.22)) { pushed = true }
+            nav.open(p)
         }
         .onAppear {
-            // B in a pushed section goes back to the list first.
-            PadNav.shared.back[AppModel.Sheet.settings(section: nil).id] = {
-                guard pushed && !wideLayout else { return false }
-                withAnimation(.easeOut(duration: 0.22)) { pushed = false }
-                return true
-            }
+            guard !ready else { return }
+            ready = true
+            nav.path = []
+            if let p = initialSection.flatMap(SettingsPane.init(link:)) { nav.open(p) }
+            PadNav.shared.back[AppModel.Sheet.settings(section: nil).id] = { SettingsNav.shared.pop() }
         }
     }
-
-    // MARK: wide: rail + content
-
-    private var rail: some View {
-        HStack(spacing: 0) {
-            VStack(alignment: .leading, spacing: 0) {
-                SheetHeader(title: "Settings", onClose: nil)
-                ScrollView {
-                    VStack(spacing: 2) {
-                        SupporterSettingsRow().padding(.bottom, 10)
-                        ForEach(SettingsSection.shown) { s in
-                            sectionRow(s, selected: s == current, chevron: false) { current = s }
-                        }
-                        versionText.padding(.vertical, 16)
-                    }
-                    .padding(.horizontal, 10)
-                }
-            }
-            .frame(width: 260)
-            .background(palette.bg.opacity(0.35).ignoresSafeArea())
-            Rectangle().fill(palette.border).frame(width: 1).ignoresSafeArea()
-            VStack(spacing: 0) {
-                SheetHeader(title: current.name, onClose: SheetNav.close)
-                ScrollViewReader { proxy in
-                    ScrollView { pane(current) }
-                        .padScrollFollow(proxy)
-                }
-                .id(current)
-            }
-        }
-    }
-
-    // MARK: narrow: list, pushed detail
 
     private var phone: some View {
-        ZStack {
-            if !pushed {
-                VStack(spacing: 0) {
-                    SheetHeader(title: "Settings", onClose: SheetNav.close)
-                    ScrollView {
-                        SupporterSettingsRow()
-                            .padding(.horizontal, 16)
-                            .padding(.top, 4)
-                            .padding(.bottom, 12)
-                        VStack(spacing: 0) {
-                            ForEach(SettingsSection.shown) { s in
-                                sectionRow(s, selected: false) {
-                                    current = s
-                                    withAnimation(.easeOut(duration: 0.22)) { pushed = true }
-                                }
-                                if s != .general { Rectangle().fill(palette.border).frame(height: 1).padding(.leading, 16) }
+        NavigationStack(path: $nav.path) {
+            RootPane()
+                .navigationTitle("Settings")
+                .navigationBarTitleDisplayMode(.large)
+                .toolbar { ToolbarItem(placement: .topBarTrailing) { CloseButton() } }
+                .navigationDestination(for: SettingsPane.self) { PaneScreen(pane: $0) }
+        }
+    }
+
+    private var wide: some View {
+        NavigationSplitView {
+            RootPane(sidebar: true)
+                .navigationTitle("Settings")
+                .toolbar { ToolbarItem(placement: .topBarLeading) { CloseButton() } }
+        } detail: {
+            NavigationStack(path: $nav.path) {
+                PaneScreen(pane: nav.selection ?? .appearance, closes: false)
+                    .navigationDestination(for: SettingsPane.self) { PaneScreen(pane: $0, closes: false) }
+            }
+            .id(nav.selection)
+        }
+        .navigationSplitViewStyle(.balanced)
+    }
+}
+
+private struct CloseButton: View {
+    var body: some View {
+        Button(action: SheetNav.close) {
+            Image(systemName: "xmark")
+        }
+        .accessibilityLabel("Close")
+        .padFocus("close", press: SheetNav.close)
+    }
+}
+
+extension SettingsNav {
+    /// The panes Settings' root lists (on a wide screen, the sidebar's).
+    static let top: [SettingsPane] = [.appearance, .controls, .audio, .play, .gb, .gba, .ds, .drive, .general]
+}
+
+/// One pane under its title.
+private struct PaneScreen: View {
+    let pane: SettingsPane
+    var closes = true
+
+    var body: some View {
+        PaneContent(pane: pane)
+            .navigationTitle(pane.title)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                if closes { ToolbarItem(placement: .topBarTrailing) { CloseButton() } }
+            }
+    }
+}
+
+// MARK: - Root
+
+private struct RootPane: View {
+    var sidebar = false
+    @ObservedObject private var s = Settings.shared
+    @ObservedObject private var supporter = Supporter.shared
+    @ObservedObject private var drive = DriveSync.shared
+    @ObservedObject private var icons = AppIconManager.shared
+    @ObservedObject private var nav = SettingsNav.shared
+    @Environment(\.palette) private var palette
+
+    var body: some View {
+        let sections = [
+            SSection(id: "banner", [.custom("banner", SupporterBanner(icon: supporter.unlocked ? icons.chosen.preview : AppIconChoice.classic[0].preview))]),
+            SSection(id: "look", [
+                row(.appearance, tile: Tile(color: 0x7A4FC4, glyph: .symbol("paintbrush.pointed.fill")), value: s.effectiveTheme.label),
+                row(.controls, tile: Tile(color: 0x636079, glyph: .symbol("gamecontroller.fill"))),
+                row(.audio, tile: Tile(color: 0xE0466B, glyph: .symbol("speaker.wave.2.fill"))),
+            ]),
+            SSection(id: "systems", [
+                row(.play, tile: Tile(color: 0x2FA85A, glyph: .symbol("play.fill"))),
+                row(.gb, tile: Tile(color: 0x2B8F8A, glyph: .gameBoy), value: s.effectivePaletteMode.label),
+                row(.gba, tile: Tile(color: 0x4D5BD6, glyph: .gba),
+                    value: FileManager.default.fileExists(atPath: RomLibrary.gbaBiosURL.path) ? nil : "No BIOS"),
+            ] + (s.dsOn ? [row(.ds, tile: Tile(color: 0xD9822B, glyph: .ds), badge: .experimental)] : [])),
+            SSection(id: "account", footer: AppBuild.label, [
+                row(.drive, tile: Tile(color: 0x2F7FE0, glyph: .symbol("cloud.fill")), value: drive.linked ? "On" : "Off"),
+                row(.general, tile: Tile(color: 0x636079, glyph: .symbol("gearshape.fill"))),
+            ]),
+        ]
+        if sidebar {
+            List(selection: $nav.selection) {
+                ForEach(sections) { sec in
+                    Section {
+                        ForEach(sec.rows) { r in
+                            if case .nav(let label, _, let tile, _, let badge, _, let to) = r.kind {
+                                NavigationLink(value: to) { RowLine(label: label, tile: tile, badge: badge) { EmptyView() } }
+                                    .padFocus(r.id) { nav.open(to) }
+                            } else if case .custom(let v) = r.kind {
+                                v
                             }
                         }
-                        .background(RoundedRectangle(cornerRadius: 11).fill(palette.surface2))
-                        .overlay(RoundedRectangle(cornerRadius: 11).stroke(palette.border, lineWidth: 1))
-                        .padding(.horizontal, 16)
                     }
-                    versionText.padding(.vertical, 12)
                 }
-                .transition(.move(edge: .leading))
-            } else {
-                VStack(spacing: 0) {
-                    SheetHeader(title: current.name, onClose: SheetNav.close) {
-                        Button {
-                            withAnimation(.easeOut(duration: 0.22)) { pushed = false }
-                        } label: {
-                            Image(systemName: "chevron.left")
-                                .font(.system(size: 17, weight: .semibold))
-                                .foregroundColor(palette.text)
-                                .frame(width: 32, height: 36)
-                                .touchTarget(width: 32, height: 36)
-                        }
-                        .buttonStyle(.plain)
-                        .padding(.leading, -12)
-                        .accessibilityLabel("Back to all settings")
-                    } trailing: {
-                        stepper
-                    }
-                    ScrollViewReader { proxy in
-                        ScrollView { pane(current) }
-                            .padScrollFollow(proxy)
-                    }
-                    .id(current)
-                }
-                .transition(.move(edge: .trailing))
-                .gesture(DragGesture(minimumDistance: 24).onEnded { v in
-                    // An edge swipe goes back, as a pushed screen does.
-                    if v.startLocation.x < 40 && v.translation.width > 80 {
-                        withAnimation(.easeOut(duration: 0.22)) { pushed = false }
-                    }
-                })
             }
+            .listStyle(.insetGrouped)
+            .scrollContentBackground(.hidden)
+            .background(palette.bg.ignoresSafeArea())
+        } else {
+            PaneList(sections: sections)
         }
     }
 
-    /// Previous / next section (web .settings-stepper).
-    private var stepper: some View {
-        let all = SettingsSection.shown
-        let i = all.firstIndex(of: current) ?? 0
-        return HStack(spacing: 0) {
-            stepButton("chevron.up", "Previous section", enabled: i > 0) { current = all[i - 1] }
-            stepButton("chevron.down", "Next section", enabled: i < all.count - 1) { current = all[i + 1] }
-        }
+    private func row(_ p: SettingsPane, tile: Tile, value: String? = nil, badge: Badge? = nil) -> SRow {
+        .nav(p.title, value: value, tile: tile, badge: badge, to: p)
     }
+}
 
-    private func stepButton(_ icon: String, _ label: String, enabled: Bool, _ action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Image(systemName: icon)
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundColor(palette.textDim)
-                .opacity(enabled ? 1 : 0.45)  // the one disabled opacity (web --disabled-opacity)
-                .frame(width: 32, height: 36)
-                .touchTarget(width: 44, height: 36)  // side by side: taller only
-        }
-        .buttonStyle(.plain)
-        .disabled(!enabled)
-        .accessibilityLabel(label)
-    }
+/// The top row: "Support dingbat", or "dingbat" with the Supporter pill.
+private struct SupporterBanner: View {
+    let icon: String
+    @ObservedObject private var store = Supporter.shared
+    @Environment(\.palette) private var palette
 
-    private func sectionRow(_ s: SettingsSection, selected: Bool, chevron: Bool = true,
-                            _ action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            HStack(spacing: 10) {
+    var body: some View {
+        Button { store.open() } label: {
+            HStack(spacing: 14) {
+                Image(icon).interpolation(.none).resizable().frame(width: 56, height: 56).clipShape(Circle())
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(s.name)
-                        .font(.system(size: 14.5, weight: .semibold))
-                        .foregroundColor(selected ? palette.accent : palette.text)
-                    Text(s.desc)
-                        .font(.system(size: 12))
-                        .foregroundColor(palette.textFaint)
-                        .lineLimit(chevron ? 1 : 2)
+                    HStack(spacing: 8) {
+                        Text(store.unlocked ? "dingbat" : "Support dingbat")
+                            .font(.system(size: 20, weight: .semibold)).foregroundColor(palette.text)
+                        if store.unlocked { SupporterPill(size: 11) }
+                    }
+                    Text(store.unlocked ? sinceText : "Themes, icons, palettes and more")
+                        .font(.system(size: 14)).foregroundColor(palette.textDim)
+                        .lineLimit(1).minimumScaleFactor(0.85)
                 }
                 Spacer(minLength: 4)
-                if chevron {
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundColor(palette.textFaint)
-                }
+                Image(systemName: "chevron.right").font(.system(size: 13, weight: .semibold)).foregroundColor(palette.textFaint)
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 11)
-            .background(RoundedRectangle(cornerRadius: 8).fill(selected ? palette.accent.opacity(0.10) : .clear))
-            .padFocus("section:" + s.rawValue, press: action)
+            .padding(.vertical, 4)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityAddTraits(selected ? .isSelected : [])
+        .padFocus("supporter:banner") { store.open() }
     }
 
-    /// web #settings-version: the build's commit; a tap copies it.
-    private var versionText: some View {
-        let text = AppBuild.label
-        return Button {
-            UIPasteboard.general.string = text
-            AppModel.shared.toast("Copied " + text)
-        } label: {
-            Text(text)
-                .font(.system(size: 11.5))
-                .foregroundColor(palette.textFaint)
-                .frame(maxWidth: .infinity)
-        }
-        .buttonStyle(.plain)
-        .accessibilityHint("Copies the build")
-    }
-
-    @ViewBuilder
-    private func pane(_ s: SettingsSection) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            switch s {
-            case .controls: ControlsPane()
-            case .video: VideoPane()
-            case .audio: AudioPane()
-            case .play: PlayPane()
-            case .gb: GameBoyPane()
-            case .gba: GbaPane()
-            case .ds: NdsSettingsPane()
-            case .general: GeneralPane()
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 22)
-        .padding(.top, 6)
-        .padding(.bottom, 28)
+    private var sinceText: String {
+        guard let d = store.since else { return "Thank you." }
+        let f = DateFormatter()
+        f.setLocalizedDateFormatFromTemplate("MMMM yyyy")
+        return "Since \(f.string(from: d)). Thank you."
     }
 }
 
-// MARK: - Controls
+// MARK: - Panes
 
-private struct ControlsPane: View {
-    @ObservedObject private var s = Settings.shared
-    @ObservedObject private var kb = Keyboard.shared
-
-    /// The web's order: Touch, Response and feedback, then the keyboard
-    /// (while one is connected) and the controller.
-    var body: some View {
-        SheetSubhead(text: "Touch", rule: false)
-        SheetToggleRow(label: "Large on-screen controls",
-                       sub: "A bigger d-pad for touch — best for large fingers", isOn: $s.largeControls)
-        SheetFlowRow(label: "Touch direction input", sub: "D-pad buttons or an analog-style joystick") {
-            SheetChipPicker(selection: $s.controlStyle, options: [(.dpad, "D-pad"), (.joystick, "Joystick")])
-        }
-        if s.controlStyle == .joystick {
-            SheetFlowRow(label: "Joystick behavior", sub: "Fixed stays put; floating follows your thumb") {
-                SheetChipPicker(selection: $s.joystickMode, options: [(.fixed, "Fixed"), (.floating, "Floating")])
-            }
-        }
-        if UIDevice.current.userInterfaceIdiom == .phone {
-            SheetFlowRow(label: "Buttons in landscape", sub: "Bold shows up on any picture") {
-                SheetChipPicker(selection: $s.landscapeButtons,
-                                options: [(.outline, "Outline"), (.bold, "Bold"), (.solid, "Solid")])
-            }
-        }
-        SheetToggleRow(label: "Hide touch controls with a controller",
-                       sub: "Hide the on-screen buttons while a game controller is connected",
-                       isOn: $s.hideTouchOnGamepad)
-        SheetSubhead(text: "Response and feedback")
-        SheetFlowRow(label: "Run-ahead",
-                     sub: "Cuts the delay between pressing a button and seeing it happen, by guessing that many frames ahead. Costs extra CPU; ignored at 2× speed and in multiplayer.") {
-            SheetChipPicker(selection: $s.runahead,
-                            options: [(0, "Off"), (1, "1"), (2, "2"), (3, "3")],
-                            spoken: [1: "1 frame", 2: "2 frames", 3: "3 frames"],
-                            accessibilityLabel: "Run-ahead frames")
-        }
-        SheetToggleRow(label: "Rumble", sub: "Buzz and shake when a game uses its rumble motor", isOn: $s.rumble)
-        SheetToggleRow(label: "Haptic feedback",
-                       sub: "A light tap under your thumb for each on-screen button press", isOn: $s.haptics)
-        SheetToggleRow(label: "Show inputs on screen",
-                       sub: "Light up a small controller over the game as you press buttons — for streams, or for watching your own inputs. Recorded clips never include it.",
-                       isOn: $s.inputDisplay)
-        // web #kb-section, which touch devices hide: here, while a
-        // keyboard is connected.
-        if kb.connected { KeyboardBlock() }
-        SheetSubhead(text: "Controller")
-        ShortcutList(rows: [
-            ("A", "A or Y"),
-            ("B", "B or X"),
-            ("Select / Start", "Options / Menu"),
-        ] + (s.dsBeta ? [("X / Y (DS games)", "X / Y")] : []) + [
-            ("L / R", "LB / RB"),
-            ("D-pad", "D-pad or left stick"),
-            ("Fast forward (hold)", "RT"),
-            ("Rewind (hold)", "LT"),
-            ("Menu, paused", "R3 / hold Select+Start"),
-            ("Move / press", "D-pad / A"),
-            ("Back / close", "B"),
-            ("Library: game options", "Y"),
-            ("Library: resume the game", "Start"),
-            ("Library: filter / sort", "LB RB / LT RT"),
-        ])
-    }
-}
-
-/// web #kb-section: the preset, the ten bindings (tap one, then press its
-/// key), and the shortcuts.
-private struct KeyboardBlock: View {
-    @ObservedObject private var kb = Keyboard.shared
-    @ObservedObject private var settings = Settings.shared
-    @Environment(\.palette) private var palette
-
-    var body: some View {
-        SheetSubhead(text: "Keyboard")
-        SheetFlowRow(label: "Preset", sub: "Custom is whatever you rebind below") {
-            SheetChipPicker(selection: Binding(get: { kb.preset }, set: { kb.setPreset($0) }),
-                            options: [(.default, "Default"), (.homerow, "Home-row"), (.custom, "Custom")],
-                            accessibilityLabel: "Keyboard preset")
-        }
-        SheetHint("Tap a key, then press its replacement. Saved automatically.")
-        LazyVGrid(columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible())], alignment: .leading, spacing: 8) {
-            // X (DS) and Y (DS) only with DS Beta on.
-            ForEach(0..<(settings.dsBeta ? Keyboard.inputNames.count : 10), id: \.self) { i in
-                HStack(spacing: 10) {
-                    let on = kb.capturing == i
-                    Button { kb.capturing = on ? nil : i } label: {
-                        Text(on ? "Press a key" : Keyboard.name(kb.bindings[i]))
-                            .font(.system(size: 12.5, weight: .semibold, design: .monospaced))
-                            .foregroundColor(on ? palette.accentInk : palette.text)
-                            .frame(minWidth: 84)
-                            .padding(.vertical, 6)
-                            .background(RoundedRectangle(cornerRadius: 6).fill(on ? palette.accent : palette.surface2))
-                            .overlay(RoundedRectangle(cornerRadius: 6).stroke(palette.border2, lineWidth: 1))
-                    }
-                    .buttonStyle(.plain)
-                    .padFocus("key\(i)") { kb.capturing = on ? nil : i }
-                    .accessibilityLabel(Keyboard.inputNames[i] + ": " + Keyboard.name(kb.bindings[i]))
-                    Text(Keyboard.inputNames[i])
-                        .font(.system(size: 13.5))
-                        .foregroundColor(palette.textDim)
-                }
-            }
-        }
-        .padding(.bottom, 16)
-        .onDisappear { kb.capturing = nil }
-        SheetSubhead(text: "Shortcuts")
-        ShortcutList(rows: [
-            ("Pause / Resume", "Space"),
-            ("Fast forward (hold)", "Tab"),
-            ("2× speed", "Shift+Tab"),
-            ("Slow motion", "Shift+`"),
-            ("Rewind (hold)", "`"),
-            ("Pause & step one frame", "."),
-            ("Mute", "M"),
-            ("Show inputs on screen", "I"),
-            ("Save state", "F5"),
-            ("Load state", "F8"),
-            ("Screenshot", "F9"),
-            ("Menu, paused", "Escape"),
-        ] + (settings.dsBeta ? [
-            ("DS: next screen arrangement", "V"),
-            ("DS: swap the screens", "B"),
-            ("DS: turn the screens", "O"),
-            ("DS: close / open the lid", "N"),
-            ("DS: blow (hold)", "H"),
-        ] : []))
-        SheetHint(settings.dsBeta
-                  ? "If a game key and a shortcut share a key, the game wins. X (DS) and Y (DS) count only while a DS game runs."
-                  : "If a game key and a shortcut share a key, the game wins.")
-    }
-}
-
-/// web .kb-shortcut rows: an action and its button.
-private struct ShortcutList: View {
-    let rows: [(String, String)]
-    @Environment(\.palette) private var palette
-
-    var body: some View {
-        VStack(spacing: 6) {
-            ForEach(rows, id: \.0) { r in
-                HStack {
-                    Text(r.0)
-                        .font(.system(size: 13.5))
-                        .foregroundColor(palette.textDim)
-                    Spacer(minLength: 8)
-                    Text(r.1)
-                        .font(.system(size: 12, design: .monospaced))
-                        .foregroundColor(palette.text)
-                        .padding(.horizontal, 7)
-                        .padding(.vertical, 3)
-                        .background(RoundedRectangle(cornerRadius: 5).fill(palette.surface2))
-                        .overlay(RoundedRectangle(cornerRadius: 5).stroke(palette.border2, lineWidth: 1))
-                }
-            }
-        }
-        .padding(.bottom, 12)
-    }
-}
-
-// MARK: - Game Boy
-
-private struct GameBoyPane: View {
+/// Every pane's sections, read from the live settings.
+private struct PaneContent: View {
+    let pane: SettingsPane
     @ObservedObject private var s = Settings.shared
     @ObservedObject private var supporter = Supporter.shared
     @ObservedObject private var session = GameSession.shared
+    @ObservedObject private var nds = NdsState.shared
+    @ObservedObject private var kb = Keyboard.shared
+    @ObservedObject private var drive = DriveSync.shared
+    @ObservedObject private var icons = AppIconManager.shared
     @Environment(\.palette) private var palette
-    @Environment(\.padScope) private var scope
+    @State private var fileGen = 0
 
-    /// SGB colour in the running game: the shader has no shades to replace.
-    private var sgbActive: Bool { session.game != nil && dingbat_sgb_active() != 0 }
+    private var unlocked: Bool { supporter.unlocked }
 
     var body: some View {
-        SheetSubhead(text: "Game Boy screen", rule: false)
-        Group {
-            SheetFlowRow(label: "Palette",
-                         sub: "The four colors black-and-white games are drawn in. Color games are never affected.") {
-                SheetChipPicker(selection: $s.gbPaletteMode,
-                                options: [(.default, "Default"), (.theme, "App theme"), (.custom, "Custom")]
-                                    .filter { !$0.0.supporterOnly || supporter.unlocked || s.gbPaletteMode == $0.0 },
-                                accessibilityLabel: "Game Boy palette", padKey: "gbpalette")
-            }
-            SupporterTeaser(text: "Pick your own four shades", swatches: [0xFFE6EE, 0xFF8FB1, 0x7A4FC4, 0x1B1028])
-                .padding(.bottom, 14)
-            if sgbActive {
-                SheetHint("Super Game Boy games bring their own colors, so there are no shades to replace. Turn it off below to use a palette.")
-            }
-            HStack(spacing: 10) {
-                Text("In use").font(.system(size: 12.5)).foregroundColor(palette.textDim).frame(width: 46, alignment: .leading)
-                HStack(spacing: 0) {
-                    ForEach(0..<4, id: \.self) { i in
-                        Rectangle().fill(Color(hex: (s.dmgPalette ?? Settings.defaultShades)[i]))
-                    }
-                }
-                .frame(height: 26)
-                .clipShape(RoundedRectangle(cornerRadius: 6))
-                .overlay(RoundedRectangle(cornerRadius: 6).stroke(palette.border2, lineWidth: 1))
-                .accessibilityHidden(true)
-                // Off while there is nothing to reset (web the same): the
-                // pad's ring steps to Default as it greys.
-                PadButton("Reset", id: "gbpalette:reset") {
-                    PadNav.shared.handOff(PadNav.key(scope, "gbpalette:reset"),
-                                          to: PadNav.key(scope, "chip:gbpalette:Default"))
-                    s.gbPaletteMode = .default
-                    s.gbPaletteCustom = Settings.defaultShades
-                }
-                .buttonStyle(SheetButtonStyle())
-                .accessibilityLabel("Reset the Game Boy palette")
-                .disabled(s.gbPaletteMode == .default && s.gbPaletteCustom == Settings.defaultShades)
-            }
-            .padding(.bottom, 14)
-            if s.gbPaletteMode == .custom {
-                HStack(spacing: 10) {
-                    Text("Pick").font(.system(size: 12.5)).foregroundColor(palette.textDim).frame(width: 46, alignment: .leading)
-                    ForEach(0..<4, id: \.self) { i in
-                        ColorPicker("", selection: shade(i), supportsOpacity: false)
-                            .labelsHidden()
-                            .accessibilityLabel(i == 0 ? "Shade 1 (lightest)" : i == 3 ? "Shade 4 (darkest)" : "Shade \(i + 1)")
-                    }
-                    Spacer()
-                }
-                .padding(.bottom, 14)
-            }
+        switch pane {
+        case .webhook: WebhookPane()
+        case .acknowledgements: AcknowledgementsPane()
+        default: PaneList(sections: sections)
         }
-        .disabled(sgbActive)
-        SheetSubhead(text: "Super Game Boy")
-        SheetToggleRow(label: "Super Game Boy mode",
-                       sub: "Adds color, and a border, to black-and-white games that were made for the Super Game Boy adapter. Other games are unaffected.",
-                       isOn: Binding(get: { s.sgbEnable }, set: { on in
-                           s.sgbEnable = on
-                           if session.game != nil {
-                               AppModel.shared.toast("Super Game Boy mode applies the next time a game is loaded")
-                           }
-                       }))
-        SheetToggleRow(label: "Show border",
-                       sub: "A border makes the picture wider, so the screen changes shape when one appears",
-                       isOn: $s.sgbBorder)
-            .disabled(!s.sgbEnable)
-        SheetSubhead(text: "Boot ROM")
-        BiosFileRow(label: "GBC Boot ROM", url: RomLibrary.gbcBootromURL)
-        SheetHint("With a boot ROM set, Game Boy games play the startup animation first.")
     }
 
-    /// A ColorPicker binding onto one of the four custom shades (0xRRGGBB).
+    private var sections: [SSection] {
+        switch pane {
+        case .appearance: return appearance
+        case .controls: return controls
+        case .controller: return controller
+        case .keyboard: return keyboard
+        case .audio: return audio
+        case .channels: return channels
+        case .play: return play
+        case .gb: return gameBoy
+        case .gba: return gba
+        case .ds: return ds
+        case .drive: return driveSections
+        case .general: return general
+        case .appIcon: return appIcon
+        case .webhook, .acknowledgements: return []
+        }
+    }
+
+    /// A setting read at load: changed mid-game, it says when it applies.
+    private func atNextLoad<T>(_ b: Binding<T>) -> Binding<T> {
+        Binding(get: { b.wrappedValue }, set: { v in
+            b.wrappedValue = v
+            if session.game != nil { AppModel.shared.toast("Applies the next time a game is loaded") }
+        })
+    }
+
+    private func index<T: Equatable>(_ all: [T], _ b: Binding<T>) -> Binding<Int> {
+        Binding(get: { all.firstIndex(of: b.wrappedValue) ?? 0 }, set: { b.wrappedValue = all[$0] })
+    }
+
+    // MARK: Display & Appearance
+
+    private var appearance: [SSection] {
+        var theme: [SRow] = [.custom("gallery", ThemeGallery())]
+        if unlocked {
+            theme.append(.toggle("Separate light-mode theme", $s.lightThemeOn))
+            if s.lightThemeOn {
+                theme.append(.menu("Light-mode theme", ThemeName.allCases.map { .init($0.label) }, index(ThemeName.allCases, $s.lightTheme)))
+            }
+        }
+        theme.append(.nav("App Icon", value: (unlocked ? icons.chosen : AppIconChoice.classic[0]).name,
+                          image: (unlocked ? icons.chosen : AppIconChoice.classic[0]).preview,
+                          locked: unlocked ? nil : .icons, to: .appIcon))
+        let filters = Settings.Filter.allCases
+        var screen: [SRow] = [
+            .toggle("Color correction", $s.colorCorrect),
+            .menu("Filter", filters.map { .init($0.label, locked: $0.supporterOnly && !unlocked ? .filters : nil) },
+                  index(filters, Binding(get: { s.effectiveFilter }, set: { s.filter = $0 }))),
+            .toggle("Integer scaling", $s.integerScale),
+            .toggle("Reproduce motion blur", $s.lcdResponse),
+            .toggle("Ambient glow", $s.ambientGlow),
+        ]
+        if PhoneCutout.hasSideColumn {
+            let all = Settings.UprightPicture.allCases
+            screen.append(.menu("Picture held upright", all.map { .init($0.label) }, index(all, $s.uprightPicture)))
+        }
+        return [SSection("Theme", theme), SSection("Game screen", screen)]
+    }
+
+    // MARK: Controls
+
+    private var controls: [SSection] {
+        var touch: [SRow] = [
+            .toggle("Large controls", $s.largeControls),
+            .segmented("Direction", ["D-pad", "Joystick"], index([.dpad, .joystick], $s.controlStyle)),
+        ]
+        if s.controlStyle == .joystick {
+            touch.append(.segmented("Joystick", ["Fixed", "Floating"], index([.fixed, .floating], $s.joystickMode)))
+        }
+        if UIDevice.current.userInterfaceIdiom == .phone {
+            touch.append(.segmented("Buttons in landscape", ["Outline", "Bold", "Solid"], index([.outline, .bold, .solid], $s.landscapeButtons)))
+        }
+        touch.append(.toggle("Hide with a controller", $s.hideTouchOnGamepad))
+        var more: [SRow] = [.nav("Controller buttons", to: .controller)]
+        if kb.connected { more.append(.nav("Keyboard", value: presetName(kb.preset), to: .keyboard)) }
+        return [
+            SSection("Touch", touch),
+            SSection("Feedback", [
+                .toggle("Rumble", $s.rumble),
+                .toggle("Haptic feedback", $s.haptics),
+                .toggle("Show inputs on screen", $s.inputDisplay),
+            ]),
+            SSection("Controller and keyboard", more),
+        ]
+    }
+
+    private func presetName(_ p: Keyboard.Preset) -> String {
+        p == .default ? "Default" : p == .homerow ? "Home-row" : "Custom"
+    }
+
+    private var controller: [SSection] {
+        func keys(_ rows: [(String, String)]) -> [SRow] { rows.map { .info($0.0, $0.1, keycap: true) } }
+        return [
+            SSection("Game buttons", keys([("A", "A or Y"), ("B", "B or X"), ("Select / Start", "Options / Menu")]
+                + (s.dsOn ? [("X / Y (DS games)", "X / Y")] : []) + [("L / R", "LB / RB"), ("D-pad", "D-pad or left stick")])),
+            SSection("While playing", keys([("Fast-forward (hold)", "RT"), ("Rewind (hold)", "LT"), ("Menu", "R3 or Select+Start")])),
+            SSection("In menus", keys([("Move / press", "D-pad / A"), ("Back", "B"), ("Game options", "Y"),
+                                       ("Resume the game", "Start"), ("Filter / sort", "LB RB / LT RT")])),
+        ]
+    }
+
+    private var keyboard: [SSection] {
+        let presets: [Keyboard.Preset] = [.default, .homerow, .custom]
+        let preset = Binding(get: { kb.preset }, set: { kb.setPreset($0) })
+        let n = s.dsOn ? Keyboard.inputNames.count : 10
+        let bindings: [SRow] = (0..<n).map { i in
+            .custom("key:\(i)", KeyBindingRow(index: i))
+        }
+        let shortcuts: [(String, String)] = [
+            ("Pause / Resume", "Space"), ("Fast-forward (hold)", "Tab"), ("2× speed", "Shift+Tab"), ("Slow motion", "Shift+`"),
+            ("Rewind (hold)", "`"), ("Step one frame", "."), ("Mute", "M"), ("Show inputs on screen", "I"),
+            ("Save state", "F5"), ("Load state", "F8"), ("Screenshot", "F9"), ("Menu", "Escape"),
+        ] + (s.dsOn ? [("DS: next screen layout", "V"), ("DS: swap the screens", "B"), ("DS: turn the screens", "O"),
+                       ("DS: close / open the lid", "N"), ("DS: blow (hold)", "H")] : [])
+        return [
+            SSection(id: "preset", [.segmented("Preset", ["Default", "Home-row", "Custom"], index(presets, preset))]),
+            SSection("Game keys", bindings),
+            SSection("Shortcuts", shortcuts.map { .info($0.0, $0.1, keycap: true) }),
+        ]
+    }
+
+    // MARK: Audio
+
+    private var audio: [SSection] {
+        let silent = Binding(get: { s.playInSilent }, set: { s.playInSilent = $0; AudioOutput.shared.refreshSession() })
+        let analog = Binding(get: { s.analogFilter }, set: { on in
+            s.analogFilter = on
+            AudioOutput.shared.setAnalogFilter(on && GameSession.shared.game?.isGBA == true)
+        })
+        let muted = s.channelMutes.nonzeroBitCount
+        return [
+            SSection("Playback", [.toggle("Pitch-correct fast-forward", $s.pitchCorrectFF), .toggle("Play in Silent Mode", silent)]),
+            SSection("Game Boy Advance sound", [
+                .toggle("Interpolation", $s.fifoInterp),
+                .toggle("Analog filter", analog),
+                .toggle("Enhanced music synthesis", $s.mp2kHle),
+            ]),
+            SSection(id: "channels", [.nav("Channels", value: muted == 0 ? "All on" : "\(muted) muted", to: .channels)]),
+        ]
+    }
+
+    private var channels: [SSection] {
+        func voice(_ name: String, _ bit: Int) -> SRow {
+            .toggle(name, Binding(get: { (s.channelMutes >> bit) & 1 == 0 }, set: { on in
+                s.channelMutes = on ? s.channelMutes & ~(1 << bit) : s.channelMutes | (1 << bit)
+            }))
+        }
+        return [
+            SSection("Tone", [voice("Square 1", 0), voice("Square 2", 1), voice("Wave", 2), voice("Noise", 3)]),
+            SSection("GBA samples", [voice("Sample A", 4), voice("Sample B", 5)]),
+            SSection(id: "all", [.button("Turn All Channels On", disabled: s.channelMutes == 0) { s.channelMutes = 0 }]),
+        ]
+    }
+
+    // MARK: Play
+
+    private var play: [SSection] {
+        [
+            SSection("Opening a game", [
+                .check("Where you left off", selected: s.libraryOpen == .resume) { s.libraryOpen = .resume },
+                .check("From the game’s save", selected: s.libraryOpen == .save) { s.libraryOpen = .save },
+            ]),
+            SSection(id: "rewind", [
+                .toggle("Rewind", $s.rewind),
+                .segmented("Run-ahead", ["Off", "1", "2", "3"], $s.runahead),
+            ]),
+        ]
+    }
+
+    // MARK: Game Boy
+
+    private var gameBoy: [SSection] {
+        let sgbActive = session.game != nil && dingbat_sgb_active() != 0
+        var palette: [SRow] = [
+            .check("Default", selected: s.effectivePaletteMode == .default, swatch: Settings.defaultShades, disabled: sgbActive) {
+                s.gbPaletteMode = .default
+            },
+            .check("App theme", selected: s.effectivePaletteMode == .theme, swatch: s.effectiveTheme.gbPalette, disabled: sgbActive) {
+                s.gbPaletteMode = .theme
+            },
+            .check("Custom", selected: s.effectivePaletteMode == .custom, swatch: s.gbPaletteCustom, disabled: sgbActive,
+                   locked: unlocked ? nil : .palette) { s.gbPaletteMode = .custom },
+        ]
+        if s.effectivePaletteMode == .custom { palette.append(.custom("wells", ShadeWells())) }
+        return [
+            SSection("Palette", palette),
+            SSection("Super Game Boy", [
+                .toggle("Super Game Boy mode", atNextLoad($s.sgbEnable)),
+                .toggle("Show border", $s.sgbBorder, disabled: !s.sgbEnable),
+            ]),
+            SSection("Boot ROM", [.file("GBC boot ROM", FileSlot(url: RomLibrary.gbcBootromURL))]),
+        ]
+    }
+
+    // MARK: Game Boy Advance
+
+    private var gba: [SSection] {
+        _ = fileGen
+        let hasBios = FileManager.default.fileExists(atPath: RomLibrary.gbaBiosURL.path)
+        let mode = hasBios ? s.gbaBiosMode : 0
+        func call(_ label: String, _ v: Int) -> SRow {
+            .check(label, selected: mode == v, disabled: !hasBios) {
+                s.gbaBiosMode = v
+                if session.game != nil { AppModel.shared.toast("Applies the next time a game is loaded") }
+            }
+        }
+        return [
+            SSection("BIOS", [
+                .file("GBA BIOS", FileSlot(url: RomLibrary.gbaBiosURL, changed: { fileGen += 1 })),
+                .toggle("Play BIOS intro", hasBios ? atNextLoad($s.gbaRunBios) : .constant(false), disabled: !hasBios),
+            ]),
+            SSection("BIOS calls", [call("Built-in", 0), call("Your BIOS", 1), call("Your BIOS for startup only", 2)]),
+        ]
+    }
+
+    // MARK: Nintendo DS
+
+    private var ds: [SSection] {
+        let layouts = NdsUtil.Arrangement.allCases
+        let gaps = NdsUtil.Gap.allCases
+        let turns = NdsUtil.rotations
+        let gpus = NdsState.GpuChoice.allCases
+        var screens: [SRow] = [
+            .menu("Layout", layouts.map { .init($0.label) }, index(layouts, $nds.arrangement)),
+            .toggle("Bottom screen first", $nds.swap),
+            .menu("Gap", gaps.map { .init($0.label) }, index(gaps, $nds.gap)),
+            .menu("Turn", turns.map { .init(NdsUtil.rotLabel($0)) }, index(turns, $nds.rot)),
+        ]
+        if UIDevice.current.userInterfaceIdiom == .phone { screens.append(.toggle("Hide the top bar while playing", $nds.barHide)) }
+        func dump(_ k: NdsUtil.BiosKind) -> SRow {
+            .file(k == .bios9 ? "ARM9 BIOS" : k == .bios7 ? "ARM7 BIOS" : "Firmware",
+                  FileSlot(url: NdsState.biosURL(k), validate: { data in
+                      guard !k.sizes.contains(data.count) else { return nil }
+                      let want = k.sizes.map { "\($0 / 1024) KB" }.joined(separator: ", ")
+                      return "That doesn't look like a DS \(k == .firmware ? "firmware" : "BIOS") dump — it should be \(want)."
+                  }))
+        }
+        return [
+            SSection("Screens", screens),
+            SSection("3D graphics", [
+                .segmented("Resolution", NdsState.hdScales.map { $0 == 1 ? "Native" : "\($0)×" }, index(NdsState.hdScales, $nds.hd)),
+                .menu("Drawn by", gpus.map { .init($0.label) }, index(gpus, $nds.gpu)),
+            ]),
+            SSection("BIOS and firmware", NdsUtil.BiosKind.allCases.map(dump)),
+        ]
+    }
+
+    // MARK: Google Drive
+
+    private var driveSections: [SSection] {
+        guard drive.linked else {
+            return [SSection(id: "signin", [.custom("signin", DriveSignIn())])]
+        }
+        let n = drive.pendingCount
+        let status = !drive.active ? "Reconnects when you next sync" : n == 0 ? "All changes synced" : "\(n) \(n == 1 ? "change" : "changes") waiting to go up"
+        return [
+            SSection(id: "account", [
+                .custom("account", DriveAccount(email: drive.email ?? "Google Drive", status: status)),
+                .button("Sync Now") { Task { @MainActor in await drive.runFullSync() } },
+            ]),
+            SSection(id: "signout", [
+                .button("Sign Out") { drive.signOut() },
+                .button("Sign Out Everywhere", destructive: true, confirm: "Sign out everywhere?",
+                        message: "Your other devices sign out of Google Drive too.") {
+                    Task { @MainActor in await drive.signOutEverywhere() }
+                },
+            ]),
+        ]
+    }
+
+    // MARK: General
+
+    private var general: [SSection] {
+        let advanced: [SRow] = unlocked
+            ? [.nav("Save webhook", value: s.saveWebhook.isEmpty ? "Off" : "On", to: .webhook),
+               .toggle("DS support", $s.dsBeta, badge: .highlyExperimental)]
+            : [.nav("Save webhook", locked: .advanced, to: .webhook),
+               .toggle("DS support", .constant(false), badge: .highlyExperimental, locked: .advanced)]
+        return [
+            SSection("Advanced", advanced),
+            SSection("About", [.custom("version", VersionRow()), .nav("Acknowledgements", to: .acknowledgements)]),
+            SSection(id: "reset", [
+                .button("Reset All Settings", destructive: true, confirm: "Reset all settings?",
+                        message: "Every setting goes back to its default. Your games and saves are kept.") {
+                    s.resetAll()
+                    AudioOutput.shared.setAnalogFilter(s.analogFilter && GameSession.shared.game?.isGBA == true)
+                },
+            ]),
+        ]
+    }
+
+    // MARK: App Icon
+
+    private var appIcon: [SSection] {
+        [
+            SSection(id: "holidays", [.toggle("Holiday icons", $icons.holidaysOn)]),
+            SSection("Classic", [.custom("classic", IconGrid(icons: AppIconChoice.classic))]),
+            SSection("Holidays", [.custom("holidays", IconGrid(icons: AppIconChoice.holidays))]),
+        ]
+    }
+}
+
+// MARK: - Pane pieces
+
+/// Twelve small previews of the app in each theme; a locked one opens the sheet.
+private struct ThemeGallery: View {
+    @ObservedObject private var s = Settings.shared
+    @ObservedObject private var supporter = Supporter.shared
+    @Environment(\.palette) private var palette
+
+    var body: some View {
+        ScrollViewReader { proxy in
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 12) {
+                    ForEach(ThemeName.allCases) { t in
+                        let locked = t.supporterOnly && !supporter.unlocked
+                        let on = s.effectiveTheme == t || (!supporter.unlocked && t == .night)
+                        Button { pick(t, locked) } label: {
+                            VStack(spacing: 7) {
+                                ThemeMini(theme: t, selected: on, locked: locked)
+                                Text(t.label).font(.system(size: 12)).foregroundColor(on ? palette.text : palette.textDim).lineLimit(1).fixedSize()
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(t.label + (locked ? ", Supporter theme" : ""))
+                        .accessibilityAddTraits(on ? .isSelected : [])
+                        .padFocus("theme:" + t.rawValue) { pick(t, locked) }
+                        .id(t)
+                    }
+                }
+                .padding(.vertical, 12)
+                .padding(.horizontal, 2)
+            }
+            .onAppear { proxy.scrollTo(s.effectiveTheme, anchor: .center) }
+        }
+        .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 0))
+    }
+
+    private func pick(_ t: ThemeName, _ locked: Bool) {
+        if locked { Supporter.shared.open(.themes) } else { s.theme = t }
+    }
+}
+
+/// The app in miniature, in one theme.
+struct ThemeMini: View {
+    let theme: ThemeName
+    var selected = false
+    var locked = false
+    var width: CGFloat = 56
+    @Environment(\.palette) private var palette
+
+    var body: some View {
+        let (bg, accent) = theme.swatch
+        let shades = theme.gbPalette
+        let light = theme.palette.isLight
+        let h = width * 100 / 56
+        VStack(spacing: width * 0.09) {
+            RoundedRectangle(cornerRadius: 3).fill((light ? Color.black : Color.white).opacity(0.22))
+                .frame(width: width * 0.55, height: width * 0.09).frame(maxWidth: .infinity, alignment: .leading)
+            VStack(spacing: 0) { ForEach(0..<4, id: \.self) { Rectangle().fill(Color(hex: shades[$0])) } }
+                .frame(height: h * 0.36).clipShape(RoundedRectangle(cornerRadius: 4))
+            Spacer(minLength: 0)
+            HStack(spacing: 4) {
+                Circle().fill(Color(hex: accent)).frame(width: width * 0.16)
+                Capsule().fill(Color(hex: accent)).frame(width: width * 0.32, height: width * 0.14)
+            }
+        }
+        .padding(width * 0.11)
+        .frame(width: width, height: h)
+        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color(hex: bg)))
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
+            .stroke(selected ? palette.accent : Color.white.opacity(0.16), lineWidth: selected ? 2 : 1))
+        .overlay(alignment: .bottomTrailing) {
+            if locked || selected {
+                ZStack {
+                    Circle().fill(locked ? palette.surface3 : palette.accent)
+                    Image(systemName: locked ? "lock.fill" : "checkmark")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundColor(locked ? palette.accent2 : palette.accentInk)
+                }
+                .frame(width: 20, height: 20)
+                .overlay(Circle().stroke(palette.surface2, lineWidth: 2))
+                .offset(x: 5, y: 5)
+            }
+        }
+    }
+}
+
+/// Custom shades: four wells and Reset.
+private struct ShadeWells: View {
+    @ObservedObject private var s = Settings.shared
+    @Environment(\.palette) private var palette
+
+    var body: some View {
+        HStack(spacing: 14) {
+            ForEach(0..<4, id: \.self) { i in
+                ColorPicker("", selection: shade(i), supportsOpacity: false)
+                    .labelsHidden()
+                    .accessibilityLabel(i == 0 ? "Shade 1 (lightest)" : i == 3 ? "Shade 4 (darkest)" : "Shade \(i + 1)")
+            }
+            Spacer()
+            Button("Reset") { s.gbPaletteCustom = Settings.defaultShades }
+                .foregroundColor(palette.accent)
+                .buttonStyle(.plain)
+                .disabled(s.gbPaletteCustom == Settings.defaultShades)
+                .padFocus("wells:reset") { s.gbPaletteCustom = Settings.defaultShades }
+        }
+        .padding(.vertical, 6)
+    }
+
     private func shade(_ i: Int) -> Binding<Color> {
         Binding(
             get: { Color(hex: s.gbPaletteCustom[i]) },
@@ -553,391 +653,176 @@ private struct GameBoyPane: View {
     }
 }
 
-/// A BIOS / boot ROM file: its status, Choose (copied into the app) and
-/// Remove (web .modal-row with #pick-*, #remove-*). Remove is off while no
-/// file is set: greyed, no tap, passed over by the pad.
-private struct BiosFileRow: View {
-    let label: String
-    let url: URL
-    var onChange: () -> Void = {}
+/// One game key: tap, then press its replacement.
+private struct KeyBindingRow: View {
+    let index: Int
+    @ObservedObject private var kb = Keyboard.shared
     @Environment(\.palette) private var palette
-    @Environment(\.padScope) private var scope
-    @State private var picking = false
-    @State private var gen = 0
-    @State private var failed: String?
-
-    private var size: Int? {
-        _ = gen
-        return (try? FileManager.default.attributesOfItem(atPath: url.path))?[.size] as? Int
-    }
-
-    /// The picked file's own name (web bios.name), kept beside it.
-    private var nameURL: URL { url.appendingPathExtension("name") }
-    /// The row's pad keys, by its file ("gbc_bootrom"), as the DS rows' by
-    /// their dump.
-    private var padID: String { "bios:" + url.deletingPathExtension().lastPathComponent }
-    private var status: String {
-        guard let size else { return "Not set" }
-        if let n = try? String(contentsOf: nameURL, encoding: .utf8), !n.isEmpty { return n }
-        return RomEntry.formatBytes(size)
-    }
 
     var body: some View {
-        HStack(spacing: 10) {
-            Text(label).font(.system(size: 14.5, weight: .medium)).fixedSize()
-            Text(status)
-                .font(.system(size: 12, design: .monospaced))
-                .foregroundColor(palette.textFaint)
-                .lineLimit(1)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            // Keyed by the row: a pad reaches each row's own buttons.
-            PadButton("Choose", id: padID + ":choose") { picking = true }.buttonStyle(SheetButtonStyle())
-            PadButton("Remove", id: padID + ":remove") {
-                try? FileManager.default.removeItem(at: url)
-                try? FileManager.default.removeItem(at: nameURL)
-                PadNav.shared.handOff(PadNav.key(scope, padID + ":remove"), to: PadNav.key(scope, padID + ":choose"))
-                gen += 1
-                onChange()
+        let on = kb.capturing == index
+        Button { kb.capturing = on ? nil : index } label: {
+            RowLine(label: Keyboard.inputNames[index]) {
+                Text(on ? "Press a key" : Keyboard.name(kb.bindings[index]))
+                    .font(.system(size: 13, design: .monospaced))
+                    .foregroundColor(on ? palette.accentInk : palette.text)
+                    .padding(.horizontal, 8).padding(.vertical, 3)
+                    .background(RoundedRectangle(cornerRadius: 6).fill(on ? palette.accent : palette.surface3))
             }
-            .buttonStyle(SheetButtonStyle(kind: .ghost))
-            .disabled(size == nil)
-        }
-        .padding(.bottom, 14)
-        .fileImporter(isPresented: $picking, allowedContentTypes: [.data]) { result in
-            guard case .success(let src) = result else { return }
-            guard let data = SheetFiles.read(src), !data.isEmpty else {
-                failed = "Couldn't read that file."
-                return
-            }
-            do {
-                try RomLibrary.ensureDir(url.deletingLastPathComponent())
-                try data.write(to: url, options: .atomic)
-                try? src.lastPathComponent.write(to: nameURL, atomically: true, encoding: .utf8)
-            } catch {
-                failed = "Couldn't keep that file: \(error.localizedDescription)"
-            }
-            gen += 1
-            onChange()
-        }
-        .alert(failed ?? "", isPresented: Binding(get: { failed != nil }, set: { if !$0 { failed = nil } })) {
-            Button("OK", role: .cancel) {}
-        }
-    }
-}
-
-// MARK: - GBA
-
-private struct GbaPane: View {
-    @ObservedObject private var s = Settings.shared
-    @State private var gen = 0
-
-    private var hasBios: Bool {
-        _ = gen
-        return FileManager.default.fileExists(atPath: RomLibrary.gbaBiosURL.path)
-    }
-
-    var body: some View {
-        SheetSubhead(text: "BIOS", rule: false)
-        BiosFileRow(label: "GBA BIOS", url: RomLibrary.gbaBiosURL) { gen += 1 }
-        // With no BIOS file the core boots HLE with no intro whatever is
-        // stored (dingbat_ios.nim's GBA load): the rows show that, disabled,
-        // and the stored choices come back when a BIOS is chosen.
-        SheetToggleRow(label: "Play BIOS intro",
-                       sub: "Play the GBA startup animation first. Needs a BIOS file.",
-                       isOn: hasBios ? $s.gbaRunBios : .constant(false))
-            .disabled(!hasBios)
-        SheetSubhead(text: "BIOS calls (SWI)")
-        VStack(spacing: 2) {
-            radio(0, "HLE", "No BIOS file needed")
-            radio(1, "Real BIOS", "The most faithful. Needs a BIOS file.")
-            radio(2, "Real BIOS boot, HLE calls", "Real startup, software after that")
-        }
-        .disabled(!hasBios)
-        .padding(.bottom, 12)
-        SheetHint("Changes apply the next time a game is loaded.")
-    }
-
-    private func radio(_ v: Int, _ label: String, _ sub: String) -> some View {
-        RadioRow(label: label, sub: sub, selected: (hasBios ? s.gbaBiosMode : 0) == v) { s.gbaBiosMode = v }
-    }
-}
-
-private struct RadioRow: View {
-    let label: String
-    let sub: String
-    let selected: Bool
-    let action: () -> Void
-    @Environment(\.palette) private var palette
-    @Environment(\.isEnabled) private var enabled
-
-    var body: some View {
-        Button(action: action) {
-            HStack(alignment: .top, spacing: 12) {
-                ZStack {
-                    Circle().stroke(selected ? palette.accent : palette.border2, lineWidth: 1.5)
-                    if selected { Circle().fill(palette.accent).padding(4) }
-                }
-                .frame(width: 18, height: 18)
-                .padding(.top, 1)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(label).font(.system(size: 14.5, weight: .medium)).foregroundColor(palette.text)
-                    Text(sub).font(.system(size: 12)).foregroundColor(palette.textFaint)
-                }
-                Spacer(minLength: 0)
-            }
-            .padding(.vertical, 7)
-            .opacity(enabled ? 1 : 0.45)
-            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityAddTraits(selected ? .isSelected : [])
+        .accessibilityLabel(Keyboard.inputNames[index] + ": " + Keyboard.name(kb.bindings[index]))
+        .padFocus("key\(index)") { kb.capturing = on ? nil : index }
+        .onDisappear { if kb.capturing == index { kb.capturing = nil } }
     }
 }
 
-// MARK: - Video
-
-private struct VideoPane: View {
-    @ObservedObject private var s = Settings.shared
-    @ObservedObject private var supporter = Supporter.shared
-
-    var body: some View {
-        SheetToggleRow(label: "Color correction", sub: "Match the colors the original screen produced",
-                       isOn: $s.colorCorrect)
-        SheetFlowRow(label: "Filter",
-                     sub: "Smooth the pixel art, or draw the screen's own grid and subpixel structure") {
-            SheetSelect(selection: $s.filter,
-                        options: Settings.Filter.offered(unlocked: supporter.unlocked, current: s.filter).map { ($0, $0.label) },
-                        accessibilityLabel: "Filter")
-        }
-        SupporterTeaser(text: "Smooth filters: hq4x and xBR")
-            .padding(.bottom, 14)
-        SheetToggleRow(label: "Integer scaling", sub: "Keep every pixel exactly the same size", isOn: $s.integerScale)
-        if PhoneCutout.hasSideColumn {
-            SheetFlowRow(label: "Picture held upright",
-                         sub: "Beside the camera; under it, larger and centered, the camera over a corner; or as wide as the screen with smaller buttons") {
-                SheetSelect(selection: $s.uprightPicture,
-                            options: Settings.UprightPicture.allCases.map { ($0, $0.label) },
-                            accessibilityLabel: "Picture held upright")
-            }
-        }
-        SheetToggleRow(label: "LCD response",
-                       sub: "Colors settle slowly, the way the real screen did, so flickering sprites look see-through instead of blinking",
-                       isOn: $s.lcdResponse)
-        SheetToggleRow(label: "Ambient glow", sub: "Fill the background with a soft glow of the screen's colors",
-                       isOn: $s.ambientGlow)
-    }
-}
-
-// MARK: - Audio
-
-private struct AudioPane: View {
-    @ObservedObject private var s = Settings.shared
+private struct DriveSignIn: View {
     @Environment(\.palette) private var palette
-    @State private var channelsOpen = Settings.shared.channelMutes != 0
-
-    /// The web's order: fast-forward and Silent Mode first, interpolation
-    /// beside the filter that pairs with it, the experimental synthesis last.
     var body: some View {
-        SheetToggleRow(label: "Pitch-correct fast-forward",
-                       sub: "Keep the pitch normal at 2× speed instead of everything sounding like chipmunks. Uses a little extra CPU, only while fast-forwarding.",
-                       isOn: $s.pitchCorrectFF)
-        SheetToggleRow(label: "Play in Silent Mode",
-                       sub: "Pauses audio from other apps while a game is playing",
-                       isOn: Binding(get: { s.playInSilent }, set: { on in
-                           s.playInSilent = on
-                           AudioOutput.shared.refreshSession()
-                       }))
-        SheetToggleRow(label: "Audio interpolation",
-                       sub: "Smooths GBA music between hardware samples for cleaner treble. Turn off for the exact sound of a real GBA's headphone jack, grit included.",
-                       isOn: $s.fifoInterp)
-        SheetToggleRow(label: "Analog filter",
-                       sub: "Soften the treble the way the GBA's own output filter and speaker did. Pair with interpolation off for the closest real-hardware sound. GBA games only.",
-                       isOn: Binding(get: { s.analogFilter }, set: { on in
-                           s.analogFilter = on
-                           AudioOutput.shared.setAnalogFilter(on && GameSession.shared.game?.isGBA == true)
-                       }))
-        SheetToggleRow(label: "Enhanced music synthesis",
-                       sub: "Experimental. Re-creates supported games' music engines at higher quality than the hardware could mix. Changes the sound's character; engages itself only where it works.",
-                       isOn: $s.mp2kHle)
-        SheetDisclosure(title: "Channels", open: $channelsOpen)
-        if channelsOpen { channels }
+        GoogleSignInButton()
+            .padding(.vertical, 8)
     }
+}
 
-    /// Per-channel mutes (bit i mutes channel i), held across game loads,
-    /// never saved.
-    private var channels: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("Mute parts of the sound to hear the rest on its own. Stays until you turn it back on or restart the app.")
-                .font(.system(size: 12.5))
-                .foregroundColor(palette.textDim)
-                .fixedSize(horizontal: false, vertical: true)
-            group("Tone channels",
-                  "The square, wave and noise voices every Game Boy and GBA game uses (PSG)",
-                  bits: 0b001111, chips: [(0, "Square 1"), (1, "Square 2"), (2, "Wave"), (3, "Noise")])
-            group("Sample channels",
-                  "Recorded sound and most music in GBA games (Direct Sound); Game Boy games have none",
-                  bits: 0b110000, chips: [(4, "Sample A"), (5, "Sample B")])
-            if s.channelMutes != 0 {
-                let n = s.channelMutes.nonzeroBitCount
-                HStack {
-                    Text(n == 1 ? "1 channel muted" : "\(n) channels muted")
-                        .font(.system(size: 12.5))
-                        .foregroundColor(palette.textDim)
-                    Spacer()
-                    PadButton("All channels on") { s.channelMutes = 0 }.buttonStyle(SheetButtonStyle())
-                }
+private struct DriveAccount: View {
+    let email: String
+    let status: String
+    @Environment(\.palette) private var palette
+    var body: some View {
+        HStack(spacing: 14) {
+            Circle().fill(Color(hex: 0x2F7FE0)).frame(width: 44, height: 44)
+                .overlay(Image(systemName: "cloud.fill").font(.system(size: 19, weight: .semibold)).foregroundColor(.white))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(email).font(.headline).foregroundColor(palette.text).lineLimit(1).truncationMode(.middle)
+                Text(status).font(.subheadline).foregroundColor(palette.textDim)
             }
         }
-        .padding(.bottom, 12)
+        .padding(.vertical, 6)
+        .accessibilityElement(children: .combine)
     }
+}
 
-    private func group(_ title: String, _ sub: String, bits: Int, chips: [(Int, String)]) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .top) {
-                SheetLabel(label: title, sub: sub)
-                Button((s.channelMutes & bits) == bits ? "Turn on" : "Mute all") {
-                    s.channelMutes = (s.channelMutes & bits) == bits ? s.channelMutes & ~bits : s.channelMutes | bits
-                }
-                .buttonStyle(SheetButtonStyle(kind: .ghost))
-                .fixedSize()
-            }
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: 2), spacing: 6) {
-                ForEach(chips, id: \.0) { c in
-                    let playing = (s.channelMutes >> c.0) & 1 == 0
-                    Button {
-                        s.channelMutes ^= 1 << c.0
-                    } label: {
-                        HStack(spacing: 6) {
-                            Image(systemName: playing ? "speaker.wave.2.fill" : "speaker.slash.fill")
-                                .font(.system(size: 12))
-                            Text(c.1).font(.system(size: 12.5, weight: .semibold))
-                            Spacer(minLength: 0)
-                        }
-                        .foregroundColor(playing ? palette.text : palette.textFaint)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 9)
-                        .background(RoundedRectangle(cornerRadius: 8)
-                            .fill(playing ? palette.accent.opacity(0.07) : .clear))
-                        .overlay(RoundedRectangle(cornerRadius: 8)
-                            .stroke(playing ? palette.accent.opacity(0.45) : palette.border, lineWidth: 1))
-                        .contentShape(Rectangle())
+/// Version; a tap copies the build.
+private struct VersionRow: View {
+    var body: some View {
+        let v = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? ""
+        let b = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? ""
+        Button {
+            UIPasteboard.general.string = AppBuild.label
+            AppModel.shared.toast("Copied " + AppBuild.label)
+        } label: {
+            RowLine(label: "Version") { ValueText("\(v) (\(b))") }
+        }
+        .buttonStyle(.plain)
+        .accessibilityHint("Copies the build")
+        .padFocus("version") {
+            UIPasteboard.general.string = AppBuild.label
+            AppModel.shared.toast("Copied " + AppBuild.label)
+        }
+    }
+}
+
+/// App Icon's grid of icons; the chosen one has a ring.
+private struct IconGrid: View {
+    let icons: [AppIconChoice]
+    @ObservedObject private var manager = AppIconManager.shared
+    @Environment(\.palette) private var palette
+
+    var body: some View {
+        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: 4), spacing: 14) {
+            ForEach(icons) { c in
+                let on = manager.chosen == c
+                Button { manager.choose(c) } label: {
+                    VStack(spacing: 6) {
+                        Image(c.preview).interpolation(.none).resizable()
+                            .frame(width: 64, height: 64)
+                            .clipShape(RoundedRectangle(cornerRadius: 15, style: .continuous))
+                            .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous)
+                                .stroke(palette.accent, lineWidth: on ? 3 : 0).padding(-4))
+                        Text(c.name).font(.system(size: 12)).foregroundColor(on ? palette.text : palette.textDim)
+                            .lineLimit(1).minimumScaleFactor(0.8)
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel(c.1)
-                    .accessibilityValue(playing ? "Playing" : "Muted")
                 }
+                .buttonStyle(.plain)
+                .accessibilityLabel(c.name)
+                .accessibilityAddTraits(on ? .isSelected : [])
+                .padFocus("icon:" + c.id, radius: 15) { manager.choose(c) }
             }
         }
+        .padding(.vertical, 12)
     }
 }
 
-// MARK: - Play
-
-/// web #settings-pane-play: how a game opens, and rewind.
-private struct PlayPane: View {
+/// General › Save webhook: the address saves are posted to.
+private struct WebhookPane: View {
     @ObservedObject private var s = Settings.shared
-
-    var body: some View {
-        SheetFlowRow(label: "Opening a game from the library",
-                     sub: "Resume goes back to the moment you left. From save starts from the game’s own save, and offers the moment after.") {
-            SheetChipPicker(selection: $s.libraryOpen, options: [(.resume, "Resume"), (.save, "From save")])
-        }
-        SheetToggleRow(label: "Rewind",
-                       sub: "Hold the rewind button to jump back, or double-tap it for a timeline you can scrub. Costs a few percent of speed; turning it off hides the rewind button.",
-                       isOn: $s.rewind)
-    }
-}
-
-// MARK: - General
-
-private struct GeneralPane: View {
-    @ObservedObject private var s = Settings.shared
-    @ObservedObject private var supporter = Supporter.shared
-    @Environment(\.palette) private var palette
-    @State private var advancedOpen = false
     @State private var hook = Settings.shared.saveWebhook
-    @State private var hookStatus = ""
-    @ObservedObject private var hookSent = SaveWebhook.Status.shared
+    @State private var problem = ""
+    @ObservedObject private var sent = SaveWebhook.Status.shared
+    @Environment(\.palette) private var palette
 
     var body: some View {
-        SheetSubhead(text: "App theme", rule: false)
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: 104), spacing: 6)], spacing: 6) {
-            ForEach(ThemeName.offered(unlocked: supporter.unlocked, current: s.theme)) { t in
-                SheetChip(label: t.label, selected: s.theme == t, fill: true, action: { s.theme = t }) {
-                    ZStack(alignment: .bottomTrailing) {
-                        Circle().fill(Color(hex: t.swatch.0))
-                            .overlay(Circle().stroke(palette.border2, lineWidth: 1))
-                        Circle().fill(Color(hex: t.swatch.1)).frame(width: 8, height: 8).padding(3)
-                    }
-                    .frame(width: 22, height: 22)
-                }
-            }
-        }
-        .padding(.bottom, supporter.unlocked ? 18 : 8)
-        SupporterTeaser(text: "\(ThemeName.allCases.filter(\.supporterOnly).count) more themes",
-                        swatches: ThemeName.allCases.filter(\.supporterOnly).map(\.swatch.0))
-            .padding(.bottom, 18)
-        SheetSubhead(text: "Google Drive")
-        DriveSettingsBlock()
-            .padding(.bottom, 18)
-        SheetDisclosure(title: "Advanced", open: $advancedOpen)
-        if advancedOpen {
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Save webhook").font(.system(size: 14.5, weight: .medium))
-                Text("Every time a game writes its save, also send the save file to this address as an HTTP POST (form field “save”). Leave empty to turn off. Synced to your other devices when signed in.")
-                    .font(.system(size: 12))
-                    .foregroundColor(palette.textFaint)
-                    .fixedSize(horizontal: false, vertical: true)
+        List {
+            Section {
                 TextField("", text: $hook, prompt: Text("https://example.com/saves").foregroundColor(palette.textFaint))
                     .keyboardType(.URL)
                     .textContentType(.URL)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
                     .submitLabel(.done)
-                    .onSubmit(commitHook)
-                    .font(.system(size: 14))
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 8)
-                    .background(RoundedRectangle(cornerRadius: 8).fill(palette.surface2))
-                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(palette.border2, lineWidth: 1))
-                if !hookStatus.isEmpty {
-                    Text(hookStatus).font(.system(size: 12)).foregroundColor(palette.textDim)
-                } else if !hookSent.text.isEmpty && !s.saveWebhook.isEmpty {
-                    Text(hookSent.text).font(.system(size: 12)).foregroundColor(palette.textDim)
-                }
-            }
-            .padding(.bottom, 18)
-            .onDisappear(perform: commitHook)
-            SheetToggleRow(label: "DS Beta",
-                           sub: "Lets Nintendo DS games load. An early, incomplete DS core: some games won't run. Turned off, DS games leave the library until it is on again; their saves are kept.",
-                           isOn: $s.dsBeta)
-        }
-        Rectangle().fill(palette.border).frame(height: 1).padding(.bottom, 14)
-        SheetFlowRow(label: "Reset all settings",
-                     sub: "Put every setting back to its default. Your games and saves are kept.") {
-            SheetConfirmButton(label: "Reset all settings", confirmLabel: "Reset all settings?") {
-                s.resetAll()
-                hook = s.saveWebhook
-                hookStatus = ""
-                AudioOutput.shared.setAnalogFilter(s.analogFilter && GameSession.shared.game?.isGBA == true)
+                    .onSubmit(commit)
+                    .foregroundColor(palette.text)
+                    .listRowBackground(palette.surface2)
+            } footer: {
+                let note = !problem.isEmpty ? problem : (!s.saveWebhook.isEmpty ? sent.text : "")
+                if !note.isEmpty { Text(note).foregroundColor(palette.textFaint) }
             }
         }
+        .listStyle(.insetGrouped)
+        .scrollContentBackground(.hidden)
+        .background(palette.bg.ignoresSafeArea())
+        .onDisappear(perform: commit)
     }
 
-    /// web: "" or an absolute http(s) address.
-    private func commitHook() {
+    /// "" or an absolute http(s) address.
+    private func commit() {
         let t = hook.trimmingCharacters(in: .whitespaces)
         if t.isEmpty {
             s.saveWebhook = ""
-            hookStatus = ""
+            problem = ""
             return
         }
         guard let u = URL(string: t), let scheme = u.scheme?.lowercased(),
               scheme == "http" || scheme == "https", u.host != nil else {
-            hookStatus = "Not a web address — it must start with http:// or https://"
+            problem = "Not a web address: it must start with http:// or https://"
             return
         }
+        problem = ""
         if s.saveWebhook != t { s.saveWebhook = t }
-        hookStatus = "Saves will be sent here"
+    }
+}
+
+/// THIRD_PARTY_NOTICES.md, as shipped.
+private struct AcknowledgementsPane: View {
+    @Environment(\.palette) private var palette
+
+    var body: some View {
+        ScrollView {
+            Text(text)
+                .font(.system(size: 14))
+                .foregroundColor(palette.text)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(20)
+                .textSelection(.enabled)
+        }
+        .background(palette.bg.ignoresSafeArea())
+    }
+
+    private var text: AttributedString {
+        guard let url = Bundle.main.url(forResource: "THIRD_PARTY_NOTICES", withExtension: "md"),
+              let md = try? String(contentsOf: url, encoding: .utf8) else { return AttributedString("") }
+        return (try? AttributedString(markdown: md, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)))
+            ?? AttributedString(md)
     }
 }
