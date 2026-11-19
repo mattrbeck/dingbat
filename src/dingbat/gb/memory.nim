@@ -392,7 +392,8 @@ proc read_byte*(mem: GbMemory; gb: GB; idx: int): uint8 =
              " cc=", gb.ppu.cycle_counter, " mode=", gb.ppu.mode_flag
     ppu_read(gb.ppu, gb, idx)
   of 0xFF4D:
-    if gb.cgb_native:
+    # KEY0 bit 3 keeps KEY1 (DocBoy cgb_dmg_ext_mode/key1/key1_write_read).
+    if gb.cgb_ext_io:
       0x7E'u8 or (uint8(mem.current_speed) shl 7) or (if mem.requested_speed_switch: 1'u8 else: 0'u8)
     else: 0xFF'u8
   of 0xFF4F:         ppu_read(gb.ppu, gb, idx)
@@ -687,7 +688,7 @@ proc write_byte*(mem: GbMemory; gb: GB; idx: int; val: uint8) =
     else:
       ppu_write(gb.ppu, gb, idx, val)
   of 0xFF4D:
-    if gb.cgb_native: mem.requested_speed_switch = (val and 0x1) != 0
+    if gb.cgb_ext_io: mem.requested_speed_switch = (val and 0x1) != 0
   of 0xFF4F:         ppu_write(gb.ppu, gb, idx, val)
   of 0xFF51..0xFF55: ppu_write(gb.ppu, gb, idx, val)
   of 0xFF68..0xFF6B: ppu_write(gb.ppu, gb, idx, val)

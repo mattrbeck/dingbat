@@ -1055,12 +1055,12 @@ the no-switch `sound/*_ds_{2,4,6}`); on E it is the mirror image (22/46).
 ## I. DocBoy (`docboy/*`, first scored 2026-10-14)
 
 DocBoy's own suite, scored by its own runner's rules on DMG ABC and CPU CGB E
-(`tests/README.md`, "The DocBoy suite"): 8,914 / 9,186 at `DocboyRev` (49
+(`tests/README.md`, "The DocBoy suite"): 8,915 / 9,186 at `DocboyRev` (49
 more not scored, `DocboyNotScored`). Every failing ROM is in
 [`tests/results_docboy.md`](../../tests/results_docboy.md); every group that is
 not scored is in the "Deliberately not scored" ledger at the end of
-`tests/results.md`. The 272 failing tests are I1 8, I2 11, I3 176, I5 6,
-I9 20, I11 1, I12 27, I13 10 and "Small" 13. I4's and I6's scored rows all
+`tests/results.md`. The 271 failing tests are I1 8, I2 11, I3 176, I5 6,
+I9 20, I12 27, I13 10 and "Small" 13. I4's, I6's and I11's scored rows all
 pass; I7, I8 and I10 are closed. The 9,186 include DocBoy's rebuilds of 7 SameSuite channel 1 ROMs
 (`cgb/samesuite/apu/channel_1/*-cgbE`), which pass; the eighth,
 `channel_1_sweep_restart_2-cgbE`, is not scored (its expectation and
@@ -1875,7 +1875,7 @@ hardware question. Families:
   overflow}` tests (I4), whose only miss is this readback. No CGB E has been
   measured; a flashcart answers for this range itself
   (docs/dev/hwprobe-questions.md), so it needs a CGB E with a real cart.
-* **I11. CGB header modes (1 left).** `mode_cgb_flag_{81,82,83,90}` pass:
+* **I11. CGB header modes (0 left).** `mode_cgb_flag_{81,82,83,90}` pass:
   the header read follows Pan Docs ("0143 — CGB flag", "Power Up Sequence",
   "FF4C — KEY0"): bit 7 picks the CGB and copies the byte to KEY0, so CGB
   mode unless KEY0 bit 2 or 3 is set.
@@ -1892,12 +1892,18 @@ hardware question. Families:
   CGB Functions", four named), as DocBoy has them. SameBoy CGB E fails the
   14 (it answers compatibility mode); it is not ground truth here either.
 
-  Left, a source conflict (not implemented): `key1/key1_write_read` wants
-  KEY1 live (write 0 reads $7E, $FF reads $7F), where nocash has "Bit3
-  disables HDMA, BGPD, OBPD, and KEY1" (nesdev "FF4C and FF6C", 2020-03-29),
-  which dingbat follows ($FF). A NotScored candidate until a console
-  answers. The ROMs are their own probe: on a CGB or AGS from a flashcart, a
-  beep is a failure, silence a pass (`key1_write_read`, with
+  Closed 2026-11-18: `key1/key1_write_read` wants KEY1 live (write 0 reads
+  $7E, $FF reads $7F), and KEY1 now answers under `cgb_ext_io` as in CGB
+  mode. nocash's "Bit3 disables HDMA, BGPD, OBPD, and KEY1" (nesdev "FF4C
+  and FF6C", 2020-03-29) is one hand-wired experiment on an unstated
+  revision, and Pan Docs declines to document bit 3, so DocBoy's ROM (run
+  on its maintainer's CGB E) is taken for KEY1; HDMA, BCPD and OCPD stay
+  dead as nocash has them (their DocBoy rows agree). Left by inference, no
+  row pins it: STOP consumes an armed KEY1 as in CGB mode (the switch path
+  is gated on the console, `cgb_enabled`), so an ext-mode cart can switch
+  to double speed; no `cgb_dmg_ext_mode` row executes STOP. The ROMs are
+  their own probe: on a CGB or AGS from a flashcart, a beep is a failure,
+  silence a pass (`key1_write_read`, with
   `cgb_dmg_mode/mode/mode_cgb_flag_84` as the silent control).
   Not modelled in the mode, no row covers it: the picture stays the
   compatibility one (fallback palette, X-ordered objects, LCDC.0 as BG
