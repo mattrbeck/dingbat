@@ -1709,8 +1709,8 @@ draw_case_result:
     .ltorg
 
 @ r0 = column, r1 = row: "pass N fail N t/o N crash N skip N" (totals)
-@ (a macro, like draw_case_lines below: viewer.inc builds its own over its
-@ text calls, and the run screen keeps these)
+@ (a macro: viewer.inc builds its own over its text calls, and the run
+@ screen keeps this one)
 .macro tally_fn name, str, dec
 \name:
     stmfd sp!, {r4-r7, lr}
@@ -1764,8 +1764,7 @@ draw_case_result:
     tally_fn draw_tally, draw_str, draw_dec
 
 @ r0 = row, r1 = case: two rows -- "STATUS suite/name", "  got X exp Y"
-.macro case_lines_fn name, row, str, hex
-\name:
+draw_case_lines:
     stmfd sp!, {r4-r8, lr}
     mov r4, r0
     mov r5, r1
@@ -1774,9 +1773,9 @@ draw_case_result:
     ldr r7, =case_table
     add r7, r7, r5, lsl #5
     mov r0, r4
-    bl  \row
+    bl  clear_row
     add r0, r4, #1
-    bl  \row
+    bl  clear_row
     ldrb r8, [r6]
     cmp r8, #ST_PASS
     ldreq r0, =C_GREEN
@@ -1790,7 +1789,7 @@ draw_case_result:
     ldr r2, [r2, r8, lsl #2]
     mov r0, #0
     mov r1, r4
-    bl  \str
+    bl  draw_str
     mov r0, #C_BLACK
     bl  ink
     mov r0, r5
@@ -1798,13 +1797,13 @@ draw_case_result:
     mov r2, r0
     mov r0, #8
     mov r1, r4
-    bl  \str
+    bl  draw_str
     ldr r2, =str_slash
     mov r1, r4
-    bl  \str
+    bl  draw_str
     ldr r2, [r7, #CD_NAME]
     mov r1, r4
-    bl  \str
+    bl  draw_str
     cmp r8, #ST_PASS               @ passes and skips need no second row
     cmpne r8, #ST_SKIP
     cmpne r8, #ST_NOTRUN
@@ -1814,26 +1813,26 @@ draw_case_result:
     add r1, r4, #1
     mov r0, #0
     ldr r2, =str_gotl
-    bl  \str
+    bl  draw_str
     ldr r0, =C_RED
     bl  ink
     cmp r8, #ST_FAIL
     movne r0, #6
     addne r1, r4, #1
     ldrne r2, =str_dash
-    blne \str
+    blne draw_str
     bne 2f
     mov r0, #6
     add r1, r4, #1
     ldr r2, [r6, #4]
     mov r3, #8
-    bl  \hex
+    bl  draw_hex
 2:  ldr r0, =C_GREY
     bl  ink
     mov r0, #14
     add r1, r4, #1
     ldr r2, =str_expl
-    bl  \str
+    bl  draw_str
     mov r0, #C_BLACK
     bl  ink
     ldr r0, [r7, #CD_INFO]
@@ -1844,7 +1843,7 @@ draw_case_result:
     mov r0, #19
     add r1, r4, #1
     mov r3, #8
-    bl  \hex
+    bl  draw_hex
     ldr r0, [r7, #CD_INFO]
     and r0, r0, #0x0F
     cmp r0, #K_SLOT
@@ -1858,21 +1857,19 @@ draw_case_result:
     ldrne r2, =str_dots
     mov r0, #27
     add r1, r4, #1
-    bl  \str
+    bl  draw_str
     ldr r2, [r7, #CD_HI]
     add r1, r4, #1
     mov r3, #8
     mov r8, r0
     mov r0, r8
-    bl  \hex
+    bl  draw_hex
 9:  ldmfd sp!, {r4-r8, pc}
     .ltorg
-.endm
-    case_lines_fn draw_case_lines, clear_row, draw_str, draw_hex
 
-@ The cartridge build's summary and detail views, and the menu once a key
-@ is pressed, are viewer.inc's.  The multiboot image has no room for it and
-@ keeps the plain ones below.
+@ In the cartridge build viewer.inc takes over at the menu's first key
+@ press and after every run.  The multiboot image has no room for it and
+@ keeps the plain summary and detail views below.
 .if MB == 0
     .include "viewer.inc"
 .else

@@ -15,7 +15,7 @@
 @   0x02023FFF            and 0x02020000, 16 KB each)
 @   0x02014000  RESULTS   the documented results block (README.md)
 @   0x02018000  RT        runtime state (runner, menu, output buffer; the
-@                         viewer's two text screens at +0x1000 and +0x3000)
+@                         viewer's text screens, list and IWRAM copy from +0x1000)
 @   0x02024000  MB_HOME   where the multiboot build's body runs from
 @   0x03000000  PAYLOAD   link-rig payloads run here, as on the console
 @   0x03000200  IWBLOCK   copied-code blocks
@@ -91,12 +91,19 @@
 .equ RT_BEACON,   0x4C            @ the beacon word, re-armed after each read
 .equ RT_LR_STATE,  0x50            @ 12 bytes for linkreport.inc
 .equ RT_VSTALE,   0x5C            @ viewer.inc: 1 = the LCD is not what RT_VSHOWN says
-.equ RT_VREPEAT,  0x60            @ frames the d-pad has been held
-.equ RT_VPAGE,    0x64            @ cases on the detail view's page
-.equ RT_VMAX,     0x68            @ its furthest scroll
+.equ RT_VREPEAT,  0x60            @ calls the d-pad has been held for
+.equ RT_VPAGE,    0x64            @ cases on the list's page
+.equ RT_VTOP,     0x68            @ the list: first position shown,
+.equ RT_VCUR,     0x6C            @ the cursor's position,
+.equ RT_VN,       0x70            @ positions,
+.equ RT_VFILTER,  0x74            @ 1 = failures only
+.equ RT_VLOGOCH,  0x78            @ the home screen's logo cells: 0 or ' '
+.equ RT_VINST,    0x7C            @ 1 = the painter is in IWRAM
 .equ RT_SB,        0x100           @ 256-byte output line
 .equ RT_VSHOWN,   0x1000          @ 40x20 cells on the LCD: character, ink | paper << 16
 .equ RT_VNEXT,    0x3000          @ ... and the screen being drawn
+.equ RT_VLIST,    0x5000          @ the list's cases, a halfword each
+.equ RT_VSAVE,    0x5800          @ the IWRAM the painter is standing on
 
 @ case descriptor (32 bytes, see the `case` macro)
 .equ CD_RUN,   0
