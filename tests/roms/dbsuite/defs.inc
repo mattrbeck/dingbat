@@ -14,7 +14,8 @@
 @   0x02010000- payload scratch (irqstorm, breakram, dmatime: 0x02010000
 @   0x02023FFF            and 0x02020000, 16 KB each)
 @   0x02014000  RESULTS   the documented results block (README.md)
-@   0x02018000  RT        runtime state (runner, menu, output buffer)
+@   0x02018000  RT        runtime state (runner, menu, output buffer; the
+@                         viewer's two text screens at +0x1000 and +0x3000)
 @   0x02024000  MB_HOME   where the multiboot build's body runs from
 @   0x03000000  PAYLOAD   link-rig payloads run here, as on the console
 @   0x03000200  IWBLOCK   copied-code blocks
@@ -89,7 +90,13 @@
 .equ RT_SAVED_CPSR,0x48
 .equ RT_BEACON,   0x4C            @ the beacon word, re-armed after each read
 .equ RT_LR_STATE,  0x50            @ 12 bytes for linkreport.inc
+.equ RT_VSTALE,   0x5C            @ viewer.inc: 1 = the LCD is not what RT_VSHOWN says
+.equ RT_VREPEAT,  0x60            @ frames the d-pad has been held
+.equ RT_VPAGE,    0x64            @ cases on the detail view's page
+.equ RT_VMAX,     0x68            @ its furthest scroll
 .equ RT_SB,        0x100           @ 256-byte output line
+.equ RT_VSHOWN,   0x1000          @ 40x20 cells on the LCD: character, ink | paper << 16
+.equ RT_VNEXT,    0x3000          @ ... and the screen being drawn
 
 @ case descriptor (32 bytes, see the `case` macro)
 .equ CD_RUN,   0
