@@ -18,16 +18,9 @@ const post = (data) => fetch("http://localhost:8766/result", {
 app.addEventListener("load", async () => {
   const W = app.contentWindow;
   try {
-    // index.js's let/const globals are not window properties, so inject a
-    // bridge script into the iframe's realm to expose what the harness needs.
+    // The bridge into the app page's scope (lattest-bridge.js says why a file).
     const bridge = W.document.createElement("script");
-    // Safari won't read a File constructed in another realm: write the bytes
-    // into the wasm FS and load directly, as handleRomFile does after its read.
-    bridge.textContent = `window.__loadRomBytes = async (bytes) => {
-      writeToFS("rom.gba", bytes);
-      await addRecentRom("m7_demo.gba", bytes);
-      await loadRom("rom.gba", "m7_demo.gba");
-    };`;
+    bridge.src = "/lattest-bridge.js";
     W.document.head.appendChild(bridge);
     for (let i = 0; i < 100 && !(W.Module && W.Module._wasm_game_fb_ptr && W.__loadRomBytes); i++)
       await new Promise(r => setTimeout(r, 100));

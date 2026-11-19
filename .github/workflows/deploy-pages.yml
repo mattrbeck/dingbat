@@ -161,7 +161,7 @@ jobs:
               ! -path './bench/*' ! -path './e2e/*' ! -path './tests/*' \
               ! -path './types/*' ! -path './signaling/*' ! -path './node_modules/*' \
               ! -name '*.test.mjs' ! -name 'package.json' ! -name 'package-lock.json' \
-              ! -name 'serve.py' ! -name 'lattest.html' ! -name 'status.json' -print0 \
+              ! -name 'serve.py' ! -name 'lattest.html' ! -name 'lattest-bridge.js' ! -name 'status.json' -print0 \
             | LC_ALL=C sort -z | xargs -0 sha256sum | sha256sum | cut -c1-16)
           live=$(curl -fsS --max-time 30 \
             "${{ steps.pages.outputs.base_url }}/build-id.txt?probe=${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" || true)
