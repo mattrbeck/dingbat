@@ -582,9 +582,58 @@ Dots are dingbat's line dots; W is the first dot of the writing M-cycle
   tile met the same way (`_wx` line 25, the fall reaching the fetcher the dot
   before the second tile's successor map read) keeps VRAM's index, hence the
   first-tile condition, which only DocBoy pins.
-- Not modelled: a WX match on the write's own dot (k = 0; lines 10 and 38),
-  gb-failure-triage.md I3.
+- A WX match on the write's own dot (k = 0) is the next entry.
 - Clean-room: derived from the test ROMs' frames, the mealybug photographs
+  and dingbat's own trace runs; no emulator source consulted.
+
+### A WX match on the LCDC.5 fall's own dot (CGB)
+- Default: `CGB_WIN_FALL_MATCH = true` (`gb.nim`; `win_fall_match`,
+  fifo_ppu.nim). CGB, single speed.
+- Rule: the match still triggers for that one dot. The window line counts;
+  the BG FIFO's remaining pixels are reloaded from the fetcher's latches and
+  the fetcher restarts on its own BG column (map read the next dot, low plane
+  3 dots on, high 5), but the window fetch mode and the stall never set in:
+  the line keeps the BG tile grid and mode 3 its length (gambatte
+  `window/late_disable*`'s charge 0 at k <= 0). The restart's tile is cut
+  where the FIFO runs out, with the planes read by then (an unread high plane
+  is the index, the CGB_WIN_CUT_PLANES latch), and a read landing on that
+  push's dot leaves its byte for the next map read. The column count goes on
+  from where the cut tile lands on screen, as after an abort.
+- Latches at the trigger, by fetcher step q after this dot's step (the dot
+  of tile C's push is q = 0, N = C + 1 is in flight): q 0..1 (L_C, H_C);
+  q 2 (L_C, I_N); q 3 (I_N, I_N): the low read due next dot is half done
+  and passes the bus's last byte; q 4 (L_N, I_N); q 5 (L_N, L_N), the same
+  for the high read; q 6..7 (L_N, H_N). At q = 0 the FIFO had nothing left
+  before that push, so only the match pixel shows the reload and the line
+  runs one pixel long.
+- It is the same mechanism as the k >= 1 cut, timed differently: counted with
+  reads 1, 3 and 5 dots after the trigger, a k >= 1 restart is cut at the
+  write itself (W, where the fall releases the stall) and the residue fires
+  exactly when a read lands on that dot (k odd); at k = 0 there is no stall
+  to release, so the cut lands where the FIFO runs out (q 3, 5, 7 and the q 0
+  push dot take a residue, q 1, 2, 4, 6 do not).
+- Evidence: DocBoy `cgb_dmg_mode/ppu/visual/m3_lcdc_win_en_change_multiple_
+  wx_*`, all 47 that failed: line 10 (q 3), line 38 (q 7, `ly38_lx31_extra_
+  pixel_*` decode x = 31 as N's pixel 0, then (L_N, I_N), then T_N again),
+  and the object rows that move the event to q 0..6 (`nops6_sprites_x16..
+  x23{,_sources*}`, `_wly` for the line count). A decodable probe (BG column
+  c = index $40 + c with rows ($80 + c, $C0 + c), every other tile (t, t)),
+  swept over 5 pulse gaps, 2 pre-delays and object X 8..31 against DocBoy as
+  a black box: 190 of 250 frames that differed now match, none newly differ;
+  the 60 left are objects hanging off the left edge (X 8..15) on lines
+  8..14, which differ before and after.
+- Not settled: DocBoy's own references for `ly10_first{,_second}_tile{s,}_
+  signed_addressing_source` (disabled there, "if TileDataLow is > $80
+  glitch is different", and DocBoy's own build fails them by the same 2
+  pixels) show q 3's low byte as $FF-like with index $AA where the bus rule
+  gives $AA; the unscored `nops5_sprites_x18_sources` (q 6; DocBoy fails it
+  too) wants T_N refetched after the cut, i.e. a residue at q 6. Both look
+  like captures from a console; the probe above on a CGB E would settle q 3
+  and q 6.
+- A rise written on the match's dot misses it (CGB_WE_ENABLE_LATE) also when
+  that dot's push is what fills the FIFO (the match pixel is emitted on the
+  write's dot): `nops6_sprites_x16`, `_x24` line 47.
+- Clean-room: derived from the test ROMs' frames, DocBoy run as a black box
   and dingbat's own trace runs; no emulator source consulted.
 
 ## 3. Objects

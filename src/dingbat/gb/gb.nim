@@ -1024,6 +1024,16 @@ const CGB_WIN_CUT_PLANES*     {.booldefine.} = true
   ## decode each byte); mealybug's CPU CGB C and D photos of `m3_lcdc_win_en_
   ## change_multiple_wx` show the same picture. false = the tile fetched in
   ## full. docs/dev/gb-derivations.md, "The bytes a cut CGB window fetch leaves".
+const CGB_WIN_FALL_MATCH*     {.booldefine.} = true
+  ## A CGB WX match on the dot an LCDC.5 fall is written (single speed, `k =
+  ## 0` in CGB_WIN_EN_DEFER's terms) still triggers, for that dot only: the
+  ## window line counts, the BG FIFO's remaining pixels are reloaded from the
+  ## fetcher's latches and the fetcher restarts on its column; nothing
+  ## stalls, so the restart's tile is cut where the FIFO runs out, as
+  ## CGB_WIN_REVOKE_KEEP cuts it at the write. Pinned by DocBoy `cgb_dmg_mode/
+  ## ppu/visual/m3_lcdc_win_en_change_multiple_wx_*` (lines 10 and 38, and
+  ## the object rows' moved lines). false = the match is refused.
+  ## docs/dev/gb-derivations.md, "A WX match on the LCDC.5 fall's own dot (CGB)".
 const CGB_WIN_REVOKE_LAG*     {.intdefine.} = 1
   ## Shifter dots between the LCDC.5 write that revokes a CGB window start and
   ## the dot the undo lands on. Not free: the undo restores the match dot's
