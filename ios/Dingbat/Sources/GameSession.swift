@@ -1749,7 +1749,7 @@ enum SaveWebhook {
 
     static func post(game: RomEntry) {
         let urlString = Settings.shared.saveWebhook.trimmingCharacters(in: .whitespaces)
-        guard !urlString.isEmpty, let url = URL(string: urlString),
+        guard Supporter.storedUnlocked, !urlString.isEmpty, let url = URL(string: urlString),
               let save = try? Data(contentsOf: game.saveURL), !save.isEmpty else { return }
         let boundary = "dingbat-\(UUID().uuidString)"
         var body = Data()

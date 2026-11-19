@@ -23,19 +23,43 @@ final class Supporter: ObservableObject {
 
     /// The last answer, so the unlock shows at launch before StoreKit
     /// replies. Not in Settings.resetAll: a reset must not take it away.
-    private static let cacheKey = "supporter.unlocked"
+    nonisolated static let cacheKey = "supporter.unlocked"
+    /// For code off the main actor (Settings, the library scans, webhooks).
+    nonisolated static var storedUnlocked: Bool { UserDefaults.standard.bool(forKey: cacheKey) }
+
+    /// The sheet's cards, in order; a locked row opens the sheet on its own.
+    enum Perk: Int, CaseIterable { case themes, icons, palette, filters, early, advanced, clips, badge }
 
     @Published private(set) var unlocked: Bool
     @Published private(set) var since: Date?
     @Published private(set) var products: [Product] = []
     @Published private(set) var busy = false
-    /// The Supporter sheet over Settings (a teaser row opens it there, so
-    /// closing it returns to the same pane).
+    /// The Supporter sheet over Settings (a locked row opens it there, so
+    /// closing it returns to the same pane), and the card it opens on.
     @Published var sheetUp = false
-    /// A thank-you row's section for Settings to open under the sheet.
-    @Published var jumpTo: String?
+    @Published private(set) var sheetCard: Perk = .themes
+    /// A thank-you row's pane for Settings to open under the sheet.
+    @Published var jumpTo: SettingsPane?
 
     private var updates: Task<Void, Never>?
+
+    /// At launch: the icon follows the unlock, and on every return to the
+    /// app the light/dark theme and the holiday icon are checked again
+    /// (switching appearance in Control Center passes through inactive).
+    static func installLifecycle() {
+        AppIconManager.shared.allowed = shared.unlocked
+        NotificationCenter.default.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) { _ in
+            Task { @MainActor in
+                Settings.shared.refreshSystemAppearance()
+                AppIconManager.shared.refresh()
+            }
+        }
+    }
+
+    func open(_ perk: Perk = .themes) {
+        sheetCard = perk
+        sheetUp = true
+    }
 
     private init() {
         unlocked = UserDefaults.standard.bool(forKey: Self.cacheKey)
@@ -43,6 +67,7 @@ final class Supporter: ObservableObject {
         // `-supporter on|off`: pretend, for screenshots (no purchase made).
         if let v = UserDefaults.standard.string(forKey: "supporter") {
             unlocked = v == "on"
+            UserDefaults.standard.set(unlocked, forKey: Self.cacheKey)
             debugForced = true
             return
         }
@@ -129,40 +154,32 @@ final class Supporter: ObservableObject {
     }
 
     private func set(_ on: Bool) {
-        if unlocked != on { unlocked = on }
         UserDefaults.standard.set(on, forKey: Self.cacheKey)
+        guard unlocked != on else { return }
+        unlocked = on
+        Settings.shared.supporterChanged()
+        AppIconManager.shared.allowed = on
     }
 }
 
 // MARK: - What the unlock covers
 
-extension ThemeName {
-    /// The seven device-colour themes; Night, Amber, Pure Black, Light and
-    /// DMG stay free.
-    var supporterOnly: Bool {
-        switch self {
-        case .night, .amber, .black, .light, .dmg: return false
-        default: return true
-        }
-    }
+// Locked choices stay listed with a lock and fall back to the free one in
+// effect (Settings.effectiveTheme and friends), so nothing is hidden and a
+// lapsed unlock never strands a setting.
 
-    /// The App theme picker's chips: a theme already in use stays listed,
-    /// so nobody loses one they picked before the unlock existed.
-    static func offered(unlocked: Bool, current: ThemeName) -> [ThemeName] {
-        allCases.filter { !$0.supporterOnly || unlocked || $0 == current }
-    }
+extension ThemeName {
+    /// Night is free; the other eleven come with Supporter.
+    var supporterOnly: Bool { self != .night }
 }
 
 extension Settings.Filter {
     /// The smoothing upscalers; None, LCD grid and RGB subpixels stay free.
     var supporterOnly: Bool { self == .hq4x || self == .xbr }
-
-    static func offered(unlocked: Bool, current: Settings.Filter) -> [Settings.Filter] {
-        allCases.filter { !$0.supporterOnly || unlocked || $0 == current }
-    }
 }
 
 extension Settings.GbPaletteMode {
     /// Custom shades; Default and App theme stay free.
     var supporterOnly: Bool { self == .custom }
+    var label: String { self == .default ? "Default" : self == .theme ? "App theme" : "Custom" }
 }
