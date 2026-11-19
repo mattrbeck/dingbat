@@ -15,28 +15,46 @@
 type
   LinkProtoError* = object of CatchableError
 
-  LinkMsgKind* = enum
+  LinkMsgType* = enum
+    ## A payload's first byte.
     lmHello    = 1
     lmClock    = 2
     lmTransfer = 3
     lmReply    = 4
     lmBye      = 5
 
+  LinkHello* = object
+    version*: uint8
+    system*: uint8    # 0 = GBA, 1 = GB
+    unit*: uint8      # 0 = listener (multi-mode unit 0), 1 = connector
+    rom_crc*: uint32  # CRC-32 of the ROM file
+
+  LinkClock* = object
+    clock*: int64     # sender's emulated clock (cycles)
+    mode*: uint8      # sender's SIO mode
+    flags*: uint8     # bit0 SO level, bit1 blocked, bit2 paused
+
+  LinkTransfer* = object
+    clock*: int64     # sender's emulated clock: the exchange's start
+    duration*: uint32 # transfer length in cycles
+    mode*: uint8      # transfer mode
+    data*: uint32     # initiator's word
+
+  LinkReply* = object
+    clock*: int64     # sender's emulated clock when it responded
+    cycle*: int64     # echo of the TRANSFER's start clock
+    mode*: uint8      # transfer mode
+    flags*: uint8     # bit0 listening
+    data*: uint32     # responder's word
+
   LinkMsg* = object
-    ## Decoded message, flat rather than a case-object; which fields are
-    ## meaningful depends on `kind` (see the encoders).
-    kind*: LinkMsgKind
-    version*: uint8   # HELLO
-    system*: uint8    # HELLO: 0 = GBA, 1 = GB
-    unit*: uint8      # HELLO: 0 = listener (multi-mode unit 0), 1 = connector
-    rom_crc*: uint32  # HELLO: CRC-32 of the ROM file
-    clock*: int64     # CLOCK/TRANSFER/REPLY: sender's emulated clock (cycles)
-    mode*: uint8      # CLOCK: sender's SIO mode; TRANSFER/REPLY: transfer mode
-    flags*: uint8     # CLOCK: bit0 SO level, bit1 blocked, bit2 paused;
-                      # REPLY: bit0 listening; BYE: reason
-    duration*: uint32 # TRANSFER: transfer length in cycles
-    cycle*: int64     # REPLY: echo of the TRANSFER's start clock
-    data*: uint32     # TRANSFER: initiator's word; REPLY: responder's word
+    ## Decoded message: one branch per wire type, holding that type's fields.
+    case
+    of MsgHello: hello*: LinkHello
+    of MsgClock: clock*: LinkClock
+    of MsgTransfer: transfer*: LinkTransfer
+    of MsgReply: reply*: LinkReply
+    of MsgBye: reason*: uint8
 
 const
   LINKPROTO_VERSION* = 1'u8
@@ -62,7 +80,7 @@ const
   # REPLY `flags`
   LINK_REPLY_LISTENING* = 0x01'u8  # responder was in a compatible SIO mode
 
-  # BYE `flags` (reason)
+  # BYE reason
   LINK_BYE_FINISHED* = 0'u8  # orderly end (e.g. test ROM completed)
   LINK_BYE_SHUTDOWN* = 1'u8  # session torn down
   LINK_BYE_MISMATCH* = 2'u8  # HELLO rejected (version/system/ROM mismatch)
@@ -152,11 +170,19 @@ proc encode_reply*(clock: int64; cycle: int64; mode: uint8; flags: uint8;
   frame(p)
 
 proc encode_bye*(reason: uint8): string =
-  ## BYE: orderly notification; reason in `flags`.
+  ## BYE: orderly notification.
   var p = ""
   p.put_u8(uint8(lmBye))
   p.put_u8(reason)
   frame(p)
+
+proc kind*(m: LinkMsg): LinkMsgType =
+  case m
+  of MsgHello: lmHello
+  of MsgClock: lmClock
+  of MsgTransfer: lmTransfer
+  of MsgReply: lmReply
+  of MsgBye: lmBye
 
 # ---------------- decoder ----------------
 
@@ -174,7 +200,7 @@ proc feed*(d: var LinkDecoder; data: openArray[char]) =
 proc feed*(d: var LinkDecoder; data: string) =
   d.buf.add data
 
-proc payload_len(d: LinkDecoder; kind: LinkMsgKind): int =
+proc payload_len(d: LinkDecoder; kind: LinkMsgType): int =
   case kind
   of lmHello: 9
   of lmClock: 11
@@ -193,36 +219,39 @@ proc next*(d: var LinkDecoder; msg: var LinkMsg): bool =
   if avail < 4 + plen: return false
   let p = d.pos + 4
   let type_byte = get_u8(d.buf, p)
-  if type_byte < uint8(low(LinkMsgKind)) or type_byte > uint8(high(LinkMsgKind)):
+  if type_byte < uint8(low(LinkMsgType)) or type_byte > uint8(high(LinkMsgType)):
     raise newException(LinkProtoError, "unknown message type " & $type_byte)
-  let kind = LinkMsgKind(type_byte)
+  let kind = LinkMsgType(type_byte)
   if plen != d.payload_len(kind):
     raise newException(LinkProtoError,
       "bad payload length " & $plen & " for message type " & $type_byte)
-  msg = LinkMsg(kind: kind)
-  case kind
-  of lmHello:
-    msg.version = get_u8(d.buf, p + 1)
-    msg.system = get_u8(d.buf, p + 2)
-    msg.unit = get_u8(d.buf, p + 3)
-    msg.rom_crc = get_u32(d.buf, p + 5)
-  of lmClock:
-    msg.clock = int64(get_u64(d.buf, p + 1))
-    msg.mode = get_u8(d.buf, p + 9)
-    msg.flags = get_u8(d.buf, p + 10)
-  of lmTransfer:
-    msg.clock = int64(get_u64(d.buf, p + 1))
-    msg.duration = get_u32(d.buf, p + 9)
-    msg.mode = get_u8(d.buf, p + 13)
-    msg.data = get_u32(d.buf, p + 15)
-  of lmReply:
-    msg.clock = int64(get_u64(d.buf, p + 1))
-    msg.cycle = int64(get_u64(d.buf, p + 9))
-    msg.mode = get_u8(d.buf, p + 17)
-    msg.flags = get_u8(d.buf, p + 18)
-    msg.data = get_u32(d.buf, p + 19)
-  of lmBye:
-    msg.flags = get_u8(d.buf, p + 1)
+  msg = case kind
+    of lmHello:
+      MsgHello(hello: LinkHello(
+        version: get_u8(d.buf, p + 1),
+        system: get_u8(d.buf, p + 2),
+        unit: get_u8(d.buf, p + 3),
+        rom_crc: get_u32(d.buf, p + 5)))
+    of lmClock:
+      MsgClock(clock: LinkClock(
+        clock: int64(get_u64(d.buf, p + 1)),
+        mode: get_u8(d.buf, p + 9),
+        flags: get_u8(d.buf, p + 10)))
+    of lmTransfer:
+      MsgTransfer(transfer: LinkTransfer(
+        clock: int64(get_u64(d.buf, p + 1)),
+        duration: get_u32(d.buf, p + 9),
+        mode: get_u8(d.buf, p + 13),
+        data: get_u32(d.buf, p + 15)))
+    of lmReply:
+      MsgReply(reply: LinkReply(
+        clock: int64(get_u64(d.buf, p + 1)),
+        cycle: int64(get_u64(d.buf, p + 9)),
+        mode: get_u8(d.buf, p + 17),
+        flags: get_u8(d.buf, p + 18),
+        data: get_u32(d.buf, p + 19)))
+    of lmBye:
+      MsgBye(reason: get_u8(d.buf, p + 1))
   d.pos += 4 + plen
   # Compact once the consumed prefix dominates; keeps feed() amortized O(1).
   if d.pos > 4096 and d.pos * 2 > d.buf.len:

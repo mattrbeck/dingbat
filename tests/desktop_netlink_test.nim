@@ -157,12 +157,18 @@ block:
   nl2.set_paused(true)
   var got_paused = false
   for m in peer2.read_msgs(200):
-    if m.kind == lmClock and (m.flags and LINK_CLOCK_PAUSED) != 0: got_paused = true
+    case m
+    of MsgClock(c):
+      if (c.flags and LINK_CLOCK_PAUSED) != 0: got_paused = true
+    else: discard
   check got_paused, "pausing sends a CLOCK with the paused bit"
   nl2.set_paused(false)
   var got_resumed = false
   for m in peer2.read_msgs(200):
-    if m.kind == lmClock and (m.flags and LINK_CLOCK_PAUSED) == 0: got_resumed = true
+    case m
+    of MsgClock(c):
+      if (c.flags and LINK_CLOCK_PAUSED) == 0: got_resumed = true
+    else: discard
   check got_resumed, "resuming sends a CLOCK without it"
   lc.teardown(nl, "")
   lc.teardown(nl2, "")
@@ -444,7 +450,7 @@ block:
     else: discard lc.service_setup(new_core(), ROM, ms_since(t0))
     check lc.setup == lsNone and lc.service_setup(gba, ROM, ms_since(t0)) == nil,
           how & ": the handshake is over"
-    var kinds: seq[LinkMsgKind]
+    var kinds: seq[LinkMsgType]
     for m in peer.read_msgs(300): kinds.add m.kind
     check kinds == @[lmHello, lmBye],
           how & ": the peer got our HELLO, then a BYE (" & $kinds & ")"

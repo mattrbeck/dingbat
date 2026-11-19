@@ -237,7 +237,7 @@ length from the one the cart autodetects.
 
 Netplay never puts a payload on the wire: `linkproto` exchanges inputs and
 SIO words under `LINKPROTO_VERSION`, and its peer ROM check is a CRC-32 of
-the file (`LinkMsg.rom_crc`; web rollback has its own `rbHash`). None of
+the file (`LinkHello.rom_crc`; web rollback has its own `rbHash`). None of
 those is `gba_rom_checksum`.
 
 ## What is deliberately not in the payload

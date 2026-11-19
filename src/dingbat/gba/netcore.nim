@@ -93,7 +93,7 @@ type
     round_predicted: bool
     got_reply: bool
     reply_wait: bool
-    pending_transfers: seq[LinkMsg]
+    pending_transfers: seq[LinkTransfer]
     multi_recv: array[4, uint16]  # SIOMULTI0-3 latches: not in state_payload,
                                   # but a replay can read them before the
                                   # frame's round re-latches (link.nim too)
@@ -144,7 +144,7 @@ type
     reply_wait: bool      # completion fired at S+D with no REPLY: clock parked
     lead_wait: bool       # bounded lead exceeded
     # TRANSFERs that arrived mid-round; replayed when phase returns idle.
-    pending_transfers: seq[LinkMsg]
+    pending_transfers: seq[LinkTransfer]
     in_frame: bool        # a frame is underway (try_advance is resumable)
     stalled*: bool        # "Waiting for your friend" telemetry
     stall_count*: int
@@ -296,7 +296,7 @@ proc exit_stall(nc: NetCore) =
 
 # ---------------- responder (slave) side ----------------
 
-proc handle_remote_transfer(nc: NetCore; m: LinkMsg)
+proc handle_remote_transfer(nc: NetCore; m: LinkTransfer)
 
 proc round_idle(nc: NetCore) =
   # Service a TRANSFER the peer opened while we were mid-round.
@@ -361,7 +361,7 @@ proc slave_sample(nc: NetCore) =
   else:
     nc.round_idle()
 
-proc immediate_reply(nc: NetCore; m: LinkMsg) =
+proc immediate_reply(nc: NetCore; m: LinkTransfer) =
   # Degenerate overlap (both units mastering at once, or we are parked in
   # our own completion): answer with current data, touch no transfer state.
   let serial = nc.gba.serial
@@ -380,7 +380,7 @@ proc immediate_reply(nc: NetCore; m: LinkMsg) =
   nc.send_msg(encode_reply(nc.now(), m.clock, m.mode,
     (if listening: LINK_REPLY_LISTENING else: 0'u8), mine))
 
-proc handle_remote_transfer(nc: NetCore; m: LinkMsg) =
+proc handle_remote_transfer(nc: NetCore; m: LinkTransfer) =
   if nc.phase == npMasterWait:
     # Cross-mastered transfers: each side answers the other's directly.
     nc.immediate_reply(m)
@@ -619,7 +619,7 @@ proc reject_hello(nc: NetCore; why: string) =
   nc.hello = hsFailed
   nc.hello_error = "link refused: " & why
 
-proc handle_hello(nc: NetCore; m: LinkMsg) =
+proc handle_hello(nc: NetCore; m: LinkHello) =
   if m.version != LINKPROTO_VERSION:
     nc.reject_hello("protocol version mismatch (you have " & $LINKPROTO_VERSION &
                     ", your friend has " & $m.version & ")")
@@ -651,37 +651,37 @@ proc finish_unanswered(nc: NetCore) =
 
 proc handle_msg(nc: NetCore; m: LinkMsg) =
   if nc.hello == hsWait:
-    case m.kind
-    of lmHello:
-      nc.handle_hello(m)
-    of lmBye:
+    case m
+    of MsgHello(hello):
+      nc.handle_hello(hello)
+    of MsgBye(reason):
       nc.hello = hsFailed
       nc.hello_error = "your friend's game refused the link (BYE reason " &
-                       $m.flags & ")"
+                       $reason & ")"
       nc.peer_done = true
     else:
       nc.reject_hello("expected HELLO, got " & $m.kind)
     return
-  case m.kind
-  of lmClock:
-    if m.clock > nc.peer_clock: nc.peer_clock = m.clock
-    nc.peer_mode = m.mode
-    nc.peer_so = (m.flags and LINK_CLOCK_SO) != 0
-    nc.peer_paused = (m.flags and LINK_CLOCK_PAUSED) != 0
-  of lmTransfer:
-    if m.clock > nc.peer_clock: nc.peer_clock = m.clock
-    nc.handle_remote_transfer(m)
-  of lmReply:
-    if m.clock > nc.peer_clock: nc.peer_clock = m.clock
-    let listening = (m.flags and LINK_REPLY_LISTENING) != 0
+  case m
+  of MsgClock(c):
+    if c.clock > nc.peer_clock: nc.peer_clock = c.clock
+    nc.peer_mode = c.mode
+    nc.peer_so = (c.flags and LINK_CLOCK_SO) != 0
+    nc.peer_paused = (c.flags and LINK_CLOCK_PAUSED) != 0
+  of MsgTransfer(t):
+    if t.clock > nc.peer_clock: nc.peer_clock = t.clock
+    nc.handle_remote_transfer(t)
+  of MsgReply(r):
+    if r.clock > nc.peer_clock: nc.peer_clock = r.clock
+    let listening = (r.flags and LINK_REPLY_LISTENING) != 0
     if nc.speculative:
-      let idx = nc.replay_round(m.cycle)
+      let idx = nc.replay_round(r.cycle)
       let our_word = if idx >= 0: nc.round_log[idx].out_word else: nc.round_out
-      nc.note_reply(m.mode, m.data, listening, our_word)
+      nc.note_reply(r.mode, r.data, listening, our_word)
       if idx >= 0 and not nc.round_log[idx].confirmed:
         if not nc.round_log[idx].predicted:
           nc.round_log[idx].confirmed = true  # was latched from a real reply
-        elif nc.round_log[idx].peer_data == m.data and
+        elif nc.round_log[idx].peer_data == r.data and
              nc.round_log[idx].listening == listening:
           nc.round_log[idx].confirmed = true
           inc nc.pred_hits
@@ -689,16 +689,16 @@ proc handle_msg(nc: NetCore; m: LinkMsg) =
           # Misprediction: correct the log and re-emulate from there.
           inc nc.pred_misses
           inc nc.rollbacks
-          nc.round_log[idx].peer_data = m.data
+          nc.round_log[idx].peer_data = r.data
           nc.round_log[idx].listening = listening
           nc.round_log[idx].predicted = false
           nc.round_log[idx].confirmed = true
-          nc.rollback_and_replay(m.cycle)
+          nc.rollback_and_replay(r.cycle)
         nc.advance_confirmed()
         return
       # idx < 0: reply for the still-in-flight round (beat S+D); fall through.
-    if nc.phase == npMasterWait and m.cycle == nc.round_cycle:
-      nc.round_in = m.data
+    if nc.phase == npMasterWait and r.cycle == nc.round_cycle:
+      nc.round_in = r.data
       nc.round_listening = listening
       nc.got_reply = true
       if nc.reply_wait:
@@ -709,11 +709,11 @@ proc handle_msg(nc: NetCore; m: LinkMsg) =
         nc.master_finish()
         if nc.speculative: nc.advance_confirmed()
     # else: stale reply for an abandoned round; drop it
-  of lmBye:
+  of MsgBye:
     nc.peer_done = true
     nc.peer_clock = high(int64) shr 2  # never lead-stall on a finished peer
     nc.finish_unanswered()
-  of lmHello:
+  of MsgHello:
     discard  # post-handshake HELLO: ignore
 
 proc feed*(nc: NetCore; data: openArray[char]) =

@@ -1423,7 +1423,7 @@ proc gba_rom_checksum(gba: GBA): uint32 =
   ## ROM identity: hash of the first 1 MB of the ROM file, cached at load
   ## (Cartridge.rom_identity). The file, not the padded buffer, so the
   ## allocation rule cannot change it; the cache, so cheat patches cannot.
-  ## Not on any wire: netplay's `LinkMsg.rom_crc` is separate.
+  ## Not on any wire: netplay's `LinkHello.rom_crc` is separate.
   gba.cartridge.rom_identity
 
 proc gba_whole_rom(gba: GBA): WholeRom =
