@@ -32,10 +32,10 @@ Direction is Joystick.
 
 ## Rules
 
-- Words: a row is a label plus at most one short line. Prefer a name that explains itself
-  ("Reproduce motion blur", "Separate light-mode theme", "DS support") over a footer; a footer only
-  when no name can carry it, one short sentence. Empty file slots read "None", which already says
-  optional.
+- Words: no footers or hints in panes. A name explains itself ("Reproduce motion blur", "Separate
+  light-mode theme", "DS support", "Where you left off"); empty file slots read "None". A setting
+  that only applies on the next game load says so in a brief notice when changed mid-game, and
+  reassurance ("Games and saves are kept") belongs in the confirmation dialog, not under the row.
 - A check row always reserves its trailing slot (check, lock or empty) so swatches and values line
   up down the list.
 - Choices: 2-4 short options → segmented; 5+ or long names → menu showing the value; options that
@@ -83,15 +83,15 @@ Same schema, map and words; the renderer takes a platform and swaps the skin, no
 
 | Pane | Sections → rows |
 |---|---|
-| Settings | Supporter banner · Display & Appearance, Controls, Audio · Play, Game Boy, Game Boy Advance, Nintendo DS (DS Beta) · Google Drive, General · version |
+| Settings | Supporter banner · Display & Appearance, Controls, Audio · Play, Game Boy, Game Boy Advance, Nintendo DS (once DS support is on) · Google Drive, General · version |
 | Display & Appearance | Theme: gallery, (Supporter: Separate light-mode theme, Light-mode theme), App Icon · Game screen: Color correction, Filter (menu; hq4x/xBR locked), Integer scaling, Reproduce motion blur, Ambient glow, (Duo: Picture held upright) |
 | Controls | Touch: Large controls, Direction (seg), Joystick behavior (seg, when Joystick), Buttons in landscape (seg, phone), Hide with a controller · Feedback: Rumble, Haptic feedback, Show inputs on screen · Controller and keyboard: Controller buttons ›, Keyboard › (while connected) |
 | Controller buttons | info rows with keycaps: game buttons, while playing, in menus |
 | Audio | Playback: Pitch-correct fast-forward, Play in Silent Mode · GBA sound: Interpolation, Analog filter, Enhanced music synthesis · Channels › |
-| Channels | Tone: Square 1, Square 2, Wave, Noise · Samples: Sample A, Sample B · Turn All Channels On |
-| Play | Opening a game: Resume / From save (check) · Rewind · Response: Run-ahead (seg Off 1 2 3) |
+| Channels | Tone: Square 1, Square 2, Wave, Noise · GBA samples: Sample A, Sample B · Turn All Channels On |
+| Play | Opening a game: Where you left off / From the game's save (check) · Rewind, Run-ahead (seg Off 1 2 3) |
 | Game Boy | Palette: Default / App theme / Custom (check with swatches; Custom locked) + color wells when Custom · Super Game Boy: mode, Show border · Boot ROM: file |
-| Game Boy Advance | BIOS: file, Play BIOS intro · BIOS calls: HLE / Real BIOS / Real boot, HLE calls (check) |
+| Game Boy Advance | BIOS: file, Play BIOS intro · BIOS calls: Built-in / Your BIOS / Your BIOS for startup only (check) |
 | Nintendo DS | Screens: Layout (menu), Bottom screen first, Gap (menu), Turn (menu), Hide the top bar (phone) · 3D: Resolution (seg), Drawn by (menu) · BIOS and firmware: three files |
 | Google Drive | account (email, last sync), Sync Now · Sign Out, Sign Out Everywhere (destructive) |
 | General | Advanced (Supporter): Save webhook ›, DS support (Highly experimental) · About: Version, Acknowledgements, Privacy · Reset All Settings (destructive) |
