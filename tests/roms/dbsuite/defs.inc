@@ -99,6 +99,7 @@
 .equ RT_VFILTER,  0x74            @ 1 = failures only
 .equ RT_VLOGOCH,  0x78            @ the home screen's logo cells: 0 or ' '
 .equ RT_VINST,    0x7C            @ 1 = the painter is in IWRAM
+.equ RT_VAUTO,    0x80            @ frames to the auto-run, 0 = none
 .equ RT_SB,        0x100           @ 256-byte output line
 .equ RT_VSHOWN,   0x1000          @ 40x20 cells on the LCD: character, ink | paper << 16
 .equ RT_VNEXT,    0x3000          @ ... and the screen being drawn

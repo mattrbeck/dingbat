@@ -1450,6 +1450,9 @@ menu:
     cmp r0, #0                     @ results already streaming: keep them
     ldreq r0, =0xDBFF0002          @ beacon: in the menu
     bleq beacon
+.if MB == 0
+    b   vboot                      @ r9 = the countdown: viewer.inc's home
+.else
 menu_redraw:
     bl  clear_screen
     mov r0, #4
@@ -1565,9 +1568,6 @@ menu_loop:
 2:  bl  read_keys                  @ r0 = newly pressed
     cmp r0, #0
     beq menu_loop
-.if MB == 0
-    b   vmenu_first                @ a hand on the keys: viewer.inc's menu
-.else
     mov r5, r0
     cmp r9, #0                     @ any key stops the countdown
     beq 3f
@@ -1867,9 +1867,9 @@ draw_case_lines:
 9:  ldmfd sp!, {r4-r8, pc}
     .ltorg
 
-@ In the cartridge build viewer.inc takes over at the menu's first key
-@ press and after every run.  The multiboot image has no room for it and
-@ keeps the plain summary and detail views below.
+@ In the cartridge build viewer.inc draws every screen but the run screen,
+@ the menu at boot included.  The multiboot image has no room for it and
+@ keeps the plain menu above and the summary and detail views below.
 .if MB == 0
     .include "viewer.inc"
 .else

@@ -170,7 +170,9 @@ def decode_png(data):
 # phase at them, so a new logo must cost the same: it is centred in the slot
 # and paper-white pixels (invisible on the white menu) are drawn in raster
 # order until the count matches. tests/roms/dbsuite/run.py should then report
-# exactly what it did before.
+# exactly what it did before. (The cartridge build's boot screen is
+# viewer.inc's since 2026-11-19, with other timing; in dingbat the APU cases
+# pass with no menu at all and with the APU suite run first.)
 LOGO_W, LOGO_H, LOGO_DRAWN = 48, 29, 588
 PAPER = 0x7FFF
 

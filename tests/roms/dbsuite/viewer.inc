@@ -15,10 +15,9 @@
 @ painter runs from IWRAM, fast enough to stay ahead of the beam through a
 @ whole page; the IWRAM it stands on is put back before a run starts.
 @
-@ The run path does not come through here.  Boot, the menu's countdown, the
-@ run screen and the cases execute the instructions they did before this
-@ file existed, so a run enters every case at the cycle it used to.  That
-@ is why the boot menu is still the plain one until a key is pressed.
+@ The run screen and the cases do not come through here: from the moment a
+@ run starts they execute the instructions they did before this file
+@ existed.  The home screen is up from boot, counting down to the auto-run.
 
 .equ C_SEL,    0x6739              @ the cursor row's paper
 .equ C_BAR,    0x2108              @ the title bar
@@ -249,7 +248,7 @@ vdiv:
 
 @ Put the next screen on the LCD: from the top of V-blank, paint each cell
 @ that differs from the one showing -- every cell when RT_VSTALE says the
-@ pixels are someone else's (the run screen's, the boot menu's).  A cell
+@ pixels are someone else's (the run screen's, the boot stub's).  A cell
 @ whose character is 0 is not text and is never painted.
 vshow:
     stmfd sp!, {r4-r8, r11, lr}
@@ -268,8 +267,8 @@ vshow:
     ldmfd sp!, {r4-r8, r11, pc}
 
 @ r4 = RT: the painter into IWRAM, what was there kept for vrestore.  Every
-@ way in from the boot menu or a run comes through here, so the LCD is
-@ marked stale too.
+@ way in from boot or a run comes through here, so the LCD is marked
+@ stale too.
 vinstall:
     mov r0, #1
     str r0, [r4, #RT_VSTALE]
@@ -465,6 +464,8 @@ vstatus_words:
 
 str_v_notrun:   .asciz "NOT RUN"
 str_v_skipped:  .asciz "SKIPPED"
+str_v_title:    .asciz "dbsuite"
+str_v_auto:     .asciz "auto-run in "
 str_v_none:     .asciz "not run"
 str_v_all:      .asciz "all suites"
 str_v_suite:    .asciz "suite"
@@ -502,9 +503,8 @@ str_h_case:     .asciz "\001B\002 back  \001\204\002 case  \001L R\002 failure"
     .align 2
 
 @ ════════════════════════════════ home ═══════════════════════════════════
-@ The boot menu (runtime.inc) draws itself and counts down as it always
-@ has.  Its first key press lands at vmenu_first, a whole run ends at
-@ summary_view, and from either the screen is this one.
+@ Boot reaches vboot from runtime.inc's menu, with the auto-run countdown;
+@ a whole run ends at summary_view, and the list's B at home_enter.
 
 @ r4 = RT: the home screen into the next screen -> r10 = entries
 home_fill:
@@ -517,7 +517,7 @@ home_fill:
     bl  vink
     mov r0, #18
     mov r1, #1
-    ldr r2, =str_title
+    ldr r2, =str_v_title
     bl  vstr
     ldr r0, =C_GREY
     bl  vink
@@ -635,7 +635,30 @@ home_fill:
     ldreq r2, =str_h_run
     ldrne r2, =str_h_open
     bl  vhint
-    ldmfd sp!, {r5-r9, pc}
+    ldr r0, [r4, #RT_VAUTO]        @ "auto-run in N", while it counts
+    cmp r0, #0
+    beq 7f
+    bl  vauto_secs
+    mov r5, r0
+    ldr r0, =C_GREY
+    bl  vink
+    mov r0, #26
+    mov r1, #19
+    ldr r2, =str_v_auto
+    bl  vstr
+    mov r1, #19
+    mov r2, r5
+    bl  vdec
+7:  ldmfd sp!, {r5-r9, pc}
+
+@ r4 = RT -> r0 = the countdown in whole seconds, rounded up
+vauto_secs:
+    ldr r0, [r4, #RT_VAUTO]
+    add r0, r0, #59
+    ldr r1, =0x8889                @ /60 for small numbers
+    mul r0, r1, r0
+    mov r0, r0, lsr #21
+    bx  lr
     .ltorg
 
 @ r0 = character, r3 = a screen of cells: the logo's cells, columns 0-16
@@ -651,11 +674,19 @@ vlogo_cells:
     bne 1b
     bx  lr
 
+@ r4 = RT, r9 = frames of countdown (0: none): the screen at boot
+vboot:
+    str r9, [r4, #RT_VAUTO]
+    bl  vinstall
+    b   home_show
 summary_view:                      @ a whole run has finished
     ldr r4, =RT
     bl  vinstall
 home_enter:                        @ from the list too
     ldr r4, =RT
+    mov r0, #0
+    str r0, [r4, #RT_VAUTO]
+home_show:
     mov r0, #' '
     str r0, [r4, #RT_VLOGOCH]
     mov r0, #0
@@ -672,26 +703,34 @@ home_enter:                        @ from the list too
     ldr r3, =RT + RT_VSHOWN
     bl  vlogo_cells
     b   home_loop
-@ r0 = the boot menu's first keys, r4 = RT, r10 = entries
-vmenu_first:
-    mov r5, r0
-    bl  vinstall
-    mov r0, #0                     @ its logo stays where it is
-    str r0, [r4, #RT_VLOGOCH]
-    str r0, [r4, #RT_VREPEAT]
-    mov r0, r5
-    mov r1, #0
-    mov r9, #1
-    b   home_key
 home_paint:
     bl  home_fill
     bl  vshow
 home_loop:
     bl  wait_vblank_link
-    bl  vkeys
+    ldr r0, [r4, #RT_VAUTO]        @ the countdown: run everything at 0,
+    cmp r0, #0                     @ repaint when its seconds change
+    beq 1f
+    bl  vauto_secs
+    mov r5, r0
+    ldr r0, [r4, #RT_VAUTO]
+    subs r0, r0, #1
+    str r0, [r4, #RT_VAUTO]
+    beq home_run_all
+    bl  vauto_secs
+    cmp r0, r5
+    beq 1f
+    bl  home_fill
+    bl  vshow
+1:  bl  vkeys
     cmp r0, #0
     beq home_loop
     mov r9, #0
+    ldr r2, [r4, #RT_VAUTO]        @ any key stops the countdown
+    cmp r2, #0
+    movne r9, #1
+    movne r2, #0
+    strne r2, [r4, #RT_VAUTO]
 home_key:                          @ r0 = keys, r1 = a repeat, r9 = paint anyway
     mov r5, r0
     mov r6, r1

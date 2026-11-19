@@ -83,8 +83,8 @@ reaches the host", and a size-dependent upload failure from either.
 - **Menu.** A runs the selected suite, START runs everything. After a run,
   the summary lists each suite and the first failures. A on a suite opens
   every case, with got and expected. B goes back.
-- **By hand (cartridge build).** From the first key press, and after
-  every run, the screens are `viewer.inc`'s:
+- **By hand (cartridge build).** Every screen but the run screen is
+  `viewer.inc`'s, from boot on:
   - *Home* lists the suites with their case counts and, once they have run,
     how many passed. A opens a suite that has results and runs one that has
     none. SELECT runs the selected suite (again), START runs everything.
@@ -101,11 +101,11 @@ reaches the host", and a size-dependent upload failure from either.
   The screens are kept as a grid of text cells and only the cells that
   change are repainted, from the top of V-blank and by a painter copied to
   IWRAM, so a press shows as one new picture. The IWRAM it borrows is put
-  back before a run starts. Boot, the countdown and the run execute the
-  code they always did, so a run enters each case at the same cycle. That
-  is why the menu at boot is still the plain one until a key is pressed.
-  The multiboot build has no room for the viewer and keeps the plain
-  screens. Its image is unchanged.
+  back before a run starts. The run screen and the cases execute the code
+  they always did. The time boot takes before the auto-run did change
+  (2026-11-19), and with it some APU cases' answers in dingbat, all still
+  inside the ranges the console gave. The multiboot build has no room for
+  the viewer and keeps the plain screens. Its image is unchanged.
 - **Watchdog.** Each case runs from a known machine state: IME/IE/IF,
   timers, DMA, WAITCNT, 0x04000800, sound, SIO, DISPSTAT, the display and
   the IRQ vector are all reset. TM3 at /1024 is armed as a 4-second watchdog.
