@@ -100,11 +100,10 @@ enum Checkpoints {
 
     /// Keep this moment if the spread wants it. The record before the index:
     /// a slot the index names always holds the moment it says.
-    static func add(_ e: RomEntry, bytes: Data, pic: Data?, ts: Double, play: Double, saveSig: String?) {
+    static func add(_ e: RomEntry, bytes: Data, pic: Data?, ts: Double, play: Double, crashSince: Double, saveSig: String?) {
         var idx = readIndex(e)
         var entry = Entry(slot: -1, ts: ts, play: play, saveSig: saveSig)
-        let kept = keep(idx.list + [entry], crashSince: CrashWatch.info(e.fileName)?.since ?? 0,
-                        now: DriveSync.now())
+        let kept = keep(idx.list + [entry], crashSince: crashSince, now: DriveSync.now())
         guard kept.contains(entry) else { return }
         let used = Set(kept.filter { $0 != entry }.map(\.slot))
         guard let slot = (0..<slots).first(where: { !used.contains($0) }) else { return }
