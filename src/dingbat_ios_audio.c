@@ -59,21 +59,22 @@ static size_t bytes_per_frame(void) {
 }
 
 /* Dynamic rate control, reader side (render thread only, under g_lock).
- * Target depth: one video frame's worth of samples (they arrive in a burst
- * while the frame emulates) plus the render quantum and some slack for a
- * late display tick. The integral term carries the steady offset between
- * the clocks (the display's and the sound hardware's), so the depth settles on
- * the target instead of above it. */
+ * Target depth: one video frame's samples (they arrive in a burst), the refresh
+ * every ~3.7 s that runs no frame at true speed on a 60 Hz screen, the render
+ * quantum and some slack for a late display tick. The depth rises slowly
+ * between those refreshes and falls by a frame's sound at one, so the control
+ * is gentle: it follows only the drift between the display's and the sound
+ * hardware's clocks, and leaves that rise in place to carry the gap. */
 #define DRC_TARGET   g_target   /* frames at 32768 Hz */
-#define DRC_GAIN     0.02       /* ratio change per unit of relative depth error */
-#define DRC_IGAIN    0.0004     /* the integral's step per callback, per unit error */
+#define DRC_GAIN     0.002      /* ratio change per unit of relative depth error */
+#define DRC_IGAIN    0.00002    /* the integral's step per callback, per unit error */
 #define DRC_IMAX     0.01
 #define DRC_MAX      0.015      /* never more than 1.5% off pitch */
 #define DRC_CAP      (3 * DRC_TARGET) /* beyond: drop back to the target (a stall's backlog) */
-static int      g_target = 832; /* ~25 ms; slow motion asks for more */
+static int      g_target = 1081; /* ~33 ms; slow motion asks for more */
 static int      g_free = 0;      /* fast-forward: no rate control, play what is there */
 static int      g_primed = 0;    /* playing; else waiting for the ring to refill */
-static double   g_fill = 832;    /* smoothed depth */
+static double   g_fill = 1081;   /* smoothed depth */
 static double   g_t = 0;
 static double   g_integ = 0;     /* the clocks' steady offset, learnt */         /* position between hist[1] and hist[2] */
 static float    g_hist[4][2];    /* x[-1], x[0], x[1], x[2] for Catmull-Rom */
@@ -236,9 +237,10 @@ int dingbat_audio_read(float *dst, int max_frames) {
     g_fill = DRC_TARGET;
   }
   if (!g_primed) {
-    /* After a gap, wait until most of the target is back: one clean start
-     * instead of a stutter of tiny underruns. */
-    if (depth < (DRC_TARGET * 3) / 4) {
+    /* After a gap, wait until the target is back: one clean start, with the
+     * depth the next refresh without a frame needs (the gentle control would
+     * take many seconds to rebuild it). */
+    if (depth < DRC_TARGET) {
       pthread_mutex_unlock(&g_lock);
       return 0;
     }
@@ -287,7 +289,7 @@ int dingbat_audio_read(float *dst, int max_frames) {
   return n;
 }
 
-/* The depth to hold, in frames: ~25 ms by default. Slow motion delivers a
+/* The depth to hold, in frames: ~33 ms by default. Slow motion delivers a
  * frame's 33 ms of sound in one burst, so it needs more. Main thread. */
 void dingbat_audio_set_target(int frames) {
   pthread_mutex_lock(&g_lock);

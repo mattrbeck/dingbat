@@ -530,6 +530,7 @@ final class DriveSync: ObservableObject {
         switch p.kind {
         case "session":
             guard let s = Self.parseBundle(bytes) else { return }
+            GameSession.shared.waitForSessionWrites()
             try? FileManager.default.removeItem(at: e.sessionPicURL)
             try s.state.write(to: e.sessionURL, options: .atomic)
             try s.header.write(to: e.sessionMetaURL, options: .atomic)

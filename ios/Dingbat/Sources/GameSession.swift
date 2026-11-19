@@ -96,6 +96,18 @@ final class GameSession: NSObject, ObservableObject {
         #endif
         return 60
     }()
+    /// The audio ring's depth at normal speed, in 32768 Hz frames (~33 ms):
+    /// enough to carry the refresh with no new frame at true speed. DEBUG
+    /// builds take `-audio-target-ms N` for tests.
+    static let audioTarget: Int32 = {
+        #if DEBUG
+        let a = ProcessInfo.processInfo.arguments
+        if let i = a.firstIndex(of: "-audio-target-ms"), i + 1 < a.count, let n = Double(a[i + 1]) {
+            return Int32(n * 32.768)
+        }
+        #endif
+        return 1081
+    }()
     private var shotTime: CFTimeInterval = 0          // seconds run since the last library picture
     private var saveCheckTime: CFTimeInterval = 0
     private var lastTick: CFTimeInterval = 0
@@ -212,6 +224,7 @@ final class GameSession: NSObject, ObservableObject {
         systemHolds.removeAll()
         pausedBySystem = false
         if isNDS { NdsState.shared.syncPower() }
+        dingbat_audio_set_target(speed == .slow ? 1800 : Self.audioTarget)
         AudioOutput.shared.start()
         // The ring's rate moves with the core (DS 32728 Hz, else 32768).
         AudioOutput.shared.syncRate()
@@ -609,7 +622,7 @@ final class GameSession: NSObject, ObservableObject {
             }
             if shotTime >= 60 {
                 shotTime = 0
-                storeLastFrame()
+                storeLastFrame(inBackground: true)
             }
             if saveCheckTime >= 1 {
                 saveCheckTime = 0
@@ -993,11 +1006,11 @@ final class GameSession: NSObject, ObservableObject {
         if fps != rounded { fps = rounded }
         #if DEBUG
         // `-audio-stats`: a line a second (fps, ring depth, reader underruns)
-        // into tmp/audiostats.txt, for checking pacing in the simulator.
+        // into Documents/audiostats.txt, for checking pacing in the simulator.
         if Self.audioStats {
             let line = String(format: "fps=%.1f speed=%@ depth=%d underruns=%d\n", f, "\(speed)",
                               dingbat_audio_queued_frames(), dingbat_audio_underruns())
-            let url = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("audiostats.txt")
+            let url = RomLibrary.docs.appendingPathComponent("audiostats.txt")
             if let h = try? FileHandle(forWritingTo: url) {
                 h.seekToEndOfFile(); h.write(line.data(using: .utf8)!); try? h.close()
             } else {
@@ -1149,8 +1162,8 @@ final class GameSession: NSObject, ObservableObject {
         dingbat_set_slowmo(s == .slow ? 1 : 0)
         dingbat_audio_set_free(s == .fastForward ? 1 : 0)
         // Slow motion's frames each bring 33 ms of sound at once: a deeper
-        // ring (~55 ms) so it never runs dry between them; ~25 ms otherwise.
-        dingbat_audio_set_target(s == .slow ? 1800 : 832)
+        // ring (~55 ms) so it never runs dry between them.
+        dingbat_audio_set_target(s == .slow ? 1800 : Self.audioTarget)
     }
 
     func toggleFastForward() { setSpeed(speed == .fastForward ? .normal : .fastForward) }
@@ -1372,6 +1385,9 @@ final class GameSession: NSObject, ObservableObject {
     /// `checkpoint`: the minute's snapshot, kept among the earlier moments
     /// too.
     func persistSession(checkpoint: Bool = false) {
+        // Earlier background writes land first: a caller may go on to read,
+        // replace or delete these files.
+        if !checkpoint { waitForSessionWrites() }
         guard let g = game, sessionMoved else { return }
         // A linked core's state is not the game's session (its clock, its
         // partner): the battery only.
@@ -1380,24 +1396,55 @@ final class GameSession: NSObject, ObservableObject {
         guard let bytes = captureState() else { return }
         let meta = SessionMeta(ts: DriveSync.now(), saveSig: RomLibrary.currentSaveSig(g),
                                by: DriveSync.deviceID, dev: DriveSync.deviceLabel)
-        do {
-            try RomLibrary.ensureDir(g.dir)
-            // The old picture goes first: one left beside a newer snapshot
-            // would be taken for its own (web sessionpic's ts check).
-            try? FileManager.default.removeItem(at: g.sessionPicURL)
-            try bytes.write(to: g.sessionURL, options: .atomic)
-            try meta.header(state: bytes.count, pic: 0).write(to: g.sessionMetaURL, options: .atomic)
-            let jpg = currentImage()?.jpegData(compressionQuality: 0.75)
-            if let jpg { try? jpg.write(to: g.sessionPicURL, options: .atomic) }
-            Checkpoints.notePlay(g, playClock)
-            if checkpoint {
-                Checkpoints.add(g, bytes: bytes, pic: jpg, ts: meta.ts, play: playClock, saveSig: meta.saveSig)
-            }
-            sessionMoved = false
+        let picture = picturePixels()
+        let play = playClock
+        let crashSince = CrashWatch.info(g.fileName)?.since ?? 0
+        let write: () -> Bool = {
+            do {
+                try RomLibrary.ensureDir(g.dir)
+                // The old picture goes first: one left beside a newer snapshot
+                // would be taken for its own (web sessionpic's ts check).
+                try? FileManager.default.removeItem(at: g.sessionPicURL)
+                try bytes.write(to: g.sessionURL, options: .atomic)
+                try meta.header(state: bytes.count, pic: 0).write(to: g.sessionMetaURL, options: .atomic)
+                let jpg = picture.flatMap(Self.pictureJPEG)
+                if let jpg { try? jpg.write(to: g.sessionPicURL, options: .atomic) }
+                Checkpoints.notePlay(g, play)
+                if checkpoint {
+                    Checkpoints.add(g, bytes: bytes, pic: jpg, ts: meta.ts, play: play,
+                                    crashSince: crashSince, saveSig: meta.saveSig)
+                }
+                return true
+            } catch { return false }
+        }
+        let stored = {
             RomLibrary.shared.pictureGen += 1
             DriveSync.shared.markUpload("stateauto:" + g.fileName)
-        } catch {}
+        }
+        if checkpoint {
+            // During play: encoding and writing here would hold up the display
+            // tick for tens of ms, enough to run the audio dry.
+            sessionMoved = false
+            sessionIO.async {
+                let ok = write()
+                DispatchQueue.main.async {
+                    if ok { stored() } else { self.sessionMoved = true }
+                }
+            }
+        } else {
+            var ok = false
+            sessionIO.sync { ok = write() }
+            if ok {
+                sessionMoved = false
+                stored()
+            }
+        }
     }
+
+    /// Background session and picture writes, in order.
+    private let sessionIO = DispatchQueue(label: "dingbat.session-io", qos: .utility)
+    /// Returns once every write already started has landed.
+    func waitForSessionWrites() { sessionIO.sync {} }
 
     /// Signature of the last picture stored, so an unchanged screen (a title
     /// screen left running) is neither rewritten nor sent again.
@@ -1408,21 +1455,66 @@ final class GameSession: NSObject, ObservableObject {
 
     /// The library picture: the last screen, a JPEG at 2x native as the
     /// web's (frame:<name>), mirrored on Drive.
-    func storeLastFrame() {
+    func storeLastFrame(inBackground: Bool = false) {
         // A switched-off DS keeps the last picture played (web storeLastFrame).
         if isNDS && NdsState.shared.poweredOff { return }
         // Not even on a pause: the picture already stored (or the cartridge)
         // is a better face than a blank screen.
         if screenBlank() { return }
-        guard let g = game, let jpg = currentImage()?.jpegData(compressionQuality: 0.75) else { return }
-        let sig = DriveSync.sig(jpg)
-        guard sig != lastFrameSig else { return }
-        lastFrameSig = sig
-        try? RomLibrary.ensureDir(g.dir)
-        try? jpg.write(to: g.shotURL, options: .atomic)
-        AddPictures.clearBlank([g.fileName])
-        RomLibrary.shared.pictureGen += 1
-        DriveSync.shared.markUpload("frame:" + g.fileName)
+        guard let g = game, let picture = picturePixels() else { return }
+        let write: (Data) -> Void = { jpg in
+            try? RomLibrary.ensureDir(g.dir)
+            try? jpg.write(to: g.shotURL, options: .atomic)
+        }
+        let stored = {
+            AddPictures.clearBlank([g.fileName])
+            RomLibrary.shared.pictureGen += 1
+            DriveSync.shared.markUpload("frame:" + g.fileName)
+        }
+        guard inBackground else {
+            guard let jpg = Self.pictureJPEG(picture) else { return }
+            let sig = DriveSync.sig(jpg)
+            guard sig != lastFrameSig else { return }
+            lastFrameSig = sig
+            write(jpg)
+            stored()
+            return
+        }
+        sessionIO.async {
+            guard let jpg = Self.pictureJPEG(picture) else { return }
+            let sig = DriveSync.sig(jpg)
+            DispatchQueue.main.async {
+                guard self.game?.fileName == g.fileName, sig != self.lastFrameSig else { return }
+                self.lastFrameSig = sig
+                self.sessionIO.async {
+                    write(jpg)
+                    DispatchQueue.main.async(execute: stored)
+                }
+            }
+        }
+    }
+
+    /// The picture's pixels now (RGBA): a copy, quick enough for the display
+    /// tick, that any thread can turn into the stored JPEG.
+    private func picturePixels() -> (px: [UInt32], width: Int, height: Int)? {
+        guard game != nil else { return nil }
+        if isNDS {
+            GameRenderer.shared.syncNdsScreens()
+            guard let top = dingbat_nds_top_rgba() else { return nil }
+            return (Array(UnsafeBufferPointer(start: top, count: 256 * 192)), 256, 192)
+        }
+        guard let ptr = dingbat_framebuffer_rgba() else { return nil }
+        let w = Int(dingbat_fb_width()), h = Int(dingbat_fb_height())
+        var px = Array(UnsafeBufferPointer(start: ptr, count: w * h))
+        if let shades = Self.pictureShades(), let raw = dingbat_framebuffer() {
+            for i in 0..<(w * h) { if let c = Self.shadeRGBA(raw[i], shades) { px[i] = c } }
+        }
+        return (px, w, h)
+    }
+
+    private static func pictureJPEG(_ p: (px: [UInt32], width: Int, height: Int)) -> Data? {
+        p.px.withUnsafeBufferPointer { rgbaImage($0.baseAddress!, width: p.width, height: p.height) }?
+            .jpegData(compressionQuality: 0.75)
     }
 
     /// The screen a picture is taken of (a DS game's top one) is one colour:
@@ -1493,6 +1585,7 @@ final class GameSession: NSObject, ObservableObject {
         dingbat_audio_clear()
         flushSave()
         sessionMoved = false
+        waitForSessionWrites()
         if let g = game {
             for u in [g.sessionURL, g.sessionMetaURL, g.sessionPicURL] { try? FileManager.default.removeItem(at: u) }
             RomLibrary.shared.pictureGen += 1

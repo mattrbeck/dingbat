@@ -123,12 +123,11 @@ pull to sync against the fake Drive.
 - **Sign-in** opens Google's consent page in the system browser sheet;
   the web's `oauth-callback.html` hands an app sign-in on to
   `dingbat://oauth`, so that page must be deployed for the app to sign in.
-- **Pacing.** Frames follow the display clock, as the web's follow
-  requestAnimationFrame; on a 60 Hz screen the game runs at exactly 60
-  frames a second (0.46% above the hardware's 59.73) so every refresh shows
-  one new frame, and the audio reader resamples by a hair (at most 1.5%) to
-  hold its buffer at ~25 ms (~55 ms in slow motion) instead of running dry.
-  The web steps at 59.73 and drops a frame every few seconds. Measured in
+- **Pacing.** Frames follow the display clock at the console's true rate, as
+  the web's follow requestAnimationFrame: on a 60 Hz screen a refresh every
+  ~3.7 s shows the frame before again. The audio ring holds ~33 ms (~55 ms in
+  slow motion), enough to carry that refresh, and its reader corrects only the
+  clocks' drift, gently. Before true speed, measured in
   the simulator (`-latency-test 40` on tonc's m7_demo): press to the changed
   frame presented, p50 12.9 / max 15.1 ms; audio ring ~27 ms on top of a
   ~5 ms output buffer. Audio depth does not delay input or video. A tick

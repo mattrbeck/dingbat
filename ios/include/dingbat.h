@@ -468,7 +468,7 @@ int dingbat_audio_read(float *dst, int max_frames);
 int dingbat_audio_queued_frames(void);
 /* Fast-forward: play the ring as it comes, no rate control. Main thread. */
 void dingbat_audio_set_free(int on);
-/* The audio ring's target depth in frames at 32768 Hz (default 832, ~25 ms;
+/* The audio ring's target depth in frames at 32768 Hz (default 1081, ~33 ms;
  * the same count serves the DS's 32728 Hz). */
 void dingbat_audio_set_target(int frames);
 int dingbat_audio_underruns(void);  /* times the reader ran dry (diagnostics) */
