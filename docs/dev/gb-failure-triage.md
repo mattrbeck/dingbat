@@ -1055,12 +1055,12 @@ the no-switch `sound/*_ds_{2,4,6}`); on E it is the mirror image (22/46).
 ## I. DocBoy (`docboy/*`, first scored 2026-10-14)
 
 DocBoy's own suite, scored by its own runner's rules on DMG ABC and CPU CGB E
-(`tests/README.md`, "The DocBoy suite"): 8,886 / 9,186 at `DocboyRev` (49
+(`tests/README.md`, "The DocBoy suite"): 8,900 / 9,186 at `DocboyRev` (49
 more not scored, `DocboyNotScored`). Every failing ROM is in
 [`tests/results_docboy.md`](../../tests/results_docboy.md); every group that is
 not scored is in the "Deliberately not scored" ledger at the end of
-`tests/results.md`. The 300 failing tests are I1 8, I2 11, I3 176, I5 6,
-I6 6, I9 20, I11 15, I12 35, I13 10 and "Small" 13. I4's scored rows all
+`tests/results.md`. The 286 failing tests are I1 8, I2 11, I3 176, I5 6,
+I6 6, I9 20, I11 1, I12 35, I13 10 and "Small" 13. I4's scored rows all
 pass; I7, I8 and I10 are closed. The 9,186 include DocBoy's rebuilds of 7 SameSuite channel 1 ROMs
 (`cgb/samesuite/apu/channel_1/*-cgbE`), which pass; the eighth,
 `channel_1_sweep_restart_2-cgbE`, is not scored (its expectation and
@@ -1866,25 +1866,37 @@ hardware question. Families:
   overflow}` tests (I4), whose only miss is this readback. No CGB E has been
   measured; a flashcart answers for this range itself
   (docs/dev/hwprobe-questions.md), so it needs a CGB E with a real cart.
-* **I11. CGB header modes (15 left).** `mode_cgb_flag_{81,82,83,90}` pass:
+* **I11. CGB header modes (1 left).** `mode_cgb_flag_{81,82,83,90}` pass:
   the header read follows Pan Docs ("0143 — CGB flag", "Power Up Sequence",
   "FF4C — KEY0"): bit 7 picks the CGB and copies the byte to KEY0, so CGB
   mode unless KEY0 bit 2 or 3 is set.
 
-  Left: the 15 `cgb_dmg_ext_mode` tests (`banks` 2, `ir` 1, `key1` 1, `mode`
-  8, `ppu/opri_write_read`, `serial` 1, `undocumented/ff74_write_read`).
-  They are PGB mode (`$0143 = $88..$8F`, KEY0 bit 3), which Pan Docs leaves
-  unresearched and dingbat does not model (those carts stay on the
-  compatibility path); DocBoy's "DMG ext mode" (SVBK, VBK, RP, KEY1, SC.1,
-  FF74 and OPRI answer as in CGB mode, BCPD and HDMA do not) is its own model.
-  Its sources name no hardware run, but these ROMs (and the KEY0 `mode`
-  ones) alone end a failure with a beep, which reads like a verdict meant to
-  be heard on a console whose LCD may be elsewhere. SameBoy CGB E, with its
-  own boot ROM and with Nintendo's, fails the same 14 (it passes
-  `opri_write_read`): a NotScored candidate until a console answers. The
-  ROMs are their own probe: on a CGB or AGS from a flashcart, a beep is a
-  failure, silence a pass (`mode_cgb_flag_88`, with `cgb_dmg_mode/mode/
-  mode_cgb_flag_84` as the silent control).
+  Closed 2026-11-17 (14): the `cgb_dmg_ext_mode` carts (`$0143 = $88..$8F`,
+  KEY0 bit 3) now run nocash's "Extended DMG Mode" (gb-derivations.md
+  §8, "KEY0 bit 3 keeps part of the CGB register set"): `banks` 2, `ir` 1,
+  `mode` 8, `ppu/opri_write_read`, `serial/sc_write_read`,
+  `undocumented/ff74_write_read`. The `mode` ROMs ask SVBK live and BCPD
+  dead; with `$8C..$8F` (bits 2 and 3) that is nocash's "Bit3 has priority".
+  VBK, SVBK, RP and OPRI are named by nocash, HDMA/BCPD/OCPD dead too
+  (the `hdma` and `bcpd`/`ocpd` rows, green before and after); SC.1 and
+  FF74 are not named and are live by his list's reading ("Disable Some
+  CGB Functions", four named), as DocBoy has them. SameBoy CGB E fails the
+  14 (it answers compatibility mode); it is not ground truth here either.
+
+  Left, a source conflict (not implemented): `key1/key1_write_read` wants
+  KEY1 live (write 0 reads $7E, $FF reads $7F), where nocash has "Bit3
+  disables HDMA, BGPD, OBPD, and KEY1" (nesdev "FF4C and FF6C", 2020-03-29),
+  which dingbat follows ($FF). A NotScored candidate until a console
+  answers. The ROMs are their own probe: on a CGB or AGS from a flashcart, a
+  beep is a failure, silence a pass (`key1_write_read`, with
+  `cgb_dmg_mode/mode/mode_cgb_flag_84` as the silent control).
+  Not modelled in the mode, no row covers it: the picture stays the
+  compatibility one (fallback palette, X-ordered objects, LCDC.0 as BG
+  on/off, map attributes read from bank 1 as ever, now writable through
+  VBK); Pan Docs' "OPRI has an effect if a PGB value (`0xX8`, `0xXC`) is
+  written to KEY0" ("TO BE VERIFIED") is not wired to object priority; the
+  hand-off is the compatibility one (CPU registers, palettes), where Pan
+  Docs has the boot ROM take its CGB path for any bit-7 cart.
 
   OPRI itself (`$FF6C` bit 0, Pan Docs "FF6C — OPRI") is a register in CGB
   mode, $FF in compatibility mode (`cgb/ppu/opri_write_read`,

@@ -2528,6 +2528,10 @@ type
     # pixel; keep it in step via gb_sync_cgb_native wherever its inputs move.
     cgb_enabled*:    bool
     cgb_native*:     bool
+    # KEY0 bit 3 ($0143 = $88-$8F, $C8-$CF), nocash's "Extended DMG Mode": a
+    # compatibility mode that keeps VBK, SVBK, RP, OPRI, FF74 and SC.1 (only
+    # HDMA, BCPD, OCPD and KEY1 go). Recomputed with cgb_native, true with it.
+    cgb_ext_io*:     bool
     # Frontend opt-in for Super Game Boy emulation; default off. Consulted only
     # at post_init, where the cart header has the final say.
     sgb_requested*:  bool
@@ -3353,6 +3357,9 @@ proc gb_sync_cgb_native*(gb: GB) {.inline.} =
   ## after the FF50 unmap, and after a state load.
   gb.cgb_native = gb.cgb_enabled and
     (gb.cgb_flag != cgbNone or (gb.memory != nil and gb.memory.bootrom.len > 0))
+  # The boot ROM copies a bit-7 header byte to KEY0; bit 3 wins over bit 2.
+  gb.cgb_ext_io = gb.cgb_native or (gb.cgb_enabled and
+    (gb.cartridge.rom[0x0143] and 0x88'u8) == 0x88'u8)
 include interrupts
 include serial
 include timer
@@ -3520,9 +3527,8 @@ proc new_gb*(bootrom_path: string; rom_path: string; headless: bool; run_bios: b
   # tests bit 7 alone. Clear: it writes $04 to KEY0 (DMG compatibility mode).
   # Set: it copies the whole byte to KEY0, whose bit 2 is DMG compatibility
   # mode ("FF4C — KEY0"), so $81-$83, $90, $C0 ... are CGB carts and $84-$87
-  # are not; bit 6 is ignored ($C0 runs as $80). Bit 3 is the "PGB" mode
-  # ($88-$8F), which Pan Docs leaves unresearched and dingbat does not model:
-  # those carts stay on the compatibility path.
+  # are not; bit 6 is ignored ($C0 runs as $80). Bit 3 ($88-$8F) is
+  # compatibility mode too, with part of the CGB register set (cgb_ext_io).
   let cgb_byte = result.cartridge.rom[0x0143]
   let cgb_device = (cgb_byte and 0x80'u8) != 0   # the cart asks for a CGB
   result.cgb_flag =

@@ -37,8 +37,9 @@ proc serial_is_master(serial: GbSerial): bool {.inline.} =
 
 proc serial_tap_bit(serial: GbSerial; gb: GB): uint16 {.inline.} =
   ## Tap bit: 7 (256 T period, 512 T per bit), or 2 under SC.1, the CGB fast
-  ## clock, wired only in native CGB mode (mooneye misc/bits/unused_hwio-C).
-  if gb.cgb_native and (serial.sc and 0x02) != 0: 1'u16 shl 2
+  ## clock, wired in CGB mode and KEY0 bit 3's (cgb_ext_io), not in
+  ## compatibility mode (mooneye misc/bits/unused_hwio-C).
+  if gb.cgb_ext_io and (serial.sc and 0x02) != 0: 1'u16 shl 2
   else: 1'u16 shl 7
 
 proc serial_update_shifting(serial: GbSerial) {.inline.} =
@@ -209,8 +210,8 @@ when SERIAL_CPU_SAMPLE_T < 4 and SERIAL_HALT_TAIL_BLIND != 0:
     serial.serial_cpu_pre(gb) and not serial.pre_irq
 
 proc serial_sc_unused_bits(gb: GB): uint8 {.inline.} =
-  # Unused SC bits read 1; bit 1 only exists in native CGB mode.
-  if gb.cgb_native: 0x7C'u8 else: 0x7E'u8
+  # Unused SC bits read 1; bit 1 exists where the fast clock does.
+  if gb.cgb_ext_io: 0x7C'u8 else: 0x7E'u8
 
 proc serial_read*(serial: GbSerial; gb: GB; idx: int): uint8 =
   when SERIAL_CPU_SAMPLE_T < 4:
@@ -256,7 +257,7 @@ proc serial_write_commit(serial: GbSerial; gb: GB; idx: int; val: uint8) =
       if was_master:
         serial.sb = (serial.sb shl 1) or 1'u8
     serial.bits_remaining = 8
-    serial.sc = val and (if gb.cgb_native: 0x83'u8 else: 0x81'u8)
+    serial.sc = val and (if gb.cgb_ext_io: 0x83'u8 else: 0x81'u8)
     if (val and 0x80) == 0:
       serial.bits_remaining = 0  # clearing the enable bit aborts a transfer
     elif started:

@@ -997,8 +997,9 @@ proc tick_bg_fetcher*(ppu: GbFifoPpu; gb: GB) =
              " num=", toHex(ppu.vram[0][map + offset], 2),
              " lcdc=", toHex(ppu.lcd_control, 2)
     ppu.tile_num   = ppu.vram[0][map + offset]
-    # Unconditional (a branch here measured +0.8%); outside CGB mode VBK is
-    # not mapped, so bank 1 is never written and the attribute plane stays 0.
+    # Unconditional (a branch here measured +0.8%); in compatibility mode VBK
+    # is not mapped, so bank 1 is never written and the attribute plane stays
+    # 0 (KEY0 bit 3 keeps VBK, cgb_ext_io: its picture is not known).
     ppu.tile_attrs = ppu.vram[1][map + offset]
     when CGB_WIN_CUT_PLANES:
       if unlikely(residue >= 0): ppu.tile_num = uint8(residue)

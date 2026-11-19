@@ -3027,9 +3027,10 @@ proc ppu_write*(ppu: GbPpu; gb: GB; idx: int; val: uint8) =
       ppu_store_wx(ppu, gb, val)
   of 0xFF4F:
     # The register, not the console: VBK goes with the CGB set when the boot
-    # ROM sets KEY0, so a compatibility cart is stuck on bank 0. The read stays
-    # on cgb_enabled (mooneye misc/bits/unused_hwio-C reads $FE).
-    if gb.cgb_native: ppu.vram_bank = val and 0x1
+    # ROM sets KEY0 bit 2, so a compatibility cart is stuck on bank 0 (bit 3
+    # keeps it, cgb_ext_io). The read stays on cgb_enabled (mooneye
+    # misc/bits/unused_hwio-C reads $FE).
+    if gb.cgb_ext_io: ppu.vram_bank = val and 0x1
   # Each edits one byte of the live address counter. The low four bits are
   # ignored (Pan Docs, FF51-FF54); the destination's upper bits are dropped
   # where the counter becomes an address (ppu_copy_hdma_block).

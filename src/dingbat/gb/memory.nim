@@ -401,22 +401,24 @@ proc read_byte*(mem: GbMemory; gb: GB; idx: int): uint8 =
   of 0xFF56:
     # Infrared, CGB only. Bits 0/6/7 R/W; bit 1 reads 1 (no IR signal
     # modelled); bits 2-5 read set.
-    if gb.cgb_native: (mem.rp and 0xC1'u8) or 0x3E'u8 else: 0xFF'u8
+    if gb.cgb_ext_io: (mem.rp and 0xC1'u8) or 0x3E'u8 else: 0xFF'u8
   of 0xFF70:
     # Pan Docs: bits 0-2 read/write. A stored 0 maps bank 1 but reads 0: the
     # 0 -> 1 substitution is in the bank decode (SVBK_READS_WRITTEN).
-    if gb.cgb_native:
+    if gb.cgb_ext_io:
       0xF8'u8 or (when SVBK_READS_WRITTEN: mem.svbk else: mem.wram_bank)
     else: 0xFF'u8
   of 0xFF6C:
-    # OPRI: $FF in compatibility mode (DocBoy cgb_dmg_mode/ppu/opri_write_read).
-    if gb.cgb_native: 0xFE'u8 or mem.opri else: 0xFF'u8
+    # OPRI: $FF in compatibility mode (DocBoy cgb_dmg_mode/ppu/opri_write_read)
+    # but kept by KEY0 bit 3 (cgb_ext_io).
+    if gb.cgb_ext_io: 0xFE'u8 or mem.opri else: 0xFF'u8
   # FF72-FF77 exist on CGB/AGB even in compat mode, except FF74 (mooneye
-  # misc/bits/unused_hwio-C); DMG reads 0xFF (acceptance/bits/unused_hwio-GS).
+  # misc/bits/unused_hwio-C), which KEY0 bit 3 keeps; DMG reads 0xFF
+  # (acceptance/bits/unused_hwio-GS).
   of 0xFF72: (if gb.cgb_enabled: mem.ff72 else: 0xFF'u8)
   of 0xFF73: (if gb.cgb_enabled: mem.ff73 else: 0xFF'u8)
   of 0xFF74:
-    if gb.cgb_native: mem.ff74 else: 0xFF'u8
+    if gb.cgb_ext_io: mem.ff74 else: 0xFF'u8
   of 0xFF75: (if gb.cgb_enabled: mem.ff75 or 0x8F'u8 else: 0xFF'u8)
   # PCM12/PCM34: the channels' current 4-bit outputs (CH1/CH3 low nibble,
   # off channels 0). Channels advance lazily; the catch-up makes the read see
@@ -638,8 +640,9 @@ proc write_byte*(mem: GbMemory; gb: GB; idx: int; val: uint8) =
     # A DMG cart drops out of CGB mode but the machine stays a CGB (timing,
     # STAT-write glitch), so cgb_enabled is not cleared.
     gb_sync_cgb_native(gb)
-    # VBK goes with the CGB register set: map attributes read zero from here.
-    if not gb.cgb_native: gb.ppu.vram_bank = 0
+    # VBK goes with the CGB register set (KEY0 bit 3 keeps it): map
+    # attributes read zero from here.
+    if not gb.cgb_ext_io: gb.ppu.vram_bank = 0
   case idx
   of 0x0000..0x7FFF:
     mbc_write(gb.cartridge, idx, val)
@@ -689,17 +692,17 @@ proc write_byte*(mem: GbMemory; gb: GB; idx: int; val: uint8) =
   of 0xFF51..0xFF55: ppu_write(gb.ppu, gb, idx, val)
   of 0xFF68..0xFF6B: ppu_write(gb.ppu, gb, idx, val)
   of 0xFF56:
-    if gb.cgb_native: mem.rp = val and 0xC1
+    if gb.cgb_ext_io: mem.rp = val and 0xC1
   of 0xFF70:
-    if gb.cgb_native:
+    if gb.cgb_ext_io:
       mem.svbk = val and 0x7
       mem.wram_bank = if mem.svbk == 0: 1'u8 else: mem.svbk
   of 0xFF6C:
-    if gb.cgb_native: mem.opri = val and 0x01
+    if gb.cgb_ext_io: mem.opri = val and 0x01
   of 0xFF72: mem.ff72 = val
   of 0xFF73: mem.ff73 = val
   of 0xFF74:
-    if gb.cgb_native: mem.ff74 = val
+    if gb.cgb_ext_io: mem.ff74 = val
   of 0xFF75: mem.ff75 = val or 0x8F
   of 0xFF80..0xFFFE: mem.hram[idx - 0xFF80] = val
   of 0xFFFF:         irq_write(gb.interrupts, idx, val)

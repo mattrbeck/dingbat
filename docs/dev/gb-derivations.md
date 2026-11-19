@@ -1788,11 +1788,33 @@ Dots are dingbat's line dots; W is the first dot of the writing M-cycle
   {43,58}` compare $9900-$997F against that map; `_1a` against zeros.
 
 ### VBK is locked outside CGB mode; FF4F reads $FE
-- Claim: VBK leaves the register map with the rest of the CGB set when KEY0 is
-  set, so bank 1 is unwritable and the attribute plane is all zero by
-  construction; the fetcher reads it unconditionally (a branch there cost
-  +0.8 % on Pokemon Crystal).
+- Claim: VBK leaves the register map with the rest of the CGB set when KEY0
+  bit 2 is set, so bank 1 is unwritable and the attribute plane is all zero
+  by construction; the fetcher reads it unconditionally (a branch there cost
+  +0.8 % on Pokemon Crystal). KEY0 bit 3 keeps VBK (next entry), so there
+  the plane is whatever the cart writes.
 - Evidence: mooneye `misc/bits/unused_hwio-C` reads $FE from FF4F.
+
+### KEY0 bit 3 keeps part of the CGB register set
+- Default: `GB.cgb_ext_io` (`gb.nim`, `gb_sync_cgb_native`), true with
+  `cgb_native` and, after the boot ROM, for a CGB with `$0143 & $88 = $88`.
+- Claim: a bit-7 header byte with bit 3 set ($88-$8F, $C8-$CF) is KEY0's
+  "Extended DMG Mode": compatibility mode (picture, KEY1, HDMA, BCPD, OCPD
+  as with bit 2) with VBK, SVBK, RP, OPRI ($FF6C), FF74 and SC.1 still
+  answering as in CGB mode. Bit 3 wins over bit 2 ($8C-$8F).
+- Evidence: nocash, nesdev "FF4C and FF6C" (2020-03-29): "Bit 3 - Disable
+  Some CGB Functions (0=Normal, 1=Extended DMG Mode)", "Bit3 disables HDMA,
+  BGPD, OBPD, and KEY1. Bit2 does the same, and additionally disables
+  RP(IR), VBK(VRAM), SVBK(WRAM), and FF6Ch", bit 3 having priority. Pan Docs
+  ("FF6C — OPRI"): OPRI "has an effect if a PGB value (`0xX8`, `0xXC`) is
+  written to KEY0" (to be verified). SC.1 and FF74 are not named: live by
+  the list's reading. DocBoy `cgb_dmg_ext_mode/*` pass, except
+  `key1_write_read`, which wants KEY1 live against nocash's list and stays
+  red (gb-failure-triage.md I11).
+- No console measured. The picture, object priority and hand-off stay the
+  compatibility ones (I11 lists them).
+- Clean-room: derived from test ROM disassembly, Pan Docs and nocash's
+  forum post; no emulator source consulted.
 
 ### SVBK reads back the stored bits, not the mapped bank
 - Default: `SVBK_READS_WRITTEN = true` (`memory.nim`); `GbMemory.svbk` beside

@@ -1,6 +1,6 @@
 # DocBoy Test Suite - Detailed Results
 
-*Generated: 2026-11-18 11:19:00 · Docheinstein/docboy 01e04d3d*
+*Generated: 2026-11-18 16:22:25 · Docheinstein/docboy 01e04d3d*
 
 DocBoy's own ROMs (`docboy/` in its tests/config manifests), each
 scored by the verdict its manifest names, the way DocBoy's runner
@@ -11,7 +11,7 @@ run on a DMG ABC, the three CGB manifests on a CPU CGB E with the
 cart header picking the mode. See tests/README.md for the mechanism
 and docs/dev/gb-failure-triage.md for the failing families.
 
-**8886/9186 passed.**
+**8900/9186 passed.**
 
 ## docboy/dmg/cpu
 
@@ -579,26 +579,17 @@ All 4 tests passed (CGB cgbE).
 
 All 2 tests passed (CGB cgbE).
 
-## docboy/cgb_dmg_ext_mode/banks (0/2 passed)
+## docboy/cgb_dmg_ext_mode/banks
 
-0/2 tests passed on CGB cgbE, 2 failed:
-
-| Test | Result |
-|------|--------|
-| cgb_dmg_ext_mode/docboy/banks/svbk_write_read | $FFF0=$02 = fail value (tick 100008) |
-| cgb_dmg_ext_mode/docboy/banks/vbk_write_read | $FFF0=$02 = fail value (tick 100000) |
+All 2 tests passed (CGB cgbE).
 
 ## docboy/cgb_dmg_ext_mode/hdma
 
 All 2 tests passed (CGB cgbE).
 
-## docboy/cgb_dmg_ext_mode/ir (0/1 passed)
+## docboy/cgb_dmg_ext_mode/ir
 
-0/1 tests passed on CGB cgbE, 1 failed:
-
-| Test | Result |
-|------|--------|
-| cgb_dmg_ext_mode/docboy/ir/rp_write_read | $FFF0=$02 = fail value (tick 100008) |
+All 1 tests passed (CGB cgbE).
 
 ## docboy/cgb_dmg_ext_mode/key1 (0/1 passed)
 
@@ -608,41 +599,18 @@ All 2 tests passed (CGB cgbE).
 |------|--------|
 | cgb_dmg_ext_mode/docboy/key1/key1_write_read | $FFF0=$02 = fail value (tick 100008) |
 
-## docboy/cgb_dmg_ext_mode/mode (0/8 passed)
+## docboy/cgb_dmg_ext_mode/mode
 
-0/8 tests passed on CGB cgbE, 8 failed:
+All 8 tests passed (CGB cgbE).
 
-| Test | Result |
-|------|--------|
-| cgb_dmg_ext_mode/docboy/mode/mode_cgb_flag_8a | $FFF0=$02 = fail value (tick 100008) |
-| cgb_dmg_ext_mode/docboy/mode/mode_cgb_flag_8b | $FFF0=$02 = fail value (tick 100008) |
-| cgb_dmg_ext_mode/docboy/mode/mode_cgb_flag_8c | $FFF0=$02 = fail value (tick 100008) |
-| cgb_dmg_ext_mode/docboy/mode/mode_cgb_flag_8d | $FFF0=$02 = fail value (tick 100008) |
-| cgb_dmg_ext_mode/docboy/mode/mode_cgb_flag_8e | $FFF0=$02 = fail value (tick 100008) |
-| cgb_dmg_ext_mode/docboy/mode/mode_cgb_flag_8f | $FFF0=$02 = fail value (tick 100008) |
-| cgb_dmg_ext_mode/docboy/mode/mode_cgb_flag_88 | $FFF0=$02 = fail value (tick 100008) |
-| cgb_dmg_ext_mode/docboy/mode/mode_cgb_flag_89 | $FFF0=$02 = fail value (tick 100008) |
+## docboy/cgb_dmg_ext_mode/ppu
 
-## docboy/cgb_dmg_ext_mode/ppu (4/5 passed)
+All 5 tests passed (CGB cgbE).
 
-4/5 tests passed on CGB cgbE, 1 failed:
+## docboy/cgb_dmg_ext_mode/serial
 
-| Test | Result |
-|------|--------|
-| cgb_dmg_ext_mode/docboy/ppu/opri_write_read | $FFF0=$02 = fail value (tick 100008) |
+All 1 tests passed (CGB cgbE).
 
-## docboy/cgb_dmg_ext_mode/serial (0/1 passed)
+## docboy/cgb_dmg_ext_mode/undocumented
 
-0/1 tests passed on CGB cgbE, 1 failed:
-
-| Test | Result |
-|------|--------|
-| cgb_dmg_ext_mode/docboy/serial/sc_write_read | $FFF0=$02 = fail value (tick 100008) |
-
-## docboy/cgb_dmg_ext_mode/undocumented (3/4 passed)
-
-3/4 tests passed on CGB cgbE, 1 failed:
-
-| Test | Result |
-|------|--------|
-| cgb_dmg_ext_mode/docboy/undocumented/ff74_write_read | $FFF0=$02 = fail value (tick 100008) |
+All 4 tests passed (CGB cgbE).
