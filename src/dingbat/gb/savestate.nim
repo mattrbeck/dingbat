@@ -1374,17 +1374,18 @@ const GB_THUMB_H = GB_THUMB_W * 144 div 160   # preserve 10:9 → 120x108
 proc gb_thumbnail(gb: GB): seq[byte] =
   downscale_bgr555(gb.ppu.framebuffer, 160, 144, GB_THUMB_W, GB_THUMB_H)
 
-proc state_bytes*(gb: GB; thumbnail = false): string =
+proc state_bytes*(gb: GB; thumbnail = false; hashed = true): string =
   ## Full validated state image (header + payload) for in-memory transports
   ## (web IndexedDB / downloads). Same format as .state files. With thumbnail,
   ## a downscaled BGR555 screenshot trailer is appended (ignored by old readers).
   let payload = gb.gb_state_payload()
   if thumbnail:
     make_state_bytes(ckGB, gb.gb_rom_checksum(), gb.gb_rom_size(),
-                     payload, gb.gb_thumbnail(), uint16(GB_THUMB_W), uint16(GB_THUMB_H))
+                     payload, gb.gb_thumbnail(), uint16(GB_THUMB_W), uint16(GB_THUMB_H),
+                     hashed = hashed)
   else:
     make_state_bytes(ckGB, gb.gb_rom_checksum(),
-                     gb.gb_rom_size(), payload)
+                     gb.gb_rom_size(), payload, hashed = hashed)
 
 proc gb_apply_checked(gb: GB; payload: string; rev: uint32): bool =
   ## Apply a validated payload, restoring the live machine if it fails midway.

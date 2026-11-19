@@ -226,6 +226,7 @@ final class GameSession: NSObject, ObservableObject {
         if isNDS { NdsState.shared.syncPower() }
         dingbat_audio_set_target(speed == .slow ? 1800 : Self.audioTarget)
         AudioOutput.shared.start()
+        Peripherals.shared.warmTap()
         // The ring's rate moves with the core (DS 32728 Hz, else 32768).
         AudioOutput.shared.syncRate()
         AudioOutput.shared.setAnalogFilter(Settings.shared.analogFilter && entry.isGBA)
@@ -346,7 +347,10 @@ final class GameSession: NSObject, ObservableObject {
         flushSave()
     }
 
-    @objc private func appDidBecomeActive() { systemRelease("inactive") }
+    @objc private func appDidBecomeActive() {
+        systemRelease("inactive")
+        if game != nil { Peripherals.shared.warmTap() }
+    }
 
     func systemHold(_ why: String) {
         guard game != nil else { return }
@@ -1227,6 +1231,28 @@ final class GameSession: NSObject, ObservableObject {
         return Data(bytes: ptr, count: Int(size))
     }
 
+    /// captureState in two halves: copied out here, then hashed and deflated
+    /// by `sealState` on any thread (a DS's 6 MB took tens of ms).
+    private func openState() -> Data? {
+        guard game != nil else { return nil }
+        if isNDS { GameRenderer.shared.syncNdsScreens() }
+        let size = dingbat_state_open()
+        guard size > 0, let ptr = dingbat_state_data() else { return nil }
+        return Data(bytes: ptr, count: Int(size))
+    }
+
+    private static func sealState(_ open: Data) -> Data? {
+        let cap = dingbat_state_seal_bound(open.count)
+        guard cap > 0 else { return nil }
+        var out = Data(count: cap)
+        let n = out.withUnsafeMutableBytes { o in
+            open.withUnsafeBytes { i in dingbat_state_seal(i.baseAddress, open.count, o.baseAddress, cap) }
+        }
+        guard n > 0 else { return nil }
+        out.count = n
+        return out
+    }
+
     /// Apply a state; nil on success, else the sentence saying why not (web
     /// STATE_REJECT_COPY).
     @discardableResult
@@ -1392,14 +1418,19 @@ final class GameSession: NSObject, ObservableObject {
         // A linked core's state is not the game's session (its clock, its
         // partner): the battery only.
         guard !NetLink.shared.holdsCore, !twoPlayer else { flushSave(); return }
-        flushSave()
-        guard let bytes = captureState() else { return }
-        let meta = SessionMeta(ts: DriveSync.now(), saveSig: RomLibrary.currentSaveSig(g),
-                               by: DriveSync.deviceID, dev: DriveSync.deviceLabel)
+        // During play the battery file is queued, not waited for: its write
+        // (fsync and rename) lands on the writer thread, and the save's
+        // signature is read once it has.
+        if checkpoint { dingbat_flush_save_queued() } else { flushSave() }
+        guard let open = openState() else { return }
+        let ts = DriveSync.now(), by = DriveSync.deviceID, dev = DriveSync.deviceLabel
         let picture = picturePixels()
         let play = playClock
         let crashSince = CrashWatch.info(g.fileName)?.since ?? 0
         let write: () -> Bool = {
+            guard let bytes = Self.sealState(open) else { return false }
+            dingbat_writer_drain()
+            let meta = SessionMeta(ts: ts, saveSig: RomLibrary.currentSaveSig(g), by: by, dev: dev)
             do {
                 try RomLibrary.ensureDir(g.dir)
                 // The old picture goes first: one left beside a newer snapshot

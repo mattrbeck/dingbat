@@ -1488,7 +1488,7 @@ const GBA_THUMB_H = GBA_THUMB_W * 160 div 240   # preserve 3:2 → 120x80
 proc gba_thumbnail(gba: GBA): seq[byte] =
   downscale_bgr555(gba.ppu.framebuffer, 240, 160, GBA_THUMB_W, GBA_THUMB_H)
 
-proc state_bytes*(gba: GBA; thumbnail = false): string =
+proc state_bytes*(gba: GBA; thumbnail = false; hashed = true): string =
   ## Full state image (header + payload + the whole-ROM trailer), the .state
   ## file format. With thumbnail, a BGR555 screenshot trailer goes before the
   ## whole-ROM one. Older readers ignore both.
@@ -1496,10 +1496,10 @@ proc state_bytes*(gba: GBA; thumbnail = false): string =
   if thumbnail:
     make_state_bytes(ckGBA, gba.gba_rom_checksum(), GBA_STATE_ROM_TAG, payload,
                      gba.gba_thumbnail(), uint16(GBA_THUMB_W), uint16(GBA_THUMB_H),
-                     gba.gba_whole_rom())
+                     gba.gba_whole_rom(), hashed)
   else:
     make_state_bytes(ckGBA, gba.gba_rom_checksum(), GBA_STATE_ROM_TAG, payload,
-                     gba.gba_whole_rom())
+                     gba.gba_whole_rom(), hashed)
 
 proc gba_apply_checked(gba: GBA; payload: string; rev: uint32): bool =
   ## Apply a validated payload, restoring the live machine if it fails midway.

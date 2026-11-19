@@ -380,7 +380,7 @@ proc legacy_payload_version*(core: CoreKind; container: uint32): uint32 =
 
 proc write_state_header(w: var Writer; core: CoreKind;
                         rom_checksum, rom_size: uint32;
-                        payload: string; flags: uint16) =
+                        payload: string; flags: uint16; hashed = true) =
   w.buf.add(STATE_MAGIC)
   w.write_u32(STATE_VERSION)
   w.write_u8(uint8(core))
@@ -389,22 +389,23 @@ proc write_state_header(w: var Writer; core: CoreKind;
   w.write_u32(rom_checksum)
   w.write_u32(rom_size)
   w.write_u32(uint32(payload.len))
-  w.write_u32(fnv1a(payload))
+  w.write_u32(if hashed: fnv1a(payload) else: 0'u32)
   w.buf.add(payload)
 
 proc make_state_bytes*(core: CoreKind; rom_checksum, rom_size: uint32;
                        payload: string; thumbnail: openArray[byte];
                        thumb_w, thumb_h: uint16;
-                       whole_rom = WholeRom()): string =
+                       whole_rom = WholeRom(); hashed = true): string =
   ## Full state-file image: header, payload, then the trailers: a thumbnail
   ## (BGR555, thumb_w*thumb_h; left out if empty or degenerate) and, when
-  ## the core knows it, the whole-ROM identity.
+  ## the core knows it, the whole-ROM identity. Not `hashed`: the payload
+  ## hash is left 0 for the caller to fill.
   let has_thumb = thumbnail.len == int(thumb_w) * int(thumb_h) * 2 and
                   thumb_w > 0'u16 and thumb_h > 0'u16
   var flags = if has_thumb: STATE_FLAG_THUMBNAIL else: 0'u16
   if whole_rom.known: flags = flags or STATE_FLAG_WHOLE_ROM
   var w = Writer()
-  write_state_header(w, core, rom_checksum, rom_size, payload, flags)
+  write_state_header(w, core, rom_checksum, rom_size, payload, flags, hashed)
   if has_thumb:
     w.write_u16(thumb_w)
     w.write_u16(thumb_h)
@@ -416,10 +417,11 @@ proc make_state_bytes*(core: CoreKind; rom_checksum, rom_size: uint32;
   w.buf
 
 proc make_state_bytes*(core: CoreKind; rom_checksum, rom_size: uint32;
-                       payload: string; whole_rom = WholeRom()): string =
+                       payload: string; whole_rom = WholeRom();
+                       hashed = true): string =
   ## As above, without a thumbnail.
   make_state_bytes(core, rom_checksum, rom_size, payload, [], 0'u16, 0'u16,
-                   whole_rom)
+                   whole_rom, hashed)
 
 proc pack_state*(image: string): string
 

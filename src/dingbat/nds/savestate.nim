@@ -1058,7 +1058,7 @@ proc thumbnail(n: NDS): seq[byte] =
     both[256 * 192 + i] = n.gpu.bottom[i]
   downscale_bgr555(both, 256, 384, THUMB_W, THUMB_H)
 
-proc state_bytes*(n: NDS; thumbnail = false): string =
+proc state_bytes*(n: NDS; thumbnail = false; hashed = true): string =
   ## The full plain state image: header, payload and (with `thumbnail`) a
   ## 128x192 BGR555 picture of both screens. What rewind and tests trade in
   ## memory; `pack_state` it for a file, a slot or the network.
@@ -1066,9 +1066,9 @@ proc state_bytes*(n: NDS; thumbnail = false): string =
   let rom_id = rom_identity(n.cart.rom)
   if thumbnail:
     make_state_bytes(ckNDS, rom_id, uint32(n.cart.rom.len), payload,
-                     n.thumbnail(), uint16(THUMB_W), uint16(THUMB_H))
+                     n.thumbnail(), uint16(THUMB_W), uint16(THUMB_H), hashed = hashed)
   else:
-    make_state_bytes(ckNDS, rom_id, uint32(n.cart.rom.len), payload)
+    make_state_bytes(ckNDS, rom_id, uint32(n.cart.rom.len), payload, hashed = hashed)
 
 proc save_state*(n: NDS; thumbnail = false): seq[uint8] =
   ## `state_bytes` as bytes.

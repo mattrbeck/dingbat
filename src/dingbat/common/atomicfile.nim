@@ -17,11 +17,18 @@ elif defined(windows):
   proc flush_file_buffers(h: Handle): WINBOOL
     {.stdcall, dynlib: "kernel32", importc: "FlushFileBuffers".}
 
+var atomic_writer*: proc (path, data: string; sync: bool) {.nimcall.} = nil
+  ## Set (the iOS app): every write_file_atomic is handed to it to do the same
+  ## off the caller's thread; it raises nothing.
+
 proc write_file_atomic*(path: string; data: string; sync = true) =
   ## Replaces `path` with `data`. `sync` pushes the bytes to the disk before
   ## the rename, so a power loss cannot leave the new name pointing at data
   ## that never landed; pass false for writes frequent enough that a lost
   ## last copy is acceptable but a torn one is not.
+  if atomic_writer != nil:
+    atomic_writer(path, data, sync)
+    return
   let tmp = path & ".tmp" & $getCurrentProcessId()
   var f: File
   # Unbuffered: the whole buffer goes out in writeBuffer, which reports a

@@ -16,6 +16,8 @@ import std/[os, strutils, monotimes, times]
 import dingbat_ios
 import dingbat/nds/nds except Input
 import dingbat/nds/io/input as nds_input
+from dingbat/common/serialize import unpack_state
+from dingbat/common/atomicfile import write_file_atomic
 
 proc dingbat_load_rom(rom, bios: cstring): cint {.importc, cdecl.}
 proc dingbat_unload(flush: cint) {.importc, cdecl.}
@@ -34,6 +36,10 @@ proc dingbat_set_lcd_response(on: cint) {.importc, cdecl.}
 proc dingbat_sgb_border(): cint {.importc, cdecl.}
 proc dingbat_state_size(): cint {.importc, cdecl.}
 proc dingbat_state_data(): pointer {.importc, cdecl.}
+proc dingbat_state_open(): cint {.importc, cdecl.}
+proc dingbat_writer_drain() {.importc, cdecl.}
+proc dingbat_state_seal_bound(len: clong): clong {.importc, cdecl.}
+proc dingbat_state_seal(image: pointer; len: clong; dst: pointer; cap: clong): clong {.importc, cdecl.}
 proc dingbat_load_state(data: pointer; len, keep: cint): cint {.importc, cdecl.}
 proc dingbat_state_error_kind(): cint {.importc, cdecl.}
 proc dingbat_set_rewind(on, cap: cint) {.importc, cdecl.}
@@ -113,6 +119,19 @@ proc staged(src: string): string =
   copyFile(root / src, result)
   removeFile(result.changeFileExt("sav"))
 
+proc sealedMatches(): bool =
+  ## dingbat_state_open + _seal give what dingbat_state_size does, and it loads.
+  let whole = takeState()
+  let n = int(dingbat_state_open())
+  if n == 0: return false
+  var open = newString(n)
+  copyMem(addr open[0], dingbat_state_data(), n)
+  var sealed = newString(int(dingbat_state_seal_bound(clong(n))))
+  let m = int(dingbat_state_seal(addr open[0], clong(n), addr sealed[0], clong(sealed.len)))
+  if m == 0: return false
+  sealed.setLen(m)
+  unpack_state(sealed) == unpack_state(whole) and applyState(sealed)
+
 echo "GBA: load, frames, states"
 block:
   dingbat_set_rewind(1, 0)
@@ -126,6 +145,7 @@ block:
   for _ in 0 ..< 60: dingbat_run_frame()
   check applyState(s), "state loads"
   check frameHash() == at, "state brings the picture back"
+  check sealedMatches(), "a state sealed off the core's thread is the state"
   var junk = "not a state at all"
   check not applyState(junk) and dingbat_state_error_kind() == 1, "junk refused as not a state"
 
@@ -522,6 +542,7 @@ if ndsHave("fb_both.nds"):
   let glow = cast[ptr UncheckedArray[uint32]](dingbat_glow_sample(4, 8, 0, 0, 0, 0, 0))
   check glow != nil and glow[7 * 4] == 0xFFFF00FF'u32, "the glow samples the composite"
   check dingbat_frame_static() == 0, "frame_static: always 0 on the DS"
+  check sealedMatches(), "DS: a state sealed off the core's thread is the state"
 
 echo "DS: HD 3D"
 proc dingbat_nds_set_hd(k: cint) {.importc, cdecl.}
@@ -846,6 +867,22 @@ if ndsHave("fw_power.nds"):
   dingbat_set_nds_bios(nil, nil, nil)
   dingbat_unload(1)
   dingbat_set_nds_flash_path(nil)
+
+echo "files: written on the writer thread, in order, whole"
+block:
+  let dir = getTempDir() / "dingbat_writer_test"
+  createDir(dir)
+  let a = dir / "a.sav"
+  for i in 0 ..< 50: write_file_atomic(a, repeat(char(i), 4096 + i))
+  write_file_atomic(dir / "b.sav", "")
+  dingbat_writer_drain()
+  check readFile(a) == repeat(char(49), 4096 + 49), "the last write to a file wins"
+  check fileExists(dir / "b.sav") and readFile(dir / "b.sav") == "", "an empty file is written"
+  var stray = 0
+  for f in walkDir(dir):
+    if ".tmp" in f.path: inc stray
+  check stray == 0, "no temp file left behind"
+  removeDir(dir)
 
 echo "audio: a gap fades instead of clicking"
 block:

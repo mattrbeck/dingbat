@@ -86,6 +86,13 @@ final class Peripherals: ObservableObject {
 
     private let tapper = UIImpactFeedbackGenerator(style: .light)
 
+    /// The Taptic Engine woken before the first press: its first impact
+    /// otherwise starts it on the main thread (tens of ms on a phone).
+    func warmTap() {
+        guard Settings.shared.haptics else { return }
+        tapper.prepare()
+    }
+
     /// A touch press or direction change.
     func tap() {
         guard Settings.shared.haptics else { return }
