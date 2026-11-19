@@ -37,28 +37,41 @@ else:
 const LINK_ROOTS = staticRead("link_roots.pem")
 
 type
-  EvKind* = enum
+  ShimEvent = enum
     ## rtc_shim.c's EV_*
-    evNone
-    evLocalDesc = 1  ## pc: s1 sdp, s2 type
-    evLocalCand      ## pc: s1 candidate, s2 mid
-    evState          ## pc: a = RTC state
-    evGathering      ## pc: a = gathering state
-    evDataChannel    ## pc: a = the friend's channel
-    evDcOpen         ## dc
-    evDcClosed       ## dc
-    evDcMessage      ## dc: data
-    evDcLow          ## dc: buffered amount fell to the threshold
-    evWsOpen         ## ws
-    evWsClosed       ## ws: a = 1 if it had opened
-    evWsMessage      ## ws: s1 text
-    evHttpDone       ## request: a = HTTP status, 0 when it failed
+    seNone
+    seLocalDesc = 1  ## pc: s1 sdp, s2 type
+    seLocalCand      ## pc: s1 candidate, s2 mid
+    seState          ## pc: a = RTC state
+    seGathering      ## pc: a = gathering state
+    seDataChannel    ## pc: a = the friend's channel
+    seDcOpen         ## dc
+    seDcClosed       ## dc
+    seDcMessage      ## dc: data
+    seDcLow          ## dc: buffered amount fell to the threshold
+    seWsOpen         ## ws
+    seWsClosed       ## ws: a = 1 if it had opened
+    seWsMessage      ## ws: s1 text
+    seHttpDone       ## request: a = HTTP status, 0 when it failed
 
   NetEvent* = object
-    kind*: EvKind
-    id*, a*: int
-    s1*, s2*: string
-    data*: string
+    ## An event from the network threads. `id` is the peer connection (Pc*),
+    ## data channel (Dc*), websocket (Ws*) or request (HttpDone) it is about.
+    id*: int
+    case
+    of EvNone: discard
+    of EvLocalDesc: sdp*, desc_type*: string
+    of EvLocalCand: candidate*, mid*: string
+    of EvPcState: state*: int          # an RTC_* state
+    of EvPcGathering: gathering*: int  # RTC_GATHERING_*
+    of EvDataChannel: channel*: int    # the friend's channel
+    of EvDcOpen, EvDcClosed: discard
+    of EvDcMessage: data*: string
+    of EvDcLow: discard                # buffered amount fell to the threshold
+    of EvWsOpen: discard
+    of EvWsClosed: had_opened*: bool
+    of EvWsMessage: text*: string
+    of EvHttpDone: status*: int        # HTTP status, 0 when it failed
 
   CEvent {.bycopy.} = object
     kind, id, a: cint
@@ -108,13 +121,28 @@ proc poll_event*(e: var NetEvent): bool =
   ## The next event from the network threads, if any.
   let c = dbn_poll()
   if c == nil: return false
-  e.kind = EvKind(c.kind)
-  e.id = int(c.id)
-  e.a = int(c.a)
-  e.s1 = if c.s1 != nil: $c.s1 else: ""
-  e.s2 = if c.s2 != nil: $c.s2 else: ""
-  e.data.setLen(int(c.len))
-  if c.len > 0: copyMem(addr e.data[0], c.data, int(c.len))
+  let id = int(c.id)
+  let a = int(c.a)
+  let s1 = if c.s1 != nil: $c.s1 else: ""
+  let s2 = if c.s2 != nil: $c.s2 else: ""
+  e = case ShimEvent(c.kind)
+    of seNone: EvNone(id: id)
+    of seLocalDesc: EvLocalDesc(id: id, sdp: s1, desc_type: s2)
+    of seLocalCand: EvLocalCand(id: id, candidate: s1, mid: s2)
+    of seState: EvPcState(id: id, state: a)
+    of seGathering: EvPcGathering(id: id, gathering: a)
+    of seDataChannel: EvDataChannel(id: id, channel: a)
+    of seDcOpen: EvDcOpen(id: id)
+    of seDcClosed: EvDcClosed(id: id)
+    of seDcMessage:
+      var data = newString(int(c.len))
+      if c.len > 0: copyMem(addr data[0], c.data, int(c.len))
+      EvDcMessage(id: id, data: data)
+    of seDcLow: EvDcLow(id: id)
+    of seWsOpen: EvWsOpen(id: id)
+    of seWsClosed: EvWsClosed(id: id, had_opened: a == 1)
+    of seWsMessage: EvWsMessage(id: id, text: s1)
+    of seHttpDone: EvHttpDone(id: id, status: a)
   dbn_event_free(c)
   true
 

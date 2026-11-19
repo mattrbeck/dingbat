@@ -384,54 +384,54 @@ proc state_name(a: int): string =
   else: "new"
 
 proc dispatch(e: NetEvent) =
-  case e.kind
-  of evWsOpen:
+  case e
+  of EvWsOpen:
     let s = sigs.getOrDefault(e.id)
     if s != nil and s.on_open != nil: s.on_open()
-  of evWsClosed:
+  of EvWsClosed(had_opened):
     let s = sigs.getOrDefault(e.id)
     if s != nil:
       s.done = true
       sigs.del e.id
       let f = s.on_close
       s.unwire()
-      if f != nil: f(e.a == 1)
-  of evWsMessage:
+      if f != nil: f(had_opened)
+  of EvWsMessage(text):
     let s = sigs.getOrDefault(e.id)
     if s != nil and s.on_message != nil:
       var j: JsonNode
-      try: j = parseJson(e.s1)
+      try: j = parseJson(text)
       except CatchableError: return
       if j.kind == JObject: s.on_message(j)
-  of evLocalDesc:
+  of EvLocalDesc(sdp, desc_type):
     let p = peers_pc.getOrDefault(e.id)
-    if p != nil and p.on_desc != nil: p.on_desc(e.s1, e.s2)
-  of evLocalCand:
+    if p != nil and p.on_desc != nil: p.on_desc(sdp, desc_type)
+  of EvLocalCand(candidate, mid):
     let p = peers_pc.getOrDefault(e.id)
-    if p != nil and p.on_cand != nil: p.on_cand(e.s1, e.s2)
-  of evState:
+    if p != nil and p.on_cand != nil: p.on_cand(candidate, mid)
+  of EvPcState(state):
     let p = peers_pc.getOrDefault(e.id)
-    if p != nil and p.on_state != nil: p.on_state(state_name(e.a))
-  of evDataChannel:
+    if p != nil and p.on_state != nil: p.on_state(state_name(state))
+  of EvDataChannel(channel):
     let p = peers_pc.getOrDefault(e.id)
     if p != nil and not p.offerer and p.dc < 0:
-      p.dc = e.a
-      peers_dc[e.a] = p
-  of evDcOpen:
+      p.dc = channel
+      peers_dc[channel] = p
+  of EvDcOpen:
     let p = peers_dc.getOrDefault(e.id)
     if p != nil and p.on_open != nil: p.on_open()
-  of evDcClosed:
+  of EvDcClosed:
     let p = peers_dc.getOrDefault(e.id)
     if p != nil and p.on_closed != nil: p.on_closed()
-  of evDcMessage:
+  of EvDcMessage(data):
     let p = peers_dc.getOrDefault(e.id)
-    if p != nil and p.on_message != nil: p.on_message(e.data)
-  of evDcLow:
+    if p != nil and p.on_message != nil: p.on_message(data)
+  of EvDcLow:
     let p = peers_dc.getOrDefault(e.id)
     if p != nil and p.on_low != nil: p.on_low()
-  of evHttpDone:
-    echo "netlink: goodbye note posted (HTTP ", e.a, ")"
-  of evGathering, evNone: discard
+  of EvHttpDone(status):
+    echo "netlink: goodbye note posted (HTTP ", status, ")"
+  of EvPcGathering, EvNone: discard
 
 # ───────────────────────── helpers ─────────────────────────
 
@@ -1815,7 +1815,9 @@ proc quitting*(ol: OnlineLink) =
       while ol.now() - t0 < 1500:
         while poll_event(e):
           dispatch(e)
-          if e.kind == evHttpDone: break wait
+          case e
+          of EvHttpDone: break wait
+          else: discard
         os.sleep(10)
 
 # ───────────────────────── endings ─────────────────────────
