@@ -60,6 +60,7 @@ struct SettingsView: View {
     @Environment(\.palette) private var palette
     /// DS Beta changes the sections (SettingsSection.shown).
     @ObservedObject private var settings = Settings.shared
+    @ObservedObject private var supporter = Supporter.shared
     @State private var current: SettingsSection = .controls
     @State private var pushed = false
     @State private var ready = false
@@ -89,6 +90,16 @@ struct SettingsView: View {
             }
         }
         .onChange(of: current) { s in UserDefaults.standard.set(s.rawValue, forKey: SettingsSection.storageKey) }
+        .sheet(isPresented: $supporter.sheetUp) {
+            SupporterView(onClose: { supporter.sheetUp = false })
+                .environment(\.palette, settings.palette)
+        }
+        .onChange(of: supporter.jumpTo) { s in
+            guard let s, let section = SettingsSection(rawValue: s) else { return }
+            supporter.jumpTo = nil
+            current = section
+            withAnimation(.easeOut(duration: 0.22)) { pushed = true }
+        }
         .onAppear {
             // B in a pushed section goes back to the list first.
             PadNav.shared.back[AppModel.Sheet.settings(section: nil).id] = {
@@ -107,6 +118,7 @@ struct SettingsView: View {
                 SheetHeader(title: "Settings", onClose: nil)
                 ScrollView {
                     VStack(spacing: 2) {
+                        SupporterSettingsRow().padding(.bottom, 10)
                         ForEach(SettingsSection.shown) { s in
                             sectionRow(s, selected: s == current, chevron: false) { current = s }
                         }
@@ -137,6 +149,10 @@ struct SettingsView: View {
                 VStack(spacing: 0) {
                     SheetHeader(title: "Settings", onClose: SheetNav.close)
                     ScrollView {
+                        SupporterSettingsRow()
+                            .padding(.horizontal, 16)
+                            .padding(.top, 4)
+                            .padding(.bottom, 12)
                         VStack(spacing: 0) {
                             ForEach(SettingsSection.shown) { s in
                                 sectionRow(s, selected: false) {
@@ -149,7 +165,6 @@ struct SettingsView: View {
                         .background(RoundedRectangle(cornerRadius: 11).fill(palette.surface2))
                         .overlay(RoundedRectangle(cornerRadius: 11).stroke(palette.border, lineWidth: 1))
                         .padding(.horizontal, 16)
-                        .padding(.top, 4)
                     }
                     versionText.padding(.vertical, 12)
                 }
@@ -444,6 +459,7 @@ private struct ShortcutList: View {
 
 private struct GameBoyPane: View {
     @ObservedObject private var s = Settings.shared
+    @ObservedObject private var supporter = Supporter.shared
     @ObservedObject private var session = GameSession.shared
     @Environment(\.palette) private var palette
     @Environment(\.padScope) private var scope
@@ -457,9 +473,12 @@ private struct GameBoyPane: View {
             SheetFlowRow(label: "Palette",
                          sub: "The four colors black-and-white games are drawn in. Color games are never affected.") {
                 SheetChipPicker(selection: $s.gbPaletteMode,
-                                options: [(.default, "Default"), (.theme, "App theme"), (.custom, "Custom")],
+                                options: [(.default, "Default"), (.theme, "App theme"), (.custom, "Custom")]
+                                    .filter { !$0.0.supporterOnly || supporter.unlocked || s.gbPaletteMode == $0.0 },
                                 accessibilityLabel: "Game Boy palette", padKey: "gbpalette")
             }
+            SupporterTeaser(text: "Pick your own four shades", swatches: [0xFFE6EE, 0xFF8FB1, 0x7A4FC4, 0x1B1028])
+                .padding(.bottom, 14)
             if sgbActive {
                 SheetHint("Super Game Boy games bring their own colors, so there are no shades to replace. Turn it off below to use a palette.")
             }
@@ -679,15 +698,19 @@ private struct RadioRow: View {
 
 private struct VideoPane: View {
     @ObservedObject private var s = Settings.shared
+    @ObservedObject private var supporter = Supporter.shared
 
     var body: some View {
         SheetToggleRow(label: "Color correction", sub: "Match the colors the original screen produced",
                        isOn: $s.colorCorrect)
         SheetFlowRow(label: "Filter",
                      sub: "Smooth the pixel art, or draw the screen's own grid and subpixel structure") {
-            SheetSelect(selection: $s.filter, options: Settings.Filter.allCases.map { ($0, $0.label) },
+            SheetSelect(selection: $s.filter,
+                        options: Settings.Filter.offered(unlocked: supporter.unlocked, current: s.filter).map { ($0, $0.label) },
                         accessibilityLabel: "Filter")
         }
+        SupporterTeaser(text: "Smooth filters: hq4x and xBR")
+            .padding(.bottom, 14)
         SheetToggleRow(label: "Integer scaling", sub: "Keep every pixel exactly the same size", isOn: $s.integerScale)
         if PhoneCutout.hasSideColumn {
             SheetFlowRow(label: "Picture held upright",
@@ -829,6 +852,7 @@ private struct PlayPane: View {
 
 private struct GeneralPane: View {
     @ObservedObject private var s = Settings.shared
+    @ObservedObject private var supporter = Supporter.shared
     @Environment(\.palette) private var palette
     @State private var advancedOpen = false
     @State private var hook = Settings.shared.saveWebhook
@@ -838,7 +862,7 @@ private struct GeneralPane: View {
     var body: some View {
         SheetSubhead(text: "App theme", rule: false)
         LazyVGrid(columns: [GridItem(.adaptive(minimum: 104), spacing: 6)], spacing: 6) {
-            ForEach(ThemeName.allCases) { t in
+            ForEach(ThemeName.offered(unlocked: supporter.unlocked, current: s.theme)) { t in
                 SheetChip(label: t.label, selected: s.theme == t, fill: true, action: { s.theme = t }) {
                     ZStack(alignment: .bottomTrailing) {
                         Circle().fill(Color(hex: t.swatch.0))
@@ -849,7 +873,10 @@ private struct GeneralPane: View {
                 }
             }
         }
-        .padding(.bottom, 18)
+        .padding(.bottom, supporter.unlocked ? 18 : 8)
+        SupporterTeaser(text: "\(ThemeName.allCases.filter(\.supporterOnly).count) more themes",
+                        swatches: ThemeName.allCases.filter(\.supporterOnly).map(\.swatch.0))
+            .padding(.bottom, 18)
         SheetSubhead(text: "Google Drive")
         DriveSettingsBlock()
             .padding(.bottom, 18)

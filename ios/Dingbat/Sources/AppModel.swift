@@ -19,6 +19,7 @@ final class AppModel: ObservableObject {
         /// Resume from Earlier; `crash`: the "stopped unexpectedly" form.
         case moments(RomEntry, crash: Bool)
         case addPictures
+        case supporter
         var id: String {
             switch self {
             case .settings: return "settings"
@@ -36,6 +37,7 @@ final class AppModel: ObservableObject {
             case .export(let e): return "export:" + e.id
             case .moments(let e, _): return "moments:" + e.id
             case .addPictures: return "addPictures"
+            case .supporter: return "supporter"
             }
         }
     }
