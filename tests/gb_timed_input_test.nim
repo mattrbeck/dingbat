@@ -238,15 +238,16 @@ block:
   let idle = run(rom, "", 4)
   check(idle.cpu.stopped and idle.wram(0xC000) != 1, "STOP waits without a press")
   check(run(rom, "100000:a:press", 4).wram(0xC000) == 1, "a press ends STOP")
-  # After the wake the clock runs on: a release swept in 4-dot steps moves the
-  # first released sample by one every 5 M-cycles.
+  # After the wake (and its 2^17-clock restart, stop_mode_exit) the clock runs
+  # on: a release swept in 4-dot steps moves the first released sample by one
+  # every 5 M-cycles.
   proc first_released(emu: GB): int =
     for j in 0 ..< 200:
       if (emu.wram(0xC010 + j) and 1) != 0: return j
     -1
   var idx: seq[int]
   for k in countup(0, 4 * 5 * 40, 4):
-    let emu = run(rom, "100000:a:press," & $(100000 + 2000 + k) & ":a:release", 4)
+    let emu = run(rom, "100000:a:press," & $(100000 + 131072 + 2000 + k) & ":a:release", 4)
     idx.add(emu.first_released)
   check(idx[0] > 0, "the release lands inside the samples (" & $idx[0] & ")")
   for i in 5 ..< idx.len:

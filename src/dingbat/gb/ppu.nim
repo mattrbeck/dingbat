@@ -242,6 +242,7 @@ proc ppu_blank_frame*(ppu: GbPpu; gb: GB) =
   fifo_sync(gb)
   let blank = if gb.cgb_enabled: 0x7FFF'u16 else: DMG_COLORS[0]
   for i in 0 ..< ppu.framebuffer.len: ppu.framebuffer[i] = blank
+  ppu.panel_blank = true
   ppu.frame = true
   ppu.dots_since_frame = 0
 

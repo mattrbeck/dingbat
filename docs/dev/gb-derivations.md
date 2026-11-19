@@ -1164,6 +1164,44 @@ Dots are dingbat's line dots; W is the first dot of the writing M-cycle
   vs `_m0irq_*`): the known one-dot-early mode-0 STAT raise seen from inside
   the instrument.
 
+### Leaving STOP mode takes the switch's 2^17-clock restart
+- Default: `STOP_EXIT_RESTART = 1`, `stop_mode_exit` (`memory.nim`).
+- Rule: STOP mode stops the machine (the PPU freezes where STOP caught it).
+  The P10-P13 edge that ends it restarts the clock, and the CPU waits
+  `SPEED_SWITCH_STALL_CPU` (2^17) clocks before its next M-cycle, run as the
+  KEY1 switch's stall is (`mem_tick_stalled`: timer and serial clocked, OAM
+  DMA frozen, an HBlank block held for the end as at a HALT wake). The PPU
+  runs one M-cycle more than the timer, the edge's own: 2^17 + 4 dots.
+- Evidence: DocBoy DMG `ppu/interactive/stop_read_ly{,_alt,_alt_alt}_round{1,2}`,
+  `stop_read_stat_round{1,2,3}`, `stop_trigger_interrupt` (10 rows). Each
+  STOPs on line 20 or 30 (plus 0 or 64 M-cycles), the runner presses A at tick
+  65,536, about 56,000 T later, and the ROM reads LY or STAT a fixed count
+  after STOP (`round1`/`round2` one M-cycle apart). The answers move with the
+  STOP's line (`_alt` against `_alt_alt`: 10 lines apart, the same press), so
+  the PPU does not run in real time through STOP; every row needs it 2^17 + 4
+  dots on from where STOP froze it (line 20 + 133.45 lines, wrapping past
+  153; the LYC = 30 interrupt is raised during the restart and taken after
+  it). PPU leads of 0, 3, 5 and 8 dots pass 5, 6, 9 and 5 of the 10. The
+  timer: 2^17 T is two DIV wraps and a whole number of TIMA wraps at 262, 65
+  and 16 kHz (TMA = 0 in every DocBoy row), so `stop_read_tima_*`,
+  `stop_tima_falling_edge` and `stop_joypad*` read the same with the timer
+  held or running; giving the timer the extra M-cycle too fails
+  `stop_read_tima_round1` (DMG and CGB) and both double-speed
+  `double_speed_stop_read_tima_{a,b}_round1`. The frozen OAM DMA is
+  `dma_stop_during_transfer_timing_round{1,2}`. A hand on a key cannot time a
+  press to the microsecond, so a fixed answer needs a fixed restart; 2^17 is
+  the count the switch's stall is measured at (gambatte `speedchange_tima00_*`,
+  daid `speed_switch_timing_*`) and Pan Docs' STOP chart's "about 0x20000
+  T-cycles". SameBoy (DMG B, black box) fails all ten.
+- Open: whether the timer runs in the restart (a 4096 Hz TIMA gains 128) and
+  whether an interrupt ends it early as it ends the switch's; no DocBoy row
+  separates either. Nothing pins the CGB; the rule is not device-gated, and
+  the CGB STOP rows (`timers/interactive/stop_read_tima_*`,
+  `hdma/interactive/*stop*`) read the same with it. Hardware:
+  tools/gbprobe/probe_l_stopwake.gb on the MGB (`00 85 89 00 01` with a
+  running timer, `.. .. 09 ..` held).
+- Clean-room: from the test ROM sources and dingbat sweeps; no emulator source.
+
 ### HALT with an interrupt already pending, and the DMG HALT's minimum length
 - Default: `HALT_IME_PENDING_REDO = 1`, `DMG_HALT_MIN_MCYCLES = 2`,
   `M2_LEAD_HALT_BLIND_DMG_ONLY = 1` (`cpu.nim`).

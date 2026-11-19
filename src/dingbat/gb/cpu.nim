@@ -478,26 +478,17 @@ proc cpu_halt_tick(gb: GB): bool {.inline.} =
     if not result and gb.ppu.ly != ly0:
       result = interrupt_ready(gb.interrupts)
 
-const STOP_WAKE_PPU_DOTS* {.intdefine.} = 0
-  ## Dots the PPU runs between a key press ending STOP mode and the CPU's
-  ## next M-cycle, the CPU-clock domain still waiting (an oscillator restart,
-  ## like the speed switch's 2^17 HALT). Default 0: Pan Docs gives no STOP
-  ## exit delay and hardware is unasked. DocBoy's DMG STOP-and-wake
-  ## `interactive/*` tests pass at 131076 only (a fixed restart, which a ROM
-  ## for a hand on a key can encode). Open question:
-  ## tools/gbprobe/probe_l_stopwake.gb (docs/dev/gb-failure-triage.md I13).
-
 proc cpu_stop_tick(cpu: GbCpu; gb: GB) {.noinline.} =
   ## One step of STOP mode (stop_instr, memory.nim). Pan Docs: "STOP is
   ## terminated by one of the P10 to P13 lines going low". The same edge sets
-  ## the joypad interrupt, so with IME set the CPU vectors next M-cycle.
+  ## the joypad interrupt, so with IME set the CPU vectors once the
+  ## oscillator restart (stop_mode_exit) is over.
   mem_tick_stopped(gb.memory, gb)
   if joypad_lines(gb.joypad) != 0x0F'u8:
     cpu.stopped = false
     cpu.locked  = false
     cpu.halted  = false
-    when STOP_WAKE_PPU_DOTS != 0:
-      mem_tick_ppu(gb.memory, gb, STOP_WAKE_PPU_DOTS, ignore_speed = true)
+    stop_mode_exit(gb.memory, gb)
 
 when defined(gbfuzz_trace):
   # Instruction trace for tools/gbfuzz; off by default.

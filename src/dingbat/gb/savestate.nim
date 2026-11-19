@@ -483,6 +483,8 @@ proc load_ppu_state(ppu: GbPpu; gb: GB; r: var Reader; rev: uint32) =
     # state replaces must not land on the loaded one.
     ppu.lcd_on_first_frame = false
     ppu.stat_drop_pending = false
+  # Presentation only (GbPpu.panel_blank): a loaded picture counts as drawn.
+  ppu.panel_blank = false
   # Derived: the interrupt line's copy of mode/LY leads the readable one by
   # under an M-cycle, so re-deriving at a frame boundary is exact.
   when STAT_IRQ_SPLIT:

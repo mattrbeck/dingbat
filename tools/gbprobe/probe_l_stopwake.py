@@ -11,10 +11,11 @@ AGB runs it in compatibility mode. The glyphs are roms/font.inc's.
 
 Pan Docs ("Using the STOP Instruction") says STOP ends on a P10-P13 line going
 low and nothing of the PPU or the timer across it, or of how long the wake
-takes. dingbat freezes the whole machine in STOP mode and resumes where it
-stopped; DocBoy's DMG `stop_read_{ly,stat}_*` rows need the PPU to have run
-2^17 + 4 dots across the stop with the timer and the OAM DMA held
-(STOP_WAKE_PPU_DOTS in cpu.nim); SameBoy agrees with dingbat.
+takes. dingbat freezes the whole machine in STOP mode and, at the key edge,
+runs the KEY1 switch's 2^17-clock restart before the CPU resumes: the PPU
+2^17 + 4 dots, the timer 2^17 T, the OAM DMA held (stop_mode_exit in
+memory.nim), which DocBoy's DMG `stop_read_{ly,stat}_*` rows need. SameBoy
+resumes at once.
 
 ONE TRIAL (six, one per key press; the results stay on screen):
   wait until no key has been held for 256 polls (a held key turns STOP into a
@@ -30,13 +31,14 @@ ONE TRIAL (six, one per key press; the results stay on screen):
 
 READING (every trial should show the same five bytes; if LY differs from
 trial to trial, the PPU free-runs through STOP and the wake time matters):
-  14 82 09 00 15  dingbat, MGB and CGB-compat alike: the PPU resumes line 20
-                  where it stopped; TIMA as at the STOP plus the reset's tick.
-  00 85 09 00 01  dingbat with STOP_WAKE_PPU_DOTS = 131076 (DocBoy's rows): the
-                  PPU ran 2^17 + 4 dots, to line 153 (LY reads 0, LYC = 0
-                  matches), and line 1 a line later.
-  .. .. 89 .. ..  the timer ran through a 2^17-T restart too (128 ticks of a
-                  4096 Hz TIMA).
+  00 85 89 00 01  dingbat (STOP_EXIT_RESTART): the PPU ran 2^17 + 4 dots, to
+                  line 153 (LY reads 0, LYC = 0 matches), and line 1 a line
+                  later; the timer ran the 2^17 T (128 ticks of a 4096 Hz
+                  TIMA).
+  .. .. 09 .. ..  the restart holds the timer (DocBoy's rows allow either).
+  14 82 09 00 15  no restart (STOP_EXIT_RESTART = 0, SameBoy): the PPU resumes
+                  line 20 where it stopped; TIMA as at the STOP plus the
+                  reset's tick.
 """
 import os
 import sys

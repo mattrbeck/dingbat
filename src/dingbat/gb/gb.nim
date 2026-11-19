@@ -2016,6 +2016,11 @@ type
     # the TV keeps the frozen picture. Not serialized: false at every frame
     # boundary a state loads from, and gb_apply_state sets it so.
     lcd_on_first_frame*: bool
+    # The framebuffer holds a blank panel (ppu_blank_frame) rather than a
+    # drawn frame. On a DMG that panel is "whiter than color #0" (Pan Docs,
+    # LCDC.7), which the greys cannot show; the test harness compares it as
+    # such. Not serialized: presentation only.
+    panel_blank*: bool
     # window state: a WY match seen with LCDC.5 set this frame (ppu.nim
     # `mode_flag=`, win_check_now, ppu_latch_wy, ppu_store_lcdc)
     window_trigger*:     bool

@@ -3264,6 +3264,7 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
             when defined(gb_dot_counter): inc gb_frame_normal
             ppu.dots_since_frame = 0
             ppu.current_window_line = -1
+            ppu.panel_blank = false
             if ppu.lcd_on_first_frame:
               # Drawn but not displayed (GbPpu.lcd_on_first_frame).
               ppu.lcd_on_first_frame = false

@@ -1055,12 +1055,12 @@ the no-switch `sound/*_ds_{2,4,6}`); on E it is the mirror image (22/46).
 ## I. DocBoy (`docboy/*`, first scored 2026-10-14)
 
 DocBoy's own suite, scored by its own runner's rules on DMG ABC and CPU CGB E
-(`tests/README.md`, "The DocBoy suite"): 8,900 / 9,186 at `DocboyRev` (49
+(`tests/README.md`, "The DocBoy suite"): 8,916 / 9,186 at `DocboyRev` (49
 more not scored, `DocboyNotScored`). Every failing ROM is in
 [`tests/results_docboy.md`](../../tests/results_docboy.md); every group that is
 not scored is in the "Deliberately not scored" ledger at the end of
-`tests/results.md`. The 286 failing tests are I1 8, I2 11, I3 176, I5 6,
-I6 6, I9 20, I11 1, I12 35, I13 10 and "Small" 13. I4's scored rows all
+`tests/results.md`. The 270 failing tests are I1 8, I2 11, I3 176, I5 6,
+I6 6, I9 20, I11 1, I12 35 and "Small" 7. I4's and I13's scored rows all
 pass; I7, I8 and I10 are closed. The 9,186 include DocBoy's rebuilds of 7 SameSuite channel 1 ROMs
 (`cgb/samesuite/apu/channel_1/*-cgbE`), which pass; the eighth,
 `channel_1_sweep_restart_2-cgbE`, is not scored (its expectation and
@@ -1603,6 +1603,22 @@ hardware question. Families:
   these are the DMG's columns or one unit's margin, since one console stands
   behind the tables. Hardware: the six ROMs on an MGB, pass/fail screens,
   with `ld_a_hl_round11` (row 0 at R = 8, DocBoy only) as a control.
+  Re-derived 2026-11-18 from the eight `round3_fe58..fe5f` tables (a model
+  of the round-3 rule over all 512 entries: every other output bit of all
+  eight tables matches; the `ld [hl]` and `ld [hli]` tables are byte-identical).
+  With a = row 0's old bit and b = row 11's (word in the index), v the
+  written bit, the written lane of row 0 is: words 0..2 lane 1 and words 0..1
+  lane 0, v (as the rule); word 3 lane 1 (`fe5f`), v | a3 (128 entries off);
+  word 3 lane 0 (`fe5e_noisy`), v | (a3 & b0) (64 off); word 2 lane 0
+  (`fe5c`), v except v = 1 reading 0 when a2 = b2 = b0 = 0, a1 = b1 and
+  a3 = b3 (8 off). The two lanes of a word see the same inputs in every
+  entry, yet `fe5e`/`fe5f` and `fe5c`/`fe5d` differ, so no lane-symmetric
+  logic gives them; `fe5c`'s 8 entries hinge on rows 0 and 11 agreeing in
+  words 1 and 3, a drive-strength signature, not a gate. The maintainer
+  named three of the eight addresses `_noisy` (`fe5b`, `fe5d` pass; `fe5e`
+  fails) in the commit that added them, so his console was not repeatable
+  there. A per-lane term passes all six and is a lookup of these tables:
+  not adopted.
 * **I6. DMG window glitches (6 left of 120).**
   * Closed: `window_retrigger_pixel_glitch_*` (67) and
     `window_bg_reprise_wx{15,23}`. Each ROM turns the window off in the WY
@@ -1924,14 +1940,30 @@ hardware question. Families:
     takes the frame the panel presents during STOP as that VBlank
     (`docboy_run_one`, tests/README.md), which can only turn failing tests
     into passing ones. SameBoy (CGB E) passes all three.
-  * Left (2), a hardware question: `stop_ly42_during_hblank` (the `_a`
-    reference) and `stop_during_pixel_transfer_alt` STOP inside the first
-    frame after LCDC.7 is set and want that frame's lines on the panel
-    (lines 0..42, then black; the whole picture held for the mode-3 STOP).
-    DocBoy and SameBoy draw the first frame; Pan Docs (LCDC.7) says "the
-    screen will stay blank during the first frame", which dingbat follows.
-    The decider: the same ROM on Matt's GBC, does the top of the screen show
-    the coloured bars?
+  * Left (2): `stop_ly42_during_hblank` (the `_a` reference) and
+    `stop_during_pixel_transfer_alt`. Re-read 2026-11-18 from the sources:
+    `stop_ly42` is not in a first frame (the LCD has run 60 frames; its
+    second LCDC write keeps bit 7 and only moves the BG map) and STOPs in
+    line 42's HBlank; `_a` (manifest `check_at_tick` 4,739,304, ignored by
+    DocBoy's runner, and `_b` one frame later) is lines 0..42 of that frame
+    with lines 43..143 black, `_b` all black. `_alt` STOPs in mode 3 of line 1
+    of the first frame after LCD enable and shares `stop_during_pixel_
+    transfer`'s reference, the whole picture. One model gives all seven CGB
+    `ppu/visual/stop_*` rows: the CGB PPU keeps running through STOP mode,
+    its lines black when STOP came outside mode 3 (each line already drawn
+    keeps its picture until scanned again) and drawn normally after a mode-3
+    STOP (Pan Docs: "will keep drawing the current screen"; the first frame
+    stays blank and the next is drawn). Built and measured (not kept): both
+    rows pass and `hdma/interactive/gdma_stop_remaining_length` breaks: the
+    PPU's phase at the wake then follows the press (tick 65,536), the
+    restart ends in mode 0 of line 114 and the HBlank block goes (HDMA5
+    reads $02, DocBoy $03). Passing it as well needs the CGB's 2^17 restart
+    counted from the STOP rather than from the key edge, i.e. a different
+    exit for the CGB than the DMG rows pin, and state for the elapsed count:
+    a fit, held. `_a` is a transient one frame long that no photograph
+    shows; `_alt` is not (full picture = the PPU keeps drawing; white = it
+    freezes, as dingbat). The decider: `stop_during_pixel_transfer_alt` on a
+    CGB, photographed.
   * Left (8), a hardware question: `window_wx0_scx{1..7}` and
     `window_wx0_scx1_fancy_tile0`, the CGB twins of I6's DMG tests (WX = 0
     with SCX & 7 = s: DocBoy and SameBoy CGB E shift the window by s + 1,
@@ -1997,9 +2029,8 @@ hardware question. Families:
     does (DocBoy's tests allow 2..3). SameBoy (CGB E) passes both; nothing
     else moves (`VRAM_WRITE_LINE0_CGB_GRACE`, `VRAM_WRITE_LINE0_OPEN_LEAD`,
     gb.nim).
-* **I13. Rows with scripted input (10 left of 71; 3 not scored).** Through
-  `--input`; 58 pass, every joypad picture and `stop_joypad*`/`stop_key*`
-  interrupt test among them.
+* **I13. Rows with scripted input (0 left of 71; 3 not scored).** Through
+  `--input`; all 68 scored pass.
   * Not scored (3; ledger "DocBoy: a joypad interrupt on key release"): 2
     `joypad_{buttons,dpad}_interrupt_release` and DMG
     `stop_immediate_exit_joypad_interrupt`.
@@ -2021,23 +2052,33 @@ hardware question. Families:
     dingbat takes it) and the ROM expects the release to end it (DocBoy's
     switch-bounce model, its comment says so). A second press wakes it
     (checked).
-  * Left (10): the DMG tests that leave STOP with a key press and then read
-    LY or STAT, or check an interrupt (`ppu/interactive/stop_read_ly{,_alt,
-    _alt_alt}_round{1,2}`, `stop_read_stat_round{1,2,3}`,
-    `stop_trigger_interrupt`): `$FFF0 = 2`, the wake happens but the phase
-    after it disagrees. dingbat freezes the PPU through STOP (Pan Docs is
-    silent); DocBoy's tests need the PPU to have run exactly 2^17 + 4 dots
-    across the stop with the timer and DMA held -- `STOP_WAKE_PPU_DOTS =
-    131076` (cpu.nim, default 0) passes all 15 DMG STOP tests and no
-    neighbouring value does -- which is an oscillator restart on the way out
-    (the switch HALT's 2^17), not a PPU running for as long as the key took,
-    so a ROM meant for a hand on a real key can encode it. SameBoy (DMG B)
-    fails all ten. Hardware question: tools/gbprobe/probe_l_stopwake.gb
-    (MGB; press A within a second each time, since Pan Docs warns a DMG left
-    in STOP with the LCD on can be damaged): six trials, `14 82 09 00 15`
-    each is dingbat's frozen PPU, `00 85 09 00 01` is DocBoy's 2^17 + 4,
-    TIMA `89` would be a timer that ran through the restart, and LY changing
-    from trial to trial a PPU that runs through the whole stop.
+  * Closed (2026-11-18, 10): the DMG tests that leave STOP with a key press
+    and then read LY or STAT, or check an interrupt (`ppu/interactive/
+    stop_read_ly{,_alt,_alt_alt}_round{1,2}`, `stop_read_stat_round{1,2,3}`,
+    `stop_trigger_interrupt`). Tabulated from the sources: STOP on line 20
+    (+0 or +64 M-cycles) or line 30 (+64), the press at tick 65,536 (about
+    56,000 T after the STOP, long before 2^17), the read 56..58 or 106..107
+    or 170..171 M-cycles after the STOP. `_alt` and `_alt_alt` (same press,
+    STOP 10 lines apart) want LY 10 apart, so the PPU does not run in real
+    time through STOP; every row wants it 2^17 + 4 dots on from where STOP
+    froze it (60,852 mod a frame: line 20 -> 153.45). The mechanism is the
+    KEY1 switch's oscillator restart on the way out of STOP mode
+    (`STOP_EXIT_RESTART`, `stop_mode_exit`, memory.nim): the CPU waits
+    `SPEED_SWITCH_STALL_CPU` clocks run as the switch's stall (timer on, OAM
+    DMA frozen), and the PPU takes the key edge's M-cycle besides. Pinned:
+    PPU leads of 0, 3, 5, 8 dots pass 5, 6, 9, 5 of the 10; the timer taking
+    the extra M-cycle too fails `stop_read_tima_round1` (DMG, CGB) and
+    `double_speed_stop_read_tima_{a,b}_round1`; a timer held through the
+    2^17 passes everything (2^17 T is a whole number of DIV and TIMA wraps at
+    the rates DocBoy uses, TMA = 0), as does a restart an interrupt ends
+    early. Nothing else in the 179 STOP rows moves. SameBoy (DMG B) fails all
+    ten. docs/dev/gb-derivations.md, "Leaving STOP mode takes the switch's
+    2^17-clock restart". Hardware: tools/gbprobe/probe_l_stopwake.gb (MGB;
+    press A within a second each time, since Pan Docs warns a DMG left in
+    STOP with the LCD on can be damaged): six trials, `00 85 89 00 01` each
+    is dingbat (TIMA `09`: the restart holds the timer), `14 82 09 00 15` no
+    restart, LY changing from trial to trial a PPU that runs through the
+    whole stop.
   * Closed: the DMG `timers/interactive/stop_read_tima_*` and
     `dma_stop_during_transfer_timing_round2`, and 6 CGB tests that woke and
     then read TIMA one count low (`timers/interactive/stop_read_tima_*`,
@@ -2064,7 +2105,7 @@ hardware question. Families:
     cartridge clock runs on its own crystal (Pan Docs, "MBC3": "an external
     32.768 kHz Quartz Oscillator, and an external battery"), so STOP mode
     moves its second on (`STOP_RTC_RUNS`, memory.nim).
-* **Small (13 left of 40; 4 not scored):**
+* **Small (7 left of 40; 4 not scored):**
   * Left (6; contradicted by hardware, 2026-11-17): HuC3 commands,
     `dmg/mbc/huc3` `huc3_command_{3x,4x,5x,10,62}` and `huc3_scratchpad`.
     `$FFF0` is never written: every MCU wait in the six is `ld a,[$a000]` /
@@ -2086,16 +2127,21 @@ hardware question. Families:
     not-scored ledger. (Unmodelled from the same posts, no scored row
     behind them: $D bit 1 high, mode $E reading $C's bits 6-2, and commands
     $0/$2 as $1/$3 without the address step.)
-  * Left (6): the DMG STOP/HALT pictures `dmg/ppu/visual/halt_ppu_off`,
-    `stop_during_{hblank,oam_scan,pixel_transfer,vblank}` and `stop_ppu_off`,
-    whose reference is DocBoy's blank-panel colour (`$AD00`, Pan Docs'
-    "whiter than color #0"), which dingbat draws as shade 0 or black. Those
-    six are also never compared: DocBoy's runner checks a picture at the
-    next mode-1 M-cycle, and dingbat's PPU, frozen through an un-woken STOP
-    or off, never reaches one. Passing them needs a fifth DMG panel colour
-    in the framebuffer (every frontend's palette) and a runner rule for a
-    stopped or blank panel: a scoring and UI decision, not chased. (The CGB
-    `ppu/visual/stop_*` pictures are in I12.)
+  * Closed (2026-11-18, 6, a scoring question): the DMG STOP/HALT pictures
+    `dmg/ppu/visual/halt_ppu_off`, `stop_during_{hblank,oam_scan,
+    pixel_transfer,vblank}` and `stop_ppu_off`. Every reference is the whole
+    panel in DocBoy's blank colour (`$AD00`, Pan Docs' "whiter than color
+    #0"), which dingbat already draws (`ppu_blank_frame`: LCD off, the first
+    frame after LCDC.7 rises, a DMG in STOP) but in shade 0's grey, so the
+    comparison could never match. The core now marks such a frame
+    (`GbPpu.panel_blank`, not serialized) and the harness compares a marked
+    DMG frame as `$AD00` (`docboy_rgb565`, tests/README.md); no frontend
+    colour changes. Which frame matches: the five STOP rows at the STOP's
+    own panel (the stand-in for DocBoy's VBlank) and, earlier, at the blank
+    first frame after the ROM's LCD enable; `halt_ppu_off` only at that first
+    frame (dingbat makes no check with the LCD off; its CGB twin passes the
+    same way). With the first frame drawn instead (experiment), the five STOP
+    rows still pass at the STOP and `halt_ppu_off` does not.
   * Not scored (3; ledger "DocBoy: an MBC3 RTC latch on a bit-0 rising edge
     only"): `mbc3_rtc_latch_{0_to_2,1_to_0,1_to_1}`. DocBoy latches on a
     rising edge of bit 0 (0->1, 0->3 and 4->3 latch; 0->2, 1->0 and 1->1 do
@@ -2217,6 +2263,16 @@ their items in section I.
 
 Each was built and scored. The tests that fail with it are named, so the
 idea is not tried again as a knob.
+
+* The CGB PPU running through STOP mode, black lines after a STOP outside
+  mode 3 (2026-11-18): passes DocBoy `cgb/ppu/visual/stop_ly42_during_hblank`
+  `_a` and `stop_during_pixel_transfer_alt`, fails `cgb/hdma/interactive/
+  gdma_stop_remaining_length` (the wake phase follows the press; the restart
+  ends in mode 0 and the HBlank block goes). I12.
+* A DMG STOP exit with the PPU lead other than one M-cycle (0, 3, 5, 8 dots
+  over 2^17: 5, 6, 9, 5 of the 10 I13 rows) or with the timer taking that
+  M-cycle too (`stop_read_tima_round1`, DMG and CGB, and the two double-speed
+  `_round1` rows fail). I13.
 
 * A uniform STAT-field lag at the mode 3 -> 0 edge (`STAT_MODE0_LAG`): every
   `_2` member of `sprites/*_m3stat` fails with it. At the 2 -> 3 edge
