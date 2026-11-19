@@ -17,13 +17,18 @@ export const inlineScriptHashes = (html) =>
 const styleBlockHashes = (html) =>
   [...html.matchAll(/<style>([\s\S]*?)<\/style>/g)].map((m) => sha(m[1]));
 
+// What compiling the wasm cores needs (the index.html entry says why both).
+const WASM = "'wasm-unsafe-eval' 'unsafe-eval'";
+
 const POLICIES = {
   "index.html": (html) => [
     "default-src 'self'",
-    // wasm-unsafe-eval: compiling em.wasm. blob: the audio worklets, whose
-    // source is built in the page. Google's sign-in library is the one
-    // script from elsewhere.
-    ["script-src 'self' 'wasm-unsafe-eval' blob: https://accounts.google.com/gsi/client",
+    // wasm-unsafe-eval: compiling em.wasm. unsafe-eval as well: Safari
+    // before WebKit's wasm-unsafe-eval (iOS 15, an iPhone SE on 15.8) knows
+    // only it, and refuses the compile without it. blob: the audio worklets,
+    // whose source is built in the page. Google's sign-in library is the
+    // one script from elsewhere.
+    ["script-src 'self' " + WASM + " blob: https://accounts.google.com/gsi/client",
       ...inlineScriptHashes(html)].join(" "),
     "style-src 'self' https://accounts.google.com/gsi/style",
     "img-src 'self' blob: data:",
@@ -43,7 +48,7 @@ const POLICIES = {
   // The embeddable player: this origin's files and the core, nothing else.
   "embed.html": () => [
     "default-src 'self'",
-    "script-src 'self' 'wasm-unsafe-eval'",
+    "script-src 'self' " + WASM,
     "img-src 'self' blob: data:",
     "media-src 'self' blob: data:",
     "object-src 'none'",
