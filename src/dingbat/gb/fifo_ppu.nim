@@ -96,8 +96,9 @@ proc fifo_arm_window*(ppu: GbFifoPpu) =
     # LCDC.5 went low while a CGB window start is still inside its restart:
     # schedule the undo CGB_WIN_REVOKE_LAG dots out (CGB_WIN_EN_DEFER, gb.nim).
     # Once only: WIN_EN_ABORT re-enters here on the fetcher's next map read.
+    # Not once the restart has pushed (a WX = 6 start pushes after four).
     if ppu.win_defer > 0'u8 and not ppu.win_revoking and
-       not window_enabled(ppu):
+       not window_enabled(ppu) and ppu.fetching_window and ppu.fetcher_x == 0:
       ppu.win_revoking = true
       ppu.win_defer = uint8(CGB_WIN_REVOKE_LAG)
   # Re-derive the one `lx` the shifter watches for on this line. Called from
@@ -754,6 +755,10 @@ proc fifo_reset_sprite*(ppu: GbFifoPpu) =
   ppu.win_pre_old = false          # WIN_HEAD_WX_SCAN, per line
   when WIN_ABORT_PUSH_POS: ppu.win_bg_push = int32.low
   when CGB_WIN_CUT_PLANES: ppu.win_idx_residue = -1
+  when WIN_EN_REVOKE_ANY:
+    # A start taken on one line is not revoked on the next.
+    ppu.win_defer = 0'u8
+    ppu.win_revoking = false
   # `lcdc2_flip` is NOT cleared here: the OAM scan reads it a few statements
   # later on this dot and retires it (fifo_get_sprites). LCDC.4's dot is
   # per-line too; its ADDRESS latch is a bus register and survives
@@ -940,7 +945,9 @@ proc tick_bg_fetcher*(ppu: GbFifoPpu; gb: GB) =
         fifo_sample_smooth_scroll(ppu)
     var bg_col = ppu.fetcher_x
     when CGB_WIN_CUT_PLANES:
-      var residue = -1'i16
+      # A BG read after a cut left on a read dot (CGB_WIN_FALL_MATCH) takes
+      # the byte too; the abort below reads the same field.
+      var residue = when CGB_WIN_FALL_MATCH: ppu.win_idx_residue else: -1'i16
     # A CGB window start is revocable (CGB_WIN_EN_DEFER, gb.nim): LCDC.5 going
     # low during the six-dot startup fetch abandons the start and the line
     # pays only the dots the fetch had run (gambatte window/late_disable*).
@@ -1002,7 +1009,9 @@ proc tick_bg_fetcher*(ppu: GbFifoPpu; gb: GB) =
     # 0 (KEY0 bit 3 keeps VBK, cgb_ext_io: its picture is not known).
     ppu.tile_attrs = ppu.vram[1][map + offset]
     when CGB_WIN_CUT_PLANES:
-      if unlikely(residue >= 0): ppu.tile_num = uint8(residue)
+      if unlikely(residue >= 0):
+        ppu.tile_num = uint8(residue)
+        when CGB_WIN_FALL_MATCH: ppu.win_idx_residue = -1
     inc ppu.fetch_counter
 
   of fsGetTileDataLow, fsGetTileDataHigh:
@@ -1856,6 +1865,74 @@ when WIN_EN_REVOKE_ANY:
     ## Forward declaration (the undo replays tick_shifter); the pragmas must
     ## match the implementation's, which gcc checks and clang does not.
 
+when CGB_WIN_FALL_MATCH:
+  proc win_fall_match(ppu: GbFifoPpu; gb: GB): bool {.noinline.} =
+    ## CGB_WIN_FALL_MATCH (gb.nim): the WX match on the LCDC.5 fall's own dot.
+    ## Called before this dot's pop, after its fetcher step; false = refused
+    ## as before. The trigger reloads the FIFO's remaining pixels from the
+    ## latches (a latch whose read is half done, the read due next dot, passes
+    ## the VRAM bus's last byte; the high latch holds the tile index until the
+    ## high plane is read) and restarts the fetcher on its column: map read
+    ## next dot, low plane 3 dots on, high 5. Nothing stalls, so its tile is
+    ## pushed where the FIFO runs out, with what was read by then; a read on
+    ## that dot leaves its byte for the next map read (CGB_WIN_CUT_PLANES).
+    ## The restart's reads are made here: VRAM is locked to the CPU in mode 3.
+    let fc = ppu.fetch_counter
+    if ppu.head_cycle or fc < 0 or fc > 7 or gb.memory.current_speed != 0'u8:
+      return false
+    inc ppu.current_window_line
+    ppu.win_lx = WIN_LX_OFF
+    # The pixels left until the FIFO runs out; a FIFO pushed on this very dot
+    # had none, but the match pixel itself is always emitted.
+    var r = int(ppu.fifo.size)
+    if fc == 0 and r == 8: r = 1
+    let lo_e = if fc == 3: ppu.tile_num else: ppu.tile_data_low
+    let hi_e = if fc in 2 .. 4: ppu.tile_num
+               elif fc == 5: ppu.tile_data_low
+               else: ppu.tile_data_high
+    let flip = (ppu.tile_attrs and 0b0010_0000) != 0
+    for i in 0 ..< r:
+      let shift = if flip: i else: 7 - i
+      ppu.fifo.data[(ppu.fifo.head + i) and 15] = GbPixel(
+        color: uint8((((hi_e shr shift) and 1) shl 1) or ((lo_e shr shift) and 1)),
+        palette: ppu.tile_attrs and 0x7,
+        obj_to_bg: (ppu.tile_attrs and 0x80) shr 7)
+    ppu.fifo.size = r
+    ppu.fifo.tail = (ppu.fifo.head + r) and 15
+    # The restart's tile: the BG map at the fetcher's column, then the planes
+    # its reads reach before the push `r` dots on.
+    let m = if (ppu.lcd_control and 0x08'u8) == 0: 0x1800 else: 0x1C00
+    let o = ((ppu.fetcher_x + ppu.scx_tile) and 0x1F) +
+            (((int(ppu.ly) + int(ppu.scy)) shr 3) * 32) and 0x3FF
+    let idx = ppu.vram[0][m + o]
+    let attrs = ppu.vram[1][m + o]
+    let sel = bg_window_tile_data(ppu) != 0
+    let num = if sel: int(idx) else: int(cast[int8](idx))
+    var row = (int(ppu.ly) + int(ppu.scy)) and 7
+    if (attrs and 0b0100_0000) != 0: row = 7 - row
+    let bank = int((attrs and 0b0000_1000) shr 3)
+    let a = (if sel: 0x0000 else: 0x1000) + 16 * num + row * 2
+    ppu.fetch_scy = ppu.scy
+    ppu.tile_num = idx
+    ppu.tile_attrs = attrs
+    if r >= 3: ppu.tile_data_low = ppu.vram[bank][a]
+    ppu.tile_data_high = if r >= 5: ppu.vram[bank][a + 1] else: idx
+    ppu.win_idx_residue =
+      case r
+      of 1: int16(idx)
+      of 3: int16(ppu.tile_data_low)
+      of 5: int16(ppu.tile_data_high)
+      else: -1'i16
+    # Waiting at the push step: it lands on the dot the FIFO runs out, and the
+    # column count goes on from where it lands on screen, as after an abort
+    # (fetcher_window_abort); on a push's own dot that is one pixel later.
+    ppu.fetch_counter = 7
+    ppu.fetcher_x = int((ppu.lx + int32(r) + int32(ppu.scx and 7)) div 8)
+    when defined(gb_win_trace):
+      echo "WINFALL ly=", ppu.ly, " dot=", ppu.cycle_counter, " lx=", ppu.lx,
+           " fc=", fc, " r=", r, " num=", toHex(idx, 2)
+    true
+
 proc fifo_pad_unpop(ppu: GbFifoPpu) {.noinline.} =
   ## WIN_FINE_PAD, on a line that started as a window line at WX = 1..5 with
   ## SCX & 7 = s > 0: the discard's first s pixels are the fine scroll's, not
@@ -1962,7 +2039,19 @@ proc tick_shifter*(ppu: GbFifoPpu; gb: GB) =
           # `window_enabled` is asked here, not in fifo_arm_window, so a
           # refused match is still seen. Costs a window-less line nothing.
           if not window_enabled(ppu):
-            window_refuse_start(ppu)
+            when CGB_WIN_FALL_MATCH:
+              if not (ppu.cgb and gb.we_off_dot ==
+                        ppu.cycle_counter + int32(CGB_WE_DISABLE_LATE) and
+                      win_fall_match(ppu, gb)):
+                window_refuse_start(ppu)
+            else:
+              window_refuse_start(ppu)
+          elif CGB_WE_ENABLE_LATE != 0 and CGB_WE_ENABLE_FETCH_LATE != 0 and ppu.cgb and
+               gb.memory.current_speed == 0'u8 and
+               gb.we_on_dot == ppu.cycle_counter + int32(CGB_WE_ENABLE_FETCH_LATE):
+            # A rise written on this dot reaches the comparator a dot late
+            # (CGB_WE_ENABLE_LATE), also when this dot's push filled the FIFO.
+            ppu.win_lx = WIN_LX_OFF
           else:
             when WIN_EN_REVOKE_ANY:
               # Revocable start: record before WIN_EN_HOLD_BACK moves `lx`.
@@ -2596,6 +2685,9 @@ proc fifo_plain_ok(ppu: GbFifoPpu; gb: GB; n: int): bool {.inline.} =
     result = result and cc >= ppu.map_dot
   when CGB_TDSEL_ANY:
     result = result and cc > ppu.tdsel_dot
+  when CGB_WIN_FALL_MATCH:
+    # A residue byte waits for the next map read (win_fall_match).
+    result = result and ppu.win_idx_residue < 0
 
 proc fifo_plain_span_of(ppu: GbFifoPpu; gb: GB; n: int; blocks: bool;
                         win, spr, sgb: static bool) =

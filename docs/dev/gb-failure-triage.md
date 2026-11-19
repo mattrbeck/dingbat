@@ -1055,11 +1055,11 @@ the no-switch `sound/*_ds_{2,4,6}`); on E it is the mirror image (22/46).
 ## I. DocBoy (`docboy/*`, first scored 2026-10-14)
 
 DocBoy's own suite, scored by its own runner's rules on DMG ABC and CPU CGB E
-(`tests/README.md`, "The DocBoy suite"): 8,900 / 9,186 at `DocboyRev` (49
+(`tests/README.md`, "The DocBoy suite"): 8,947 / 9,186 at `DocboyRev` (49
 more not scored, `DocboyNotScored`). Every failing ROM is in
 [`tests/results_docboy.md`](../../tests/results_docboy.md); every group that is
 not scored is in the "Deliberately not scored" ledger at the end of
-`tests/results.md`. The 286 failing tests are I1 8, I2 11, I3 176, I5 6,
+`tests/results.md`. The 239 failing tests are I1 8, I2 11, I3 129, I5 6,
 I6 6, I9 20, I11 1, I12 35, I13 10 and "Small" 13. I4's scored rows all
 pass; I7, I8 and I10 are closed. The 9,186 include DocBoy's rebuilds of 7 SameSuite channel 1 ROMs
 (`cgb/samesuite/apu/channel_1/*-cgbE`), which pass; the eighth,
@@ -1305,10 +1305,10 @@ hardware question. Families:
 
   blargg, SameSuite APU 70/70, gambatte `sound`/`speedchange` and the GBA PSG
   tests are unchanged by these rules.
-* **I3. CGB compatibility-mode picture (176 left of 233).**
+* **I3. CGB compatibility-mode picture (129 left of 233).**
   Three groups: the boot ROM's palette table, and two kinds of mid-mode-3
-  LCDC write in compat mode, `m3_lcdc_win_en_change_multiple_wx_*` (timing
-  tests closed, 47 frames left) and `change_{bg,win}_tile_data_glitch_*` (63
+  LCDC write in compat mode, `m3_lcdc_win_en_change_multiple_wx_*` (all
+  closed) and `change_{bg,win}_tile_data_glitch_*` (63
   left; their 10 CGB-mode twins are counted in I12).
   * Left (66, the palette table, which Matt keeps failing): 63
     `palettes_checksum_*`, `palettes_old_license_33_new_license_01_checksum_
@@ -1355,33 +1355,37 @@ hardware question. Families:
     window fetch leaves"): `bg_0000_win_{0000,00ff,ff00,ffff}`; it is also
     what DocBoy draws on lines 4..9 and 32..37 of all 70 frames, the
     unscored `nops5`/`nops7` ones included.
-  * Left (47; scored again 2026-11-16): every one differs on line 10 and/or
-    38 only (plus one line per object variant, the same event moved by the
-    object), the lines whose WX match lands on the write's own dot (k = 0).
-    dingbat refuses that match; DocBoy (and SameBoy, which also counts the
-    window line: the `_wly` frame's window rows run one ahead of dingbat's
-    from line 10, and `nops6_sprites_x16` line 47) takes it. What DocBoy
-    draws, decoded from the `ly10_*` and `ly38_lx31_extra_pixel_{a..f}` tile
-    variants:
-    * Line 10 (match at x = 3, mid background tile; tile 1's map byte m read
-      on dot 92): x = 3..7 are pixels 0..4 of a tile whose high plane is m
-      and whose low plane is the byte at $8000 + 16 m + 2 row (`ly10_first_
-      tile_*`: m = $AA, all VRAM $FF, gives `31313`; with m = 0 every variant
-      draws colour 0, so it is not the background's signed $9000 tile).
-      x = 8..15 are tile 1 as fetched; x = 16..23 take tile 1's high plane as
-      their index (`ly10_second_tile_source*`: tile $FF row 2 = $AA shows
-      `30303030`).
-    * Line 38 (match at x = 31, the background tile 4 already fetched): x =
-      32..39 are tile 4 with its own low plane and its index as the high
-      plane, x = 40..47 tile 4 again in full (column 5 is skipped), and
-      x = 31 shows tile 4's pixel 0 (`_b`, `_e`, `_f`).
-    A k = 0 start revoked at once with nothing read (the restart rule above
-    at `fetch_counter` 0) gives line 38's x = 32..39 but not x = 31, 40..47,
-    nor line 10's low plane from the $8000 address. Not modelled: no photo
-    resolves these pixels (the mealybug tile data hide them but for line
-    10's colour 0 at x = 3..7, which the photos show), and the line-10 low
-    plane has no mechanism yet. DocBoy disables two signed-addressing
-    variants itself ("glitch is different").
+  * Closed (2026-11-18): the 47 frames whose WX match lands on the LCDC.5
+    fall's own dot (k = 0; lines 10 and 38, and the line each object variant
+    moves the event to), `CGB_WIN_FALL_MATCH` (docs/dev/gb-derivations.md, "A
+    WX match on the LCDC.5 fall's own dot (CGB)"). The match triggers for one
+    dot: the window line counts, the FIFO's remaining pixels are reloaded from
+    the fetcher's latches, the fetcher restarts on its BG column, nothing
+    stalls, and the restart's tile is cut where the FIFO runs out, with a read
+    on that dot leaving its byte for the next map read. Tabulated per fetcher
+    step q from the ROM sources and the decodable variants (the object rows
+    reach q 0..6), it is the k >= 1 cut rule with the cut moved from the write
+    to the FIFO's end. Two earlier readings were wrong: line 10's x = 3..7 are
+    (m, m), the low latch passing the bus's last byte (the map read) because
+    its own read is half done; the "$8000 + 16 m" low plane came from the
+    disabled `ly10_first_tile_signed_addressing_source`, whose reference
+    DocBoy's own build does not draw either (x = 4, 6: 1 where it draws 0).
+    And column 5 skipped on line 38 is the residue rule, not a skip.
+    The CGB_WE_ENABLE_LATE miss of a rise on the match dot also applies when
+    that dot's push fills the FIFO (`nops6_sprites_x16`, `_x24` line 47).
+    Left in the family, all unscored and all failed by DocBoy's own build too:
+    the two signed-addressing rows (q 3's low byte for an index >= $80) and
+    `nops5_sprites_x18_sources` (q 6: the reference refetches tile N after the
+    cut, a residue the rule gives only at q 3, 5, 7). Deciders: the decodable
+    probe (`.scratch`-built from `m3_lcdc_win_en_change_multiple_wx`, BG
+    column c = $40 + c, rows ($80 + c, $C0 + c)) photographed on a CGB E with
+    an object at X = 18 (q 6) and X = 19 (q 3).
+    The same probes found a crash on origin/main: a WX = 6 start pushes its
+    first tile after four dots, one short of the five-dot revoke window, so a
+    fall after that push armed a revoke that landed on the next line's first
+    dot and drove the fetch counter to -6 (IndexDefect, every `--pre 1`
+    probe). The revoke now arms only before the restart's push and is cleared
+    per line.
   * Left (63 here, 10 in I12; scored again 2026-11-16),
     `change_{bg,win}_tile_data_glitch_*` (63 compat + 10 CGB): LCDC.4 flipped
     across a bitplane read with objects and windows at other phases. Per line,
@@ -1981,6 +1985,22 @@ hardware question. Families:
     already pushed on the re-trigger's dot on the startup fetch alone and
     leaves the 111 push-dot lines of the six tests as they are. SameBoy differs from DocBoy (and now
     dingbat) on 6 to 13 other lines of five of the tests.
+    Probed 2026-11-18 with DocBoy as a black box: the same ROM with BG tile
+    $00 (the background under x = 0..7) given rows $F0/$F0 draws x = 1..8 as
+    that tile's pattern from its pixel 0, so the colour 0 is the background
+    tile the window start cleared, re-shown from x = 1, not a blanked tile.
+    Two rules on it, each built and scored: the previous push's planes on
+    every push-dot re-trigger passes 3 of the 9 rows (breaks `change_wx_
+    glitch{,_alt}`, `wx6_nops17`, `wx7_nops18`); on the window's first push
+    only passes 8 of 9 (breaks `wx7_nops18` line 16, the same startup push
+    with the start on the background's own push dot, x = 0, where the reference
+    keeps the window tile). What separates the two lines is the start's
+    phase against the background push (dot 91 against 90), which is the
+    CGB_WIN_FALL_MATCH reload's q 1 against q 0: the latches the start
+    reloads from, shown when the re-trigger lands on the startup push. Not
+    built: it needs the start's reload kept in a latch pair the window's own
+    fetch does not overwrite, which no other row shows. Decider: wx8_nops18
+    with tile $00 = $F0 on a CGB E.
   * Closed (2026-11-17): `window_bg_reprise_wx25`, the window disabled on the
     WY line. On line 12 DocBoy draws x = 26..33 in colour 0 where dingbat drew
     BG tile $A3: the window starts at dot 108 and LCDC.5, written on 113
