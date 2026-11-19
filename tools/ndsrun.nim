@@ -451,8 +451,8 @@ when isMainModule:
       let sav = if slot2_save.len > 0 and fileExists(slot2_save):
                   cast[seq[uint8]](readFile(slot2_save)) else: @[]
       n.insert_slot2(s2GbaCart, cast[seq[uint8]](readFile(parts[0])), sav)
-      echo "slot2: GBA cart ", parts[0].extractFilename, ", ", n.slot2.save_type,
-           (if n.slot2.has_rtc: " + RTC" else: "")
+      echo "slot2: GBA cart ", parts[0].extractFilename, ", ", n.slot2.gba_cart.save_type,
+           (if n.slot2.gba_cart.has_rtc: " + RTC" else: "")
     else: quit("--slot2 wants gba:FILE[,SAVE], rumble or expansion")
   if state_layout:
     stdout.write n.state_layout()
@@ -644,9 +644,10 @@ when isMainModule:
   if fw_out.len > 0 and n.spi.firmware_dirty:
     writeFile(fw_out, cast[string](n.spi.firmware))
     echo "firmware: written by the run -> ", fw_out
-  if slot2_save.len > 0 and n.slot2.dirty:
-    writeFile(slot2_save, cast[string](n.slot2_save()))
-    echo "slot2 save: ", n.slot2.save.len, " bytes written -> ", slot2_save
+  if slot2_save.len > 0 and n.slot2.save_dirty:
+    let bytes = n.slot2_save()
+    writeFile(slot2_save, cast[string](bytes))
+    echo "slot2 save: ", bytes.len, " bytes written -> ", slot2_save
   if shot.len == 2:
     # --bgshot A0: that BG replaces the top half of the PNG
     let px = n.bg_shot(shot[0] == 'B', ord(shot[1]) - ord('0'))

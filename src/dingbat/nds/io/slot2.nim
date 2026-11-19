@@ -41,10 +41,9 @@ type
   Slot2Kind* = enum
     s2Empty, s2GbaCart, s2RumblePak, s2ExpansionPak
 
-  Slot2* = ref object
-    kind*: Slot2Kind
-    rom*: seq[uint8]            ## GBA cart ROM image (as loaded)
-    save_type*: StorageType     ## GBA cart backup chip (stNone without one)
+  GbaCart* = object
+    rom*: seq[uint8]            ## ROM image (as loaded)
+    save_type*: StorageType     ## backup chip (stNone without one)
     save*: seq[uint8]           ## its contents (SRAM / FLASH / EEPROM bytes)
     dirty*: bool                ## save written since the frontend last took it
     has_rtc*: bool              ## the ROM links the RTC library (not modelled)
@@ -52,15 +51,30 @@ type
     flash_bank: uint8
     ee_in: array[81, uint8]     ## EEPROM: bits written since the last read
     ee_bits: int
-    ee_sized: bool             ## EEPROM: size fixed by a first command
+    ee_sized: bool              ## EEPROM: size fixed by a first command
     ee_out: uint64              ## EEPROM: bits a read command left to read
     ee_out_left: int            ## 68 after a read command (4 dummy + 64)
     gpio_data, gpio_dir, gpio_ctl: uint8
-    rumble_latch*: bool         ## Rumble Pak: the AD1 value last written
+
+  RumblePak* = object
+    rumble_latch*: bool         ## the AD1 value last written
     rumble_edges: int           ## latch changes this frame
     rumble_last*: int           ## latch changes in the last whole frame
-    exp_ram*: seq[uint8]        ## Expansion Pak: 8 MB
+
+  ExpansionPak* = object
+    exp_ram*: seq[uint8]        ## 8 MB
     exp_unlocked*: bool
+
+  Slot2Device* = object
+    ## What is in the slot: a device's state exists only while it is in.
+    case
+    of SlotEmpty: discard
+    of SlotGbaCart: cart*: GbaCart
+    of SlotRumblePak: rumble_pak*: RumblePak
+    of SlotExpansionPak: expansion_pak*: ExpansionPak
+
+  Slot2* = ref object
+    dev*: Slot2Device
 
 const
   EXP_HEADER: array[8, uint16] = [  ## halfwords at 0x080000B0-BF (reference runs)
@@ -70,55 +84,61 @@ const
   EXP_LOCK = 0x0024_0000'u32      ## 0x08240000
   EEPROM_READ_BITS = 68           ## GBATEK "GBA Cart Backup EEPROM"
 
-proc new_slot2*(): Slot2 = Slot2(kind: s2Empty, save_type: stNone)
+proc new_slot2*(): Slot2 = Slot2(dev: SlotEmpty())
+
+proc kind*(s: Slot2): Slot2Kind =
+  case s.dev
+  of SlotEmpty: s2Empty
+  of SlotGbaCart: s2GbaCart
+  of SlotRumblePak: s2RumblePak
+  of SlotExpansionPak: s2ExpansionPak
+
+proc gba_cart*(s: Slot2): ptr GbaCart =
+  ## The GBA cartridge in the slot, nil without one. For the frontends and
+  ## the save state, which reach its save and ROM; the bus matches `dev`.
+  case s.dev
+  of SlotGbaCart:
+    {.cast(uncheckedAccess).}:
+      result = addr s.dev.cart
+  else: result = nil
+
+proc save_dirty*(s: Slot2): bool =
+  ## The GBA cart's save chip was written since the frontend last took it.
+  let c = s.gba_cart
+  c != nil and c.dirty
+
+proc `save_dirty=`*(s: Slot2; on: bool) =
+  let c = s.gba_cart
+  if c != nil: c.dirty = on
 
 proc eject*(s: Slot2) =
-  s.kind = s2Empty
-  s.rom = @[]
-  s.save = @[]
-  s.save_type = stNone
-  s.exp_ram = @[]
-  s.dirty = false
-  s.rumble_latch = false
-  s.rumble_edges = 0
-  s.rumble_last = 0
+  s.dev = SlotEmpty()
 
 proc insert_gba*(s: Slot2; rom: seq[uint8]; save: seq[uint8] = @[]) =
   ## A GBA cartridge: `save` (a GBA emulator's .sav, chip bytes first) is
   ## copied over the erased chip; its length does not pick the chip.
-  s.eject()
-  s.kind = s2GbaCart
-  s.rom = rom
   var content = newString(rom.len)
   if rom.len > 0: copyMem(addr content[0], unsafeAddr rom[0], rom.len)
-  s.save_type = find_storage_type(content)
-  s.has_rtc = rom_has_rtc(content)
-  let size = case s.save_type
+  var c = GbaCart(rom: rom, save_type: find_storage_type(content),
+                  has_rtc: rom_has_rtc(content), flash_state: {fsReady})
+  let size = case c.save_type
     of stEEPROM:
       # 4 Kbit or 64 Kbit: the chip answers either address width (below);
       # a 512-byte save file says which the game used
       if save.len == 0x200: 0x200 else: 0x2000
-    else: storage_bytes(s.save_type)
-  s.save = newSeq[uint8](size)
-  for b in s.save.mitems: b = 0xFF
-  for i in 0 ..< min(size, save.len): s.save[i] = save[i]
-  s.flash_state = {fsReady}
-  s.flash_bank = 0
-  s.ee_bits = 0
-  s.ee_sized = false
-  s.ee_out_left = 0
-  s.gpio_data = 0; s.gpio_dir = 0; s.gpio_ctl = 0
+    else: storage_bytes(c.save_type)
+  c.save = newSeq[uint8](size)
+  for b in c.save.mitems: b = 0xFF
+  for i in 0 ..< min(size, save.len): c.save[i] = save[i]
+  s.dev = SlotGbaCart(cart: c)
 
 proc insert_rumble_pak*(s: Slot2) =
-  s.eject()
-  s.kind = s2RumblePak
+  s.dev = SlotRumblePak(rumble_pak: RumblePak())
 
 proc insert_expansion_pak*(s: Slot2) =
-  s.eject()
-  s.kind = s2ExpansionPak
-  s.exp_ram = newSeq[uint8](EXP_RAM_SIZE)
-  for b in s.exp_ram.mitems: b = 0xFF     # Assumed (the reference's RAM reads FFh)
-  s.exp_unlocked = true
+  var ram = newSeq[uint8](EXP_RAM_SIZE)
+  for b in ram.mitems: b = 0xFF     # Assumed (the reference's RAM reads FFh)
+  s.dev = SlotExpansionPak(expansion_pak: ExpansionPak(exp_ram: ram, exp_unlocked: true))
 
 # ---------------------------------------------------------------------------
 # Open bus
@@ -141,79 +161,82 @@ proc open_bus16*(a: uint32; rom_n: int): uint32 {.inline.} =
 # The chip size is known from the command's length when the first read
 # after it arrives: 9 / 17 bits = read setup, 73 / 81 = write.
 
-proc eeprom_at(s: Slot2; off: uint32): bool {.inline.} =
-  s.save_type == stEEPROM and
-    (if s.rom.len > 0x100_0000: off >= 0x01FF_FF00'u32 else: off >= 0x0100_0000'u32)
+proc eeprom_at(c: GbaCart; off: uint32): bool {.inline.} =
+  c.save_type == stEEPROM and
+    (if c.rom.len > 0x100_0000: off >= 0x01FF_FF00'u32 else: off >= 0x0100_0000'u32)
 
-proc eeprom_command(s: Slot2) =
+proc eeprom_command(c: var GbaCart) =
   ## The bits written since the last read form a whole command.
-  let n = s.ee_bits
-  s.ee_bits = 0
-  proc bits(s: Slot2; first, count: int): uint64 =
-    for i in first ..< first + count: result = (result shl 1) or uint64(s.ee_in[i])
-  if n in [9, 17, 73, 81] and not s.ee_sized:
+  let n = c.ee_bits
+  c.ee_bits = 0
+  proc bits(c: GbaCart; first, count: int): uint64 =
+    for i in first ..< first + count: result = (result shl 1) or uint64(c.ee_in[i])
+  if n in [9, 17, 73, 81] and not c.ee_sized:
     # the first command's address width sizes the chip (bytes kept)
     let size = if n == 9 or n == 73: 0x200 else: 0x2000
-    let old = s.save.len
-    s.save.setLen(size)
-    for i in old ..< size: s.save[i] = 0xFF
-    s.ee_sized = true
+    let old = c.save.len
+    c.save.setLen(size)
+    for i in old ..< size: c.save[i] = 0xFF
+    c.ee_sized = true
   case n
   of 9, 17:     # read setup: 11, address, 0
     let abits = n - 3
-    if s.bits(0, 2) != 3: return
-    let base = (int(s.bits(2, abits)) * 8) mod s.save.len
+    if c.bits(0, 2) != 3: return
+    let base = (int(c.bits(2, abits)) * 8) mod c.save.len
     var d = 0'u64
-    for i in 0..7: d = (d shl 8) or uint64(s.save[base + i])
-    s.ee_out = d
-    s.ee_out_left = EEPROM_READ_BITS
+    for i in 0..7: d = (d shl 8) or uint64(c.save[base + i])
+    c.ee_out = d
+    c.ee_out_left = EEPROM_READ_BITS
   of 73, 81:    # write: 10, address, 64 data bits, 0
     let abits = n - 67
-    if s.bits(0, 2) != 2: return
-    let base = (int(s.bits(2, abits)) * 8) mod s.save.len
-    let d = s.bits(2 + abits, 64)
-    for i in 0..7: s.save[base + i] = uint8(d shr (56 - 8 * i))
-    s.dirty = true
+    if c.bits(0, 2) != 2: return
+    let base = (int(c.bits(2, abits)) * 8) mod c.save.len
+    let d = c.bits(2 + abits, 64)
+    for i in 0..7: c.save[base + i] = uint8(d shr (56 - 8 * i))
+    c.dirty = true
   else: discard
 
-proc eeprom_read(s: Slot2): uint32 =
-  if s.ee_bits > 0: s.eeprom_command()
-  if s.ee_out_left == 0: return 1        # ready (writes finish at once: Assumed)
-  dec s.ee_out_left
-  if s.ee_out_left >= 64: return 0       # the 4 dummy bits
-  uint32((s.ee_out shr s.ee_out_left) and 1)
+proc eeprom_read(c: var GbaCart): uint32 =
+  if c.ee_bits > 0: c.eeprom_command()
+  if c.ee_out_left == 0: return 1        # ready (writes finish at once: Assumed)
+  dec c.ee_out_left
+  if c.ee_out_left >= 64: return 0       # the 4 dummy bits
+  uint32((c.ee_out shr c.ee_out_left) and 1)
 
-proc eeprom_write(s: Slot2; v: uint32) =
-  if s.ee_out_left > 0: s.ee_out_left = 0  # a new command abandons a read
-  if s.ee_bits < s.ee_in.len: s.ee_in[s.ee_bits] = uint8(v and 1)
-  inc s.ee_bits
+proc eeprom_write(c: var GbaCart; v: uint32) =
+  if c.ee_out_left > 0: c.ee_out_left = 0  # a new command abandons a read
+  if c.ee_bits < c.ee_in.len: c.ee_in[c.ee_bits] = uint8(v and 1)
+  inc c.ee_bits
 
 # ---------------------------------------------------------------------------
 # ROM region (16-bit)
 
+proc cart_read16(c: var GbaCart; a, off: uint32; rom_n: int): uint32 =
+  if c.eeprom_at(off): return c.eeprom_read()
+  if off >= 0xC4 and off <= 0xC8 and (c.gpio_ctl and 1) != 0:
+    # GPIO readable (GBATEK "GBA Cart I/O Port (GPIO)"): output pins read
+    # back what was written; no input device is modelled (reads 0)
+    return case off
+      of 0xC4: uint32(c.gpio_data and c.gpio_dir and 0xF)
+      of 0xC6: uint32(c.gpio_dir and 0xF)
+      else: uint32(c.gpio_ctl and 1)
+  if int(off) + 1 < c.rom.len:
+    uint32(c.rom[off]) or (uint32(c.rom[off + 1]) shl 8)
+  else: open_bus16(a, rom_n)     # past the ROM: Assumed as an empty slot
+
 proc rom_read16*(s: Slot2; a: uint32; rom_n: int): uint32 =
   ## The halfword at `a` (0x08000000-0x09FFFFFF), seen by the owning CPU.
   let off = a and 0x01FF_FFFE'u32
-  case s.kind
-  of s2Empty: open_bus16(a, rom_n)
-  of s2GbaCart:
-    if s.eeprom_at(off): return s.eeprom_read()
-    if off >= 0xC4 and off <= 0xC8 and (s.gpio_ctl and 1) != 0:
-      # GPIO readable (GBATEK "GBA Cart I/O Port (GPIO)"): output pins read
-      # back what was written; no input device is modelled (reads 0)
-      return case off
-        of 0xC4: uint32(s.gpio_data and s.gpio_dir and 0xF)
-        of 0xC6: uint32(s.gpio_dir and 0xF)
-        else: uint32(s.gpio_ctl and 1)
-    if int(off) + 1 < s.rom.len:
-      uint32(s.rom[off]) or (uint32(s.rom[off + 1]) shl 8)
-    else: open_bus16(a, rom_n)     # past the ROM: Assumed as an empty slot
-  of s2RumblePak: open_bus16(a, rom_n) and 0xFFFD
-  of s2ExpansionPak:
+  case s.dev
+  of SlotEmpty: open_bus16(a, rom_n)
+  of SlotGbaCart(c): c.cart_read16(a, off, rom_n)
+  of SlotRumblePak: open_bus16(a, rom_n) and 0xFFFD
+  of SlotExpansionPak(e):
     if off >= EXP_RAM_BASE and off < EXP_RAM_BASE + EXP_RAM_SIZE:
-      if not s.exp_unlocked: return 0xFFFF
-      let i = int(off - EXP_RAM_BASE)
-      uint32(s.exp_ram[i]) or (uint32(s.exp_ram[i + 1]) shl 8)
+      if not e.exp_unlocked: 0xFFFF'u32
+      else:
+        let i = int(off - EXP_RAM_BASE)
+        uint32(e.exp_ram[i]) or (uint32(e.exp_ram[i + 1]) shl 8)
     elif off >= 0xB0 and off < 0xC0: uint32(EXP_HEADER[(off - 0xB0) shr 1])
     else: 0xFFFF
 
@@ -223,58 +246,65 @@ proc rom_write*(s: Slot2; a: uint32; v: uint32; width: int) =
   ## the GBA's 8-bit SRAM bus does).
   let off = a and 0x01FF_FFFF'u32
   let h = if width == 8: (v and 0xFF) * 0x0101 else: v and 0xFFFF
-  case s.kind
-  of s2Empty: discard
-  of s2GbaCart:
-    if s.eeprom_at(off): s.eeprom_write(h)
+  case s.dev
+  of SlotEmpty: discard
+  of SlotGbaCart(c):
+    if c.eeprom_at(off): c.eeprom_write(h)
     elif off >= 0xC4 and off <= 0xC9:
       case off and not 1'u32
-      of 0xC4: s.gpio_data = uint8(h and 0xF)
-      of 0xC6: s.gpio_dir = uint8(h and 0xF)
-      else: s.gpio_ctl = uint8(h and 1)
-  of s2RumblePak:
+      of 0xC4: c.gpio_data = uint8(h and 0xF)
+      of 0xC6: c.gpio_dir = uint8(h and 0xF)
+      else: c.gpio_ctl = uint8(h and 1)
+  of SlotRumblePak(r):
     let latch = (h and 2) != 0
-    if latch != s.rumble_latch:
-      s.rumble_latch = latch
-      inc s.rumble_edges
-  of s2ExpansionPak:
+    if latch != r.rumble_latch:
+      r.rumble_latch = latch
+      inc r.rumble_edges
+  of SlotExpansionPak(e):
     if width == 8: return     # no byte lane selects on the bus (reference runs)
     if (off and not 1'u32) == EXP_LOCK:
-      s.exp_unlocked = h == 1
-    elif s.exp_unlocked and off >= EXP_RAM_BASE and off < EXP_RAM_BASE + EXP_RAM_SIZE:
+      e.exp_unlocked = h == 1
+    elif e.exp_unlocked and off >= EXP_RAM_BASE and off < EXP_RAM_BASE + EXP_RAM_SIZE:
       let j = int(off - EXP_RAM_BASE) and not 1
-      s.exp_ram[j] = uint8(h); s.exp_ram[j + 1] = uint8(h shr 8)
+      e.exp_ram[j] = uint8(h); e.exp_ram[j + 1] = uint8(h shr 8)
 
 # ---------------------------------------------------------------------------
 # SRAM region (8-bit, /CS2)
 
 proc ram_read8*(s: Slot2; a: uint32): uint32 =
-  if s.kind != s2GbaCart: return 0xFF
   let off = a and 0xFFFF'u32
-  case s.save_type
-  of stSRAM: uint32(s.save[off and 0x7FFF])
-  of stFLASH, stFLASH512, stFLASH1M:
-    uint32(flash_read(s.save, s.flash_state, s.flash_bank, flash_id(s.save_type), off))
-  else: 0xFF   # EEPROM or no chip: nothing on /CS2
+  case s.dev
+  of SlotGbaCart(c):
+    case c.save_type
+    of stSRAM: uint32(c.save[off and 0x7FFF])
+    of stFLASH, stFLASH512, stFLASH1M:
+      uint32(flash_read(c.save, c.flash_state, c.flash_bank, flash_id(c.save_type), off))
+    else: 0xFF   # EEPROM or no chip: nothing on /CS2
+  else: 0xFF
 
 proc ram_write8*(s: Slot2; a: uint32; v: uint8) =
-  if s.kind != s2GbaCart: return
   let off = a and 0xFFFF'u32
-  case s.save_type
-  of stSRAM:
-    s.save[off and 0x7FFF] = v
-    s.dirty = true
-  of stFLASH, stFLASH512, stFLASH1M:
-    if flash_write(s.save, s.flash_state, s.flash_bank, s.save_type, off, v):
-      s.dirty = true
+  case s.dev
+  of SlotGbaCart(c):
+    case c.save_type
+    of stSRAM:
+      c.save[off and 0x7FFF] = v
+      c.dirty = true
+    of stFLASH, stFLASH512, stFLASH1M:
+      if flash_write(c.save, c.flash_state, c.flash_bank, c.save_type, off, v):
+        c.dirty = true
+    else: discard
   else: discard
 
 # ---------------------------------------------------------------------------
 # Rumble
 
 proc end_frame*(s: Slot2) =
-  s.rumble_last = s.rumble_edges
-  s.rumble_edges = 0
+  case s.dev
+  of SlotRumblePak(r):
+    r.rumble_last = r.rumble_edges
+    r.rumble_edges = 0
+  else: discard
 
 proc rumble*(s: Slot2): int =
   ## Rumble strength for the frontend, 0 (still) .. 255. The Rumble Pak's
@@ -282,10 +312,10 @@ proc rumble*(s: Slot2): int =
   ## many changes the last frame had (one a frame is a light buzz; a game
   ## toggling from a timer gets full strength). A GBA cart's GPIO motor
   ## (bit 3 an output, driven high) is simply on.
-  case s.kind
-  of s2RumblePak: min(255, s.rumble_last * 64)
-  of s2GbaCart:
-    if (s.gpio_dir and 8) != 0 and (s.gpio_data and 8) != 0: 255 else: 0
+  case s.dev
+  of SlotRumblePak(r): min(255, r.rumble_last * 64)
+  of SlotGbaCart(c):
+    if (c.gpio_dir and 8) != 0 and (c.gpio_data and 8) != 0: 255 else: 0
   else: 0
 
 proc gba_header_info*(s: Slot2): array[12, uint8] =
@@ -295,12 +325,14 @@ proc gba_header_info*(s: Slot2): array[12, uint8] =
   ## flags byte 00h (the real firmware, --boot firmware with the dumps).
   for b in result.mitems: b = 0xFF
   result[5] = 0
-  if s.kind != s2GbaCart or s.rom.len < 0xC0: return
-  let r = s.rom
-  result[0] = r[0xBE]; result[1] = r[0xBF]
-  result[2] = r[0xB5]; result[3] = r[0xB6]; result[4] = r[0xB7]
-  result[5] = 0    # "whatever flags": Assumed 0
-  result[6] = r[0xB0]; result[7] = r[0xB1]
-  for i in 0..3: result[8 + i] = r[0xAC + i]
+  case s.dev
+  of SlotGbaCart(c):
+    if c.rom.len < 0xC0: return
+    result[0] = c.rom[0xBE]; result[1] = c.rom[0xBF]
+    result[2] = c.rom[0xB5]; result[3] = c.rom[0xB6]; result[4] = c.rom[0xB7]
+    result[5] = 0    # "whatever flags": Assumed 0
+    result[6] = c.rom[0xB0]; result[7] = c.rom[0xB1]
+    for i in 0..3: result[8 + i] = c.rom[0xAC + i]
+  else: discard
 
 {.pop.}

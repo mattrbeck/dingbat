@@ -101,7 +101,7 @@ block gba_flash:
   for b in sav.mitems: b = 0xFF
   sav[0x12345] = 0x42
   s.insert_gba(rom, sav)
-  check s.save_type == stFLASH1M and s.save.len == 0x20000, "FLASH1M_V -> 128 KB FLASH", $s.save_type
+  check s.gba_cart.save_type == stFLASH1M and s.gba_cart.save.len == 0x20000, "FLASH1M_V -> 128 KB FLASH", $s.gba_cart.save_type
   check s.rom_read16(0x0800_0100'u32, 10) == rom16(rom, 0x100), "ROM halfword"
   check s.rom_read16(0x0810_0002'u32, 6) == 0x0001 and s.rom_read16(0x0810_0002'u32, 10) == 0xFE09,
         "past the ROM: open bus as for an empty slot"
@@ -115,10 +115,10 @@ block gba_flash:
   cmd(0xB0); s.ram_write8(0x0A00_0000'u32, 1)
   check s.ram_read8(0x0A00_2345'u32) == 0x42, "bank 1 reads the second 64 KB"
   cmd(0xA0); s.ram_write8(0x0A00_0010'u32, 0x5A)
-  check s.save[0x10010] == 0x5A and s.dirty, "byte program into bank 1"
+  check s.gba_cart.save[0x10010] == 0x5A and s.gba_cart.dirty, "byte program into bank 1"
   cmd(0x80); s.ram_write8(0x0A00_5555'u32, 0xAA); s.ram_write8(0x0A00_2AAA'u32, 0x55)
   s.ram_write8(0x0A00_0000'u32, 0x30)
-  check s.save[0x10010] == 0xFF and s.save[0x12345] == 0x42, "4 KB sector erase"
+  check s.gba_cart.save[0x10010] == 0xFF and s.gba_cart.save[0x12345] == 0x42, "4 KB sector erase"
   check s.gba_header_info() == [0'u8, 0, 0, 0, 0, 0, uint8('0'), uint8('1'),
                                  uint8('T'), uint8('E'), uint8('S'), uint8('T')],
         "boot info: header BEh, B5h-B7h, flags, maker, game code"
@@ -127,7 +127,7 @@ block gba_sram:
   echo "GBA cart: SRAM"
   let s = new_slot2()
   s.insert_gba(gba_rom(0x8_0000, "SRAM_V113"))
-  check s.save_type == stSRAM and s.save.len == 0x8000, "SRAM_V -> 32 KB SRAM"
+  check s.gba_cart.save_type == stSRAM and s.gba_cart.save.len == 0x8000, "SRAM_V -> 32 KB SRAM"
   s.ram_write8(0x0A00_7FFF'u32, 0x77)
   check s.ram_read8(0x0A00_7FFF'u32) == 0x77 and s.ram_read8(0x0A01_7FFF'u32) == 0x77,
         "write / read back, repeating every 64 KB"
@@ -136,7 +136,7 @@ block gba_eeprom:
   echo "GBA cart: EEPROM"
   let s = new_slot2()
   s.insert_gba(gba_rom(0x10_0000, "EEPROM_V124"))
-  check s.save_type == stEEPROM, "EEPROM_V -> EEPROM"
+  check s.gba_cart.save_type == stEEPROM, "EEPROM_V -> EEPROM"
   proc send(s: Slot2; bits: openArray[int]) =
     for b in bits: s.rom_write(0x0900_0000'u32, uint32(b), 16)
   proc bits_of(v: uint64; n: int): seq[int] =
@@ -145,7 +145,7 @@ block gba_eeprom:
   let data = 0x0123_4567_89AB_CDEF'u64
   s.send(@[1, 0] & bits_of(5, 14) & bits_of(data, 64) & @[0])
   check s.rom_read16(0x0900_0000'u32, 10) == 1, "ready after the write"
-  check s.save.len == 0x2000 and s.save[40] == 0x01 and s.save[47] == 0xEF,
+  check s.gba_cart.save.len == 0x2000 and s.gba_cart.save[40] == 0x01 and s.gba_cart.save[47] == 0xEF,
         "81-bit write: 64 Kbit chip, block 5 stored MSB first"
   s.send(@[1, 1] & bits_of(5, 14) & @[0])
   var got = 0'u64
@@ -159,7 +159,7 @@ block gba_gpio:
   echo "GBA cart: GPIO rumble"
   let s = new_slot2()
   s.insert_gba(gba_rom(0x40_0000, "SRAM_V113"))
-  check s.rom_read16(0x0800_00C4'u32, 10) == rom16(s.rom, 0xC4), "port write-only: ROM data"
+  check s.rom_read16(0x0800_00C4'u32, 10) == rom16(s.gba_cart.rom, 0xC4), "port write-only: ROM data"
   s.rom_write(0x0800_00C8'u32, 1, 16)
   s.rom_write(0x0800_00C6'u32, 8, 16)
   s.rom_write(0x0800_00C4'u32, 8, 16)

@@ -80,7 +80,9 @@ delta stays mostly zeros. In payload order:
 | 22 | DIV/SQRT | registers, results and busy-until times |
 | 23 | input | keys held, KEYCNTs, stylus, lid, PENIRQ enable |
 | 24 | SPI | SPICNT, the transfer in flight (reply, busy time), firmware-flash command state and write/erase busy, deep power-down, touchscreen ADC state, power-manager registers and index, chip select |
-| 31 | GBA slot | device, save type and contents, FLASH/EEPROM state machines, GPIO, Rumble Pak latch and edge counts, Expansion Pak RAM (8 MB when present) and lock |
+| 31 | GBA slot: GBA cart | only with a GBA cart in: save type and contents, FLASH/EEPROM state machines, GPIO |
+| 32 | GBA slot: Rumble Pak | only with the Rumble Pak in: latch and edge counts |
+| 33 | GBA slot: Expansion Pak | only with the Expansion Pak in: its RAM (8 MB) and lock |
 | 27 | sound | 16 channels (registers, timer, position, ADPCM state and loop copy, noise LFSR, read-ahead FIFO), SOUNDCNT/BIAS, both capture units, the next mixer tick, last output words |
 | 28 | RTC | port, serial state machine, status/alarm/adjust/free registers, clock offsets, fixed start, time slept, INT1/INT2 latches and edge state, next check, RCNT |
 | 29 | wifi | registers, packet RAM, BB and RF chips, IRQ line, random generator, microsecond counter, beacon/IRQ timers, the transmitter (source, stage, the frame being sent, retries, multiplay state), the receiver's frames in flight, channel, frame counters |
@@ -111,7 +113,7 @@ wifi frame in flight (`AirFrame`, a ref) as a present flag and its fields.
 | engine palette/OAM pointers, `line3d`; the DMA mode 4 hook | point into the machine; set at construction or before each use |
 | renderer depth, polygon IDs, flags, AA coverage, `below`, texture page pointers, sort order | per-frame scratch: `render_frame`'s clear and `build_pages` rewrite them before anything reads them |
 | `spu.samples` | the host's output queue; emptied on load |
-| `backup.dirty`, `slot2.dirty` | frontend bookkeeping; set on load, so the frontend writes out the save chips the state carries (as the GB/GBA cores do) |
+| `backup.dirty`, the GBA cart's `dirty` | frontend bookkeeping; set on load, so the frontend writes out the save chips the state carries (as the GB/GBA cores do) |
 | `rtc.fixed` | whether the clock follows emulated time is the frontend's choice (`ndsrun --rtc`); offsets, fixed start and the tick state are saved. On the host clock a resumed game reads the host's time, as on the GB/GBA cores |
 | wifi `air`, `station`, `air_offset`, firmware copy, write masks | the Air is the frontend's link between machines, not one machine's state (a linked session saves each machine and links them again; the test does); masks are constant |
 | debug switches (traces, profiles, I/O and card logs) | not machine state |

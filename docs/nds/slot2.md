@@ -64,7 +64,7 @@ table's fixed default whatever EXMEMCNT said; the boot info said "no cart".
 API: `n.insert_slot2(kind, rom, save)` (`s2Empty`, `s2GbaCart`,
 `s2RumblePak`, `s2ExpansionPak`; before the first instruction it is power-on
 insertion and rewrites the boot info), `n.slot2_save()` (the cart's chip
-bytes in the usual GBA .sav layout; `n.slot2.dirty` says when it changed),
+bytes in the usual GBA .sav layout; `n.slot2.save_dirty` says when it changed),
 `n.slot2_rumble()` (0-255). ndsrun: `--slot2 gba:FILE[,SAVE]` (the save is
 written back when changed), `--slot2 rumble`, `--slot2 expansion`,
 `--rumble-log`. wasm: `nds_insert_slot2`, `nds_slot2_save_{len,ptr,dirty}`,

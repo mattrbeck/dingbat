@@ -276,14 +276,17 @@ proc nds_insert_slot2(kind: cint; rom: pointer; rom_len: cint; save: pointer;
   1
 
 proc nds_slot2_save_len(): cint {.exportc.} =
-  if core == nil: 0 else: cint(core.slot2.save.len)
+  if core == nil or core.slot2.gba_cart == nil: 0
+  else: cint(core.slot2.gba_cart.save.len)
 
 proc nds_slot2_save_ptr(): pointer {.exportc.} =
-  if core == nil or core.slot2.save.len == 0: nil else: addr core.slot2.save[0]
+  if core == nil: return nil
+  let c = core.slot2.gba_cart
+  if c == nil or c.save.len == 0: nil else: addr c.save[0]
 
 proc nds_slot2_save_dirty(): cint {.exportc.} =
-  if core == nil or not core.slot2.dirty: return 0
-  core.slot2.dirty = false
+  if core == nil or not core.slot2.save_dirty: return 0
+  core.slot2.save_dirty = false
   1
 
 proc nds_rumble(): cint {.exportc.} =

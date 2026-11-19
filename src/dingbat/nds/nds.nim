@@ -699,8 +699,10 @@ proc insert_slot2*(n: NDS; kind: Slot2Kind; rom: seq[uint8] = @[];
 proc slot2_save*(n: NDS): seq[uint8] =
   ## The slot-2 GBA cart's backup chip contents (empty without one), in the
   ## .sav layout GBA emulators use; clears the dirty flag.
-  n.slot2.dirty = false
-  n.slot2.save
+  let c = n.slot2.gba_cart
+  if c == nil: return @[]
+  c.dirty = false
+  c.save
 
 proc slot2_rumble*(n: NDS): int =
   ## Rumble strength 0..255 for the frontend (Rumble Pak or a GBA cart's

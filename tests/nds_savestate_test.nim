@@ -508,10 +508,11 @@ proc hostile_fields() =
         proc (n: NDS) = n.gpu3d.geo.vp_x2 = high(int32), path3d)
   offer("a second FLASH bank on a 64 KB GBA-slot FLASH",
         proc (n: NDS) =
-          privateAccess(Slot2)
-          n.slot2.save_type = stFLASH
-          n.slot2.save.setLen(0x10000)
-          n.slot2.flash_bank = 1,
+          privateAccess(GbaCart)
+          let c = n.slot2.gba_cart
+          c.save_type = stFLASH
+          c.save.setLen(0x10000)
+          c.flash_bank = 1,
         rom_dir / "slot2_probe.nds",
         proc (n: NDS) = n.insert_slot2(s2GbaCart, gba_cart()))
 

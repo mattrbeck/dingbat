@@ -576,7 +576,21 @@ proc io_machine[S](s: var S; n: NDS) =
   obj_section(s, 22, "DIV/SQRT", n.divsqrt[], DIVSQRT_SKIP)
   obj_section(s, 23, "input", n.input[], NO_SKIP)
   obj_section(s, 24, "SPI (power manager, firmware flash, touch)", n.spi[], SPI_SKIP)
-  obj_section(s, 31, "GBA slot", n.slot2[], SLOT2_SKIP)
+  # The GBA slot: the device that is in (the preamble names it, so a load
+  # meets the same one). The layout lists all three, whatever is in.
+  when S is Layout:
+    var cart: GbaCart
+    var rumble_pak: RumblePak
+    var expansion_pak: ExpansionPak
+    obj_section(s, 31, "GBA slot: GBA cart", cart, SLOT2_SKIP)
+    obj_section(s, 32, "GBA slot: Rumble Pak", rumble_pak, NO_SKIP)
+    obj_section(s, 33, "GBA slot: Expansion Pak", expansion_pak, NO_SKIP)
+  else:
+    case n.slot2.dev
+    of SlotEmpty: discard
+    of SlotGbaCart(cart): obj_section(s, 31, "GBA slot: GBA cart", cart, SLOT2_SKIP)
+    of SlotRumblePak(pak): obj_section(s, 32, "GBA slot: Rumble Pak", pak, NO_SKIP)
+    of SlotExpansionPak(pak): obj_section(s, 33, "GBA slot: Expansion Pak", pak, NO_SKIP)
   obj_section(s, 27, "sound", n.spu[], SPU_SKIP)
   obj_section(s, 28, "RTC", n.rtc[], RTC_SKIP)
   obj_section(s, 29, "wifi", n.wifi[], WIFI_SKIP)
@@ -664,9 +678,11 @@ proc slot2_identity(n: NDS): uint32 =
   ## What is in the GBA slot: the device, and for a GBA cart fnv1a over its
   ## header (0xC0 bytes: title, game code, version, checksum) and length.
   ## Its ROM is supplied like the card's, so a state needs the same one.
-  let r = n.slot2.rom
-  result = fnv1a(r.toOpenArray(0, min(r.len, 0xC0) - 1))
-  result = (result xor uint32(r.len)) * 0x01000193'u32
+  let c = n.slot2.gba_cart
+  let len = if c != nil: c.rom.len else: 0
+  result = if len > 0: fnv1a(c.rom.toOpenArray(0, min(len, 0xC0) - 1))
+           else: fnv1a(default(seq[uint8]))
+  result = (result xor uint32(len)) * 0x01000193'u32
 
 proc write_preamble(s: var Saver; n: NDS) =
   var w = [(if s.aligned: PREAMBLE_ALIGNED else: PREAMBLE_MAGIC),
@@ -923,7 +939,7 @@ proc after_load(n: NDS) =
   privateAccess(Mic)
   privateAccess(Engine2D)
   privateAccess(NdsScheduler)
-  privateAccess(Slot2)
+  privateAccess(GbaCart)
   privateAccess(Gpu)
   # the renderer's colour buffer is the state's: a render the host-GPU skip
   # left without dots before the load is not this machine's
@@ -1005,16 +1021,16 @@ proc after_load(n: NDS) =
   # The GBA slot's save chip: its memory as long as its type's (insert_gba),
   # the FLASH bank inside it (storage_chip.nim indexes it unmasked), and the
   # EEPROM's bit counts (`eeprom_read` shifts by what is left)
-  let s2 = n.slot2
-  if s2.kind == s2GbaCart:
+  let s2 = n.slot2.gba_cart
+  if s2 != nil:
     if s2.save_type == stEEPROM: check_one_of(s2.save.len, [0x200, 0x2000], "slot2.save")
     else: check_one_of(s2.save.len, [storage_bytes(s2.save_type)], "slot2.save")
     if s2.save_type in {stFLASH, stFLASH512, stFLASH1M}:
       check_range(int(s2.flash_bank), 0, s2.save.len div 0x10000 - 1, "slot2.flash_bank")
       if fsSetBank in s2.flash_state and s2.save_type != stFLASH1M:
         raise state_error("DS state sets a bank on a one-bank FLASH")
-  check_range(s2.ee_bits, 0, high(int32), "slot2.ee_bits")
-  check_range(s2.ee_out_left, 0, 68, "slot2.ee_out_left")
+    check_range(s2.ee_bits, 0, high(int32), "slot2.ee_bits")
+    check_range(s2.ee_out_left, 0, 68, "slot2.ee_out_left")
   for e in [n.gpu.engine_a, n.gpu.engine_b]:
     check_range(e.mmem_rd, 0, MMEM_FIFO_WORDS * 2 - 1, "engine.mmem_rd")
     check_range(e.mmem_n, 0, MMEM_FIFO_WORDS * 2, "engine.mmem_n")
@@ -1042,7 +1058,8 @@ proc apply_new(n: NDS; payload: string; restart_hd = true) =
   if restart_hd: n.gpu.hd_restart()
   n.spu.clear_samples()
   n.cart.backup.dirty = true
-  if n.slot2.save.len > 0: n.slot2.dirty = true
+  let cart2 = n.slot2.gba_cart
+  if cart2 != nil and cart2.save.len > 0: cart2.dirty = true
 
 # ---------------------------------------------------------------------------
 # Images
@@ -1086,7 +1103,7 @@ proc apply_checked(n: NDS; payload: string): bool =
   ## Apply a payload; on any refusal put the machine back as it was.
   let before = n.state_payload()
   let dirty = n.cart.backup.dirty
-  let dirty2 = n.slot2.dirty
+  let dirty2 = n.slot2.save_dirty
   try:
     n.apply_new(payload)
     last_state_reject_kind = srkNone
@@ -1097,7 +1114,7 @@ proc apply_checked(n: NDS; payload: string): bool =
     let kind = last_state_reject_kind
     restore_backup(n.apply_payload(before))
     n.cart.backup.dirty = dirty
-    n.slot2.dirty = dirty2
+    n.slot2.save_dirty = dirty2
     last_state_reject_kind = kind
     return false
 
@@ -1127,7 +1144,7 @@ proc load_own_payload*(n: NDS; payload: string; as_new = true): bool =
   last_state_error = ""
   if payload.len == 0: return false
   let dirty = n.cart.backup.dirty
-  let dirty2 = n.slot2.dirty
+  let dirty2 = n.slot2.save_dirty
   try:
     n.apply_new(payload, restart_hd = as_new)
   except CatchableError, Defect:
@@ -1136,7 +1153,7 @@ proc load_own_payload*(n: NDS; payload: string; as_new = true): bool =
     return false
   if not as_new:
     n.cart.backup.dirty = dirty
-    n.slot2.dirty = dirty2
+    n.slot2.save_dirty = dirty2
   true
 
 proc load_state_bytes*(n: NDS; data: string): bool =
