@@ -970,6 +970,7 @@ type
     # player 2): get_sample skips catch-up and mix (set_audio_silent). Not
     # serialised.
     silent*:            bool
+    lookahead*:         bool  # run-ahead's unseen frames: nothing reaches the queue
     # 2x speed: drop every other stereo frame at the queue point
     turbo*:             bool
     turbo_parity:       bool  # emscripten per-sample decimation state

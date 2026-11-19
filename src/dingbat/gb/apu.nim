@@ -358,7 +358,7 @@ proc get_sample*(apu: GbApu; gb: GB) =
       ch1_catchup_at(c1, gb, uint32(GB_SAMPLE_PERIOD))
     apu.stretch_engaged = false
     when not defined(test_harness) and not defined(emscripten):
-      apu.queue_frame(0.0'f32, 0.0'f32)
+      if not apu.lookahead: apu.queue_frame(0.0'f32, 0.0'f32)
     gb.scheduler.schedule_gb(GB_SAMPLE_PERIOD, etAPUSample)
     return
   # Gated on `enabled` (a disabled channel's amplitude does not depend on its
