@@ -68,7 +68,8 @@ static size_t bytes_per_frame(void) {
 #define DRC_TARGET   g_target   /* frames at 32768 Hz */
 #define DRC_GAIN     0.002      /* ratio change per unit of relative depth error */
 #define DRC_IGAIN    0.00002    /* the integral's step per callback, per unit error */
-#define DRC_IMAX     0.01
+#define DRC_IMAX     0.002      /* clock drift is far less; a stall must not wind it up */
+#define DRC_ICLAMP   0.15       /* the error the integral sees, at most */
 #define DRC_MAX      0.015      /* never more than 1.5% off pitch */
 #define DRC_CAP      (3 * DRC_TARGET) /* beyond: drop back to the target (a stall's backlog) */
 static int      g_target = 1081; /* ~33 ms; slow motion asks for more */
@@ -254,7 +255,7 @@ int dingbat_audio_read(float *dst, int max_frames) {
    * Deeper than the target: consume a little faster, and the reverse. */
   g_fill += ((double)depth - g_fill) * 0.08;
   double err = (g_fill - DRC_TARGET) / DRC_TARGET;
-  g_integ += err * DRC_IGAIN;
+  g_integ += (err > DRC_ICLAMP ? DRC_ICLAMP : err < -DRC_ICLAMP ? -DRC_ICLAMP : err) * DRC_IGAIN;
   if (g_integ > DRC_IMAX) g_integ = DRC_IMAX;
   if (g_integ < -DRC_IMAX) g_integ = -DRC_IMAX;
   double step = 1.0 + err * DRC_GAIN + g_integ;
