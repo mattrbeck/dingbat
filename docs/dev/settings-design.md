@@ -40,7 +40,7 @@ Direction is Joystick.
   up down the list.
 - Choices: 2-4 short options → segmented; 5+ or long names → menu showing the value; options that
   need a description → check list.
-- Paid things are shown in place, locked: the lock replaces the value, switch and arrow. Never hidden, never a banner inside a pane. The only
+- Paid things are shown in place, locked: the lock takes the place of the switch or the arrow. Never hidden, never a banner inside a pane. The only
   upsell surfaces are the banner at the top of Settings and the locked item itself.
 - Free baseline: Night theme and the Night Flyer icon. Advanced features (Save webhook, DS
   support) are Supporter too: locked rows in General, and the Nintendo DS row appears only once
