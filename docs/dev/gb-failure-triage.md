@@ -1966,6 +1966,40 @@ hardware question. Families:
     every frame), so every one asks what that panel shows; none is a PPU
     timing row. The 10 `change_{bg,win}_tile_data_glitch_*`
     CGB-mode tests are counted with I3's family.
+
+    Re-read 2026-11-18 with Pan Docs' sentence set aside (an unsourced 2019
+    paragraph about the screen in general). The references are one panel
+    model with a row cursor, not "blank while off": rows already drawn keep
+    their picture across the off period and the first frame; rows reached
+    later go white; a line drawn in the short on-periods lands on whatever
+    row the cursor has reached (the skip ROMs' cyan row 65 or 67, not row 0),
+    and the cursor returns to row 0 only at the second frame's start. Every
+    check falls with the LCD on. Event times, from dingbat's PPU on the same
+    ROMs (LCDC writes traced; "virtual" = the line dot the PPU was at when
+    LCDC.7 fell plus the time it then stayed off, i.e. a line clock that runs
+    on while off and restarts at each enable):
+    * the cursor advances once per on/off cycle exactly when the virtual dot
+      of line 0 reaches 249 and not at 245 (`y50_stall_nops50/51`: off
+      220/224 dots after an on-period ending at dot 25; `skip_y16_stall_
+      nops50/51`: on to 225/229 then off 20; the two families agree);
+    * the off period begun on line 50 (or 48) of a running frame advances
+      the cursor twice if it lasts 260 dots (`skip_y16`: rows 51..66 white,
+      the drawn line on row 67, i.e. 17 advances for 16 cycles) but once if
+      it lasts 220/224 (`stall`: only row 51 white);
+    * a cycle reaching virtual dot 445 (`skip_y16_stall_nops100`) leaves
+      every row white where 441 (`nops99`) leaves line 0's full picture on
+      rows 67..143;
+    * after an off period of 105 lines, an enable at virtual (147, ~447)
+      leaves the first frame untouched (`y148_round1_b` keeps rows 0..41)
+      and one 4 dots later blanks all of it (`round2_b`).
+    No single cursor rule tried fits all four (an advance on crossing one
+    dot, a white write in a virtual pixel window, an advance on LCDC.7
+    falling with pixels drawn, an off-time threshold): each fits two or three
+    and breaks the rest by one row. Not implemented; it would also change
+    what games show while the LCD is off (the last picture held above the
+    cursor, white below, where dingbat shows white): an owner decision
+    before any fit ships. Decider: one GBC photo per `stall` pair, which
+    tells a retained panel from a blank one.
   * Closed: `stop_during_hblank`, `stop_during_oam_scan`,
     `stop_ly42_during_hblank #2` (the `_b` reference). STOP with the LCD on
     blacks a CGB screen outside mode 3 (Pan Docs, "Using the STOP
