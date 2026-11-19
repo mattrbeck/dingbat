@@ -28,6 +28,9 @@ struct SupporterView: View {
         }
         .foregroundColor(palette.text)
         .background(palette.surface1.ignoresSafeArea())
+        // A controller starts on the buy button ("supporter" is both the
+        // sheet's own scope and its pane inside Settings).
+        .onAppear { PadNav.shared.preferred["supporter"] = "supporter:buy" }
         .alert(failure ?? "", isPresented: Binding(get: { failure != nil }, set: { if !$0 { failure = nil } })) {
             Button("OK", role: .cancel) {}
         }
@@ -99,6 +102,14 @@ struct SupporterView: View {
         .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 26, style: .continuous).stroke(palette.border, lineWidth: 1))
         .simultaneousGesture(DragGesture(minimumDistance: 8).onChanged { _ in held = true })
+        .padFocus("supporter:cards", radius: 23, adjust: { d in step(d) }) { step(1) }
+    }
+
+    /// A controller pages the cards: left/right, or A for the next.
+    private func step(_ d: Int) {
+        held = true
+        let n = Perk.all.count
+        withAnimation(.easeInOut(duration: 0.3)) { slide = (slide + d + n) % n }
     }
 
     private var dots: some View {

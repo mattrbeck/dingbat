@@ -522,10 +522,34 @@ private struct ActionRow: View {
 /// for the thank-you rows that open a pane under the Supporter sheet.
 final class SettingsNav: ObservableObject {
     static let shared = SettingsNav()
-    @Published var path: [SettingsPane] = []
+    @Published var path: [SettingsPane] = [] {
+        didSet { moveFocus(from: oldValue.count) }
+    }
     @Published var selection: SettingsPane? = .appearance
     /// Sidebar + detail (iPad, wide windows): the top panes are a selection.
     var wide = false
+    /// The focused row each pushed pane was opened from, for B to return to.
+    private var openedFrom: [String?] = []
+
+    /// The pane a controller drives: the sidebar never stacks, so on a wide
+    /// screen it stays untagged and in reach beside the detail.
+    @MainActor var shownPane: String {
+        if Supporter.shared.sheetUp { return "supporter" }
+        if let p = path.last { return "\(p)" }
+        return wide ? "\(selection ?? .appearance)" : "root"
+    }
+
+    private func moveFocus(from old: Int) {
+        let pad = PadNav.shared
+        if path.count > old {
+            openedFrom += [pad.focused] + Array(repeating: nil, count: path.count - old - 1)
+            pad.scopeChanged()
+        } else if path.count < old {
+            let back = openedFrom.count > path.count ? openedFrom[path.count] : nil
+            openedFrom = Array(openedFrom.prefix(path.count))
+            pad.refocus(back)
+        }
+    }
 
     /// The pane a sub-pane is pushed from.
     static func parent(_ p: SettingsPane) -> SettingsPane? {
