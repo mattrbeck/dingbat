@@ -20,6 +20,9 @@ targets:
     sources:
       - path: Dingbat/Sources
       - path: Dingbat/Resources
+      # Settings › General › Acknowledgements shows it as shipped.
+      - path: ../THIRD_PARTY_NOTICES.md
+        buildPhase: resources
     info:
       path: Dingbat/Info.plist
       properties:
@@ -143,4 +146,5 @@ targets:
         OTHER_LDFLAGS: "-ldingbat -lwebrtcdc -lc++ -lcompression"
         TARGETED_DEVICE_FAMILY: "1,2"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS: YES
         "EXCLUDED_ARCHS[sdk=iphonesimulator*]": x86_64

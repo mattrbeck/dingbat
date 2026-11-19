@@ -21,6 +21,7 @@ struct DingbatApp: App {
         _ = LaunchIntro.shared
         dingbat_init()
         Settings.shared.apply()
+        Supporter.installLifecycle()
         Peripherals.shared.install()
         Task { @MainActor in
             await RomLibrary.shared.removeInstalledDemo()

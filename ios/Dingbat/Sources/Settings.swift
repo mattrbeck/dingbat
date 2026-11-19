@@ -86,6 +86,12 @@ final class Settings: ObservableObject {
 
     // MARK: General
     @Published var theme: ThemeName { didSet { d.set(theme.rawValue, forKey: "dingbat_theme"); applyVideo() } }
+    /// Supporter: a second theme while the system is in light mode.
+    @Published var lightThemeOn: Bool { didSet { d.set(lightThemeOn, forKey: "dingbat_theme_light_on"); applyVideo() } }
+    @Published var lightTheme: ThemeName { didSet { d.set(lightTheme.rawValue, forKey: "dingbat_theme_light"); applyVideo() } }
+    /// The system's appearance, not the app's (preferredColorScheme forces the
+    /// app's): read from the screen on activation and on trait changes.
+    @Published private(set) var systemDark = UIScreen.main.traitCollection.userInterfaceStyle != .light
     @Published var rewind: Bool { didSet { d.set(rewind, forKey: "rewindOn"); dingbat_set_rewind(rewind ? 1 : 0, 0) } }
     @Published var runahead: Int { didSet { d.set(runahead, forKey: "runahead") } }
     /// General › Advanced › DS Beta (web dsBetaOn): off, the app is what it
@@ -94,7 +100,8 @@ final class Settings: ObservableObject {
     @Published var dsBeta: Bool { didSet { d.set(dsBeta, forKey: Self.dsBetaKey); dsBetaChanged(was: oldValue) } }
     static let dsBetaKey = "dsBeta"
     /// For code off the main actor (the library's file scans).
-    static var dsBetaOn: Bool { UserDefaults.standard.bool(forKey: dsBetaKey) }
+    static var dsBetaOn: Bool { UserDefaults.standard.bool(forKey: dsBetaKey) && Supporter.storedUnlocked }
+    var dsOn: Bool { dsBeta && Supporter.storedUnlocked }
     @Published var saveWebhook: String {
         didSet {
             d.set(saveWebhook, forKey: "save-hook")
@@ -110,7 +117,31 @@ final class Settings: ObservableObject {
         adoptingWebhook = false
     }
 
-    var palette: Palette { theme.palette }
+    var palette: Palette { effectiveTheme.palette }
+
+    // What is in effect: a Supporter choice without the unlock falls back to
+    // the free one (the stored pick is kept for when it comes back).
+    private var unlocked: Bool { Supporter.storedUnlocked }
+    var effectiveTheme: ThemeName {
+        guard unlocked else { return .night }
+        return lightThemeOn && !systemDark ? lightTheme : theme
+    }
+    var effectiveFilter: Filter { unlocked || !filter.supporterOnly ? filter : .none }
+    var effectivePaletteMode: GbPaletteMode { unlocked || !gbPaletteMode.supporterOnly ? gbPaletteMode : .default }
+
+    /// The unlock came or went: everything it gates is read again.
+    func supporterChanged() {
+        objectWillChange.send()
+        applyVideo()
+        RomLibrary.shared.refresh()
+    }
+
+    func refreshSystemAppearance() {
+        let dark = UIScreen.main.traitCollection.userInterfaceStyle != .light
+        guard dark != systemDark else { return }
+        systemDark = dark
+        applyVideo()
+    }
 
     private init() {
         let d = UserDefaults.standard
@@ -147,6 +178,8 @@ final class Settings: ObservableObject {
         muted = bool("audio.muted", false)
         // Night is the default; a stored "amber" (someone picked it) keeps Amber.
         theme = ThemeName(rawValue: str("dingbat_theme") ?? "") ?? .night
+        lightThemeOn = bool("dingbat_theme_light_on", false)
+        lightTheme = ThemeName(rawValue: str("dingbat_theme_light") ?? "") ?? .light
         rewind = bool("rewindOn", true)
         dsBeta = bool(Self.dsBetaKey, false)
         runahead = d.integer(forKey: "runahead")
@@ -155,9 +188,9 @@ final class Settings: ObservableObject {
 
     /// The four DMG shades the presenter substitutes (web gbPaletteColors).
     var dmgPalette: [UInt32]? {
-        switch gbPaletteMode {
+        switch effectivePaletteMode {
         case .default: return Settings.defaultShades
-        case .theme: return theme.gbPalette
+        case .theme: return effectiveTheme.gbPalette
         case .custom: return gbPaletteCustom
         }
     }
@@ -198,9 +231,10 @@ final class Settings: ObservableObject {
     func applyVideo() {
         var o = PresentOptions()
         o.colorCorrect = colorCorrect
-        o.filter = filter == .hq4x ? 1 : filter == .xbr ? 2 : 0
-        o.grid = filter == .grid
-        o.subpixel = filter == .rgb
+        let f = effectiveFilter
+        o.filter = f == .hq4x ? 1 : f == .xbr ? 2 : 0
+        o.grid = f == .grid
+        o.subpixel = f == .rgb
         o.dmgPalette = dmgPalette
         GameRenderer.shared.options = o
         GameRenderer.shared.redraw()
@@ -223,6 +257,7 @@ final class Settings: ObservableObject {
                   "video.integerScale", "video.uprightPicture", "video.lcdResponse", "video.ambientGlow",
                   "audio.fifoInterp", "audio.mp2kHle", "audio.pitchCorrectFF", "audio.audioLowpass",
                   "audio.playInSilent", "audio.volume", "audio.muted", "dingbat_theme",
+                  "dingbat_theme_light_on", "dingbat_theme_light",
                   "rewindOn", "runahead", "save-hook", AddPictures.driveKey] {
             d.removeObject(forKey: k)
         }
@@ -260,6 +295,8 @@ final class Settings: ObservableObject {
         muted = fresh.muted
         channelMutes = 0
         theme = fresh.theme
+        lightThemeOn = fresh.lightThemeOn
+        lightTheme = fresh.lightTheme
         rewind = fresh.rewind
         dsBeta = fresh.dsBeta
         runahead = fresh.runahead
