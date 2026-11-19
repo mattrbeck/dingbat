@@ -39,7 +39,9 @@ struct DingbatApp: App {
     ///   -menu                 open the in-game menu
     ///   -sheet <id>           open a sheet: settings[:section], states,
     ///                         saves, rewind, cheats, prints, report,
-    ///                         tile (first game's menu), rename, export
+    ///                         tile (first game's menu), rename, export,
+    ///                         supporter
+    ///   -supporter on|off     (DEBUG) pretend the unlock is or isn't bought
     private func autoplay() {
         let args = ProcessInfo.processInfo.arguments
         func value(_ flag: String) -> String? {
@@ -249,6 +251,7 @@ struct DingbatApp: App {
                 case "report": model.openSheet(.report)
                 case "clip": model.openSheet(.clip)
                 case "addPictures": model.openSheet(.addPictures)
+                case "supporter": model.openSheet(.supporter)
                 case "moments": if let e = entries.first { model.openSheet(.moments(e, crash: CrashWatch.streak(e.fileName) >= CrashWatch.askStreak)) }
                 case "link": NetLink.shared.openSheet()
                 case "tile": if let e = entries.first { model.openSheet(.tileMenu(e)) }
@@ -377,6 +380,7 @@ struct SheetHost: View {
         case .tileMenu(let e): TileMenuView(entry: e)
         case .rename(let e): RenameView(entry: e)
         case .export(let e): ExportView(entry: e)
+        case .supporter: SupporterView()
         }
     }
 }
