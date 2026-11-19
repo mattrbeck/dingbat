@@ -455,6 +455,9 @@ proc dingbat_audio_ahead(): cint {.importc, cdecl.}
 proc dingbat_audio_read(dst: ptr float32; max: cint): cint {.importc, cdecl.}
 proc dingbat_audio_set_free(on: cint) {.importc, cdecl.}
 proc dingbat_audio_clear() {.importc, cdecl.}
+proc dingbat_audio_open(format, freq, play: cint) {.importc, cdecl.}
+proc dingbat_audio_put(data: pointer; len: uint32) {.importc, cdecl.}
+proc dingbat_audio_set_target(frames: cint) {.importc, cdecl.}
 proc dingbat_audio_sample_rate(): cint {.importc, cdecl.}
 proc dingbat_clip_history_frames(): cint {.importc, cdecl.}
 proc dingbat_frame_static(): cint {.importc, cdecl.}
@@ -843,6 +846,34 @@ if ndsHave("fw_power.nds"):
   dingbat_set_nds_bios(nil, nil, nil)
   dingbat_unload(1)
   dingbat_set_nds_flash_path(nil)
+
+echo "audio: a gap fades instead of clicking"
+block:
+  dingbat_audio_open(1, 32768, 1)
+  dingbat_audio_set_free(0)
+  dingbat_audio_set_target(1081)
+  dingbat_audio_clear()
+  var tone = newSeq[float32](2 * 2000)
+  for v in tone.mitems: v = 0.5
+  var got = newSeq[float32]()
+  var buf = newSeq[float32](2 * 128)
+  proc pull(times: int) =
+    for _ in 0 ..< times:
+      let n = int(dingbat_audio_read(addr buf[0], 128))
+      for i in 0 ..< n: got.add buf[2 * i]
+      for i in n ..< 128: got.add 0'f32   # the caller's zero fill
+  for round in 0 ..< 2:
+    dingbat_audio_put(addr tone[0], uint32(tone.len * 4))
+    pull(40)
+  var jump = 0'f32
+  var loud = 0
+  for i in 1 ..< got.len:
+    jump = max(jump, abs(got[i] - got[i - 1]))
+    if got[i] > 0.45: inc loud
+  check jump < 0.02, "no step between samples through two gaps: " & $jump
+  check loud > 2500, "the tone plays between them: " & $loud
+  check abs(got[^1]) < 0.001, "and it ends in silence"
+  dingbat_audio_clear()
 
 echo "DS: sound into the ring at the DS's rate"
 if ndsHave("snd_tone.nds"):
