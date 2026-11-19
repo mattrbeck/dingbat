@@ -8572,10 +8572,13 @@ body.rewind-off #report-slider {
   align-items: center;
   gap: 6px;
 }
+/* 66px tall with the art at the bottom: a supporter's crowned bat (its
+   strip 5 rows taller) stands on the same line as a plain one. */
 .net-transfer-bat {
   width: 104px;
-  height: 56px;
+  height: 66px;
   background-repeat: no-repeat;
+  background-position-y: 100%;
   image-rendering: pixelated;
   animation: net-transfer-flap 667ms steps(16) infinite;
 }
@@ -8587,8 +8590,12 @@ body.rewind-off #report-slider {
   background-image: url("flap-dusk.png");
   background-size: 1664px 56px;
 }
+.net-transfer-friend.crowned {
+  background-image: url("flap-dusk-crown.png");
+  background-size: 1664px 66px;
+}
 @keyframes net-transfer-flap {
-  to { background-position: -1664px 0; }
+  to { background-position-x: -1664px; }
 }
 .net-transfer-name {
   font-size: 12px;
@@ -8598,6 +8605,7 @@ body.rewind-off #report-slider {
 .net-transfer-cable {
   width: 140px;
   height: 68px;
+  margin-top: 10px;
   flex: none;
   overflow: visible;
 }

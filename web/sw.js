@@ -17,6 +17,7 @@ const ASSETS = [
   "./framegrid.js",
   "./flap.png",
   "./flap-dusk.png",
+  "./flap-dusk-crown.png",
   "./ckptworker.js",
   "./sdputil.js",
   "./netplay.js",

@@ -64,7 +64,7 @@ struct SupporterView: View {
     private var offer: some View {
         ScrollView {
             VStack(spacing: 0) {
-                Image("Logo").interpolation(.none).resizable().scaledToFit().frame(width: compact ? 84 : 112)
+                Image("LogoCrown").interpolation(.none).resizable().scaledToFit().frame(width: compact ? 84 : 112)
                     .accessibilityHidden(true)
                     .padding(.top, compact ? 54 : 62)
                 Text("Support dingbat")
@@ -190,12 +190,10 @@ struct SupporterView: View {
     private var thanks: some View {
         ScrollView {
             VStack(spacing: 0) {
-                Image(icons.chosen.preview).interpolation(.none).resizable()
-                    .frame(width: 112, height: 112)
-                    .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
+                Image("LogoCrown").interpolation(.none).resizable().scaledToFit()
+                    .frame(width: 150)
                     .accessibilityHidden(true)
-                    .padding(.top, 76)
-                SupporterPill().padding(.top, 18)
+                    .padding(.top, 84)
                 Text("Thank you!")
                     .font(.system(size: 30, weight: .bold, design: .rounded))
                     .padding(.top, 10)
@@ -290,18 +288,6 @@ private struct GlassButton<Label: View>: View {
     }
 }
 
-/// The pink "Supporter" capsule (Settings' banner, the thank-you, the link badge).
-struct SupporterPill: View {
-    var size: CGFloat = 12
-    var body: some View {
-        Text("Supporter")
-            .font(.system(size: size, weight: .semibold))
-            .foregroundColor(Color(hex: 0xFF8FB1))
-            .padding(.horizontal, size * 0.8)
-            .padding(.vertical, size * 0.33)
-            .background(Capsule().fill(Color(hex: 0xFF8FB1).opacity(0.16)))
-    }
-}
 
 // MARK: - The cards (in Supporter.Perk order)
 
@@ -314,12 +300,12 @@ private struct Perk {
     static let all: [Perk] = [
         Perk(perk: .themes, title: "Every theme", desc: "Amber, Pure Black, Light, DMG, Kiwi and more."),
         Perk(perk: .icons, title: "App icons", desc: "Classic bats, plus holiday ones that can switch by themselves."),
+        Perk(perk: .crown, title: "A crown for your bat", desc: "Your friend sees it over the link cable."),
         Perk(perk: .palette, title: "Your own Game Boy colors", desc: "Pick all four shades of a custom palette."),
         Perk(perk: .filters, title: "Smooth filters", desc: "hq4x and xBR round off the pixel steps."),
-        Perk(perk: .early, title: "Early access", desc: "Try new builds a week before they ship."),
         Perk(perk: .advanced, title: "Advanced features", desc: "DS support and the save webhook."),
+        Perk(perk: .early, title: "Early access", desc: "Try new builds a week before they ship."),
         Perk(perk: .clips, title: "Clip studio", desc: "Export GIFs, and sharper, longer clips.", soon: true),
-        Perk(perk: .badge, title: "Supporter badge", desc: "Your link partner sees it beside your name.", soon: true),
     ]
 }
 
@@ -365,7 +351,7 @@ private struct PerkCard: View {
         case .early: EarlyArt()
         case .advanced: AdvancedArt()
         case .clips: ClipsArt()
-        case .badge: BadgeArt()
+        case .crown: CrownArt()
         }
     }
 }
@@ -509,55 +495,67 @@ private struct AdvancedArt: View {
     }
 }
 
+/// The clip as it would land in Messages: a GIF of the game, looping.
 private struct ClipsArt: View {
     @Environment(\.palette) private var palette
     var body: some View {
         VStack(spacing: 12) {
-            HStack(spacing: 6) {
-                ForEach([2.0, 9, 15, 7], id: \.self) { y in
-                    RoundedRectangle(cornerRadius: 4).fill(Color(hex: 0xE6DEFC))
-                        .overlay(alignment: .top) { batImage(42).padding(.top, y) }
-                        .frame(width: 64, height: 48).clipped()
-                }
+            ZStack {
+                Color(hex: 0xE6DEFC)
+                FlappingBat().frame(width: 156, height: 84)
             }
-            .padding(8)
-            .background(RoundedRectangle(cornerRadius: 10).fill(Color(hex: 0x0B0812)))
+            .frame(width: 192, height: 120)
+            .overlay(alignment: .topLeading) { tag("GIF", bold: true).padding(8) }
+            .overlay(alignment: .bottomTrailing) { tag("0:06").padding(8) }
+            .overlay(alignment: .topTrailing) {
+                Image(systemName: "square.and.arrow.up").font(.system(size: 11, weight: .semibold)).foregroundColor(.white)
+                    .frame(width: 26, height: 26).background(Circle().fill(Color(hex: 0x0E0A16).opacity(0.78))).padding(8)
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .shadow(color: .black.opacity(0.35), radius: 10, y: 8)
             HStack(spacing: 6) {
-                chip("GIF", on: true)
-                chip("4× MP4", on: false)
-                chip("Up to 2 min", on: false)
+                chip("GIF export")
+                chip("Sharper clips")
+                chip("Longer clips")
             }
         }
     }
 
-    private func chip(_ t: String, on: Bool) -> some View {
+    private func tag(_ t: String, bold: Bool = false) -> some View {
+        Text(t).font(.system(size: 11, weight: bold ? .heavy : .semibold)).foregroundColor(.white)
+            .padding(.horizontal, 7).padding(.vertical, 3)
+            .background(RoundedRectangle(cornerRadius: 6).fill(Color(hex: 0x0E0A16).opacity(0.78)))
+    }
+
+    private func chip(_ t: String) -> some View {
         Text(t).font(.system(size: 12, weight: .semibold))
-            .foregroundColor(on ? palette.accentInk : palette.text)
+            .foregroundColor(palette.text)
             .padding(.horizontal, 10).padding(.vertical, 5)
-            .background(Capsule().fill(on ? palette.accent : palette.surface3))
+            .background(Capsule().fill(palette.surface3))
     }
 }
 
-private struct BadgeArt: View {
+/// The link transfer screen in small: your bat crowned, your friend's not.
+private struct CrownArt: View {
     @Environment(\.palette) private var palette
     var body: some View {
-        HStack(spacing: 0) {
-            player("You", icon: "IconPreview-night-flyer", ring: palette.border) {
-                Text("Player 1").font(.system(size: 11)).foregroundColor(palette.textFaint)
+        HStack(alignment: .bottom, spacing: 0) {
+            end("FlapCrown", "You", crowned: true)
+            Path { p in
+                p.move(to: CGPoint(x: 2, y: 20))
+                p.addCurve(to: CGPoint(x: 62, y: 20), control1: CGPoint(x: 18, y: 34), control2: CGPoint(x: 46, y: 6))
             }
-            Rectangle().fill(palette.accent).frame(width: 52, height: 2)
-            player("Sam", icon: "IconPreview-h-witch", ring: palette.peer) { SupporterPill(size: 11) }
+            .stroke(palette.accent, style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
+            .frame(width: 64, height: 40)
+            .padding(.bottom, 30)
+            end("FlapDusk", "Your friend", crowned: false)
         }
     }
 
-    private func player<S: View>(_ name: String, icon: String, ring: Color, @ViewBuilder sub: () -> S) -> some View {
+    private func end(_ image: String, _ name: String, crowned: Bool) -> some View {
         VStack(spacing: 6) {
-            Image(icon).interpolation(.none).resizable().frame(width: 44, height: 44).clipShape(Circle())
-            Text(name).font(.system(size: 13, weight: .semibold))
-            sub()
+            FlappingBat(image: image).frame(width: 104, height: crowned ? 66 : 56)
+            Text(name).font(.system(size: 12, weight: .semibold)).foregroundColor(palette.textDim)
         }
-        .frame(width: 118, height: 120)
-        .background(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(palette.bg))
-        .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).stroke(ring, lineWidth: 1))
     }
 }

@@ -58,6 +58,15 @@ const netMismatch = document.getElementById("net-mismatch");
 
 const netModalOpen = () => netModal.classList.contains("open");
 
+// The friend supports dingbat (their HELLO's capabilities bit 1, sent by the
+// iOS app's Supporter unlock): their bat wears the crown.
+const netSetFriendCrown = (on) => {
+  const bat = netTransfer?.querySelector(".net-transfer-friend");
+  if (!bat) return;
+  bat.classList.toggle("crowned", on);
+  bat.setAttribute("aria-label", on ? "Your friend, a supporter" : "Your friend");
+};
+
 const netSetConnecting = (on) => {
   if (netSpinner) netSpinner.hidden = !on;
   netCodeInput.readOnly = on;
@@ -1488,6 +1497,7 @@ const rbConnect = async () => {
   paused = true;
   const romBytes = FS.readFile(currentRomName);
   const romId = rbRomId(romBytes);
+  netSetFriendCrown(false);
   net.rb = {
     localPlayer: net.isHost ? 0 : 1,
     epoch: net.isHost ? Math.floor(Date.now() / 1000) : 0,
@@ -1664,6 +1674,7 @@ const rbMessage = (data) => {
       rb.peerCore = [v.getUint32(21), v.getUint32(25)];
       rb.peerBuilt = v.getUint32(29);
       rb.peerSync = (v.getUint8(33) & 1) === 1 && rbCanSync();
+      netSetFriendCrown((v.getUint8(33) & 2) !== 0);
     }
     if (data.byteLength >= RB_HELLO_BIOS_LEN) rb.peerBios = { mode: v.getUint8(34), hash: v.getUint32(35) };
     if (answers ? !rbSameRom(rb.remoteRomId, rb.romId) : rb.remoteRomHash !== rb.romHash) {

@@ -259,6 +259,9 @@ struct DingbatApp: App {
                     model.openSheet(.supporter)
                 case "moments": if let e = entries.first { model.openSheet(.moments(e, crash: CrashWatch.streak(e.fileName) >= CrashWatch.askStreak)) }
                 case "link": NetLink.shared.openSheet()
+                #if DEBUG
+                case "link-transfer": NetLink.shared.debugTransferScene(peerCrown: parts.count > 1 && parts[1] == "crown")
+                #endif
                 case "tile": if let e = entries.first { model.openSheet(.tileMenu(e)) }
                 case "rename": if let e = entries.first { model.openSheet(.rename(e)) }
                 case "export": if let e = entries.first(where: { $0.fileName == value("-autoplay") }) ?? entries.first { model.openSheet(.export(e)) }
