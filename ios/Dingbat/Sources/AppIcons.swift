@@ -52,8 +52,20 @@ struct AppIconChoice: Identifiable, Equatable, Sendable {
 
     var showing: AppIconChoice {
         guard allowed else { return .primary }
-        if holidaysOn, let h = holiday(on: Date()) { return h }
+        if holidaysOn, let h = holiday(on: Self.today) { return h }
         return chosen
+    }
+
+    /// DEBUG `-icon-date 2026-10-30`: pretend it is that day (holiday icons).
+    private static var today: Date {
+        #if DEBUG
+        if let s = UserDefaults.standard.string(forKey: "icon-date") {
+            let f = DateFormatter()
+            f.dateFormat = "yyyy-MM-dd"
+            if let d = f.date(from: s) { return d }
+        }
+        #endif
+        return Date()
     }
 
     func choose(_ c: AppIconChoice) {

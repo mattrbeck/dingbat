@@ -21,6 +21,7 @@ struct SettingsView: View {
     @ObservedObject private var supporter = Supporter.shared
     @ObservedObject private var nav = SettingsNav.shared
     @State private var ready = false
+    @State private var sheetFrom: String?
 
     var body: some View {
         GeometryReader { geo in
@@ -36,6 +37,16 @@ struct SettingsView: View {
         .sheet(isPresented: $supporter.sheetUp) {
             SupporterView(onClose: { supporter.sheetUp = false })
                 .environment(\.palette, settings.palette)
+                .environment(\.padScope, AppModel.Sheet.settings(section: nil).id)
+                .environment(\.padPane, "supporter")
+        }
+        .onChange(of: supporter.sheetUp) { up in
+            if up {
+                sheetFrom = PadNav.shared.focused
+                PadNav.shared.scopeChanged()
+            } else {
+                PadNav.shared.refocus(sheetFrom)
+            }
         }
         .onChange(of: supporter.jumpTo) { p in
             guard let p else { return }
@@ -47,7 +58,12 @@ struct SettingsView: View {
             ready = true
             nav.path = []
             if let p = initialSection.flatMap(SettingsPane.init(link:)) { nav.open(p) }
-            PadNav.shared.back[AppModel.Sheet.settings(section: nil).id] = { SettingsNav.shared.pop() }
+            let scope = AppModel.Sheet.settings(section: nil).id
+            PadNav.shared.back[scope] = {
+                if Supporter.shared.sheetUp { Supporter.shared.sheetUp = false; return true }
+                return SettingsNav.shared.pop()
+            }
+            PadNav.shared.shownPane[scope] = { SettingsNav.shared.shownPane }
         }
     }
 
@@ -57,6 +73,7 @@ struct SettingsView: View {
                 .navigationTitle("Settings")
                 .navigationBarTitleDisplayMode(.large)
                 .toolbar { ToolbarItem(placement: .topBarTrailing) { CloseButton() } }
+                .environment(\.padPane, "root")
                 .navigationDestination(for: SettingsPane.self) { PaneScreen(pane: $0) }
         }
     }
@@ -104,6 +121,7 @@ private struct PaneScreen: View {
             .toolbar {
                 if closes { ToolbarItem(placement: .topBarTrailing) { CloseButton() } }
             }
+            .environment(\.padPane, "\(pane)")
     }
 }
 
@@ -534,6 +552,7 @@ private struct ThemeGallery: View {
     @ObservedObject private var s = Settings.shared
     @ObservedObject private var supporter = Supporter.shared
     @Environment(\.palette) private var palette
+    @Environment(\.padScope) private var scope
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -552,15 +571,15 @@ private struct ThemeGallery: View {
                         .accessibilityLabel(t.label + (locked ? ", Supporter theme" : ""))
                         .accessibilityAddTraits(on ? .isSelected : [])
                         .padFocus("theme:" + t.rawValue) { pick(t, locked) }
-                        .id(t)
                     }
                 }
                 .padding(.vertical, 12)
-                .padding(.horizontal, 2)
+                .padding(.horizontal, 6)  // room for the focus ring
             }
-            .onAppear { proxy.scrollTo(s.effectiveTheme, anchor: .center) }
+            .onAppear { proxy.scrollTo(PadNav.key(scope, "theme:" + s.effectiveTheme.rawValue), anchor: .center) }
+            .padScrollFollow(proxy)
         }
-        .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 0))
+        .listRowInsets(EdgeInsets(top: 0, leading: 12, bottom: 0, trailing: 0))
     }
 
     private func pick(_ t: ThemeName, _ locked: Bool) {

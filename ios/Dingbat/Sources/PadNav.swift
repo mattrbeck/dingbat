@@ -27,6 +27,8 @@ final class PadNav: ObservableObject {
         var adjust: ((Int) -> Void)?
         /// Y (a tile's options).
         var alt: (() -> Void)?
+        /// The pane it sits in, when the scope stacks panes (Settings).
+        var pane: String?
     }
 
     private var items: [String: Item] = [:]
@@ -36,6 +38,9 @@ final class PadNav: ObservableObject {
     var back: [String: () -> Bool] = [:]
     var edge: [String: (String, Dir) -> String?] = [:]
     var preferred: [String: String] = [:]
+    /// Per scope that stacks panes: the one on screen. A pane slid away
+    /// keeps its items registered (they re-register as it animates out).
+    var shownPane: [String: () -> String?] = [:]
     /// Home's shoulder and trigger steps: the system filter, the sort.
     var homeFilter: ((Int) -> Void)?
     var homeSort: ((Int) -> Void)?
@@ -73,23 +78,38 @@ final class PadNav: ObservableObject {
         focused = key
     }
 
+    /// A pane was popped: back to the row that opened it, once it has laid out.
+    func refocus(_ key: String?) {
+        focused = nil
+        guard showing else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
+            guard let self, self.focused == nil else { return }
+            if let key, self.live().contains(where: { $0.0 == key }) { self.focused = key } else { self.focusDefault() }
+        }
+    }
+
     /// Touch took over: the ring goes until the pad is used again.
     func hide() { if showing { showing = false } }
 
     private func live() -> [(String, Item)] {
         guard let scope else { return [] }
-        return items.filter { $0.value.scope == scope && $0.value.frame.width > 0 }.map { ($0.key, $0.value) }
+        let pane = shownPane[scope]?()
+        return items.filter {
+            $0.value.scope == scope && $0.value.frame.width > 0 && ($0.value.pane == nil || $0.value.pane == pane)
+        }.map { ($0.key, $0.value) }
     }
 
     private func focusDefault() {
         guard let scope else { return }
-        if let p = preferred[scope], items[Self.key(scope, p)] != nil {
-            focused = Self.key(scope, p)
-            return
-        }
-        // Not the sheet's close button: B is already that.
         let all = live()
-        let pool = all.count > 1 ? all.filter { !$0.0.hasSuffix("|close") } : all
+        for name in [shownPane[scope]?(), scope].compactMap({ $0 }) {
+            if let p = preferred[name], all.contains(where: { $0.0 == Self.key(scope, p) }) {
+                focused = Self.key(scope, p)
+                return
+            }
+        }
+        // Not a close button: B is already that.
+        let pool = all.count > 1 ? all.filter { !$0.0.hasSuffix("close") } : all
         focused = pool.min { a, b in
             let ay = (a.1.frame.minY / 8).rounded(), by = (b.1.frame.minY / 8).rounded()
             return ay != by ? ay < by : a.1.frame.minX < b.1.frame.minX
@@ -109,7 +129,7 @@ final class PadNav: ObservableObject {
         let wasShowing = showing
         showing = true
         guard let scope else { return }
-        guard wasShowing, let cur = focused, let from = items[cur], from.scope == scope else {
+        guard wasShowing, let cur = focused, let from = live().first(where: { $0.0 == cur })?.1 else {
             focusDefault()
             return
         }
@@ -154,7 +174,7 @@ final class PadNav: ObservableObject {
     func press() {
         let wasShowing = showing
         showing = true
-        guard wasShowing, let k = focused, let it = items[k], it.scope == scope else {
+        guard wasShowing, let k = focused, let it = live().first(where: { $0.0 == k })?.1 else {
             focusDefault()
             return
         }
@@ -183,12 +203,18 @@ final class PadNav: ObservableObject {
 }
 
 private struct PadScopeKey: EnvironmentKey { static let defaultValue = "" }
+private struct PadPaneKey: EnvironmentKey { static let defaultValue: String? = nil }
 
 extension EnvironmentValues {
     /// The scope focusable views below register under (home, menu, a sheet).
     var padScope: String {
         get { self[PadScopeKey.self] }
         set { self[PadScopeKey.self] = newValue }
+    }
+    /// The pane they sit in, inside a scope that stacks panes.
+    var padPane: String? {
+        get { self[PadPaneKey.self] }
+        set { self[PadPaneKey.self] = newValue }
     }
 }
 
@@ -203,6 +229,7 @@ struct PadFocusable: ViewModifier {
     var adjust: ((Int) -> Void)?
     var alt: (() -> Void)?
     @Environment(\.padScope) private var scope
+    @Environment(\.padPane) private var pane
     @Environment(\.isEnabled) private var enabled
     @Environment(\.palette) private var palette
     @ObservedObject private var nav = PadNav.shared
@@ -240,7 +267,7 @@ struct PadFocusable: ViewModifier {
     private func put(_ at: Placement) {
         guard !scope.isEmpty else { return }
         guard at.enabled else { nav.unregister(key); return }
-        nav.register(key, .init(scope: scope, frame: at.frame, press: press, adjust: adjust, alt: alt))
+        nav.register(key, .init(scope: scope, frame: at.frame, press: press, adjust: adjust, alt: alt, pane: pane))
     }
 }
 
