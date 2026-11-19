@@ -7489,7 +7489,7 @@ const enforceRomBudget = async (list) => {
 
 // Move `name` to the front of the index and spend the byte budget over the
 // result (ROM files only, never saves).
-const bumpRecentIndex = (name, { fresh = false, gen: atLeast = 0 } = {}) => updateRecent(async (all) => {
+const bumpRecentIndex = (name, { fresh = false, gen: atLeast = 0, next = false } = {}) => updateRecent(async (all) => {
   // Any game under the name claims it again - an import, a Drive-only
   // tile's download, a launch - and a pull may write under it once more
   // (bug_download_into_away_name_skips_saves).
@@ -7518,6 +7518,10 @@ const bumpRecentIndex = (name, { fresh = false, gen: atLeast = 0 } = {}) => upda
     let t = syncState.tomb.find((x) => x?.name === name);
     if (t) gen = Math.max(gen, genOf(t) + 1);
   }
+  // Another file put in the game's place (addRecentRom `replace`): the next
+  // generation too, so the new file goes up over Drive's and other devices
+  // let go of the old one, as for a game deleted and loaded again.
+  if (next && prev) gen += 1;
   list.unshift(withGen(imp ? { name, ts, imp } : { name, ts }, gen));
   await enforceRomBudget(list);
   return list;
@@ -7652,14 +7656,49 @@ const claimRomName = async (name, bytes) => {
   return name;
 };
 
-const noteRomRenamed = (asked, name) => {
-  if (name !== asked) {
-    pushToast("Added as “" + displayName(name) + "” — a different game named “" +
-              displayName(asked) + "” is already in your library", 5000, null);
-  }
+// Which of two different files a name is for. Resolves "replace" (this
+// file takes the name, and the save and states that go by it), "both" (it
+// goes in under `numbered`), or null (neither: nothing is added).
+const romClashModal = document.getElementById("rom-clash-modal");
+let romClashResolve = null;
+const settleRomClash = (answer) => {
+  let resolve = romClashResolve;
+  romClashResolve = null;
+  romClashModal.classList.remove("open");
+  releaseFocus(romClashModal);
+  if (resolve) resolve(answer);
+};
+const askRomClash = (asked, numbered) => new Promise((resolve) => {
+  if (romClashResolve) settleRomClash(null); // a second file while one is asked about
+  document.getElementById("rom-clash-title").textContent =
+    "You already have a game named “" + displayName(asked) + "”";
+  document.getElementById("rom-clash-replace-sub").textContent =
+    "Use this file for “" + displayName(asked) + "”. Its save and save states stay with it.";
+  document.getElementById("rom-clash-both-sub").textContent =
+    "Add this one as “" + displayName(numbered) + "”. It starts with no save.";
+  romClashResolve = resolve;
+  romClashModal.classList.add("open");
+  trapFocus(romClashModal);
+});
+document.getElementById("rom-clash-replace")?.addEventListener("click", () => settleRomClash("replace"));
+document.getElementById("rom-clash-both")?.addEventListener("click", () => settleRomClash("both"));
+document.getElementById("rom-clash-cancel")?.addEventListener("click", () => settleRomClash(null));
+romClashModal?.addEventListener("click", (e) => {
+  if (e.target === romClashModal) settleRomClash(null);
+});
+
+// Where a file the player is adding goes: { name, replace }, or null when
+// they backed out. Asked only when the name is another game's and these
+// bytes are not already in the library under one of its numbered names.
+const placeRom = async (asked, bytes) => {
+  let name = await claimRomName(asked, bytes);
+  if (name === asked || (await dbGet(romKey(name)).catch(() => null))?.data) return { name, replace: false };
+  let answer = await askRomClash(asked, name);
+  if (!answer) return null;
+  return answer === "replace" ? { name: asked, replace: true } : { name, replace: false };
 };
 
-const addRecentRom = async (name, bytes, art) => {
+const addRecentRom = async (name, bytes, art, { replace = false } = {}) => {
   // Bytes first, index second: an interruption leaves at worst an orphan.
   if (!(await dbPutRoomy(romKey(name), { name, data: new Uint8Array(bytes) }, name))) {
     // The game still plays - it is in the emulator's own filesystem already.
@@ -7672,7 +7711,7 @@ const addRecentRom = async (name, bytes, art) => {
   await noteRomSize(name, bytes.byteLength ?? bytes.length);
   if (art) await dbPut(artKey(name), art); // Blob (box art from a zip)
   await clearThumbsBlank([name]); // a new file: the next run may picture it
-  await bumpRecentIndex(name, { fresh: true });
+  await bumpRecentIndex(name, { fresh: true, next: replace });
   refreshHomeRecent();
   requestPersistentStorage();
   markGameUpload(name);
@@ -13816,6 +13855,12 @@ const mimeForImg = (e) =>
 
 // --- Minimal ZIP reader (central directory + DecompressionStream deflate-raw) ---
 
+// The most one entry may unpack to: the largest DS cartridge. A zip names
+// each entry's size, and deflate can turn a megabyte into a gigabyte, so a
+// size past this is refused before inflating, and the inflate is stopped
+// as soon as it has produced more than the entry claimed.
+const ZIP_ENTRY_MAX = 512 * 1024 * 1024;
+
 const unzip = async (arrayBuffer) => {
   const view = new DataView(arrayBuffer);
   const bytes = new Uint8Array(arrayBuffer);
@@ -13853,12 +13898,29 @@ const unzip = async (arrayBuffer) => {
     const extraLen = view.getUint16(lo + 28, true);
     const start = lo + 30 + nameLen + extraLen;
     const comp = bytes.subarray(start, start + entry.compSize);
+    if (entry.uncompSize > ZIP_ENTRY_MAX) throw new Error("a file in the zip is too large");
     if (entry.method === 0) return comp.slice(); // stored
     if (entry.method === 8) {
       if (typeof DecompressionStream === "undefined")
         throw new Error("this browser can't decompress zip files");
-      const stream = new Blob([comp]).stream().pipeThrough(new DecompressionStream("deflate-raw"));
-      return new Uint8Array(await new Response(stream).arrayBuffer());
+      const reader = new Blob([comp]).stream()
+        .pipeThrough(new DecompressionStream("deflate-raw")).getReader();
+      // Into a buffer of the size the entry names, read chunk by chunk: one
+      // that runs past it is not what the zip said, and is dropped there.
+      const out = new Uint8Array(entry.uncompSize);
+      let got = 0;
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        if (got + value.length > out.length) {
+          await reader.cancel().catch(() => {});
+          throw new Error("a file in the zip is larger than the zip says");
+        }
+        out.set(value, got);
+        got += value.length;
+      }
+      if (got !== out.length) throw new Error("a file in the zip is cut short");
+      return out;
     }
     throw new Error("unsupported zip compression (method " + entry.method + ")");
   };
@@ -14005,10 +14067,10 @@ const handleZipFile = async (file) => {
   // initStorage (DOMContentLoaded) opens the database and reads the sync
   // state - the tombstones a re-imported game's generation is judged by.
   await storageReady;
-  const asked = innerName;
-  innerName = await claimRomName(innerName, romBytes);
-  await addRecentRom(innerName, romBytes, art);
-  noteRomRenamed(asked, innerName);
+  const placed = await placeRom(innerName, romBytes);
+  if (!placed) return;
+  innerName = placed.name;
+  await addRecentRom(innerName, romBytes, art, placed);
   await ensureRuntimeReady(); // a zip dropped before the wasm runtime is up
   // In the library either way; booted only if nothing was opened since.
   if (gen !== loadGen) return;
@@ -14033,9 +14095,10 @@ let handleRomFile = (file) => {
         !(await confirmSuspectRom(file.name, ext))) return;
     // Storage, the library, then the core: see handleZipFile.
     await storageReady;
-    const name = await claimRomName(file.name, bytes);
-    await addRecentRom(name, bytes);
-    noteRomRenamed(file.name, name);
+    const placed = await placeRom(file.name, bytes);
+    if (!placed) return;
+    const name = placed.name;
+    await addRecentRom(name, bytes, null, placed);
     await ensureRuntimeReady(); // a ROM picked/dropped before the runtime is up
     // In the library either way; booted only if nothing was opened since.
     if (gen !== loadGen) return;

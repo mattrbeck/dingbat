@@ -9,7 +9,9 @@
 ## with no extension keeps its battery file beside it, not `<parent>.sav`.
 
 import std/[os, hashes, strformat, strutils, tables, tempfiles]
+import zippy
 import zippy/ziparchives
+import dingbat/common/linkproto
 import dingbat/frontend/game_load
 import dingbat/gb/gb
 import dingbat/gba/gba
@@ -220,6 +222,39 @@ block zip_adopts_earlier_folder:
   let rom = extract_zip_rom(cache, zip)
   doAssert rom.len > 0 and readFile(rom.parentDir / "Z.sav") == "progress"
   doAssert not dirExists(old)
+
+block zip_larger_than_it_says:
+  # A zip gives each entry's unpacked size, and deflate can make a megabyte
+  # a gigabyte: the ROM comes out at the size given, or not at all.
+  proc le(v: uint32; n: int): string =
+    for i in 0 ..< n: result.add char((v shr (8 * i)) and 0xFF)
+  proc zip_of(name, data: string; claim: uint32): string =
+    ## One deflated entry, classic (no zip64) layout, saying it unpacks to `claim`.
+    let comp = compress(data, 9, dfDeflate)
+    let crc = crc32(data)
+    let local = "PK\x03\x04" & le(20, 2) & le(0, 2) & le(8, 2) & le(0, 4) & le(crc, 4) &
+                le(uint32(comp.len), 4) & le(claim, 4) & le(uint32(name.len), 2) & le(0, 2) & name & comp
+    let cd = "PK\x01\x02" & le(20, 2) & le(20, 2) & le(0, 2) & le(8, 2) & le(0, 4) & le(crc, 4) &
+             le(uint32(comp.len), 4) & le(claim, 4) & le(uint32(name.len), 2) & le(0, 2) & le(0, 2) &
+             le(0, 2) & le(0, 2) & le(0, 4) & le(0, 4) & name
+    local & cd & "PK\x05\x06" & le(0, 4) & le(1, 2) & le(1, 2) & le(uint32(cd.len), 4) &
+      le(uint32(local.len), 4) & le(0, 2)
+  let big = newString(8 * 1024 * 1024)
+  let honest_zip = zip_of("Big.gba", big, uint32(big.len))
+  doAssert honest_zip.len < 64 * 1024, "8 MiB of zeros packs small"
+  writeFile(dir / "honest.zip", honest_zip)
+  let honest = extract_zip_rom(dir / "bigcache", dir / "honest.zip")
+  doAssert honest.len > 0 and getFileSize(honest) == big.len
+  writeFile(dir / "liar.zip", zip_of("Big.gba", big, 1024))
+  doAssert extract_zip_rom(dir / "liarcache", dir / "liar.zip") == "",
+    "an entry that unpacks past the size it gives is refused"
+  writeFile(dir / "huge.zip", zip_of("Big.gba", big, 600'u32 * 1024 * 1024))
+  doAssert extract_zip_rom(dir / "hugecache", dir / "huge.zip") == "",
+    "an entry that says it is larger than any cartridge is refused"
+  var bad = honest_zip
+  bad[40] = char(uint8(bad[40]) xor 0x55)   # inside the deflate stream
+  writeFile(dir / "bad.zip", bad)
+  doAssert extract_zip_rom(dir / "badcache", dir / "bad.zip") == "", "a damaged entry is refused"
 
 block extensionless_paths:
   # The command line takes any path; with no extension, "up to the last dot"

@@ -90,6 +90,10 @@ final class AppModel: ObservableObject {
     /// One question about a file before it is accepted (web askRomWarn).
     @Published var romWarn: (title: String, text: String)?
     private var romWarnAnswer: CheckedContinuation<Bool, Never>?
+    /// Which of two different files a name is for (web askRomClash).
+    enum RomClashAnswer { case replace, both }
+    @Published var romClash: (asked: String, numbered: String)?
+    private var romClashAnswer: CheckedContinuation<RomClashAnswer?, Never>?
     /// A plain notice with OK (web alert()).
     @Published var notice: String?
     /// A save or state handed to the app ("Open in dingbat"), waiting for
@@ -403,6 +407,30 @@ final class AppModel: ObservableObject {
             romWarnAnswer = cont
             romWarn = (title, text)
         }
+    }
+
+    /// Replace (this file takes the name and the save that goes by it),
+    /// both (it goes in under `numbered`), or nil (nothing is added).
+    @MainActor
+    func askRomClash(_ asked: String, _ numbered: String) async -> RomClashAnswer? {
+        #if DEBUG
+        // Dev hook for headless tests: `-answer-rom-clash replace|both|cancel`.
+        let args = ProcessInfo.processInfo.arguments
+        if let i = args.firstIndex(of: "-answer-rom-clash"), i + 1 < args.count {
+            return args[i + 1] == "replace" ? .replace : args[i + 1] == "both" ? .both : nil
+        }
+        #endif
+        romClashAnswer?.resume(returning: nil)
+        return await withCheckedContinuation { cont in
+            romClashAnswer = cont
+            romClash = (asked, numbered)
+        }
+    }
+
+    func answerRomClash(_ answer: RomClashAnswer?) {
+        romClash = nil
+        romClashAnswer?.resume(returning: answer)
+        romClashAnswer = nil
     }
 
     func answerRomWarn(_ go: Bool) {

@@ -6,6 +6,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { webcrypto } from "node:crypto";
+import { deflateRawSync } from "node:zlib";
 import { loadApp, settle, eq, u8, fakeFile } from "./helpers.mjs";
 import { makeDrive, makeClock, useClock } from "./drivefake.mjs";
 
@@ -104,29 +105,152 @@ test("claimRomName: a game here without its file is given its file back, unless 
   eq(await claim("Game.gba", u8(4, 5, 6, 7)), "Game (2).gba", "another size: another game");
 });
 
-test("a file dropped under an existing game's name does not touch that game or its save", async () => {
+const rom = (f) => new Uint8Array(readFileSync(new URL("../../tests/roms/" + f, import.meta.url)));
+
+// A library holding "Pocket.gba" (linktest) with a save and a state, and a
+// different file (gbaedge) dropped under the same name: the question is up.
+const clash = async () => {
   const app = await loadApp();
   app.runIn("Module.ccall = () => {}");
-  const rom = (f) => new Uint8Array(readFileSync(new URL("../../tests/roms/" + f, import.meta.url)));
   const mine = rom("linktest.gba");
   const theirs = rom("gbaedge.gba");
   await app.api.addRecentRom("Pocket.gba", mine);
   await app.api.dbPut("save:Pocket.gba", u8(42));
-
+  await app.api.dbPut("state:Pocket.gba", u8(7, 7));
   app.api.handleRomFile(fakeFile("Pocket.gba", theirs));
   await settle();
   await settle();
+  const modal = app.document.getElementById("rom-clash-modal");
+  assert.ok(modal.classList.contains("open"), "asked which game the name is for");
+  assert.match(app.document.getElementById("rom-clash-title").textContent, /named “Pocket”/);
+  assert.match(app.document.getElementById("rom-clash-both-sub").textContent, /“Pocket \(2\)”/);
+  eq(app.idb.get("rom:Pocket.gba").data, mine, "nothing is changed while it is asked");
+  const answer = async (id) => {
+    app.document.getElementById(id).click();
+    await settle();
+    await settle();
+    assert.ok(!modal.classList.contains("open"));
+  };
+  return { app, mine, theirs, answer };
+};
+const libraryNames = (app) => app.idb.get("recent").map((r) => r.name).sort();
+const genOfGame = (app, n) => app.idb.get("recent").find((r) => r.name === n)?.gen || 0;
+
+test("a file under another game's name, Keep both: it goes in numbered, the first game untouched", async () => {
+  const { app, mine, theirs, answer } = await clash();
+  await answer("rom-clash-both");
   eq(app.idb.get("rom:Pocket.gba").data, mine, "the game that was here keeps its file");
   eq(app.idb.get("save:Pocket.gba"), u8(42), "and its save");
   eq(app.idb.get("rom:Pocket (2).gba").data, theirs, "the new one went in beside it");
-  assert.equal(app.idb.get("save:Pocket (2).gba"), undefined);
-  eq(app.idb.get("recent").map((r) => r.name).sort(), ["Pocket (2).gba", "Pocket.gba"]);
+  assert.equal(app.idb.get("save:Pocket (2).gba"), undefined, "with no save");
+  eq(libraryNames(app), ["Pocket (2).gba", "Pocket.gba"]);
 
-  // The same file again is that second game, not a third.
+  // The same file again is that second game: no question, no third.
   app.api.handleRomFile(fakeFile("Pocket.gba", theirs));
   await settle();
   await settle();
-  eq(app.idb.get("recent").map((r) => r.name).sort(), ["Pocket (2).gba", "Pocket.gba"]);
+  assert.ok(!app.document.getElementById("rom-clash-modal").classList.contains("open"));
+  eq(libraryNames(app), ["Pocket (2).gba", "Pocket.gba"]);
+});
+
+test("Replace: the new file takes the name, the save and states stay, and it is the next generation", async () => {
+  const { app, theirs, answer } = await clash();
+  const before = genOfGame(app, "Pocket.gba");
+  await answer("rom-clash-replace");
+  eq(app.idb.get("rom:Pocket.gba").data, theirs, "the file under the name is the new one");
+  eq(app.idb.get("save:Pocket.gba"), u8(42), "the save stays with the name");
+  eq(app.idb.get("state:Pocket.gba"), u8(7, 7), "and the state");
+  eq(libraryNames(app), ["Pocket.gba"], "one game");
+  assert.equal(app.idb.get("rom:Pocket (2).gba"), undefined);
+  eq(genOfGame(app, "Pocket.gba"), before + 1, "a new generation: Drive's file is replaced, not kept");
+});
+
+test("Cancel, or closing the question: nothing is added and nothing changes", async () => {
+  const { app, mine, answer } = await clash();
+  await answer("rom-clash-cancel");
+  eq(app.idb.get("rom:Pocket.gba").data, mine);
+  eq(app.idb.get("save:Pocket.gba"), u8(42));
+  eq(libraryNames(app), ["Pocket.gba"]);
+  assert.equal(app.idb.get("rom:Pocket (2).gba"), undefined);
+});
+
+test("a replaced game goes up over Drive's file, and another device lets go of the old one", async () => {
+  const clock = makeClock();
+  const drive = makeDrive({ clock });
+  const a = withCrypto(await device(drive, clock));
+  a.idb.set("recent", [{ name: "Game.gba", ts: 100 }]);
+  a.idb.set("rom:Game.gba", { name: "Game.gba", data: X });
+  a.idb.set("save:Game.gba", u8(10, 10));
+  await pull(a);
+  await flush(a);
+  const b = withCrypto(await device(drive, clock));
+  b.idb.set("recent", [{ name: "Game.gba", ts: 50 }]);
+  b.idb.set("rom:Game.gba", { name: "Game.gba", data: X });
+  await pull(b);
+  await flush(b);
+  eq(b.idb.get("save:Game.gba"), u8(10, 10), "both devices hold the game and its save");
+
+  await a.api.addRecentRom("Game.gba", Y, null, { replace: true });
+  await settle();
+  await pull(a);
+  await flush(a);
+  eq(drive.get("rom:Game.gba").bytes, Y, "Drive's file is the new one");
+  eq(drive.get("save:Game.gba").bytes, u8(10, 10), "its save is still there");
+  eq(a.idb.get("save:Game.gba"), u8(10, 10), "and still on the device that replaced it");
+
+  await pull(b);
+  await flush(b);
+  assert.ok(!b.idb.get("rom:Game.gba") || eqBytes(b.idb.get("rom:Game.gba").data, Y),
+    "the other device no longer runs the old file under the name");
+  eq(drive.get("rom:Game.gba").bytes, Y, "and has not put the old one back");
+});
+
+// ---------------------------------------------------------------------------
+// A zip that unpacks to more than it says
+// ---------------------------------------------------------------------------
+
+// One deflated entry; `claim` is the size the directory gives for it.
+const zipOf = (name, data, claim = data.length) => {
+  const comp = new Uint8Array(deflateRawSync(data));
+  const nm = new TextEncoder().encode(name);
+  const local = new Uint8Array(30 + nm.length + comp.length);
+  const lv = new DataView(local.buffer);
+  lv.setUint32(0, 0x04034b50, true); lv.setUint16(8, 8, true);
+  lv.setUint32(18, comp.length, true); lv.setUint32(22, claim, true); lv.setUint16(26, nm.length, true);
+  local.set(nm, 30); local.set(comp, 30 + nm.length);
+  const cd = new Uint8Array(46 + nm.length);
+  const cv = new DataView(cd.buffer);
+  cv.setUint32(0, 0x02014b50, true); cv.setUint16(10, 8, true);
+  cv.setUint32(20, comp.length, true); cv.setUint32(24, claim, true); cv.setUint16(28, nm.length, true);
+  cd.set(nm, 46);
+  const end = new Uint8Array(22);
+  const ev = new DataView(end.buffer);
+  ev.setUint32(0, 0x06054b50, true); ev.setUint16(8, 1, true); ev.setUint16(10, 1, true);
+  ev.setUint32(12, cd.length, true); ev.setUint32(16, local.length, true);
+  const out = new Uint8Array(local.length + cd.length + end.length);
+  out.set(local, 0); out.set(cd, local.length); out.set(end, local.length + cd.length);
+  return out.buffer;
+};
+
+test("a zip entry comes out at the size the zip gives, or not at all", async () => {
+  const app = await loadApp();
+  app.sandbox.DecompressionStream = DecompressionStream;
+  app.sandbox.Blob = Blob;
+  const unzip = app.runIn("unzip");
+  const data = new Uint8Array(200_000).map((_, i) => i % 7);
+
+  const good = await unzip(zipOf("g.gba", data));
+  eq(await good.extract(good.entries[0]), data, "an honest entry");
+
+  // 8 MB of zeros, about 8 KB packed, in an entry that says 1000 bytes.
+  const bomb = await unzip(zipOf("g.gba", new Uint8Array(8 << 20), 1000));
+  await assert.rejects(bomb.extract(bomb.entries[0]), /larger than the zip says/);
+
+  const short = await unzip(zipOf("g.gba", data, data.length + 5));
+  await assert.rejects(short.extract(short.entries[0]), /cut short/);
+
+  const huge = await unzip(zipOf("g.gba", data, 600 * 1024 * 1024));
+  await assert.rejects(huge.extract(huge.entries[0]), /too large/);
 });
 
 // ---------------------------------------------------------------------------

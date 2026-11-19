@@ -305,7 +305,7 @@ final class RomLibrary: ObservableObject {
     /// one this device deleted. `atLeast` raises the generation (a download of
     /// files written for a newer one).
     @MainActor
-    func bump(_ name: String, fresh: Bool = false, gen atLeast: Int = 0) async {
+    func bump(_ name: String, fresh: Bool = false, gen atLeast: Int = 0, next: Bool = false) async {
         await updateRecent { all in
             DriveSync.shared.renamedAway.remove(name)
             let prev = all.first { $0.string("name") == name }
@@ -322,6 +322,10 @@ final class RomLibrary: ObservableObject {
             if fresh, let t = DriveSync.shared.state.tomb.first(where: { $0.name == name }) {
                 gen = max(gen, t.gen + 1)
             }
+            // Another file put in the game's place (`add`): the next
+            // generation, so it goes up over Drive's and other devices let
+            // go of the old one, as for a game deleted and loaded again.
+            if next, prev != nil { gen += 1 }
             list.insert(Lib.entry(name: name, ts: ts, impFirst: imp, gen: gen), at: 0)
             return list
         }
@@ -473,17 +477,27 @@ final class RomLibrary: ObservableObject {
         guard Self.validName(asked) else {
             throw ImportError.unreadable("That file's name can't be used — rename it and try again")
         }
-        let fileName = Self.claimName(asked) { nameTaken($0, by: romData) }
-        if fileName != asked {
-            AppModel.shared.toast("Added as “\(DriveSync.display(fileName))” — a different game named “\(DriveSync.display(asked))” is already in your library", duration: 5)
+        var fileName = Self.claimName(asked) { nameTaken($0, by: romData) }
+        var replace = false
+        // Asked only when the name is another game's and these bytes are not
+        // already here under one of its numbered names (web placeRom).
+        if fileName != asked, !RomEntry(fileName: fileName).isLocal {
+            switch await AppModel.shared.askRomClash(asked, fileName) {
+            case .replace: fileName = asked; replace = true
+            case .both: break
+            case nil: throw ImportError.declined
+            }
         }
         let e = RomEntry(fileName: fileName)
+        // The game under the name is running: its save is written before
+        // the file under it changes.
+        if replace, GameSession.shared.game == e { GameSession.shared.close() }
         do { try romData.write(to: e.url, options: .atomic) } catch {
             throw ImportError.unreadable("Couldn't keep that file: \(error.localizedDescription)")
         }
         noteRomSize(fileName, romData.count)
         AddPictures.clearBlank([fileName])  // a new file: the next run may picture it
-        await bump(fileName, fresh: true)
+        await bump(fileName, fresh: true, next: replace)
         DriveSync.shared.markGameUpload(fileName)
         return e
     }

@@ -28,6 +28,10 @@ proc agree(plain: string; level: int) =
   doAssert capped(z, 1 shl 30, 1 shl 29) == plain
   doAssert capped(z, plain.len) == plain, "the limit is the size itself"
   if plain.len > 0: doAssert too_big(z, plain.len - 1)
+  # The same blocks without the zlib wrapper: a zip entry's stream.
+  let raw = compress(plain, level, dfDeflate)
+  if raw.len > 0:
+    doAssert deflate_inflate_capped(unsafeAddr raw[0], raw.len, 1 shl 30) == plain
   inc checked
 
 var rng = initRand(0x51A7E)

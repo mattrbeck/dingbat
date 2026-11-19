@@ -194,20 +194,8 @@ proc adler32(data: ptr UncheckedArray[uint8]; n: int): uint32 =
     b = b mod 65521
   (b shl 16) or a
 
-proc zlib_inflate_capped*(src: pointer; len: int; limit: int; hint = 0): string =
-  ## The zlib stream at `src`, inflated. Raises InflateError for a stream
-  ## that is not well formed, and (too_big set) as soon as the output would
-  ## pass `limit`, before the bytes that would are made. `hint` is the size
-  ## expected, from whoever wrote the stream: where the buffer starts, held
-  ## to what a stream this long could plausibly need.
-  if len < 6: fail("the stream is too short")
-  let s = cast[ptr UncheckedArray[uint8]](src)
-  let cmf = uint32(s[0])
-  let flg = uint32(s[1])
-  if (cmf and 15) != 8 or (cmf shr 4) > 7 or ((cmf shl 8) or flg) mod 31 != 0 or
-     (flg and 0x20) != 0:
-    fail("not a zlib stream this reads")
-  var b = Bits(src: s, len: len - 4, pos: 2)
+proc inflate_blocks(b: var Bits; len, limit, hint: int): string =
+  ## The deflate blocks `b` stands at, to their final one.
   var dst = newString(max(0, min(limit, min(len * 16 + 4096,
                                             if hint > 0: hint else: len * 4))))
   # Written through a pointer, taken again after each resize: indexing the
@@ -292,11 +280,35 @@ proc zlib_inflate_capped*(src: pointer; len: int; limit: int; hint = 0): string 
     else:
       fail("the stream is damaged")
     if final == 1: break
-  let want = (uint32(s[len - 4]) shl 24) or (uint32(s[len - 3]) shl 16) or
-             (uint32(s[len - 2]) shl 8) or uint32(s[len - 1])
-  if adler32(o, op) != want: fail("the stream's checksum does not match")
   dst.setLen(op)
   dst
+
+proc zlib_inflate_capped*(src: pointer; len: int; limit: int; hint = 0): string =
+  ## The zlib stream at `src`, inflated. Raises InflateError for a stream
+  ## that is not well formed, and (too_big set) as soon as the output would
+  ## pass `limit`, before the bytes that would are made. `hint` is the size
+  ## expected, from whoever wrote the stream: where the buffer starts, held
+  ## to what a stream this long could plausibly need.
+  if len < 6: fail("the stream is too short")
+  let s = cast[ptr UncheckedArray[uint8]](src)
+  let cmf = uint32(s[0])
+  let flg = uint32(s[1])
+  if (cmf and 15) != 8 or (cmf shr 4) > 7 or ((cmf shl 8) or flg) mod 31 != 0 or
+     (flg and 0x20) != 0:
+    fail("not a zlib stream this reads")
+  var b = Bits(src: s, len: len - 4, pos: 2)
+  result = inflate_blocks(b, len, limit, hint)
+  let want = (uint32(s[len - 4]) shl 24) or (uint32(s[len - 3]) shl 16) or
+             (uint32(s[len - 2]) shl 8) or uint32(s[len - 1])
+  let o = cast[ptr UncheckedArray[uint8]](if result.len > 0: addr result[0] else: nil)
+  if adler32(o, result.len) != want: fail("the stream's checksum does not match")
+
+proc deflate_inflate_capped*(src: pointer; len: int; limit: int; hint = 0): string =
+  ## The same for a bare deflate stream (a zip entry's), which carries no
+  ## header and no checksum of its own.
+  if len < 1: fail("the stream is too short")
+  var b = Bits(src: cast[ptr UncheckedArray[uint8]](src), len: len, pos: 0)
+  inflate_blocks(b, len, limit, hint)
 
 when not defined(inflate_checks):
   {.pop.}

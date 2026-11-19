@@ -4,7 +4,7 @@
 ## GL here, so tests/desktop_lifecycle_test.nim builds headless.
 
 import std/[os, hashes, strformat, strutils]
-import zippy/ziparchives
+import ../common/inflate_bound
 import ../common/[linkproto, rom_exts]
 import ../gba/gba
 import ../gb/gb
@@ -120,19 +120,84 @@ proc legacy_zip_cache_dir(cache_root, zip_path: string): string =
   ## Where earlier builds put it: keyed by the path as given.
   cache_root / &"{zip_path.splitFile().name}-{cast[uint32](hash(zip_path)):08x}"
 
+const ZIP_ENTRY_MAX = 512 * 1024 * 1024
+  ## The most a zip's ROM may unpack to: the largest DS cartridge. Deflate
+  ## can turn a megabyte into a gigabyte, and the size a zip gives for an
+  ## entry is the zip's word for it.
+
+type ZipError = object of CatchableError
+
+proc zip_first_rom(zip: string; exts: openArray[string]): tuple[name, data: string] =
+  ## The first entry of `zip` (a zip file's bytes) named with one of `exts`,
+  ## unpacked: at most ZIP_ENTRY_MAX, and the size its directory entry gives.
+  ## ("", "") when there is none. Stored and deflated entries; zip64 sizes
+  ## and offsets are read (zippy writes every archive that way).
+  proc u16(p: int): int =
+    if p < 0 or p + 2 > zip.len: raise newException(ZipError, "the zip is cut short")
+    int(uint8(zip[p])) or (int(uint8(zip[p + 1])) shl 8)
+  proc u32(p: int): int = u16(p) or (u16(p + 2) shl 16)
+  proc u64(p: int): int =
+    # Nothing here is past 2^31; a larger value is damage.
+    if u32(p + 4) != 0 or u32(p) < 0: raise newException(ZipError, "the zip is too large to read")
+    u32(p)
+  var eocd = -1
+  for i in countdown(zip.len - 22, max(0, zip.len - 65557)):
+    if u32(i) == 0x06054b50:
+      eocd = i
+      break
+  if eocd < 0: raise newException(ZipError, "not a zip file")
+  var p = u32(eocd + 16)
+  var count = u16(eocd + 10)
+  if eocd >= 20 and u32(eocd - 20) == 0x07064b50:
+    # A zip64 end record, found through its locator.
+    let z = u64(eocd - 20 + 8)
+    if u32(z) != 0x06064b50: raise newException(ZipError, "the zip's directory is damaged")
+    count = u64(z + 32)
+    p = u64(z + 48)
+  for _ in 0 ..< count:
+    if u32(p) != 0x02014b50: break
+    let name_len = u16(p + 28)
+    if p + 46 + name_len > zip.len: raise newException(ZipError, "the zip is cut short")
+    let name = zip[p + 46 ..< p + 46 + name_len]
+    if not name.endsWith("/") and name.splitFile().ext.toLowerAscii() in exts:
+      var (method_id, comp, size, lo) = (u16(p + 10), u32(p + 20), u32(p + 24), u32(p + 42))
+      # Fields left at all ones are in the zip64 extra, in this order.
+      var x = p + 46 + name_len
+      let x_end = x + u16(p + 30)
+      while x + 4 <= x_end:
+        let (id, n) = (u16(x), u16(x + 2))
+        if id == 1:
+          var q = x + 4
+          if size == 0xFFFFFFFF: (size = u64(q); q += 8)
+          if comp == 0xFFFFFFFF: (comp = u64(q); q += 8)
+          if lo == 0xFFFFFFFF: lo = u64(q)
+          break
+        x += 4 + n
+      if size > ZIP_ENTRY_MAX: raise newException(ZipError, "the game in the zip is too large")
+      if u32(lo) != 0x04034b50: raise newException(ZipError, "the zip's entry is damaged")
+      let start = lo + 30 + u16(lo + 26) + u16(lo + 28)
+      if comp < 0 or start + comp > zip.len: raise newException(ZipError, "the zip is cut short")
+      var data: string
+      case method_id
+      of 0: data = zip[start ..< start + comp]
+      of 8:
+        if comp == 0: raise newException(ZipError, "the zip's entry is empty")
+        # To the size the entry gives and no further: a longer one stops there.
+        data = deflate_inflate_capped(unsafeAddr zip[start], comp, size, hint = size)
+      else: raise newException(ZipError, "the zip uses a compression this cannot read")
+      if data.len != size: raise newException(ZipError, "the game in the zip is not the size the zip gives")
+      if crc32(data) != uint32(u32(p + 16)): raise newException(ZipError, "the game in the zip is damaged")
+      return (name, data)
+    p += 46 + name_len + u16(p + 30) + u16(p + 32)
+  ("", "")
+
 proc extract_zip_rom*(cache_root, zip_path: string;
                       exts: openArray[string] = ROM_EXTS): string =
   ## Extract the zip's first ROM (`exts`: `ROM_EXTS`, or `ROM_EXTS_DS` with
   ## DS Beta on) into its cache folder; returns its path ("" if none or
   ## unreadable). The folder is reused, so the .sav beside the ROM persists.
   try:
-    let reader = openZipArchive(zip_path)
-    defer: reader.close()
-    var entry = ""
-    for name in reader.walkFiles:
-      if name.splitFile().ext.toLowerAscii() in exts:
-        entry = name
-        break
+    let (entry, rom) = zip_first_rom(readFile(zip_path), exts)
     if entry == "":
       echo "No ROM found in zip: ", zip_path
       return ""
@@ -149,8 +214,8 @@ proc extract_zip_rom*(cache_root, zip_path: string;
           except OSError: discard
     createDir(dest_dir)
     let dest = dest_dir / entry.extractFilename()
-    writeFile(dest, reader.extractFile(entry))
+    writeFile(dest, rom)
     dest
-  except ZippyError, IOError, OSError:
+  except ZipError, InflateError, IOError, OSError:
     echo "Failed to read zip: ", getCurrentExceptionMsg()
     ""

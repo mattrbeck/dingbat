@@ -797,6 +797,26 @@
       </div>
     </div>
 
+    <!-- A file added under the name of a different game already here
+         (index.js askRomClash): which of the two the name is for. -->
+    <div id="rom-clash-modal" class="modal-overlay">
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="rom-clash-title">
+        <h2 id="rom-clash-title"></h2>
+        <p>The file you added is a different game with the same name.</p>
+        <div class="rom-clash-options">
+          <button type="button" class="rom-clash-option" id="rom-clash-replace">
+            <span class="rom-clash-label">Replace the game</span>
+            <span class="rom-clash-sub" id="rom-clash-replace-sub"></span>
+          </button>
+          <button type="button" class="rom-clash-option" id="rom-clash-both">
+            <span class="rom-clash-label">Keep both</span>
+            <span class="rom-clash-sub" id="rom-clash-both-sub"></span>
+          </button>
+        </div>
+        <button type="button" class="rom-clash-cancel" id="rom-clash-cancel">Cancel</button>
+      </div>
+    </div>
+
     <!-- One-time offer: picture every game in the library (index.js
          maybeOfferThumbnails); the same box shows the run's progress. -->
     <div id="thumbs-modal" class="modal-overlay">

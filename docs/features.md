@@ -61,12 +61,17 @@ Signing in turns sync on; signed out, none of it runs.
   multipart form data: `save` (the file), `game`, `savedAt`. It goes no-cors, so the receiver
   needs no CORS headers, and its response is never read.
 - Everything of a game goes by its file name, so two different ROMs cannot share one. A
-  file added under a name another game in the library has is stored as "Name (2).ext" (then
-  3, and so on), like a second copy in a file system; the same bytes under the same name
-  are the same game. The same holds across devices: a device that signs in holding a
-  different ROM than Drive's under one name has its own game moved to the numbered name,
-  with its saves and states, before anything syncs. Sizes are compared first, then Drive's
-  SHA-256 of its file.
+  file added under a name another game in the library has asks which the name is for:
+  **Replace the game** (the new file takes the name, and the save and states that go by
+  it; it becomes the game's next generation, so it goes up over Drive's file and other
+  devices let go of the old one) or **Keep both** (it is stored as "Name (2).ext", then 3,
+  like a second copy in a file system, with no save). The same bytes under the same name
+  are the same game and nothing is asked. Across devices there is nobody to ask mid-sync:
+  a device that signs in holding a different ROM than Drive's under one name has its own
+  game moved to the numbered name, with its saves and states, before anything syncs, and
+  says so. Sizes are compared first, then Drive's SHA-256 of its file.
+- A zip's entry is unpacked to the size the zip gives for it and no further, and never past
+  512 MiB (the largest DS cartridge): a small zip cannot be made to fill memory.
 
 Scope is `drive.appdata` (dingbat sees only its own hidden app folder). The OAuth client
 ID ships in source (GIS implicit flow, no secret; gated by the Authorized JavaScript

@@ -308,6 +308,11 @@ struct RootView: View {
                     TombstoneSheet(games: model.tombstonePrompt ?? [])
                         .environment(\.palette, palette)
                 }
+                .sheet(isPresented: Binding(get: { model.romClash != nil },
+                                            set: { if !$0 && model.romClash != nil { model.answerRomClash(nil) } })) {
+                    RomClashSheet(asked: model.romClash?.asked ?? "", numbered: model.romClash?.numbered ?? "")
+                        .environment(\.palette, palette)
+                }
         }
         .alert(model.romWarn?.title ?? "", isPresented: Binding(get: { model.romWarn != nil },
                                                                  set: { if !$0 && model.romWarn != nil { model.answerRomWarn(false) } })) {
