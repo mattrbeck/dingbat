@@ -1078,6 +1078,21 @@ const WIN_WX0_PHASE*          {.intdefine.} = 1
   ## skipped dot is what `m3_window_timing_wx_0.asm` calls "activating one
   ## T-cycle later when WX = 0 and SCX > 0"; tested at the SCX latch dot, see
   ## fifo_sample_smooth_scroll.
+const WIN_WX0_SCX_DOT*        {.intdefine.} = 1
+  ## WX = 0 with SCX & 7 = s > 0: the dot the window activates late (the
+  ## header of mealybug m3_window_timing_wx_0) is spent discarding one more
+  ## window pixel rather than in the startup fetch, up to the head's largest
+  ## discard of 14 (`7 - WX + SCX & 7`), so s = 7 keeps 14. The window's
+  ## pixel 8 + s lands at x = 0 (DocBoy window_wx0_scx1..6, DMG and CGB E, and
+  ## its own run of patched ROMs at every s), where Pan Docs' unsourced
+  ## sentence has 7 + s. Mode 3 is unchanged. 0 = the Pan Docs shift.
+const CGB_WX0_TILE1_ZERO*     {.intdefine.} = 1
+  ## On a CGB, a window line at WX = 0 with SCX & 7 > 0 fetches its second
+  ## tile (map column 1) as tile number 0. Only those pixels are on screen
+  ## (x < 8 - SCX & 7 after WIN_WX0_SCX_DOT): DocBoy cgb window_wx0_scx1..7
+  ## draw none of column 1's tile, `_scx1_fancy_tile0` draws tile 0's at
+  ## x = 0..6. A fit: DocBoy's own run of patched ROMs draws tile 0 there at
+  ## s = 1 but other mixed pixels at s >= 2, which no row pins.
 const WIN_FINE_PAD*           {.intdefine.} = 1
   ## On a line that starts as a window line at WX = 1..5, the fine-scroll
   ## discard's SCX & 7 pixels are not the window's (1): they are thrown away

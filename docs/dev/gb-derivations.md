@@ -490,6 +490,27 @@ Dots are dingbat's line dots; W is the first dot of the writing M-cycle
 - Evidence: gambatte `m2int_wx07_m3stat_*`: it pays the ordinary fetch restart.
   Only WX < 7 is the hardware-bug corner.
 
+### WX = 0 with a fine scroll discards one more window pixel
+- Default: `WIN_WX0_SCX_DOT = 1`, `CGB_WX0_TILE1_ZERO = 1` (`gb.nim`).
+- Claim: a line that starts as a window line at WX = 0 with SCX & 7 = s
+  shows window pixel `8 + s` at x = 0 for s = 1..6 and 14 at s = 7 (s = 0:
+  7). The dot by which such a window activates late is a discard dot, not a
+  fetch dot, so mode 3 and the first pixel's dot are unchanged; 14 is the
+  head's largest discard (`7 - WX + SCX & 7`). On a CGB, map column 1's
+  fetch reads tile number 0.
+- Departs from Pan Docs ("Window": "shifted left by SCX % 8 pixels"), whose
+  sentence came with gbdev/pandocs PR #626 citing no ROM or hardware. DocBoy's
+  `window_wx0_scx*` ROMs come from its maintainer's DMG and CGB E.
+- Evidence: DocBoy `dmg/ppu/visual/window_wx0_scx{0..7}` and
+  `cgb/ppu/visual/window_wx0_scx{0..7}`, `_scx{0,1}_fancy_tile0`; DocBoy's
+  builds run as black boxes on a ROM numbering every window pixel (WX = 0,
+  1, 7; SCX = 0..7). Timing: mealybug `m3_window_timing_wx_0`, gambatte
+  `window/m2int_wx03_scx*`, DocBoy `pixel_transfer_timing_window_wx0_*`,
+  unchanged. The CGB part is a fit: the black box draws tile 0 in column
+  1's slot only at s = 1, a scramble of other tiles at s >= 2.
+- Clean-room: test-ROM sources, reference PNGs and black-box frames; no
+  emulator source consulted.
+
 ### Re-reaching WX while the window is already active injects one colour-0 pixel
 - Default: `WIN_REACT_PHASE = 7` (`fifo_ppu.nim`).
 - Claim: the window does not restart; one colour-0, lowest-priority pixel is

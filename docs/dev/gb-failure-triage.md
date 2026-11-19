@@ -1055,12 +1055,12 @@ the no-switch `sound/*_ds_{2,4,6}`); on E it is the mirror image (22/46).
 ## I. DocBoy (`docboy/*`, first scored 2026-10-14)
 
 DocBoy's own suite, scored by its own runner's rules on DMG ABC and CPU CGB E
-(`tests/README.md`, "The DocBoy suite"): 8,974 / 9,186 at `DocboyRev` (49
+(`tests/README.md`, "The DocBoy suite"): 8,988 / 9,186 at `DocboyRev` (49
 more not scored, `DocboyNotScored`). Every failing ROM is in
 [`tests/results_docboy.md`](../../tests/results_docboy.md); every group that is
 not scored is in the "Deliberately not scored" ledger at the end of
-`tests/results.md`. The 212 failing tests are I2 8, I3 129, I5 6,
-I6 6, I9 20, I11 1, I12 35 and "Small" 7. I4's and I13's scored rows all
+`tests/results.md`. The 198 failing tests are I2 8, I3 129, I5 6,
+I9 20, I11 1, I12 27 and "Small" 7. I4's, I6's and I13's scored rows all
 pass; I1, I7, I8 and I10 are closed. The 9,186 include DocBoy's rebuilds of 7 SameSuite channel 1 ROMs
 (`cgb/samesuite/apu/channel_1/*-cgbE`), which pass; the eighth,
 `channel_1_sweep_restart_2-cgbE`, is not scored (its expectation and
@@ -1638,7 +1638,7 @@ hardware question. Families:
   fails) in the commit that added them, so his console was not repeatable
   there. A per-lane term passes all six and is a lookup of these tables:
   not adopted.
-* **I6. DMG window glitches (6 left of 120).**
+* **I6. DMG window glitches (0 left of 120).**
   * Closed: `window_retrigger_pixel_glitch_*` (67) and
     `window_bg_reprise_wx{15,23}`. Each ROM turns the window off in the WY
     line's HBlank, so every later line has WX matching with LCDC.5 low.
@@ -1695,14 +1695,23 @@ hardware question. Families:
     photo covers a fall on the window's first map read. The decider:
     `window_turn_off_nops22_sprite_x3_variation_a` on the MGB, line 9, x =
     9..16: `30303030` (DocBoy, dingbat now) or `33333333` (dingbat before).
-  * Left (6): `window_wx0_scx{1..6}`. WX = 0 with SCX & 7 = s: DocBoy and
-    SameBoy draw the window's 9-pixel black head as 9, 7, 6, 5, 4, 3, 2, 2
-    for s = 0..7; dingbat draws 9, 8, 7, 6, 5, 4, 3, 2, which is Pan Docs,
-    "Window" ("shifted left by SCX % 8 pixels"). mealybug
-    `m3_window_timing_wx_0` paints a uniform window, so it fixes the first
-    pixel's dot, not which window pixel it is. Spec against two references:
-    a hardware question, not changed. The decider: these ROMs on the MGB,
-    the length of the black run at the left of line 0 for SCX = 1..6.
+  * Closed (2026-11-18, 6): `window_wx0_scx{1..6}`. WX = 0 with SCX & 7 =
+    s: DocBoy draws the window's 9-pixel black head as 9, 7, 6, 5, 4, 3, 2, 2
+    for s = 0..7, i.e. window pixel `8 + s` at x = 0 for s = 1..6 and 14 at
+    s = 7; dingbat drew Pan Docs' `7 + s` ("Window": "shifted left by SCX % 8
+    pixels"). That sentence is unsourced prose (gbdev/pandocs PR #626, no
+    ROM or hardware cited); DocBoy's ROMs come from its maintainer's DMG, so
+    DocBoy's picture is taken. `WIN_WX0_SCX_DOT` (gb.nim): the dot by which
+    an SCX > 0 window activates late (mealybug `m3_window_timing_wx_0`'s
+    header) discards one more window pixel instead of lengthening the
+    startup fetch, up to the head's largest discard of 14, so mode 3 and the
+    first pixel's dot do not move. DocBoy's own build, run as a black box on
+    a patched ROM that numbers every window pixel (WX = 0, 1, 7 x SCX =
+    0..7), draws the same columns as dingbat now in every DMG cell. A fit
+    with a stated reason, not a measured mechanism: the cap at 14 is the
+    reading of s = 7 that keeps the timing. Nothing else in the full runner
+    moved. Decider: these ROMs on the MGB, the black run at the left of line
+    0 for SCX = 1..7.
   * A rule no scored DocBoy test covers: the same ROM patched to WX = 0..8 x
     SCX = 0..7, DMG and CGB. SameBoy (DMG B and CGB E, black box) shifts
     the window by SCX & 7 only at WX = 0 (Pan Docs' WX = 0 paragraph: the
@@ -1936,7 +1945,7 @@ hardware question. Families:
   OPRI itself (`$FF6C` bit 0, Pan Docs "FF6C — OPRI") is a register in CGB
   mode, $FF in compatibility mode (`cgb/ppu/opri_write_read`,
   `boot_regs_cgb`; the AGS read $FE at hand-off).
-* **I12. CGB pictures (35 left of 46), and CGB PPU timing.**
+* **I12. CGB pictures (27 left of 46), and CGB PPU timing.**
   * Left (13; scored again 2026-11-16): `ppu/visual/turn_off_y*`. The ROMs'
     own comment: "Depending on the timing, the next lines are either kept,
     rendered, or cleared": the references keep rows drawn before LCDC.7 went
@@ -1983,10 +1992,19 @@ hardware question. Families:
     shows; `_alt` is not (full picture = the PPU keeps drawing; white = it
     freezes, as dingbat). The decider: `stop_during_pixel_transfer_alt` on a
     CGB, photographed.
-  * Left (8), a hardware question: `window_wx0_scx{1..7}` and
-    `window_wx0_scx1_fancy_tile0`, the CGB twins of I6's DMG tests (WX = 0
-    with SCX & 7 = s: DocBoy and SameBoy CGB E shift the window by s + 1,
-    capped at 7, Pan Docs by s, dingbat by s). Same decider on the GBC.
+  * Closed (2026-11-18, 8): `window_wx0_scx{1..7}` and
+    `window_wx0_scx1_fancy_tile0`, the CGB twins of I6's DMG tests. The
+    references draw none of the window's first two tiles (colour 3): map
+    column 2 starts at x = 8 - s as on the DMG (`WIN_WX0_SCX_DOT`), and the
+    pixels left of it are column 1's slot drawn from tile 0
+    (`_fancy_tile0`: tile 0's colour 1 at x = 0..6, on every line).
+    `CGB_WX0_TILE1_ZERO` (gb.nim): on a CGB, a WX = 0 line with SCX & 7 > 0
+    fetches map column 1 as tile number 0, and the head's `WX - 8`
+    re-trigger (`CGB_WIN_RETRIG_LATCH`) leaves that fetch alone. A fit:
+    DocBoy's black-box run of the numbered ROM draws tile 0 there at s = 1
+    (window attributes set to palette 3 did not move it), but at s >= 2 a
+    mix of other tiles' bits in a scrambled order, which no scored row pins
+    and no rule tried reproduces. Decider: these ROMs on a GBC.
   * `change_wx_glitch*` (9; 7 closed, 2 left). WX = 6, 7 or 8 written in
     mode 2 of each line and WX = I (0..127 down the frame) stored 85, 89 or
     93 dots in (`nops16/17/18`; 117 for the plain tests' 24 NOPs): inside or
