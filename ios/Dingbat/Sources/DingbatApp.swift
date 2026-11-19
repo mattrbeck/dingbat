@@ -252,7 +252,11 @@ struct DingbatApp: App {
                 case "report": model.openSheet(.report)
                 case "clip": model.openSheet(.clip)
                 case "addPictures": model.openSheet(.addPictures)
-                case "supporter": model.openSheet(.supporter)
+                case "supporter":
+                    if parts.count > 1, let p = Supporter.Perk.allCases.first(where: { "\($0)" == parts[1] }) {
+                        Supporter.shared.startOn(p)
+                    }
+                    model.openSheet(.supporter)
                 case "moments": if let e = entries.first { model.openSheet(.moments(e, crash: CrashWatch.streak(e.fileName) >= CrashWatch.askStreak)) }
                 case "link": NetLink.shared.openSheet()
                 case "tile": if let e = entries.first { model.openSheet(.tileMenu(e)) }

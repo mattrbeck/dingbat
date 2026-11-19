@@ -14,7 +14,12 @@ struct SupporterView: View {
     @State private var tier = 1
     @State private var failure: String?
     @State private var note: String?
+    @Environment(\.verticalSizeClass) private var vClass
     private let timer = Timer.publish(every: 3.8, on: .main, in: .common).autoconnect()
+
+    /// A short screen (iPhone mini, SE): smaller hero and card, so the
+    /// card's page dots sit above the price bar.
+    private var compact: Bool { UIScreen.main.bounds.height < 860 || vClass == .compact }
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -59,19 +64,19 @@ struct SupporterView: View {
     private var offer: some View {
         ScrollView {
             VStack(spacing: 0) {
-                Image("Logo").interpolation(.none).resizable().scaledToFit().frame(width: 112)
+                Image("Logo").interpolation(.none).resizable().scaledToFit().frame(width: compact ? 84 : 112)
                     .accessibilityHidden(true)
-                    .padding(.top, 62)
-                Text("dingbat Supporter")
-                    .font(.system(size: 30, weight: .bold, design: .rounded))
-                    .padding(.top, 12)
-                Text("Every game, the link cable and your saves stay free. Supporters keep dingbat going, and get the extras.")
+                    .padding(.top, compact ? 54 : 62)
+                Text("Support dingbat")
+                    .font(.system(size: compact ? 26 : 30, weight: .bold, design: .rounded))
+                    .padding(.top, 10)
+                Text("Core features are always free. Supporters get some extra fun perks.")
                     .font(.system(size: 15))
                     .foregroundColor(palette.textDim)
                     .multilineTextAlignment(.center)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.top, 6)
-                carousel.padding(.top, 16)
+                carousel.padding(.top, compact ? 12 : 16)
                 dots
             }
             .frame(maxWidth: 420)
@@ -90,7 +95,7 @@ struct SupporterView: View {
             ForEach(Perk.all.indices, id: \.self) { i in PerkCard(perk: Perk.all[i]).tag(i) }
         }
         .tabViewStyle(.page(indexDisplayMode: .never))
-        .frame(height: 300)
+        .frame(height: compact ? 272 : 300)
         .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 26, style: .continuous).stroke(palette.border, lineWidth: 1))
         .simultaneousGesture(DragGesture(minimumDistance: 8).onChanged { _ in held = true })
@@ -137,9 +142,6 @@ struct SupporterView: View {
             }
             .padding(3)
             .background(Capsule().fill(Color(red: 118 / 255, green: 118 / 255, blue: 128 / 255).opacity(0.24)))
-            Text("\(Supporter.tierNames[tier]). Every price unlocks everything.")
-                .font(.system(size: 13)).foregroundColor(palette.textDim)
-                .padding(.top, 8)
             Button(action: buy) {
                 ZStack {
                     Text("Support for \(store.price(tier))").opacity(store.busy ? 0 : 1)
@@ -158,9 +160,9 @@ struct SupporterView: View {
             if let note {
                 Text(note).font(.system(size: 13)).foregroundColor(palette.textDim).padding(.top, 8)
             }
-            Text("One-time purchase · Shared with your family")
+            Text("One-time purchase · Every price unlocks everything")
                 .font(.system(size: 12)).foregroundColor(palette.textFaint)
-                .padding(.top, 10)
+                .padding(.top, 8)
         }
         .frame(maxWidth: 420)
         .padding(.horizontal, 24)
@@ -310,10 +312,10 @@ private struct Perk {
     var soon = false
 
     static let all: [Perk] = [
-        Perk(perk: .themes, title: "All twelve themes", desc: "Amber, Pure Black, Light, DMG, Kiwi and the rest. Night is always free."),
-        Perk(perk: .icons, title: "18 app icons", desc: "Classic bats, plus holiday ones that can switch by themselves."),
+        Perk(perk: .themes, title: "Every theme", desc: "Amber, Pure Black, Light, DMG, Kiwi and more."),
+        Perk(perk: .icons, title: "App icons", desc: "Classic bats, plus holiday ones that can switch by themselves."),
         Perk(perk: .palette, title: "Your own Game Boy colors", desc: "Pick all four shades of a custom palette."),
-        Perk(perk: .filters, title: "Smooth filters", desc: "hq4x and xBR upscalers, with a CRT look coming."),
+        Perk(perk: .filters, title: "Smooth filters", desc: "hq4x and xBR round off the pixel steps."),
         Perk(perk: .early, title: "Early access", desc: "Try new builds a week before they ship."),
         Perk(perk: .advanced, title: "Advanced features", desc: "DS support and the save webhook."),
         Perk(perk: .clips, title: "Clip studio", desc: "Export GIFs, and sharper, longer clips.", soon: true),
@@ -429,32 +431,23 @@ private struct PaletteArt: View {
 
 private struct FiltersArt: View {
     @Environment(\.palette) private var palette
+    // The bat through the app's own shaders at 8x (PresentShader's upscale,
+    // rendered offline): the wing tips, cropped close so the steps show.
     var body: some View {
         HStack(spacing: 8) {
-            tile("Sharp · free", bright: false) { batImage(84) }
-            tile("xBR", bright: true) {
-                Image("Logo").resizable().interpolation(.high).scaledToFit().frame(width: 84).blur(radius: 0.6)
-            }
-            tile("CRT · soon", bright: true, ground: Color(hex: 0x2A2440)) {
-                batImage(84).brightness(0.12).shadow(color: palette.accent.opacity(0.7), radius: 4)
-                    .overlay(Canvas { ctx, size in
-                        var y: CGFloat = 0
-                        while y < size.height {
-                            ctx.fill(Path(CGRect(x: 0, y: y, width: size.width, height: 1)), with: .color(.black.opacity(0.42)))
-                            y += 3
-                        }
-                    })
-            }
+            tile("Sharp · free", "sharp", bright: false)
+            tile("hq4x", "hq4x", bright: true)
+            tile("xBR", "xbr", bright: true)
         }
     }
 
-    private func tile<C: View>(_ label: String, bright: Bool, ground: Color = Color(hex: 0xE6DEFC),
-                               @ViewBuilder _ content: () -> C) -> some View {
+    private func tile(_ label: String, _ name: String, bright: Bool) -> some View {
         VStack(spacing: 7) {
-            RoundedRectangle(cornerRadius: 14, style: .continuous).fill(ground)
-                .overlay(content())
-                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            Image("FilterPreview-" + name).interpolation(.none).resizable()
+                .frame(width: 384 * 0.62, height: 200 * 0.62)
+                .offset(x: 72)
                 .frame(width: 98, height: 98)
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
             Text(label).font(.system(size: 12)).foregroundColor(bright ? palette.text : palette.textDim)
         }
     }
