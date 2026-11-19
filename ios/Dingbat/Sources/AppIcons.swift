@@ -10,7 +10,7 @@ struct AppIconChoice: Identifiable, Equatable, Sendable {
     var alternateName: String? { id == "night-flyer" ? nil : "AppIcon-" + id }
 
     static let classic: [AppIconChoice] = [
-        ("night-flyer", "Night Flyer"), ("moonlit", "Moonlit"), ("dusk", "Dusk"), ("midnight", "Midnight"),
+        ("night-flyer", "Night Flyer"), ("supporter", "Supporter"), ("moonlit", "Moonlit"), ("dusk", "Dusk"), ("midnight", "Midnight"),
         ("sunrise", "Sunrise"), ("ember", "Ember"), ("paper", "Paper"), ("ink", "Ink"),
         ("glacier", "Glacier"), ("pea-soup", "Pea Soup"),
     ].map { AppIconChoice(id: $0.0, name: $0.1, holiday: false) }

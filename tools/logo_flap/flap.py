@@ -30,6 +30,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import bat  # noqa: E402
+import crown  # noqa: E402
 import imgio  # noqa: E402
 
 ROOT = os.path.normpath(os.path.join(HERE, '..', '..'))
@@ -143,6 +144,51 @@ def app_icon(dst):
         f.write('\n')
 
 
+def imageset(name, rows, pal):
+    """One 1x imageset in the asset catalog (the views scale it with .interpolation(.none))."""
+    d = os.path.join(XC, name + '.imageset')
+    os.makedirs(d, exist_ok=True)
+    imgio.png(os.path.join(d, name.lower() + '.png'), rows, pal)
+    with open(os.path.join(d, 'Contents.json'), 'w') as f:
+        json.dump({"images": [{"filename": name.lower() + '.png', "idiom": "universal"}],
+                   "info": {"author": "xcode", "version": 1}}, f, indent=2)
+        f.write('\n')
+
+
+def crowned_layers(n, k):
+    """moon_layers with the crowned bat: the bat where the plain icon has it, the crown above."""
+    _, field, moon = bat.moon_layers(n, k)
+    s = bat.scale(crown.still(), k)
+    w, h = len(s[0]), len(s)
+    ox, oy = (n - w) // 2, (n - len(bat.still()) * k) // 2 - crown.PAD * k
+    top = [['.'] * n for _ in range(n)]
+    for y, r in enumerate(s):
+        for x, c in enumerate(r):
+            if c != '.' and 0 <= oy + y < n:
+                top[oy + y][ox + x] = c
+    return [''.join(r) for r in top], field, moon
+
+
+def supporter_icon():
+    """The alternate "Supporter" icon: the app icon (cream by day, the moon on
+    Night by night) with the crown; and its 256 preview for the picker."""
+    pal = crown.palette(bat.MOON_PAL)
+    d = os.path.join(XC, 'AppIcon-supporter.appiconset')
+    os.makedirs(d, exist_ok=True)
+    b, field, moon = crowned_layers(1024, 22)
+    imgio.png(os.path.join(d, 'light.png'), bat.over(b, field), pal)
+    imgio.png(os.path.join(d, 'dark.png'), bat.over(b, moon), pal)
+    with open(os.path.join(d, 'Contents.json'), 'w') as f:
+        json.dump({"images": [
+            {"filename": "light.png", "idiom": "universal", "platform": "ios", "size": "1024x1024"},
+            {"appearances": [{"appearance": "luminosity", "value": "dark"}],
+             "filename": "dark.png", "idiom": "universal", "platform": "ios", "size": "1024x1024"}],
+            "info": {"author": "xcode", "version": 1}}, f, indent=2)
+        f.write('\n')
+    b, _, moon = crowned_layers(256, 5)
+    imageset('IconPreview-supporter', bat.over(b, moon), pal)
+
+
 def main():
     still = bat.still()
     fav32, fav16 = bat.favicon32(), bat.FAVICON16
@@ -188,6 +234,16 @@ def main():
     imgio.png(path('.github', 'readme', 'dingbat.png'), still, P)
     imgio.png(path('.github', 'readme', 'dingbat_large.png'), bat.scale(still, 4), P)
     imgio.gif(path('.github', 'readme', 'dingbat_flap.gif'), [bat.scale(f, 4) for f in frames31[:16]], P, delay_cs=4)
+
+    # ---- the supporter's crown: link-screen strips, the still, the Supporter app icon
+    beat = frames31[:16]
+    # the web shows only a friend's crown (it has no Supporter unlock of its own)
+    imgio.png(path('web', 'flap-dusk-crown.png'), strip(crown.frames(beat)), crown.palette(bat.DUSK))
+    for name, rows, pal in (('LogoCrown', crown.still(), crown.palette(P)),
+                            ('FlapCrown', strip(crown.frames(beat)), crown.palette(P)),
+                            ('FlapDuskCrown', strip(crown.frames(beat)), crown.palette(bat.DUSK))):
+        imageset(name, rows, pal)
+    supporter_icon()
 
     if '--preview' in sys.argv:
         out = sys.argv[sys.argv.index('--preview') + 1]

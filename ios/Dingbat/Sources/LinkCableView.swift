@@ -116,28 +116,35 @@ struct LinkCableView: View {
 struct LinkTransferScene: View {
     @Environment(\.palette) private var palette
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @ObservedObject private var link = NetLink.shared
+    @ObservedObject private var supporter = Supporter.shared
 
     var body: some View {
         HStack(alignment: .top, spacing: 4) {
-            end("Flap", "You")
+            end("Flap", "You", crowned: supporter.unlocked)
             TimelineView(.animation(paused: reduceMotion)) { ctx in
                 Canvas { g, _ in draw(g, t: ctx.date.timeIntervalSinceReferenceDate) }
             }
             .frame(width: 140, height: 68)
+            .padding(.top, 10)
             .accessibilityHidden(true)
-            end("FlapDusk", "Your friend")
+            end("FlapDusk", "Your friend", crowned: link.peerCrown)
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 6)
     }
 
-    private func end(_ image: String, _ name: String) -> some View {
+    /// A supporter's bat wears the crown: its strip is 5 art rows (10 pt)
+    /// taller, so every bat stands in a 66 pt box, feet on the same line.
+    private func end(_ image: String, _ name: String, crowned: Bool) -> some View {
         VStack(spacing: 6) {
-            FlappingBat(image: image).frame(width: 104, height: 56)
+            FlappingBat(image: crowned ? image + "Crown" : image)
+                .frame(width: 104, height: crowned ? 66 : 56)
+                .frame(height: 66, alignment: .bottom)
             Text(name).font(.system(size: 12, weight: .semibold)).foregroundColor(palette.textDim)
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(name)
+        .accessibilityLabel(crowned ? name + ", a supporter" : name)
     }
 
     // The web's cable: M6 34 C 40 58, 100 10, 134 34 in a 140 x 68 box.
