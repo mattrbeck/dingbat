@@ -739,7 +739,9 @@ proc state_payload*(n: NDS; aligned = false): string =
   ## never stored: `state_bytes` writes the plain form).
   # mid-frame, a render the host-GPU skip left without dots draws them now
   if not n.dead_3d_frame(): n.gpu3d.settle_dots()
-  var s = Saver(buf: newString(8 * 1024 * 1024), aligned: aligned,
+  # Not zeroed: `put`, io_room and io_planes write every byte below `pos`,
+  # and clearing 8 MB first was a quarter of a payload's instructions.
+  var s = Saver(buf: newStringUninit(8 * 1024 * 1024), aligned: aligned,
                 rooms: addr n.state_rooms, dead3d: n.dead_3d_frame())
   s.write_preamble(n)
   io_machine(s, n)
