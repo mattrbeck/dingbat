@@ -222,3 +222,10 @@ body {
 #drop-overlay.visible {
   opacity: 1;
 }
+
+/* Shown by embed.js (an inline style would need the page's policy to allow
+   inline styles). */
+#icon-play,
+#icon-vol {
+  display: none;
+}

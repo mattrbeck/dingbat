@@ -141,12 +141,13 @@ const resetButton = document.getElementById("reset");
 const fastForwardButton = document.getElementById("fast-forward");
 const iconPause = document.getElementById("icon-pause");
 const iconPlay = document.getElementById("icon-play");
+document.getElementById("canvas")?.addEventListener("contextmenu", (e) => e.preventDefault());
 const overlay = document.getElementById("overlay");
 let overlayTimer = null;
 
 const updatePauseIcon = () => {
   iconPause.style.display = paused ? "none" : "";
-  iconPlay.style.display = paused ? "" : "none";
+  iconPlay.style.display = paused ? "inline" : "";
   pauseButton.setAttribute("aria-label", paused ? "Play" : "Pause");
   pauseButton.title = paused ? "Play" : "Pause";
   overlay.classList.toggle("pinned", paused);
@@ -193,7 +194,7 @@ const updateVolumeUI = () => {
   volFill.style.width = pct;
   volKnob.style.left = pct;
   iconMuted.style.display = volume === 0 ? "" : "none";
-  iconVol.style.display = volume === 0 ? "none" : "";
+  iconVol.style.display = volume === 0 ? "" : "inline";
   volTrack.setAttribute("aria-valuenow", String(volume));
   volIconBtn.setAttribute("aria-label", volume === 0 ? "Unmute" : "Mute");
   applyAudioSilent();

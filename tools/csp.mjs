@@ -40,6 +40,16 @@ const POLICIES = {
     "base-uri 'none'",
     "form-action 'none'",
   ].join("; "),
+  // The embeddable player: this origin's files and the core, nothing else.
+  "embed.html": () => [
+    "default-src 'self'",
+    "script-src 'self' 'wasm-unsafe-eval'",
+    "img-src 'self' blob: data:",
+    "media-src 'self' blob: data:",
+    "object-src 'none'",
+    "base-uri 'none'",
+    "form-action 'none'",
+  ].join("; "),
   // Google's redirect target: its one script and its one style block, and
   // nothing else at all.
   "oauth-callback.html": (html) => [

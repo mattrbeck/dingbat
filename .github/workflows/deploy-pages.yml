@@ -196,7 +196,7 @@ jobs:
 
       - name: Check the page's Content-Security-Policy
         # After the last step that rewrites index.html: each page with a
-        # policy (index.html, oauth-callback.html) still names its inline
+        # policy (index.html, embed.html, oauth-callback.html) still names its inline
         # code by hash as it ships (tools/csp.mjs). A stale hash and the
         # browser refuses that script.
         run: node tools/csp.mjs --check
