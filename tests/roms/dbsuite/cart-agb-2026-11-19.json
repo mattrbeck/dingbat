@@ -1,5 +1,5 @@
 {
- "what": "dbsuite cartridge build at main c6f17836 (the viewer, the boot home screen, the 512 KB image, the IRQ-handler watchdog), run from a flash cart on the AGB SP, 2026-11-19, one boot; results block read back over the link cable (tools/hwlink/gblink.py read_report). Per case: [status, got] per run.",
+ "what": "dbsuite cartridge build at main c6f17836 (the viewer, the boot home screen, the 512 KB image, the IRQ-handler watchdog), run from a flash cart on the AGB SP, 2026-11-19. This is the second run of one boot: after the auto-run (872/872 on the console's screen, not read back), Matt navigated the viewer by hand and started a run with START from the home screen; its results block was read back over the link cable (tools/hwlink/gblink.py read_report). Per case: [status, got] per run.",
  "cases": {
   "cpu/psr-f-field-sets-nzcv": [
    [
