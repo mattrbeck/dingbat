@@ -8,7 +8,10 @@ off the console (`tools/hwlink/*-agb.json`), or rig runs noted in the
 project history. The idea and the output format follow the mGBA test suite;
 the cases are this project's own measurements.
 
-`dbsuite.gba` is the cartridge build. `dbsuite.mb.gba` is the same body as a
+`dbsuite.gba` is the cartridge build, padded to 512 KB so that no emulator
+takes it for a multiboot image (mGBA 0.10.5 loads a file of 256 KB or less
+whose word at 0xC0 is a forward branch as one, and runs it from EWRAM).
+`dbsuite.mb.gba` is the same body as a
 256 KB-or-smaller multiboot image. It runs from EWRAM, so it can go to a
 console over a link cable with no flashcart. It also boots as a cartridge,
 so an emulator without multiboot support can run it too. In the multiboot
