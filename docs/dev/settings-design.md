@@ -42,7 +42,9 @@ Direction is Joystick.
   need a description → check list.
 - Paid things are shown in place, locked. Never hidden, never a banner inside a pane. The only
   upsell surfaces are the banner at the top of Settings and the locked item itself.
-- Free baseline: Night theme and the Night Flyer icon. No light theme or appearance matching for
+- Free baseline: Night theme and the Night Flyer icon. Advanced features (Save webhook, DS
+  support) are Supporter too: locked rows in General, and the Nintendo DS row appears only once
+  DS support is on. No light theme or appearance matching for
   free users.
 - Switches and checks use the theme accent. Icon tiles have fixed hues on every theme.
 - Navigation: Settings has a large title and Close; panes an inline title and Back. From 700 pt
@@ -92,7 +94,7 @@ Same schema, map and words; the renderer takes a platform and swaps the skin, no
 | Game Boy Advance | BIOS: file, Play BIOS intro · BIOS calls: HLE / Real BIOS / Real boot, HLE calls (check) |
 | Nintendo DS | Screens: Layout (menu), Bottom screen first, Gap (menu), Turn (menu), Hide the top bar (phone) · 3D: Resolution (seg), Drawn by (menu) · BIOS and firmware: three files |
 | Google Drive | account (email, last sync), Sync Now · Sign Out, Sign Out Everywhere (destructive) |
-| General | Advanced: Save webhook ›, DS support (Highly experimental) · About: Version, Acknowledgements, Privacy · Reset All Settings (destructive) |
+| General | Advanced (Supporter): Save webhook ›, DS support (Highly experimental) · About: Version, Acknowledgements, Privacy · Reset All Settings (destructive) |
 
 ## Tokens
 
