@@ -1055,13 +1055,13 @@ the no-switch `sound/*_ds_{2,4,6}`); on E it is the mirror image (22/46).
 ## I. DocBoy (`docboy/*`, first scored 2026-10-14)
 
 DocBoy's own suite, scored by its own runner's rules on DMG ABC and CPU CGB E
-(`tests/README.md`, "The DocBoy suite"): 8,916 / 9,186 at `DocboyRev` (49
+(`tests/README.md`, "The DocBoy suite"): 8,927 / 9,186 at `DocboyRev` (49
 more not scored, `DocboyNotScored`). Every failing ROM is in
 [`tests/results_docboy.md`](../../tests/results_docboy.md); every group that is
 not scored is in the "Deliberately not scored" ledger at the end of
-`tests/results.md`. The 270 failing tests are I1 8, I2 11, I3 176, I5 6,
+`tests/results.md`. The 259 failing tests are I2 8, I3 176, I5 6,
 I6 6, I9 20, I11 1, I12 35 and "Small" 7. I4's and I13's scored rows all
-pass; I7, I8 and I10 are closed. The 9,186 include DocBoy's rebuilds of 7 SameSuite channel 1 ROMs
+pass; I1, I7, I8 and I10 are closed. The 9,186 include DocBoy's rebuilds of 7 SameSuite channel 1 ROMs
 (`cgb/samesuite/apu/channel_1/*-cgbE`), which pass; the eighth,
 `channel_1_sweep_restart_2-cgbE`, is not scored (its expectation and
 SameSuite's both claim CGB E).
@@ -1079,7 +1079,7 @@ section. Where SameBoy agrees with DocBoy, the family is probably dingbat's.
 Where it fails too, the test encodes something only DocBoy models, or a
 hardware question. Families:
 
-* **I1. CH4 retrigger and NR43 changes (8 left).** The tests read PCM34 one
+* **I1. CH4 retrigger and NR43 changes (closed 2026-11-18).** The tests read PCM34 one
   M-cycle either side of the LFSR's 15th clock after the last write. The
   rules are in `psg_channels.nim` (notes above `ch4_lfsr_frozen`,
   `psg_noise_first_inc`, `psg_noise_slow_restart`). Each was checked against
@@ -1103,10 +1103,15 @@ hardware question. Families:
     and the 3 single-speed `ch4_retrigger_delay16_*_nops{0,2,4}`; SameBoy
     restarts as late in the running-stage case, passes 31 of the 40, and
     differs only before the first increment).
-  * Divisor code 1 rounds a trigger off the grid up to the next grid edge
-    only from a zero counter (SameSuite channel_4_frequency_alignment);
-    once the counter has counted it rounds down like codes >= 2 (10 tests,
-    all passed by SameBoy too).
+  * Every restart of a code >= 1 stage rounds down onto the 512 kHz grid.
+    A start from off holds the counter's input for four ticks, and a stage
+    pulse inside the hold waits in a latch for the next grid edge; only
+    code 1 off the grid pulses that early (three ticks), which is its old
+    "round up" (SameSuite channel_4_frequency_alignment; DocBoy
+    `shift{1,2,4}_divider1_nops{2,3}`, while `divider2..7` start alike at
+    all four phases). A restart clears the stage, not the latch (below).
+    Running restarts with the counter at zero no longer round up: no
+    scored row needs it, and 6 more disabled rows pass without it.
   * One rule SameBoy does not share: a code-0 count left pending off the
     512 kHz grid by a write selecting code >= 1 finishes on the next grid
     edge (`change_divider0_to_3`, 12 tests SameBoy fails; probe (m)
@@ -1137,25 +1142,34 @@ hardware question. Families:
     triggers that close, so this is DocBoy's word alone
     (docs/dev/hwprobe-questions.md 20). Not on the AGB.
 
-  Left (8, all in `double_speed/apu/ch4`):
-  `retrigger_shift{1,4}_divider1_delay{5,6}_nops3` and `_delay{6,7}_nops2`,
-  a code-1 retrigger one tick before the first increment of a trigger from
-  off that was off the 512 kHz grid (the start code 1 rounds up). DocBoy's
-  timeline is the stage not restarted at all (or, the same timeline,
-  rounded down keeping the increment due a tick later), one increment
-  earlier than dingbat. The same retrigger one tick before an on-grid
-  trigger's first increment (`delay{4,5}_nops0`, `delay{3,4}_nops1`) wants
-  dingbat's round-up with that increment counted, which a rounded-down
-  restart would lose. No rule on the counter, the grid or the restart
-  window gives both; a "drop it" case for this one start would be a fit.
-  Probe (m) `c0_pend_*` asks the code-0 analogue of the question.
+  * The start hold's latch (closed 2026-11-18, `ch4_held_start_pulse`):
+    `retrigger_shift{1,4}_divider1_delay{5,6}_nops3` and `_delay{6,7}_
+    nops2` retrigger one tick before the held pulse counts (start at
+    M-cycle 28, pulse at 34, counted at 38, retrigger at 36). The restart
+    clears the stage, so its next pulse is 42, but the latched increment
+    still lands at 38: one increment earlier than a restart that drops it.
+    The same retrigger one tick before an on-grid start's first increment
+    (`delay{4,5}_nops0`, `delay{3,4}_nops1`, pulse at 34 unheld) loses that
+    increment, as every running restart does. Read from the ROMs' write and
+    read cycles over the whole code >= 1 family (single and double
+    retriggers, 604 scored round pairs and DocBoy's 640 disabled
+    `double_retrigger_*` rows): this model passes 604/604 and 856/860 of
+    all, against 804/860 before; the 4 left expect the 15th clock on an
+    odd M-cycle, which no grid-aligned clock gives. Dead ends, scored /
+    all: "a code-1 retrigger 4 ticks after the start, its first increment
+    a tick away, is ignored" 604 / 826 (a special case, and it misses the
+    disabled rows where that retrigger opens a restart window); the hold
+    without the latch surviving 596 / 808; a hold of 3 or 5 ticks 550 /
+    702 and 565 / 770. The same disabled rows also take the LFSR reset of
+    a late-picked-up retrigger on its late edge, which dingbat's
+    restart-point counting already does. DocBoy's word alone (SameBoy
+    fails the code-1 rows); no hardware-verified row moves.
 
   DocBoy disables 640 `double_retrigger_*` tests (codes 0 and 1); its own
   build, run as a black box, fails 84 of them (SameBoy passes 37 of those
-  84), so those expectations are not DocBoy's output; dingbat passes 584
-  (484 before the restart window: it turned 108 red ones green and 8 green
-  ones red).
-* **I2. CH1 frequency sweep (11 left of 380).**
+  84), so those expectations are not DocBoy's output; dingbat passes 628
+  (484 before the restart window, 584 before the start hold).
+* **I2. CH1 frequency sweep (8 left of 380).**
   `period_sweep_*` on DMG, CGB and double speed. Second opinion: SameBoy
   (black box, DMG B / CGB E) passed 301 of the 380 tests dingbat failed, so
   the family was dingbat's. Probe ROMs built from DocBoy's own code
@@ -1217,11 +1231,13 @@ hardware question. Families:
     Closed 2026-11-17 (CGB `..._alt_round1_2`, `..._pace_4_to_6_..._round1_1`);
     SameBoy fails both, no hardware suite reaches the M-cycle.
   * DocBoy-only rules taken with the rest (SameBoy differs; they fall out of
-    the same model): a trigger one tick into a calculation waits a tick, a
-    trigger on its way holds the channel on, and a clock cuts a running
+    the same model): a trigger two ticks after the last one to reach the
+    sweep unit waits a tick, and one tick after rides on it (channel 4's
+    restart window, `ch1_sweep_arrive`), a trigger on its way holds the
+    channel on, and a clock cuts a running
     calculation short (`change_period_nr14_during_recalc_delay14279..14284`:
     the frequency becomes 0 and the note plays on).
-  * Left (11):
+  * Left (8):
     * CGB `change_period_nr14_during_recalc{,_step0}_delay14284` (2; scored
       again 2026-11-16): a retrigger 8 cycles (2 M-cycles) before a sweep
       clock, which DocBoy has the clock take, i.e. a CGB trigger lead of 4
@@ -1261,17 +1277,16 @@ hardware question. Families:
     * Double speed `delay12243_period_round2/4` (2: the duty phase after a
       trigger the clock's write-back overwrites; dingbat and SameBoy sit on
       opposite sides of DocBoy's edge).
-    * Double speed `disable_on_triple_trigger_step4_delay4_{2,3}_round1`
-      (2): the third trigger arrives 2 ticks into the second one's
-      restarted calculation (arrival at 13 M-cycles after the first write,
-      the restart at 9); DocBoy has it restart at 15, as `delay4_{4,5}` do,
-      while 2 ticks into the FIRST trigger's calculation (the second
-      trigger, at 9 after a start at 5) restarts at once. A rule keyed on a
-      restarted calculation has no mechanism behind it; SameBoy fails both.
-    * Double speed `change_step_7_to_0_during_recalc_delay16_after_trigger`
-      (1): step 0 written 18 M-cycles after the trigger, before the 7th
-      tick (19) and the check (20); dingbat freezes the calculation, DocBoy
-      wants the stop. SameBoy fails it.
+    * Closed 2026-11-18: double speed `disable_on_triple_trigger_step4_
+      delay4_{2,3}_round1` (the third trigger two ticks after a restart's
+      arrival waits a tick, as two ticks after a start from idle does: one
+      rule measured from the last arrival, GB payload rev 12; a restart
+      that keeps one shift instead fixes them and breaks `change_step_7_
+      to_0_during_recalc_then_7_delay{1,2}_after_double_trigger_round1`)
+      and `change_step_7_to_0_during_recalc_delay16_after_trigger` (the
+      tick on the write's own edge runs on the old step, so a step of 0 on
+      the last tick holds nothing; 17 M-cycles after the trigger holds, 18
+      does not).
 
   The 14 double-speed CH1 tests outside the sweep are closed
   (`psg_channels.nim`: `sq_trigger`, `sq_starting`, `sq_reload_step`). Each

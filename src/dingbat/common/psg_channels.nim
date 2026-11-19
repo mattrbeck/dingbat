@@ -434,12 +434,19 @@ when not PSG_AGB:
     ## this tick (step + 2). DocBoy disable_on_{,double_}trigger_*, SameSuite
     ## channel_1_sweep_restart.
     let tick = sweep_tick_len(h)
-    if ch.sweep_check_at != PSG_NO_STEP and at == ch1_sweep_t0(ch, h) + tick:
-      # One tick into a calculation the trigger waits a tick (only DocBoy
-      # disable_on_double_trigger_step{1,6}_delay0* pin it).
+    if ch.sweep_check_at != PSG_NO_STEP and ch.sweep_arrived_at != PSG_NO_STEP and
+       at == ch.sweep_arrived_at + 2 * tick:
+      # The restart window channel 4's divisor stage has (ch4_restart_edge):
+      # a trigger one tick after the last one rides on it
+      # (ch1_trigger_sweep), and one two ticks after waits a tick, the edge
+      # the next is measured from (DocBoy double speed disable_on_double_
+      # trigger_step{1,6}_delay0*, after a restart disable_on_triple_trigger_
+      # step4_delay4_{2,3}).
       ch.sweep_load_at = at + tick + 1
       ch.sweep_load_kind = SWEEP_LOAD_ARRIVAL
+      ch.sweep_arrived_at = PSG_NO_STEP
       return
+    ch.sweep_arrived_at = at
     ch.frequency_shadow = ch.frequency
     ch.sweep_operand = 0
     ch.sweep_operand_valid = false
@@ -458,15 +465,17 @@ when not PSG_AGB:
 
   proc ch1_sweep_complete(ch: PsgSweepSquare) =
     ## A calculation's end: the operand is shifted into place and the
-    ## overflow check runs on the adder (in NR10's direction as it is now)
-    ## while NR10's step is non-zero. A check in subtraction mode arms the
-    ## direction-clear stop (Pan Docs, "Obscure Behavior"). A trigger still
-    ## on its way to the sweep unit holds the channel on (only DocBoy
-    ## disable_on_double_trigger_* pin it).
+    ## overflow check runs on the adder (in NR10's direction as it is now),
+    ## skipped only when the calculation and NR10 both have step 0 (a step
+    ## of 0 written on its last tick does not save the note, ch1_write). A
+    ## check in subtraction mode arms the direction-clear stop (Pan Docs,
+    ## "Obscure Behavior"). A trigger still on its way to the sweep unit
+    ## holds the channel on (only DocBoy disable_on_double_trigger_* pin it).
     ch.sweep_check_at = PSG_NO_STEP
     ch.sweep_operand = ch.sweep_load_value shr ch.sweep_calc_n
     ch.sweep_operand_valid = true
-    if ch1_sweep_trigger_pending(ch) or ch.shift == 0: return
+    if ch1_sweep_trigger_pending(ch) or
+       (ch.shift == 0 and ch.sweep_calc_n == 0): return
     if ch.negate: ch.negate_used = true
     if ch1_sweep_sum(ch) > 0x7FF:
       ch.enabled = false
@@ -783,15 +792,21 @@ proc ch1_write(ch: PsgSweepSquare; nr: int; val: uint8; h: PsgHost) =
       # non-zero: a step of 0 written while one runs holds it (and the check
       # at its end), and a step written later lets it count out the ticks it
       # had left, whatever the new step; one M-cycle later on the CGB (DocBoy
-      # change_step_7_to_0_during_recalc_then_7*).
+      # change_step_7_to_0_during_recalc_then_7*). The tick on the write's own
+      # 1 MHz edge runs on the old step, so a write landing on the last one
+      # holds nothing and the check runs on the step the calculation took
+      # (double speed `change_step_7_to_0_during_recalc_delay{15,16}_after_
+      # trigger`: 17 M-cycles after the trigger holds it, 18 does not).
       elif old_shift != 0 and ch.shift == 0 and
            ch.sweep_check_at != PSG_NO_STEP:
         let tick = sweep_tick_len(h)
         let t0 = ch1_sweep_t0(ch, h)
-        let d = if psg_now(h) > t0: int((psg_now(h) - t0) div tick) else: 0
-        let done = min(int(ch.sweep_calc_n), max(1, d))
-        ch.sweep_frozen = uint8(int(ch.sweep_calc_n) - done + 1)
-        ch.sweep_check_at = PSG_NO_STEP
+        let e = psg_edge(h)
+        let d = if e > t0: int((e - t0) div tick) else: 0
+        if d < int(ch.sweep_calc_n):
+          let done = max(1, d)
+          ch.sweep_frozen = uint8(int(ch.sweep_calc_n) - done + 1)
+          ch.sweep_check_at = PSG_NO_STEP
       elif old_shift == 0 and ch.shift != 0 and ch.sweep_frozen != 0:
         let tick = sweep_tick_len(h)
         let left = CycleCount(ch.sweep_frozen) - 1
@@ -1115,25 +1130,43 @@ proc psg_noise_on_grid(h: PsgHost; t: CycleCount): bool {.inline.} =
   ((t + 2 * tick - psg_noise_phase(h)) mod (2 * tick)) == tick
 
 proc psg_noise_first_inc(h: PsgHost; edge: CycleCount; inc: CycleCount;
-                         divisor_code: uint8; counted: bool): CycleCount =
+                         divisor_code: uint8; held: bool): CycleCount =
   ## Absolute cycle of the divisor stage's first increment after a trigger:
   ## one increment period plus two ticks from the point the trigger restarts
-  ## the stage. That point is the 1 MHz edge at or after the write, moved onto
-  ## the 512 kHz grid the stage is clocked by, which a trigger cannot reset
-  ## (psg_noise_phase): code 0 starts on the 1 MHz tick, code 1 rounds up to
-  ## the grid, codes >= 2 round down (SameSuite channel_4_delay,
-  ## channel_4_frequency_alignment; DocBoy double-speed ch4). A trigger
-  ## leaves the counter alone. `counted`: the counter is not at zero; code 1
-  ## rounds up only from a zero counter, and once it has counted rounds down
-  ## like codes >= 2 (DocBoy `retrigger_shift{1,2}_divider1_*`). `edge` is
-  ## the trigger's 1 MHz edge (ch4_restart_edge).
+  ## the stage. That point is the 1 MHz edge at or after the write, moved
+  ## down onto the 512 kHz grid the stage is clocked by, which a trigger
+  ## cannot reset (psg_noise_phase); code 0 starts on the 1 MHz tick
+  ## (SameSuite channel_4_delay, channel_4_frequency_alignment; DocBoy
+  ## double-speed ch4). A trigger leaves the counter alone. `held`: a start
+  ## from off holds the counter's input for four ticks, and a stage pulse
+  ## inside the hold waits in a latch for the next grid edge. Only code 1
+  ## off the grid pulses that early (three ticks), so it alone counts a grid
+  ## edge late (SameSuite channel_4_frequency_alignment's code-1 rows; DocBoy
+  ## double-speed `shift{1,2,4}_divider1_nops{2,3}`, while `divider2..7`
+  ## start alike at every phase); code 0 counts on the 1 MHz path, outside
+  ## the hold. `edge` is the trigger's 1 MHz edge (ch4_restart_edge).
   let tick = psg_tick(h)
   var extra = 2 * tick
   if divisor_code != 0 and not psg_noise_on_grid(h, edge):
     # Off the 512 kHz grid. Adjusting `extra` rather than `edge` keeps the
-    # sum from underflowing in the down-rounding case.
-    extra = (if divisor_code == 1 and not counted: extra + tick else: extra - tick)
+    # sum from underflowing.
+    extra -= tick
+    if held and divisor_code == 1: extra += 2 * tick
   edge + inc + extra
+
+proc ch4_held_start_pulse(ch: PsgNoise; h: PsgHost;
+                          prev_edge, edge: CycleCount): bool =
+  ## A retrigger between a held start pulse (psg_noise_first_inc) and the
+  ## grid edge it counts on: the restart clears the stage, not the latch,
+  ## so that increment stands, and the restarted stage's own first pulse is
+  ## the grid edge after it, where the start's next one was due. A restart
+  ## on the pulse's own edge stops it reaching the latch (the ordinary
+  ## path). DocBoy double-speed `retrigger_shift{1,4}_divider1_delay{5,6}_
+  ## nops3` and `_delay{6,7}_nops2` (CGB E); prev_edge is the start's edge.
+  let tick = psg_tick(h)
+  ch.divisor_code == 1 and ch.div_counter == 0 and prev_edge != PSG_NO_STEP and
+    ch.div_next == prev_edge + ch4_inc_period(ch, h) + 3 * tick and
+    edge == ch.div_next - tick
 
 proc psg_noise_slow_restart(ch: PsgNoise; h: PsgHost; edge: CycleCount): bool =
   ## Divisor code 0, a retrigger of a running channel. Code 0's half-period
@@ -1264,16 +1297,22 @@ proc ch4_write(ch: PsgNoise; nr: int; val: uint8; h: PsgHost) =
       # tick past the write), so the LFSR waits for the tap's next rising
       # edge.
       let inc = ch4_inc_period(ch, h)
+      let prev_edge = ch.restart_edge
       let edge = ch4_restart_edge(ch, h, was_running)
       if edge == PSG_NO_STEP:
         discard
       elif was_running and ch.divisor_code == 0 and
            psg_noise_slow_restart(ch, h, edge):
         discard
+      elif was_running and not PSG_AGB and
+           ch4_held_start_pulse(ch, h, prev_edge, edge):
+        discard
       elif was_running:
         ch4_advance_divisor(ch, h)
-        let first = psg_noise_first_inc(h, edge, inc, ch.divisor_code,
-                                        ch.div_counter != 0)
+        # GB: a running stage restarts without the start hold. The AGB keeps
+        # code 1's round-up while the counter is at zero (no test of it).
+        let held = when PSG_AGB: ch.div_counter == 0 else: false
+        let first = psg_noise_first_inc(h, edge, inc, ch.divisor_code, held)
         let lead = inc + 2 * psg_tick(h)
         if ch.div_next + lead <= first:
           let n = (first - lead - ch.div_next) div inc + 1
@@ -1281,7 +1320,7 @@ proc ch4_write(ch: PsgNoise; nr: int; val: uint8; h: PsgHost) =
         ch.div_next = first
       else:
         ch.div_counter = 0
-        ch.div_next = psg_noise_first_inc(h, edge, inc, ch.divisor_code, false)
+        ch.div_next = psg_noise_first_inc(h, edge, inc, ch.divisor_code, true)
       let deadline = ch4_next_shift(ch, h)
       # Shift 14/15: the divisor stage starts but the LFSR never fires.
       ch.next_step = if ch4_lfsr_frozen(ch): PSG_NO_STEP else: deadline

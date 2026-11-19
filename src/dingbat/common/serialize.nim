@@ -93,8 +93,10 @@ const
   #        (timer.hold_t) and whether the PPU sits it out
   #      · 11 channel 4's last divisor restart edge (restart_edge,
   #        ch4_restart_edge)
+  #      · 12 the tick channel 1's last trigger reached the sweep unit on
+  #        (sweep_arrived_at, ch1_sweep_arrive)
   GBA_PAYLOAD_VERSION* = 12'u32
-  GB_PAYLOAD_VERSION*  = 11'u32
+  GB_PAYLOAD_VERSION*  = 12'u32
   # NDS: 1 initial (docs/nds/savestate.md). The payload also carries a hash
   #      of its field layout, checked on load, so a layout change that
   #      forgets this bump is still refused rather than misread.
