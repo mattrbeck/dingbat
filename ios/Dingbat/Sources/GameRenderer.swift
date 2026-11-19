@@ -39,7 +39,8 @@ private struct ViewUniforms {
 }
 
 /// Uploads the core's raw BGR555 frame to an R16Uint texture and runs the
-/// presenter shader into an MTKView the session redraws after each tick.
+/// presenter shader into the game's MTKView after each tick: GB/GBA from a
+/// thread of its own, a DS game from its display link.
 final class GameRenderer: NSObject, MTKViewDelegate {
     static let shared = GameRenderer()
 
@@ -268,6 +269,10 @@ final class GameRenderer: NSObject, MTKViewDelegate {
     /// Upload the current picture and draw it. Main thread, after frames run.
     func present() {
         guard let view, dingbat_loaded() != 0 else { return }
+        if presentsOffThread {
+            submitPicture(view)
+            return
+        }
         uploadGame()
         #if DEBUG
         drawableWait = 0
@@ -285,7 +290,183 @@ final class GameRenderer: NSObject, MTKViewDelegate {
 
     /// Redraw without new pixels (an options change while paused).
     func redraw() {
-        if metalLinkHandler != nil { drawIntoUpdate() } else { view?.draw() }
+        if presentsOffThread {
+            if let view, dingbat_loaded() != 0 { submitPicture(view) }
+        } else if metalLinkHandler != nil { drawIntoUpdate() } else { view?.draw() }
+    }
+
+    // MARK: Presenting off the main thread (GB/GBA)
+
+    // A free drawable can take tens of ms to come back when the system's
+    // compositor falls behind. The main thread runs the game and feeds the
+    // audio, so it only hands over a copy of the newest picture; this thread
+    // waits for the drawable and draws whatever is newest by then. A DS game
+    // keeps its CAMetalDisplayLink, which is handed a drawable with no wait.
+    private struct Picture {
+        var pixels: [UInt16]
+        var width: Int, height: Int
+        var uniforms: PresentUniforms
+        var clear: MTLClearColor
+        var layer: CAMetalLayer
+        var tick: Int
+    }
+    private let renderLock = NSLock()
+    private let renderWake = DispatchSemaphore(value: 0)
+    private let renderIdle = DispatchSemaphore(value: 1)
+    private var pendingPicture: Picture?       // under renderLock
+    private var pendingBorder: [UInt16]?       // under renderLock
+    private var renderAllowed = true           // under renderLock
+    private var renderThread: Thread?
+    private var ringTex: [MTLTexture] = []     // the render thread's
+    private var ringNext = 0
+    private var lifecycleObservers: [NSObjectProtocol] = []
+
+    private var presentsOffThread: Bool {
+        #if DEBUG
+        if Self.inlinePresent { return false }
+        #endif
+        return metalLinkHandler == nil && dingbat_is_nds() == 0
+    }
+    #if DEBUG
+    /// `-inline-present`: the main thread waits for the drawable (A/B).
+    static let inlinePresent = ProcessInfo.processInfo.arguments.contains("-inline-present")
+    #endif
+
+    private func submitPicture(_ view: MTKView) {
+        guard pipeline != nil, let layer = view.layer as? CAMetalLayer, let pic = Self.picture() else { return }
+        startRenderThread()
+        var border: [UInt16]?
+        if dingbat_sgb_border() != 0, let bptr = dingbat_sgb_border_ptr() {
+            let gen = dingbat_sgb_border_gen()
+            if gen != lastBorderGen {
+                lastBorderGen = gen
+                border = Array(UnsafeBufferPointer(start: bptr, count: 256 * 224))
+            }
+        } else {
+            lastBorderGen = -1
+        }
+        var tick = 0
+        #if DEBUG
+        if GameSession.presentCheck { uploadedHash = GameSession.hash16(pic.ptr, pic.w * pic.h) }
+        if FFTrace.on { tick = FFTrace.shared.currentTick }
+        #endif
+        let next = Picture(pixels: Array(UnsafeBufferPointer(start: pic.ptr, count: pic.w * pic.h)),
+                           width: pic.w, height: pic.h,
+                           uniforms: gameUniforms(width: pic.w, height: pic.h),
+                           clear: view.clearColor, layer: layer, tick: tick)
+        renderLock.lock()
+        #if DEBUG
+        if FFTrace.on, let old = pendingPicture { FFTrace.shared.log("S \(old.tick)") }
+        #endif
+        pendingPicture = next
+        if let border { pendingBorder = border }
+        renderLock.unlock()
+        renderWake.signal()
+        #if DEBUG
+        if FFTrace.on { FFTrace.shared.afterPresent(wait: 0) }
+        #endif
+    }
+
+    private func startRenderThread() {
+        guard renderThread == nil else { return }
+        let t = Thread { [unowned self] in self.renderLoop() }
+        t.name = "dingbat.present"
+        t.qualityOfService = .userInteractive
+        renderThread = t
+        t.start()
+        // The GPU is off limits in the background: nothing is drawn from here
+        // on, and a draw under way finishes first.
+        let nc = NotificationCenter.default
+        lifecycleObservers.append(nc.addObserver(forName: UIApplication.willResignActiveNotification,
+                                                 object: nil, queue: .main) { [unowned self] _ in
+            self.renderLock.lock()
+            self.renderAllowed = false
+            self.pendingPicture = nil
+            self.renderLock.unlock()
+            _ = self.renderIdle.wait(timeout: .now() + 0.1)
+            self.renderIdle.signal()
+        })
+        lifecycleObservers.append(nc.addObserver(forName: UIApplication.didBecomeActiveNotification,
+                                                 object: nil, queue: .main) { [unowned self] _ in
+            self.renderLock.lock()
+            self.renderAllowed = true
+            self.renderLock.unlock()
+        })
+    }
+
+    private func renderLoop() {
+        while true {
+            renderWake.wait()
+            autoreleasepool { renderOne() }
+        }
+    }
+
+    private func renderOne() {
+        renderIdle.wait()
+        defer { renderIdle.signal() }
+        renderLock.lock()
+        let first = renderAllowed ? pendingPicture : nil
+        renderLock.unlock()
+        guard let first else { return }
+        let w0 = CACurrentMediaTime()
+        guard let drawable = first.layer.nextDrawable() else { return }
+        let waited = CACurrentMediaTime() - w0
+        // The newest picture by now: the wait need not cost a frame's age.
+        renderLock.lock()
+        let pic = pendingPicture ?? first
+        pendingPicture = nil
+        let border = pendingBorder
+        pendingBorder = nil
+        renderLock.unlock()
+        #if DEBUG
+        if FFTrace.on { FFTrace.shared.log("W \(pic.tick) \(String(format: "%.3f", waited * 1000))") }
+        #else
+        _ = waited
+        #endif
+        draw(pic, border: border, into: drawable)
+    }
+
+    private func draw(_ pic: Picture, border: [UInt16]?, into drawable: CAMetalDrawable) {
+        guard let device, let queue, let pipeline, let borderTex,
+              let cmd = queue.makeCommandBuffer() else { return }
+        if ringTex.first?.width != pic.width || ringTex.first?.height != pic.height {
+            let d = MTLTextureDescriptor.texture2DDescriptor(
+                pixelFormat: .r16Uint, width: pic.width, height: pic.height, mipmapped: false)
+            d.usage = .shaderRead
+            ringTex = (0..<4).compactMap { _ in device.makeTexture(descriptor: d) }
+            ringNext = 0
+        }
+        guard ringTex.count == 4 else { return }
+        // A texture no command buffer in flight still reads
+        let tex = ringTex[ringNext]
+        ringNext = (ringNext + 1) % ringTex.count
+        pic.pixels.withUnsafeBytes {
+            tex.replace(region: MTLRegionMake2D(0, 0, pic.width, pic.height), mipmapLevel: 0,
+                        withBytes: $0.baseAddress!, bytesPerRow: pic.width * 2)
+        }
+        border?.withUnsafeBytes {
+            borderTex.replace(region: MTLRegionMake2D(0, 0, 256, 224), mipmapLevel: 0,
+                              withBytes: $0.baseAddress!, bytesPerRow: 512)
+        }
+        let pass = MTLRenderPassDescriptor()
+        pass.colorAttachments[0].texture = drawable.texture
+        pass.colorAttachments[0].loadAction = .clear
+        pass.colorAttachments[0].storeAction = .store
+        pass.colorAttachments[0].clearColor = pic.clear
+        #if DEBUG
+        if FFTrace.on { FFTrace.shared.drawable(drawable, cmd, tick: pic.tick) }
+        #endif
+        if let enc = cmd.makeRenderCommandEncoder(descriptor: pass) {
+            var u = pic.uniforms
+            enc.setRenderPipelineState(pipeline)
+            enc.setFragmentTexture(tex, index: 0)
+            enc.setFragmentTexture(borderTex, index: 1)
+            enc.setFragmentBytes(&u, length: MemoryLayout<PresentUniforms>.stride, index: 0)
+            enc.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
+            enc.endEncoding()
+        }
+        cmd.present(drawable)
+        cmd.commit()
     }
 
     /// The picture to upload: a DS game's HD composite while HD 3D is on
@@ -341,22 +522,13 @@ final class GameRenderer: NSObject, MTKViewDelegate {
         encode(pass: pass, drawable: drawable)
     }
 
-    private func encode(pass: MTLRenderPassDescriptor, drawable: CAMetalDrawable) {
-        if dingbat_is_nds() != 0 {
-            encodeNds(pass: pass, drawable: drawable)
-            return
-        }
-        guard let pipeline, let queue, let gameTex, let borderTex,
-              let cmd = queue.makeCommandBuffer(),
-              let enc = cmd.makeRenderCommandEncoder(descriptor: pass) else { return }
-        #if DEBUG
-        if FFTrace.on { FFTrace.shared.drawable(drawable, cmd) }
-        #endif
+    /// The presenter's settings for a GB/GBA picture (reads the core: main thread).
+    private func gameUniforms(width: Int, height: Int) -> PresentUniforms {
         var u = PresentUniforms()
         let border = dingbat_sgb_border() != 0
-        u.texSize = SIMD2(Float(gameTex.width), Float(gameTex.height))
-        u.scanWidth = Float(border ? 256 : gameTex.width)
-        u.scanHeight = Float(border ? 224 : gameTex.height)
+        u.texSize = SIMD2(Float(width), Float(height))
+        u.scanWidth = Float(border ? 256 : width)
+        u.scanHeight = Float(border ? 224 : height)
         u.filter = Int32(options.filter)
         u.colorCorrect = options.colorCorrect ? 1 : 0
         u.panelGbc = dingbat_panel_gbc()
@@ -379,6 +551,21 @@ final class GameRenderer: NSObject, MTKViewDelegate {
             }
             u.dmgPal = (c(pal[0]), c(pal[1]), c(pal[2]), c(pal[3]))
         }
+        return u
+    }
+
+    private func encode(pass: MTLRenderPassDescriptor, drawable: CAMetalDrawable) {
+        if dingbat_is_nds() != 0 {
+            encodeNds(pass: pass, drawable: drawable)
+            return
+        }
+        guard let pipeline, let queue, let gameTex, let borderTex,
+              let cmd = queue.makeCommandBuffer(),
+              let enc = cmd.makeRenderCommandEncoder(descriptor: pass) else { return }
+        #if DEBUG
+        if FFTrace.on { FFTrace.shared.drawable(drawable, cmd) }
+        #endif
+        var u = gameUniforms(width: gameTex.width, height: gameTex.height)
         enc.setRenderPipelineState(pipeline)
         enc.setFragmentTexture(gameTex, index: 0)
         enc.setFragmentTexture(borderTex, index: 1)

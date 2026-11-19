@@ -116,6 +116,9 @@ final class FFTrace {
         frameIndex += 1
     }
 
+    /// The tick whose picture is being handed to the presenting thread.
+    var currentTick: Int { seq }
+
     func beforePresent() {
         if cur != nil && workEnd == 0 { workEnd = CACurrentMediaTime() }
     }
@@ -133,8 +136,8 @@ final class FFTrace {
     }
 
     /// The drawable a present draws into: its time on glass and the GPU's.
-    func drawable(_ d: MTLDrawable, _ cmd: MTLCommandBuffer) {
-        let s = seq
+    func drawable(_ d: MTLDrawable, _ cmd: MTLCommandBuffer, tick: Int? = nil) {
+        let s = tick ?? seq
         #if !targetEnvironment(simulator)
         d.addPresentedHandler { [weak self] dr in
             self?.log("D \(s) \(Self.ms(dr.presentedTime))")
