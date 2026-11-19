@@ -35,7 +35,7 @@ jobs:
       - uses: jiro4989/setup-nim-action@v2
         with:
           # Pinned, as test.yml's NIM_VERSION.
-          nim-version: "2.2.12"
+          nim-version: "2.4.2"
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Cache Emscripten
@@ -53,7 +53,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.nimble/pkgs2
-          key: nimble-wasm-${{ runner.os }}-nim2.2.12-zippy-0.10.20
+          key: nimble-wasm-${{ runner.os }}-nim2.4.2-zippy-0.10.20
 
       - name: Install nimble dependencies
         # nimble queries the package's git remote for tags: a network fetch.

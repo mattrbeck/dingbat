@@ -18,7 +18,7 @@ jobs:
       - uses: jiro4989/setup-nim-action@v2
         with:
           # Pinned, as test.yml's NIM_VERSION.
-          nim-version: "2.2.12"
+          nim-version: "2.4.2"
           repo-token: ${{ secrets.GITHUB_TOKEN }}
       - name: Install SDL 3's build dependencies, OpenGL headers and Xvfb
         # Headers only: SDL loads X11, Wayland, ALSA, PulseAudio, PipeWire
@@ -126,7 +126,7 @@ jobs:
       - name: Install Nim
         env:
           # Pinned, as test.yml's NIM_VERSION.
-          CHOOSENIM_CHOOSE_VERSION: "2.2.12"
+          CHOOSENIM_CHOOSE_VERSION: "2.4.2"
         run: |
           set -eo pipefail
           .github/scripts/retry.sh 3 bash -c \
@@ -200,7 +200,7 @@ jobs:
       - uses: jiro4989/setup-nim-action@v2
         with:
           # Pinned, as test.yml's NIM_VERSION.
-          nim-version: "2.2.12"
+          nim-version: "2.4.2"
           repo-token: ${{ secrets.GITHUB_TOKEN }}
       - name: Install mingw-w64
         run: |

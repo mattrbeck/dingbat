@@ -20,7 +20,7 @@ concurrency:
 env:
   # Pinned, so a toolchain release cannot change CI under an unchanged tree.
   # The nimcache key carries NIM_VERSION: a new compiler starts it afresh.
-  NIM_VERSION: "2.2.12"
+  NIM_VERSION: "2.4.2"
   NODE_VERSION: "24"
 jobs:
   test:

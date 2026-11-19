@@ -27,7 +27,7 @@ proc gather_entries(fe: FileExplorer) =
       let ext = if dot_pos > 0 and dot_pos < name.len - 1: name[dot_pos + 1 .. ^1] else: ""
       let hidden = name.startsWith('.')
       fe.entries.add(FileEntry(name: name, is_file: is_file, extension: ext, hidden: hidden))
-  except:
+  except CatchableError, Defect:
     discard
   fe.entries.add(FileEntry(name: "..", is_file: false, extension: "", hidden: false))
   fe.entries.sort(proc(a, b: FileEntry): int =

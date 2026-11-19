@@ -2511,7 +2511,7 @@ proc main() =
       if test_out.finished: break
       try:
         emu.step_frame()
-      except:
+      except CatchableError, Defect:
         stderr.writeLine("Emulator exception at frame " & $frame & ": " & getCurrentExceptionMsg())
         break
       if mode == tmMgba and test_out.mgba_debug_output.len > 0:

@@ -568,7 +568,7 @@ proc parse_config(j: JsonNode): Config =
         let input_val = input_from_name(v.getStr())
         if keycode >= 0:
           cfg.keybindings[keycode] = input_val
-      except: discard
+      except CatchableError, Defect: discard
   if j.hasKey("controller_bindings") and j["controller_bindings"].kind == JObject:
     cfg.controller_bindings = initTable[cint, Input]()
     for k, v in j["controller_bindings"].pairs:
@@ -577,7 +577,7 @@ proc parse_config(j: JsonNode): Config =
         let input_val = input_from_name(v.getStr())
         if button >= 0:
           cfg.controller_bindings[button] = input_val
-      except: discard
+      except CatchableError, Defect: discard
   result = cfg
 
 proc parse_config_text(text: string): Config =
