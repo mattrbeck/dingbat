@@ -2390,6 +2390,7 @@ type
     # Nobody hears this core: get_sample skips the catch-up and the mix
     # (set_audio_silent; see the GBA APU). Not serialized.
     silent*:              bool
+    lookahead*:           bool  # run-ahead's unseen frames: nothing reaches the queue
     # 2x speed: drop every other stereo frame at the queue point so
     # audio-driven pacing runs emulation twice as fast
     turbo*:               bool

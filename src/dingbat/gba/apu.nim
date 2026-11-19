@@ -314,7 +314,7 @@ proc get_sample*(apu: APU) =
         ch1_catchup_at(apu.channel1, apu.gba, uint32(APU_SAMPLE_PERIOD))
     apu.stretch_engaged = false
     when not defined(test_harness) and not defined(emscripten):
-      apu.queue_frame(0, 0)
+      if not apu.lookahead: apu.queue_frame(0, 0)
     apu.gba.scheduler.schedule(APU_SAMPLE_PERIOD, etAPUSample)
     return
   # Gated on `enabled`: a disabled channel's amplitude is 0 regardless of

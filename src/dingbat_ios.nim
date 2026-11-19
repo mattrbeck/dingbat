@@ -909,17 +909,27 @@ proc run_frame_ahead(n: cint) =
   case stateKind
   of ekGBA:
     let snap = stateGba.state_payload()
+    # The canonical frame's sound stays queued: the lookahead adds none, and
+    # the restore must neither clear the queue nor drop the part-filled buffer.
+    let (owns, pos) = (stateGba.apu.owns_audio, stateGba.apu.buffer_pos)
     stateGba.apu.silent = true
+    stateGba.apu.lookahead = true
+    stateGba.apu.owns_audio = false
     for _ in 0 ..< int(n): stateGba.step_frame()
     stateGba.apu.silent = optSilent
     if runaheadFrame.len != pixels: runaheadFrame.setLen(pixels)
     copyMem(addr runaheadFrame[0], addr stateGba.ppu.framebuffer[0], pixels * 2)
     try: stateGba.apply_state_payload(snap)
     except CatchableError: discard
+    stateGba.apu.lookahead = false
+    (stateGba.apu.owns_audio, stateGba.apu.buffer_pos) = (owns, pos)
   of ekGB:
     let snap = stateGb.state_payload()
     let prnSnap = if statePrinter != nil: statePrinter.clone() else: nil
+    let (owns, pos) = (stateGb.apu.owns_audio, stateGb.apu.buffer_pos)
     stateGb.apu.silent = true
+    stateGb.apu.lookahead = true
+    stateGb.apu.owns_audio = false
     for _ in 0 ..< int(n): stateGb.step_frame()
     stateGb.apu.silent = optSilent
     if prnSnap != nil: copy_into(prnSnap, statePrinter)
@@ -927,6 +937,8 @@ proc run_frame_ahead(n: cint) =
     copyMem(addr runaheadFrame[0], addr stateGb.ppu.framebuffer[0], pixels * 2)
     try: stateGb.apply_state_payload(snap)
     except CatchableError: discard
+    stateGb.apu.lookahead = false
+    (stateGb.apu.owns_audio, stateGb.apu.buffer_pos) = (owns, pos)
   of ekNDS, ekNone: return
   prepare_game_frame(cast[ptr UncheckedArray[uint16]](addr runaheadFrame[0]), pixels)
 
