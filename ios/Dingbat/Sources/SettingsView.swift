@@ -174,13 +174,15 @@ private struct SupporterBanner: View {
     var body: some View {
         Button { store.open() } label: {
             HStack(spacing: 14) {
-                Image(icon).interpolation(.none).resizable().frame(width: 56, height: 56).clipShape(Circle())
+                if store.unlocked {
+                    Circle().fill(palette.bg).frame(width: 56, height: 56)
+                        .overlay(Image("LogoCrown").interpolation(.none).resizable().scaledToFit().frame(width: 46))
+                } else {
+                    Image(icon).interpolation(.none).resizable().frame(width: 56, height: 56).clipShape(Circle())
+                }
                 VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: 8) {
-                        Text(store.unlocked ? "dingbat" : "Support dingbat")
-                            .font(.system(size: 20, weight: .semibold)).foregroundColor(palette.text)
-                        if store.unlocked { SupporterPill(size: 11) }
-                    }
+                    Text(store.unlocked ? "dingbat" : "Support dingbat")
+                        .font(.system(size: 20, weight: .semibold)).foregroundColor(palette.text)
                     Text(store.unlocked ? sinceText : "Themes, icons, palettes and more")
                         .font(.system(size: 14)).foregroundColor(palette.textDim)
                         .lineLimit(1).minimumScaleFactor(0.85)
@@ -196,10 +198,10 @@ private struct SupporterBanner: View {
     }
 
     private var sinceText: String {
-        guard let d = store.since else { return "Thank you." }
+        guard let d = store.since else { return "Supporter" }
         let f = DateFormatter()
         f.setLocalizedDateFormatFromTemplate("MMMM yyyy")
-        return "Since \(f.string(from: d)). Thank you."
+        return "Supporter since \(f.string(from: d))"
     }
 }
 
@@ -591,10 +593,22 @@ struct ThemeMini: View {
             VStack(spacing: 0) { ForEach(0..<4, id: \.self) { Rectangle().fill(Color(hex: shades[$0])) } }
                 .frame(height: h * 0.36).clipShape(RoundedRectangle(cornerRadius: 4))
             Spacer(minLength: 0)
-            HStack(spacing: 4) {
-                Circle().fill(Color(hex: accent)).frame(width: width * 0.16)
-                Capsule().fill(Color(hex: accent)).frame(width: width * 0.32, height: width * 0.14)
+            // The play screen's controls: a d-pad, and B low and A high.
+            let u = width / 56
+            HStack(alignment: .center) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 1.5 * u).frame(width: 5 * u, height: 15 * u)
+                    RoundedRectangle(cornerRadius: 1.5 * u).frame(width: 15 * u, height: 5 * u)
+                }
+                .foregroundColor((light ? Color.black : Color.white).opacity(light ? 0.45 : 0.55))
+                Spacer(minLength: 0)
+                ZStack(alignment: .topLeading) {
+                    Circle().fill(Color(hex: accent)).frame(width: 8 * u, height: 8 * u).offset(y: 5 * u)
+                    Circle().fill(Color(hex: accent)).frame(width: 8 * u, height: 8 * u).offset(x: 9 * u)
+                }
+                .frame(width: 17 * u, height: 13 * u, alignment: .topLeading)
             }
+            .padding(.horizontal, u)
         }
         .padding(width * 0.11)
         .frame(width: width, height: h)

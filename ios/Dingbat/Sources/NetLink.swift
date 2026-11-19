@@ -9,7 +9,8 @@ import SwiftUI
 /// and a browser link as two browsers do.
 ///
 /// Wire protocol, first byte = kind, big-endian (web RB_*):
-///   0 hello [epoch u32][romHash u32][len u32][crc32 u32][fnv u32]
+///   0 hello [epoch u32][romHash u32][len u32][crc32 u32][fnv u32] ... [33] capabilities
+///      (bit 0 sync checks, bit 1 the sender supports dingbat), see helloBuildLen
 ///   1 input [frame i32][bits u16]
 ///   2 state-begin [len u32]            3 state-chunk [bytes]
 ///   4 rom-begin [len u32]              5 rom-chunk [bytes]
@@ -46,6 +47,9 @@ final class NetLink: ObservableObject {
     @Published private(set) var connecting = false
     /// The session runs: the game ticks linked.
     @Published private(set) var linked = false
+    /// The friend supports dingbat (hello capabilities bit 1): their bat
+    /// wears the crown on the transfer screen.
+    @Published private(set) var peerCrown = false
     /// The different-game question is up (LinkCableView's alert).
     @Published private(set) var askingMismatch = false
     /// The manual exchange is on screen instead of the shared code.
@@ -285,7 +289,7 @@ final class NetLink: ObservableObject {
     static let backToastDelay: TimeInterval = 1.5
     private static let helloLen = 21  // with the whole-ROM identity
     /// ... and the build (web RB_HELLO_BUILD_LEN): [21] core id, [29] build
-    /// time, [33] capabilities (bit 0: sync checks).
+    /// time, [33] capabilities (bit 0: sync checks, bit 1: a supporter).
     private static let helloBuildLen = 34
     /// ... and the GBA BIOS: [34] mode, [35] image hash (web RB_HELLO_BIOS_LEN).
     private static let helloBiosLen = 39
@@ -778,6 +782,14 @@ final class NetLink: ObservableObject {
     }
 
     #if DEBUG
+    /// `-sheet link-transfer[:crown]`: the transfer screen for a screenshot,
+    /// the friend crowned with `:crown` (no link is made).
+    func debugTransferScene(peerCrown: Bool) {
+        openSheet()
+        self.peerCrown = peerCrown
+        setStatus("Transferring games…")
+    }
+
     /// `-link-manual`: the manual exchange, with our code written to
     /// tmp/linkcode.txt and the friend's read from tmp/friendcode.txt
     /// (ios/e2e/link.mjs).
@@ -842,13 +854,14 @@ final class NetLink: ObservableObject {
         rb.romId = RomIdentity(rom)
         rb.localState = state
         s.rb = rb
+        peerCrown = false
         setStatus("Syncing…")
         let own = Self.ownBuild()
         var hello: [UInt8] = [Self.hello]
         hello += Self.be32(rb.epoch) + Self.be32(rb.romHash)
         hello += Self.be32(rb.romId.len) + Self.be32(rb.romId.crc) + Self.be32(rb.romId.fnv)
         hello += Self.be32(own.hi) + Self.be32(own.lo) + Self.be32(own.built)
-        hello.append(1)  // checks sync
+        hello.append(1 | (Supporter.storedUnlocked ? 2 : 0))  // checks sync; supports dingbat (the crown)
         var bios: [UInt32] = [0, 0]
         bios.withUnsafeMutableBufferPointer { dingbat_rollback_bios_identity($0.baseAddress) }
         rb.ownBios = (bios[0], bios[1])
@@ -994,6 +1007,7 @@ final class NetLink: ObservableObject {
                 rb.peerCore = (Self.read32(data, 21), Self.read32(data, 25))
                 rb.peerBuilt = Self.read32(data, 29)
                 rb.peerSync = data[data.startIndex + 33] & 1 == 1
+                peerCrown = data[data.startIndex + 33] & 2 != 0
             }
             if data.count >= Self.helloBiosLen {
                 rb.peerBios = (UInt32(data[data.startIndex + 34]), Self.read32(data, 35))
