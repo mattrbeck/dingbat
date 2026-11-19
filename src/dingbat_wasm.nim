@@ -1,6 +1,7 @@
 import std/[os, strutils, math]
 import zippy  # clip anchors + their strip thumbnails are stored deflated
 import dingbat/common/input
+import dingbat/common/web_audio
 import dingbat/common/rewind
 import dingbat/common/serialize
 import dingbat/common/scheduler
@@ -367,19 +368,6 @@ proc wasm_fb_ptr(): pointer {.exportc.} =
   for i in 0 ..< pixels: rgbaBuffer[i] = lut[fb[i] and 0x7FFF]
   addr rgbaBuffer[0]
 
-# float32 stereo samples for Web Audio; JS reads and clears after each frame.
-var audioBuffer: seq[float32] = @[]
-
-# True while a muted core's etAPUSample is dispatched. The sample is still
-# computed and rescheduled; only the append is dropped, so linked cores stay
-# bit-identical.
-var audioSuppressed = false
-
-# Slow motion: JS doubles the wall-clock step, so the core makes half the
-# samples the AudioContext consumes; emitting each twice restores the rate an
-# octave down.
-var slowmoStretch = false
-
 # A clip replay (clip_begin .. clip_tick / clip_abort) is running.
 var clipReplaying = false
 # The player's 2x / slow motion, held while a replay runs at 1x. Both change
@@ -388,14 +376,6 @@ var clipReplaying = false
 # set meanwhile lands here and reaches the core when the replay ends.
 var clipHeldTurbo = false
 var clipHeldSlowmo = false
-
-proc appendAudioSample(left, right: float32) {.exportc.} =
-  if audioSuppressed: return
-  audioBuffer.add(left)
-  audioBuffer.add(right)
-  if slowmoStretch:
-    audioBuffer.add(left)
-    audioBuffer.add(right)
 
 proc getAudioBufferPtr(): pointer {.exportc.} =
   if audioBuffer.len > 0: addr audioBuffer[0] else: nil

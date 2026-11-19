@@ -17,9 +17,8 @@ const FRAME_SEQ_PERIOD*   = CPU_CLOCK_SPEED div FRAME_SEQ_RATE
 const AUDIO_LOWPASS_ALPHA* = 0.90'f32
 
 when defined(emscripten):
-  # Emscripten: float32 samples go to a global buffer (dingbat_wasm.nim)
-  # that JS consumes via the Web Audio API
-  proc appendAudioSample(left, right: float32) {.importc, cdecl.}
+  # Emscripten: float32 samples go to the page's buffer
+  import ../common/web_audio
 
 when not defined(emscripten):
   # DINGBAT_GBA_AUDIO_DUMP=<path>: every mixed sample as raw s16le stereo

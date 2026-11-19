@@ -15,7 +15,7 @@ const APU_SPSW_TAP_LAG_T* {.intdefine.} = 4
   ## or a DIV write. Pinned by AGE spsw-ch2-lc-delay. 0 compiles it out.
 
 when defined(emscripten):
-  proc appendAudioSample(left, right: float32) {.importc, cdecl.}
+  import ../common/web_audio
 
 when not defined(emscripten):
   # DINGBAT_GB_AUDIO_DUMP=<path>: every mixed sample as raw s16le stereo at

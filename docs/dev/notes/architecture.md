@@ -38,7 +38,7 @@ and the GB CB table), `resampler.nim`, `rewind.nim` (ring of zlib-compressed XOR
 `scheduler.nim` (one instance per core), `serialize.nim` (`.state` header; payload changes
 bump the per-core `GBA_PAYLOAD_VERSION`/`GB_PAYLOAD_VERSION` with a migration, guarded by
 `tests/savestate_compat_test.nim`), `test_output.nim`, `timestretch.nim` (WSOLA),
-`util.nim`.
+`util.nim`, `web_audio.nim` (the web build's sample buffer; both APUs append to it).
 
 `src/dingbat/gba/` (hub `gba.nim`; `link`, `rollback`, `netcore`, `netlink` import it):
 `reg.nim` (included first), `pipeline`, `cartridge`, `storage` + `storage/{sram,flash,eeprom}`,

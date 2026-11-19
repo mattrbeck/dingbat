@@ -55,7 +55,6 @@ interface EmscriptenModule {
   _wasm_panel_gbc?(): number;
   _wasm_glow_sample?(gw: number, gh: number, remap: number, p0: number, p1: number, p2: number, p3: number): number;
   _wasm_fb_ptr?(): number;
-  _appendAudioSample?(left: number, right: number): void;
   _getAudioBufferPtr?(): number;
   _getAudioBufferLen?(): number;
   _clearAudioBuffer?(): void;
