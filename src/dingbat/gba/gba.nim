@@ -2346,6 +2346,12 @@ proc refresh_cheat_rom_patches*(gba: GBA) =
   if gba.cheats != nil:
     gba.cheats.apply_rom(gba.cartridge.rom)
 
+const FRAME_STEP_LIMIT* = 16 * 280896
+  ## The most CPU steps one step_frame takes: sixteen frames of cycles, where
+  ## a step is a cycle or more. A machine a loaded state has stopped (a file's
+  ## or a link peer's) never ends its frame; the frame gives up here instead
+  ## of holding the app.
+
 proc step_frame*(gba: GBA) =
   gba.apply_cheats()
   if gba.mp2k_hle and gba.mp2k != nil:
@@ -2356,8 +2362,10 @@ proc step_frame*(gba: GBA) =
   # opens it while a driver is published)
   if not gba.mp2k_hle: gba.bus.snd_wlen = 0
   gba.frame_start_cycles = gba.scheduler.cycles
-  while gba.ppu.frame == 0:
+  var steps = FRAME_STEP_LIMIT
+  while gba.ppu.frame == 0 and steps > 0:
     gba.cpu.tick()
+    dec steps
   gba.end_frame()
 
 method run_until_frame*(gba: GBA) = gba.step_frame()

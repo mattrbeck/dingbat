@@ -3761,10 +3761,20 @@ proc refresh_cheat_rom_patches*(gb: GB) =
   if gb.cheats != nil:
     gb.cheats.apply_rom(gb.cartridge.rom)
 
+const FRAME_STEP_LIMIT* = 16 * 70224
+  ## The most CPU steps one step_frame takes: sixteen frames of dots, where
+  ## a step is four dots or more. A machine whose clock or PPU a loaded state
+  ## has stopped (halted with nothing due, say) never ends its frame; the
+  ## state is a file's or a link peer's, and the frame gives up here instead
+  ## of holding the app.
+
 proc step_frame*(gb: GB) =
   gb.apply_cheats()
+  var steps = FRAME_STEP_LIMIT
   while not gb.ppu.frame:
     gb.cpu.tick(gb)
+    dec steps
+    if steps == 0: break   # the frame is closed below as any other
   # A frame boundary is where every state is written (rewind, rollback, the
   # slots), so run on past anything the format does not hold; the machine runs
   # the same instructions either way, only the host's frame edge moves (by
@@ -3776,21 +3786,25 @@ proc step_frame*(gb: GB) =
   if gb.gdma_req or gb.hdma_start_req: gb.cpu.tick(gb)
   # a CGB dispatch's hold on its timer or serial line (GbInterrupts.
   # clear_line, under 16 T-cycles), LCD on or off;
-  while irq_clear_live(gb.interrupts, gb.scheduler.cycles): gb.cpu.tick(gb)
+  while irq_clear_live(gb.interrupts, gb.scheduler.cycles) and steps > 0:
+    gb.cpu.tick(gb)
+    dec steps
   # a DMG HALT inside its minimum window (DMG_HALT_MIN_MCYCLES; at most that
   # many halted M-cycles, a wake ends it);
   when DMG_HALT_MIN_MCYCLES > 1:
     while not gb.cgb_enabled and gb.cpu.halted and not gb.cpu.stopped and
           gb.scheduler.cycles - gb.halt_start <
-            CycleCount(4 * DMG_HALT_MIN_MCYCLES):
+            CycleCount(4 * DMG_HALT_MIN_MCYCLES) and steps > 0:
       gb.cpu.tick(gb)
+      dec steps
   # mode 3 (the renderer's per-line scratch, load_ppu_state); a CGB LYC write
   # in flight to the comparator (GB.lyc_sampled, at most two dots past its
   # instruction), or a dispatch hold met again. `settle` bounds all but mode
   # 3, so back-to-back writes cannot hold the frame. A CPU in STOP freezes the PPU (mem_tick_stopped) and is
   # left where it is.
   var settle = 4
-  while gb.ppu.lcd_enabled and not gb.cpu.stopped:
+  while gb.ppu.lcd_enabled and not gb.cpu.stopped and steps > 0:
+    dec steps
     if (gb.ppu.lcd_status and 3'u8) == 3'u8: discard
     elif CGB_LYC_CMP_LATCH and gb.lyc_land_left >= 0 and settle > 0: dec settle
     elif IRQ_SAMPLE_CGB_TIMER_SERIAL_ADD != 0 and settle > 0 and

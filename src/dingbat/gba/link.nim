@@ -66,8 +66,10 @@ proc run_to(link: Link; i: int; target: int64) =
   if link.active[i]: return  # already being advanced up-stack
   let gba = link.cores[i]
   link.active[i] = true
-  while link.offsets[i] + int64(gba.scheduler.cycles) < target:
+  var steps = FRAME_STEP_LIMIT
+  while link.offsets[i] + int64(gba.scheduler.cycles) < target and steps > 0:
     gba.advance_once()
+    dec steps
   link.active[i] = false
 
 proc step_frame*(link: Link) =
@@ -77,6 +79,7 @@ proc step_frame*(link: Link) =
   for i in 0 ..< link.cores.len:
     link.frame_done[i] = false
     link.cores[i].frame_start_cycles = link.cores[i].scheduler.cycles
+  var steps = FRAME_STEP_LIMIT * link.cores.len   # see FRAME_STEP_LIMIT
   while true:
     var best = -1
     var best_t = int64.high
@@ -90,10 +93,11 @@ proc step_frame*(link: Link) =
     let gba = link.cores[best]
     let local_target = gba.scheduler.cycles + CycleCount(LINK_SLICE)
     link.active[best] = true
-    while gba.scheduler.cycles < local_target and gba.ppu.frame == 0:
+    while gba.scheduler.cycles < local_target and gba.ppu.frame == 0 and steps > 0:
       gba.advance_once()
+      dec steps
     link.active[best] = false
-    if gba.ppu.frame > 0:
+    if gba.ppu.frame > 0 or steps == 0:
       link.frame_done[best] = true
   for i in 0 ..< link.cores.len:
     link.offsets[i] += int64(link.cores[i].end_frame())

@@ -8,6 +8,9 @@
 # run. FUZZ_MODE=release keeps Nim's checks, as iOS and the desktop have
 # them: an index or range Defect stops the run.
 #
+# FUZZ_NIMFLAGS adds compiler flags ("--stackTrace:on --lineTrace:on" names
+# the line a Defect was raised on when replaying a crash file).
+#
 # Needs a clang that ships libFuzzer (Apple's does not: Homebrew's llvm, or
 # any Linux clang). The corpus is kept in $FUZZ_DIR/<target>-<mode>, seeded
 # from the genuine states and streams the target writes itself; an input
@@ -39,7 +42,7 @@ nim c --cc:clang --clang.exe:"$clang" --clang.linkerexe:"$clang" \
   --passC:"-fsanitize=fuzzer-no-link,address -g -fno-omit-frame-pointer" \
   --passL:"-fsanitize=fuzzer,address" \
   --path:src --nimcache:"$dir/nimcache/${target}-${mode}" \
-  -o:"$bin" tests/fuzz/fuzz.nim
+  ${FUZZ_NIMFLAGS:-} -o:"$bin" tests/fuzz/fuzz.nim
 
 DINGBAT_FUZZ_SEEDS="$corpus" "$bin" -runs=0 -artifact_prefix="$dir/seedstep-" 2>/dev/null || true   # it exits from inside the fuzzer, which libFuzzer calls an error
 

@@ -740,7 +740,10 @@ proc wl_horizon(gb: GB; reads_ly, reads_stat: bool; period = 0): int =
   let s {.cursor.} = gb.scheduler
   for ev in s.pending:
     if ev.kind notin GB_APU_EVENTS:
-      result = min(result, int(ev.cycles - s.cycles))
+      # One already due (a loaded state may hold one) leaves nothing to
+      # skip; its distance, taken unsigned, would not fit an int either.
+      if ev.cycles <= s.cycles: return 0
+      result = min(result, int(min(ev.cycles - s.cycles, CycleCount(int32.high))))
       break
   if t.enabled:
     if t.previous_bit != ((t.tdiv and (1'u16 shl t.bit_for_tima)) != 0): return 0

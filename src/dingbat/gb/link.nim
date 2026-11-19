@@ -39,8 +39,10 @@ proc run_to(link: GbLink; i: int; target: int64) =
   if link.active[i]: return  # already being advanced up-stack
   let gb = link.cores[i]
   link.active[i] = true
-  while link.offsets[i] + int64(gb.scheduler.cycles) < target:
+  var steps = FRAME_STEP_LIMIT
+  while link.offsets[i] + int64(gb.scheduler.cycles) < target and steps > 0:
     gb.cpu.tick(gb)
+    dec steps
   link.active[i] = false
 
 proc step_frame*(link: GbLink) =
@@ -48,6 +50,7 @@ proc step_frame*(link: GbLink) =
   ## always advance the core with the smallest global clock.
   for i in 0 ..< link.cores.len:
     link.frame_done[i] = false
+  var steps = FRAME_STEP_LIMIT * link.cores.len   # see FRAME_STEP_LIMIT
   while true:
     var best = -1
     var best_t = int64.high
@@ -61,10 +64,11 @@ proc step_frame*(link: GbLink) =
     let gb = link.cores[best]
     let local_target = gb.scheduler.cycles + CycleCount(LINK_SLICE)
     link.active[best] = true
-    while gb.scheduler.cycles < local_target and not gb.ppu.frame:
+    while gb.scheduler.cycles < local_target and not gb.ppu.frame and steps > 0:
       gb.cpu.tick(gb)
+      dec steps
     link.active[best] = false
-    if gb.ppu.frame:
+    if gb.ppu.frame or steps == 0:
       link.frame_done[best] = true
   for i in 0 ..< link.cores.len:
     link.cores[i].ppu.frame = false
