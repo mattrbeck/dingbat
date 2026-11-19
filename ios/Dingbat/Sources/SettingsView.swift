@@ -114,13 +114,12 @@ private struct RootPane: View {
     @ObservedObject private var s = Settings.shared
     @ObservedObject private var supporter = Supporter.shared
     @ObservedObject private var drive = DriveSync.shared
-    @ObservedObject private var icons = AppIconManager.shared
     @ObservedObject private var nav = SettingsNav.shared
     @Environment(\.palette) private var palette
 
     var body: some View {
         let sections = [
-            SSection(id: "banner", [.custom("banner", SupporterBanner(icon: supporter.unlocked ? icons.chosen.preview : AppIconChoice.classic[0].preview))]),
+            SSection(id: "banner", [.custom("banner", SupporterBanner())]),
             SSection(id: "look", [
                 row(.appearance, tile: Tile(color: 0x7A4FC4, glyph: .symbol("paintbrush.pointed.fill")), value: s.effectiveTheme.label),
                 row(.controls, tile: Tile(color: 0x636079, glyph: .symbol("gamecontroller.fill"))),
@@ -167,19 +166,14 @@ private struct RootPane: View {
 
 /// The top row: "Support dingbat", or "dingbat" with the Supporter pill.
 private struct SupporterBanner: View {
-    let icon: String
     @ObservedObject private var store = Supporter.shared
     @Environment(\.palette) private var palette
 
     var body: some View {
         Button { store.open() } label: {
             HStack(spacing: 14) {
-                if store.unlocked {
-                    Circle().fill(palette.bg).frame(width: 56, height: 56)
-                        .overlay(Image("LogoCrown").interpolation(.none).resizable().scaledToFit().frame(width: 46))
-                } else {
-                    Image(icon).interpolation(.none).resizable().frame(width: 56, height: 56).clipShape(Circle())
-                }
+                Circle().fill(palette.bg).frame(width: 56, height: 56)
+                    .overlay(Image("LogoCrown").interpolation(.none).resizable().scaledToFit().frame(width: 46))
                 VStack(alignment: .leading, spacing: 2) {
                     Text(store.unlocked ? "dingbat" : "Support dingbat")
                         .font(.system(size: 20, weight: .semibold)).foregroundColor(palette.text)
