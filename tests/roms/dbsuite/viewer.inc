@@ -1372,5 +1372,212 @@ case_loop:
     b   case_draw
     .ltorg
 
+@ ═════════════════════════════ the run screen ═══════════════════════════════
+@ runtime.inc's layout, drawn as cells: row 0 the warning, rows 2-3 the case
+@ in flight, row 5 the tally, rows 7-18 the latest failures (two rows each,
+@ six, then from the top again).  Each call paints the cells that changed,
+@ at once: no wait for V-blank (the run's timing is the cases' business,
+@ not the screen's), and no row is blanked before it is drawn.
+
+@ Paint the cells that differ from the LCD, now
+vflush:
+    stmfd sp!, {r4-r8, r11, lr}
+    ldr r4, =RT
+    ldr r11, [r4, #RT_VSTALE]
+    mov r0, #0
+    str r0, [r4, #RT_VSTALE]
+    add r5, r4, #RT_VNEXT
+    add r4, r4, #RT_VSHOWN
+    ldr r6, =VRAM
+    bl  vpaint
+    cmp r11, #0                    @ a full paint covered the verdict block
+    blne draw_verdict
+    ldmfd sp!, {r4-r8, r11, pc}
+
+draw_run_screen:
+    stmfd sp!, {r4, lr}
+    ldr r4, =RT
+    mov r0, #1
+    str r0, [r4, #RT_VSTALE]
+    bl  vclear
+    ldr r0, =C_RED
+    bl  vink
+    mov r0, #0
+    mov r1, #0
+    ldr r2, =str_v_running
+    bl  vstr
+    bl  vflush
+    ldmfd sp!, {r4, pc}
+
+@ r0 = case index: rows 2-3 say which case is in flight
+draw_run_progress:
+    stmfd sp!, {r4-r11, lr}
+    mov r7, r0
+    ldr r0, =C_WHITE
+    bl  vpaper
+    mov r0, #2
+    bl  vrow
+    mov r0, #3
+    bl  vrow
+    mov r0, #C_BLACK
+    bl  vink
+    mov r0, #0
+    mov r1, #2
+    add r2, r7, #1
+    bl  vdec
+    mov r1, #2
+    ldr r2, =str_slash
+    bl  vstr
+    mov r6, r0
+    ldr r2, =RESULTS
+    ldr r2, [r2, #RB_RUNEND]
+    mov r0, r6
+    mov r1, #2
+    bl  vdec
+    add r6, r0, #1
+    mov r0, r7
+    bl  suite_name_of
+    mov r2, r0
+    mov r0, r6
+    mov r1, #2
+    bl  vstr
+    ldr r2, =case_table
+    add r2, r2, r7, lsl #5
+    ldr r2, [r2, #CD_NAME]
+    mov r0, #2
+    mov r1, #3
+    bl  vstr
+    bl  vflush
+    ldmfd sp!, {r4-r11, pc}
+
+@ r0 = case index: the tally on row 5, and a failure goes on the list
+draw_case_result:
+    stmfd sp!, {r4-r11, lr}
+    mov r7, r0
+    ldr r4, =RT
+    ldr r0, =C_WHITE
+    bl  vpaper
+    mov r0, #5
+    bl  vrow
+    mov r0, #0
+    mov r1, #5
+    bl  vtally
+    mov r0, r7
+    bl  vbad
+    cmp r0, #0
+    beq 9f
+    ldr r0, [r4, #RT_FAILROW]
+    cmp r0, #12                    @ rows 7..18: six failures, then wrap
+    movhs r0, #0
+    add r1, r0, #2
+    str r1, [r4, #RT_FAILROW]
+    add r0, r0, #7
+    mov r1, r7
+    bl  vcase2
+9:  bl  vflush
+    ldmfd sp!, {r4-r11, pc}
+
+@ r0 = row, r1 = case: "STATUS suite/name", then "got X exp Y"
+vcase2:
+    stmfd sp!, {r4-r11, lr}
+    mov r5, r0
+    mov r7, r1
+    ldr r8, =RESULTS + RB_CASES
+    add r8, r8, r7, lsl #4         @ its record
+    ldr r9, =case_table
+    add r9, r9, r7, lsl #5         @ its descriptor
+    ldrb r10, [r8]                 @ status
+    mov r0, r5
+    bl  vrow
+    add r0, r5, #1
+    bl  vrow
+    ldr r2, =vstatus_marks
+    ldr r2, [r2, r10, lsl #2]
+    mov r0, r2, lsr #16
+    bl  vink
+    ldr r2, =vstatus_words
+    ldr r2, [r2, r10, lsl #2]
+    mov r0, #0
+    mov r1, r5
+    bl  vstr
+    mov r0, #C_BLACK
+    bl  vink
+    mov r0, r7
+    bl  suite_name_of
+    mov r2, r0
+    mov r0, #8
+    mov r1, r5
+    bl  vstr
+    mov r6, r0
+    mov r1, r5
+    mov r2, #'/'
+    bl  vput
+    add r0, r6, #1
+    mov r1, r5
+    ldr r2, [r9, #CD_NAME]
+    mov r3, #40
+    bl  vstrn
+    add r5, r5, #1
+    ldr r0, =C_GREY
+    bl  vink
+    cmp r10, #ST_FAIL
+    beq 2f
+    cmp r10, #ST_TIMEOUT
+    ldreq r2, =str_v_timeout
+    ldrne r2, =str_v_crash
+    mov r0, #3
+    mov r1, r5
+    bl  vstr
+    b   9f
+2:  mov r0, #3
+    mov r1, r5
+    ldr r2, =str_v_got
+    bl  vstr
+    mov r0, #17
+    mov r1, r5
+    ldr r2, =str_v_exp
+    bl  vstr
+    ldr r0, =C_RED
+    bl  vink
+    mov r0, #7
+    mov r1, r5
+    ldr r2, [r8, #4]
+    bl  vhex
+    mov r0, #C_BLACK
+    bl  vink
+    ldr r6, [r9, #CD_INFO]
+    and r6, r6, #0x0F              @ kind
+    cmp r6, #K_SLOT
+    ldreq r2, [r8, #8]
+    ldrne r2, [r9, #CD_LO]
+    mov r0, #21
+    mov r1, r5
+    bl  vhex
+    cmp r6, #K_SLOT
+    beq 9f
+    ldr r1, [r9, #CD_LO]
+    ldr r2, [r9, #CD_HI]
+    cmp r1, r2
+    beq 9f
+    ldr r0, =C_GREY
+    bl  vink
+    cmp r6, #K_TWO
+    ldreq r2, =str_bar
+    ldrne r2, =str_dots
+    mov r0, #29
+    mov r1, r5
+    bl  vstr
+    mov r0, #C_BLACK
+    bl  vink
+    mov r0, #31
+    mov r1, r5
+    ldr r2, [r9, #CD_HI]
+    bl  vhex
+9:  ldmfd sp!, {r4-r11, pc}
+    .ltorg
+
+str_v_running:  .asciz "running - do not trust this screen"
+    .align 2
+
     .include "vfont_gen.inc"
     .align 2

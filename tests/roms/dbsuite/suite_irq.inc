@@ -207,7 +207,12 @@ iw_rom_pattern:
 @ row reads 30 cycles lower.  The H-blank and V-blank rows are anchored by
 @ a polling loop (the flag's fall, VCOUNT reaching 158) whose phase depends
 @ on where the page started, so they are checked +-32; the timer and DMA
-@ rows have no anchor and are exact.
+@ rows have no anchor and are exact.  irqlat-hblank-haltcnt goes lower:
+@ the console's flash-cart runs read 0x3B7 three times (2026-11-04,
+@ cart-agb.json) and 0x3DD twice (cart-agb-2026-11-05.json,
+@ cart-agb-2026-11-19.json), with the page started at different moments,
+@ and dingbat lands on the same two values as its start moves.  It checks
+@ 0x3B7 to 0x3DD + 32.
 .equ V8STUB, 0x03000500
 .macro id_clear
     mov r0, #0
@@ -469,7 +474,7 @@ v8_race_end:
     chalf "irqlat-tm2-reload-0001", RUN_SAME, 6, 0x0072, F_CART
     chalf "irqlat-tm2-haltcnt-ignored", RUN_SAME, 8, 0x0087, F_CART
     crange "irqlat-hblank",         RUN_SAME, 10, 0xFFFF, 0x03BD - 32, 0x03BD + 32, F_CART
-    crange "irqlat-hblank-haltcnt", RUN_SAME, 12, 0xFFFF, 0x03DD - 32, 0x03DD + 32, F_CART
+    crange "irqlat-hblank-haltcnt", RUN_SAME, 12, 0xFFFF, 0x03B7, 0x03DD + 32, F_CART
     crange "irqlat-vblank",         RUN_SAME, 14, 0xFFFF, 0x0989 - 32, 0x0989 + 32, F_CART
     crange "irqlat-vblank-haltcnt", RUN_SAME, 16, 0xFFFF, 0x0974 - 32, 0x0974 + 32, F_CART
     chalf "irqlat-dma3",            RUN_SAME, 18, 0x00B2, F_CART

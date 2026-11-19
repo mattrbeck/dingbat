@@ -1630,6 +1630,9 @@ read_keys:
     .ltorg
 
 @ ───────────────────────────── the run screen ────────────────────────────
+@ The cartridge build's run screen is viewer.inc's (vrun_*): the same
+@ layout drawn as cells, so a case's lines change in place.
+.if MB
 draw_run_screen:
     stmfd sp!, {lr}
     bl  clear_screen
@@ -1709,6 +1712,7 @@ draw_case_result:
     bl  draw_case_lines
 9:  ldmfd sp!, {r4-r6, pc}
     .ltorg
+.endif
 
 @ r0 = column, r1 = row: "pass N fail N t/o N crash N skip N" (totals)
 @ (a macro: viewer.inc builds its own over its text calls, and the run
@@ -1869,8 +1873,8 @@ draw_case_lines:
 9:  ldmfd sp!, {r4-r8, pc}
     .ltorg
 
-@ In the cartridge build viewer.inc draws every screen but the run screen,
-@ the menu at boot included.  The multiboot image has no room for it and
+@ In the cartridge build viewer.inc draws every screen, the menu at boot
+@ and the run screen included.  The multiboot image has no room for it and
 @ keeps the plain menu above and the summary and detail views below.
 .if MB == 0
     .include "viewer.inc"
