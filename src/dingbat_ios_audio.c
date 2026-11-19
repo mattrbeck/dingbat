@@ -80,6 +80,21 @@ static double   g_t = 0;
 static double   g_integ = 0;     /* the clocks' steady offset, learnt */         /* position between hist[1] and hist[2] */
 static float    g_hist[4][2];    /* x[-1], x[0], x[1], x[2] for Catmull-Rom */
 static unsigned g_underruns = 0;
+/* A gap must not click: sound fades out from the last sample when the ring
+ * runs dry, and back in when it restarts (~3 ms each way). */
+#define FADE_FRAMES  96
+static float    g_gain = 1;      /* of the sound being read, fading in */
+static float    g_tail[2];       /* the sample a fade-out starts from */
+static int      g_tail_left = 0; /* frames of it still to come */
+
+static int fade_tail(float *dst, int n, int max_frames) {
+  for (; n < max_frames && g_tail_left > 0; n++) {
+    float k = (float)--g_tail_left / FADE_FRAMES;
+    dst[2 * n] = g_tail[0] * k;
+    dst[2 * n + 1] = g_tail[1] * k;
+  }
+  return n;
+}
 
 /* Pop one stereo frame as float; 0 when the ring is empty. */
 static int pop_frame(float out[2]) {
@@ -242,14 +257,17 @@ int dingbat_audio_read(float *dst, int max_frames) {
      * depth the next refresh without a frame needs (the gentle control would
      * take many seconds to rebuild it). */
     if (depth < DRC_TARGET) {
+      n = fade_tail(dst, 0, max_frames);
       pthread_mutex_unlock(&g_lock);
-      return 0;
+      return n;
     }
     for (int i = 1; i < 4; i++) pop_frame(g_hist[i]);
     g_hist[0][0] = g_hist[1][0]; g_hist[0][1] = g_hist[1][1];
     g_t = 0;
     g_fill = (double)depth;
     g_primed = 1;
+    g_gain = 0;
+    g_tail_left = 0;
   }
   /* Smoothed depth -> a ratio a fraction of a percent either side of 1.
    * Deeper than the target: consume a little faster, and the reverse. */
@@ -268,8 +286,9 @@ int dingbat_audio_read(float *dst, int max_frames) {
       float p0 = g_hist[0][c], p1 = g_hist[1][c], p2 = g_hist[2][c], p3 = g_hist[3][c];
       dst[2 * n + c] = 0.5f * ((2.0f * p1) + (-p0 + p2) * t +
                                (2.0f * p0 - 5.0f * p1 + 4.0f * p2 - p3) * t2 +
-                               (-p0 + 3.0f * p1 - 3.0f * p2 + p3) * t3);
+                               (-p0 + 3.0f * p1 - 3.0f * p2 + p3) * t3) * g_gain;
     }
+    if (g_gain < 1) { g_gain += 1.0f / FADE_FRAMES; if (g_gain > 1) g_gain = 1; }
     g_t += step;
     int dry = 0;
     while (g_t >= 1.0) {
@@ -278,10 +297,13 @@ int dingbat_audio_read(float *dst, int max_frames) {
       if (!pop_frame(g_hist[3])) { dry = 1; break; }
     }
     if (dry) {
-      /* Ran dry: the rest of this buffer is silence, then a clean restart. */
+      /* Ran dry: a short fade, silence, then a clean restart. */
       g_primed = 0;
       g_underruns++;
-      n++;
+      g_tail[0] = dst[2 * n];
+      g_tail[1] = dst[2 * n + 1];
+      g_tail_left = FADE_FRAMES;
+      n = fade_tail(dst, n + 1, max_frames);
       break;
     }
   }
