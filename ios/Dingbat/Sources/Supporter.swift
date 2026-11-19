@@ -61,6 +61,9 @@ final class Supporter: ObservableObject {
         sheetUp = true
     }
 
+    /// The card the next sheet opens on (the app's own sheet, not over Settings).
+    func startOn(_ perk: Perk) { sheetCard = perk }
+
     private init() {
         unlocked = UserDefaults.standard.bool(forKey: Self.cacheKey)
         #if DEBUG

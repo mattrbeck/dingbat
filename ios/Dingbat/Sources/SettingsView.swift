@@ -803,26 +803,114 @@ private struct WebhookPane: View {
     }
 }
 
-/// THIRD_PARTY_NOTICES.md, as shipped.
+/// THIRD_PARTY_NOTICES.md as native sections: each `##` a section, each
+/// table row a component with its licence, each bullet an entry, the rest
+/// paragraphs. Sections for builds this app is not (desktop only) are left out.
 private struct AcknowledgementsPane: View {
     @Environment(\.palette) private var palette
 
-    var body: some View {
-        ScrollView {
-            Text(text)
-                .font(.system(size: 14))
-                .foregroundColor(palette.text)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(20)
-                .textSelection(.enabled)
-        }
-        .background(palette.bg.ignoresSafeArea())
+    struct Item: Identifiable {
+        let id = UUID()
+        var title: String?
+        var value: String?
+        var body: String?
+        var mono = false
+    }
+    struct Part: Identifiable {
+        let id = UUID()
+        var header: String?
+        var items: [Item] = []
     }
 
-    private var text: AttributedString {
-        guard let url = Bundle.main.url(forResource: "THIRD_PARTY_NOTICES", withExtension: "md"),
-              let md = try? String(contentsOf: url, encoding: .utf8) else { return AttributedString("") }
-        return (try? AttributedString(markdown: md, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)))
-            ?? AttributedString(md)
+    var body: some View {
+        List {
+            ForEach(Self.parts) { part in
+                Section {
+                    ForEach(part.items) { item in
+                        VStack(alignment: .leading, spacing: 3) {
+                            if item.title != nil || item.value != nil {
+                                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                                    if let t = item.title { Text(inline(t)).foregroundColor(palette.text) }
+                                    Spacer(minLength: 8)
+                                    if let v = item.value { Text(v).foregroundColor(palette.textFaint).multilineTextAlignment(.trailing) }
+                                }
+                            }
+                            if let b = item.body {
+                                Text(inline(b))
+                                    .font(item.mono ? .system(size: 12, design: .monospaced) : .subheadline)
+                                    .foregroundColor(item.title == nil ? palette.text : palette.textDim)
+                            }
+                        }
+                        .padding(.vertical, 3)
+                        .listRowBackground(palette.surface2)
+                        .listRowSeparatorTint(palette.border)
+                    }
+                } header: {
+                    if let h = part.header {
+                        Text(h).font(.system(size: 13)).foregroundColor(palette.textFaint).textCase(.uppercase)
+                    }
+                }
+            }
+        }
+        .listStyle(.insetGrouped)
+        .scrollContentBackground(.hidden)
+        .background(palette.bg.ignoresSafeArea())
+        .textSelection(.enabled)
     }
+
+    private func inline(_ s: String) -> AttributedString {
+        (try? AttributedString(markdown: s, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))) ?? AttributedString(s)
+    }
+
+    static let parts: [Part] = {
+        guard let url = Bundle.main.url(forResource: "THIRD_PARTY_NOTICES", withExtension: "md"),
+              let md = try? String(contentsOf: url, encoding: .utf8) else { return [] }
+        var parts: [Part] = [Part()]
+        var para: [String] = []
+        var bullet: [String]?
+        func flush() {
+            if !para.isEmpty {
+                let licence = parts[parts.count - 1].header?.lowercased().contains("licence text") == true
+                parts[parts.count - 1].items.append(Item(body: para.joined(separator: " "), mono: licence))
+                para = []
+            }
+            if let b = bullet {
+                let text = b.joined(separator: " ")
+                // "**Title** (`where`): body" → the title, then the rest.
+                if text.hasPrefix("**"), let end = text.range(of: "**", range: text.index(text.startIndex, offsetBy: 2)..<text.endIndex) {
+                    let title = String(text[text.index(text.startIndex, offsetBy: 2)..<end.lowerBound])
+                    var rest = String(text[end.upperBound...]).trimmingCharacters(in: .whitespaces)
+                    if rest.hasPrefix(":") { rest.removeFirst() }
+                    parts[parts.count - 1].items.append(Item(title: title, body: rest.trimmingCharacters(in: .whitespaces)))
+                } else {
+                    parts[parts.count - 1].items.append(Item(body: text))
+                }
+                bullet = nil
+            }
+        }
+        for raw in md.components(separatedBy: "\n") {
+            let line = raw.trimmingCharacters(in: .whitespaces)
+            if line.hasPrefix("# ") { continue }
+            if line.hasPrefix("## ") {
+                flush()
+                parts.append(Part(header: String(line.dropFirst(3))))
+            } else if line.hasPrefix("|") {
+                flush()
+                let cells = line.split(separator: "|").map { $0.trimmingCharacters(in: .whitespaces) }
+                guard cells.count == 3, cells[0] != "Component", !cells[0].hasPrefix("---") else { continue }
+                parts[parts.count - 1].items.append(Item(title: cells[0], value: cells[1], body: cells[2]))
+            } else if line.hasPrefix("- ") {
+                flush()
+                bullet = [String(line.dropFirst(2))]
+            } else if line.isEmpty {
+                flush()
+            } else if bullet != nil {
+                bullet?.append(line)
+            } else {
+                para.append(line)
+            }
+        }
+        flush()
+        return parts.filter { !$0.items.isEmpty && $0.header?.contains("desktop build only") != true }
+    }()
 }
