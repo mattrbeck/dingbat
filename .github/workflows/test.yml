@@ -27,7 +27,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        # windows-latest is out for now (desktop builds are no longer
+        # published); add it back to check Windows.
+        os: [ubuntu-latest]
     runs-on: ${{ matrix.os }}
     # A green job is ~14 min on Windows, ~11 on Linux; an hour is headroom so
     # a wedged step reports instead of burning the 6h default.

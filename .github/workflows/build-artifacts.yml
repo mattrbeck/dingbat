@@ -194,6 +194,9 @@ jobs:
     # tools/docker/windows-cross: that image's base comes from Docker Hub, whose
     # anonymous pulls from runner IPs fail with 429/504 for hours at a time.
     # Same toolchain and steps as the image, which stays for local builds.
+    # Off for now (desktop builds are no longer published); the image is
+    # still on Nim 2.2.6 until nimlang/nim has a 2.4.2 tag.
+    if: false
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -271,6 +274,7 @@ jobs:
     # beyond 1.1 without a GPU driver: Mesa's llvmpipe opengl32.dll beside
     # the exe stands in for one (the exe ships alone; this is the runner's).
     needs: windows
+    if: false
     runs-on: windows-latest
     timeout-minutes: 15
     steps:
