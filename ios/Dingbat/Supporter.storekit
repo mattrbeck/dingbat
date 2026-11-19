@@ -1,0 +1,68 @@
+{
+  "identifier" : "5E1D7C2A",
+  "nonRenewingSubscriptions" : [
+
+  ],
+  "products" : [
+    {
+      "displayPrice" : "2.99",
+      "familyShareable" : true,
+      "internalID" : "6740000001",
+      "localizations" : [
+        {
+          "description" : "Unlocks every Supporter extra. Thank you!",
+          "displayName" : "Supporter: Thanks",
+          "locale" : "en_US"
+        }
+      ],
+      "productID" : "com.mattrb.dingbat.supporter.thanks",
+      "referenceName" : "Supporter (Thanks)",
+      "type" : "NonConsumable"
+    },
+    {
+      "displayPrice" : "4.99",
+      "familyShareable" : true,
+      "internalID" : "6740000002",
+      "localizations" : [
+        {
+          "description" : "Unlocks every Supporter extra. Big thanks!",
+          "displayName" : "Supporter: Big thanks",
+          "locale" : "en_US"
+        }
+      ],
+      "productID" : "com.mattrb.dingbat.supporter.bigthanks",
+      "referenceName" : "Supporter (Big thanks)",
+      "type" : "NonConsumable"
+    },
+    {
+      "displayPrice" : "9.99",
+      "familyShareable" : true,
+      "internalID" : "6740000003",
+      "localizations" : [
+        {
+          "description" : "Unlocks every Supporter extra. Huge thanks!",
+          "displayName" : "Supporter: Huge thanks",
+          "locale" : "en_US"
+        }
+      ],
+      "productID" : "com.mattrb.dingbat.supporter.hugethanks",
+      "referenceName" : "Supporter (Huge thanks)",
+      "type" : "NonConsumable"
+    }
+  ],
+  "settings" : {
+    "_failTransactionsEnabled" : false,
+    "_locale" : "en_US",
+    "_storefront" : "USA",
+    "_storeKitErrors" : [
+
+    ]
+  },
+  "subscriptionGroups" : [
+
+  ],
+  "version" : {
+    "major" : 3,
+    "minor" : 0
+  }
+}

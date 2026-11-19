@@ -108,6 +108,10 @@ targets:
             LSItemContentTypes:
               - com.mattrb.dingbat.save
               - com.mattrb.dingbat.state
+    # Run from Xcode, purchases go to the local Supporter.storekit products
+    # (no App Store Connect needed; Debug > StoreKit > Manage Transactions).
+    scheme:
+      storeKitConfiguration: Dingbat/Supporter.storekit
     # The commit, for Settings' version line and bug reports (web version.txt).
     postBuildScripts:
       - name: Stamp the commit
