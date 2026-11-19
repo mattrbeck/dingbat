@@ -1565,6 +1565,9 @@ menu_loop:
 2:  bl  read_keys                  @ r0 = newly pressed
     cmp r0, #0
     beq menu_loop
+.if MB == 0
+    b   vmenu_first                @ a hand on the keys: viewer.inc's menu
+.else
     mov r5, r0
     cmp r9, #0                     @ any key stops the countdown
     beq 3f
@@ -1591,6 +1594,7 @@ menu_loop:
     subge r1, r10, #1
     str r1, [r4, #RT_CURSOR]
     b   menu_list
+.endif
 menu_go_all:
     mov r0, #0
     ldr r1, =N_CASES
@@ -1705,7 +1709,10 @@ draw_case_result:
     .ltorg
 
 @ r0 = column, r1 = row: "pass N fail N t/o N crash N skip N" (totals)
-draw_tally:
+@ (a macro, like draw_case_lines below: viewer.inc builds its own over its
+@ text calls, and the run screen keeps these)
+.macro tally_fn name, str, dec
+\name:
     stmfd sp!, {r4-r7, lr}
     mov r4, r0
     mov r5, r1
@@ -1715,47 +1722,50 @@ draw_tally:
     mov r0, r4
     mov r1, r5
     ldr r2, =str_pa
-    bl  draw_str
+    bl  \str
     ldr r2, [r6]
     mov r1, r5
-    bl  draw_dec
+    bl  \dec
     mov r7, r0
     ldr r0, =C_RED
     bl  ink
     mov r0, r7
     mov r1, r5
     ldr r2, =str_fl
-    bl  draw_str
+    bl  \str
     ldr r2, [r6, #4]
     mov r1, r5
-    bl  draw_dec
+    bl  \dec
     mov r1, r5
     ldr r2, =str_to
-    bl  draw_str
+    bl  \str
     ldr r2, [r6, #8]
     mov r1, r5
-    bl  draw_dec
+    bl  \dec
     mov r1, r5
     ldr r2, =str_cr
-    bl  draw_str
+    bl  \str
     ldr r2, [r6, #12]
     mov r1, r5
-    bl  draw_dec
+    bl  \dec
     mov r7, r0
     ldr r0, =C_GREY
     bl  ink
     mov r0, r7
     mov r1, r5
     ldr r2, =str_sk
-    bl  draw_str
+    bl  \str
     ldr r2, [r6, #16]
     mov r1, r5
-    bl  draw_dec
+    bl  \dec
     ldmfd sp!, {r4-r7, pc}
     .ltorg
+.endm
+    tally_fn draw_tally, draw_str, draw_dec
 
 @ r0 = row, r1 = case: two rows -- "STATUS suite/name", "  got X exp Y"
-draw_case_lines:
+.macro case_lines_fn name, row, str, hex
+\name:
     stmfd sp!, {r4-r8, lr}
     mov r4, r0
     mov r5, r1
@@ -1764,9 +1774,9 @@ draw_case_lines:
     ldr r7, =case_table
     add r7, r7, r5, lsl #5
     mov r0, r4
-    bl  clear_row
+    bl  \row
     add r0, r4, #1
-    bl  clear_row
+    bl  \row
     ldrb r8, [r6]
     cmp r8, #ST_PASS
     ldreq r0, =C_GREEN
@@ -1780,7 +1790,7 @@ draw_case_lines:
     ldr r2, [r2, r8, lsl #2]
     mov r0, #0
     mov r1, r4
-    bl  draw_str
+    bl  \str
     mov r0, #C_BLACK
     bl  ink
     mov r0, r5
@@ -1788,13 +1798,13 @@ draw_case_lines:
     mov r2, r0
     mov r0, #8
     mov r1, r4
-    bl  draw_str
+    bl  \str
     ldr r2, =str_slash
     mov r1, r4
-    bl  draw_str
+    bl  \str
     ldr r2, [r7, #CD_NAME]
     mov r1, r4
-    bl  draw_str
+    bl  \str
     cmp r8, #ST_PASS               @ passes and skips need no second row
     cmpne r8, #ST_SKIP
     cmpne r8, #ST_NOTRUN
@@ -1804,26 +1814,26 @@ draw_case_lines:
     add r1, r4, #1
     mov r0, #0
     ldr r2, =str_gotl
-    bl  draw_str
+    bl  \str
     ldr r0, =C_RED
     bl  ink
     cmp r8, #ST_FAIL
     movne r0, #6
     addne r1, r4, #1
     ldrne r2, =str_dash
-    blne draw_str
+    blne \str
     bne 2f
     mov r0, #6
     add r1, r4, #1
     ldr r2, [r6, #4]
     mov r3, #8
-    bl  draw_hex
+    bl  \hex
 2:  ldr r0, =C_GREY
     bl  ink
     mov r0, #14
     add r1, r4, #1
     ldr r2, =str_expl
-    bl  draw_str
+    bl  \str
     mov r0, #C_BLACK
     bl  ink
     ldr r0, [r7, #CD_INFO]
@@ -1834,7 +1844,7 @@ draw_case_lines:
     mov r0, #19
     add r1, r4, #1
     mov r3, #8
-    bl  draw_hex
+    bl  \hex
     ldr r0, [r7, #CD_INFO]
     and r0, r0, #0x0F
     cmp r0, #K_SLOT
@@ -1848,16 +1858,24 @@ draw_case_lines:
     ldrne r2, =str_dots
     mov r0, #27
     add r1, r4, #1
-    bl  draw_str
+    bl  \str
     ldr r2, [r7, #CD_HI]
     add r1, r4, #1
     mov r3, #8
     mov r8, r0
     mov r0, r8
-    bl  draw_hex
+    bl  \hex
 9:  ldmfd sp!, {r4-r8, pc}
     .ltorg
+.endm
+    case_lines_fn draw_case_lines, clear_row, draw_str, draw_hex
 
+@ The cartridge build's summary and detail views, and the menu once a key
+@ is pressed, are viewer.inc's.  The multiboot image has no room for it and
+@ keeps the plain ones below.
+.if MB == 0
+    .include "viewer.inc"
+.else
 @ ──────────────────────────── the summary view ───────────────────────────
 summary_view:
     ldr r4, =RT
@@ -2101,3 +2119,4 @@ dv_loop:
     str r1, [r4, #RT_SCROLL]
     b   dv_redraw
     .ltorg
+.endif

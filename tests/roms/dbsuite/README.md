@@ -80,6 +80,15 @@ reaches the host", and a size-dependent upload failure from either.
 - **Menu.** A runs the selected suite, START runs everything. After a run,
   the summary lists each suite and the first failures. A on a suite opens
   every case, with got and expected. B goes back.
+- **By hand (cartridge build).** From the first key press the screens are
+  `viewer.inc`'s. They are kept as a grid of text cells and only the cells
+  that change are repainted, so moving the cursor does not flash. The cursor
+  row has a tinted bar, a held direction repeats, LEFT/RIGHT page through a
+  suite's cases, the header says which cases are showing, and B from the
+  summary returns to a menu that does not count down again. Boot, the
+  countdown and the run execute the code they always did, so a run enters
+  each case at the same cycle. The multiboot build has no room for the
+  viewer and keeps the plain screens. Its image is unchanged.
 - **Watchdog.** Each case runs from a known machine state: IME/IE/IF,
   timers, DMA, WAITCNT, 0x04000800, sound, SIO, DISPSTAT, the display and
   the IRQ vector are all reset. TM3 at /1024 is armed as a 4-second watchdog.
