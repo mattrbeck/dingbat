@@ -232,3 +232,4 @@ tests/nds/src/**/*.elf
 
 # Built by .github/scripts/build-webrtc.sh (nimble webrtc)
 deps/
+/.fuzz/

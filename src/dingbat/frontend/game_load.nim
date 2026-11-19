@@ -120,14 +120,14 @@ proc legacy_zip_cache_dir(cache_root, zip_path: string): string =
   ## Where earlier builds put it: keyed by the path as given.
   cache_root / &"{zip_path.splitFile().name}-{cast[uint32](hash(zip_path)):08x}"
 
-const ZIP_ENTRY_MAX = 512 * 1024 * 1024
+const ZIP_ENTRY_MAX* = 512 * 1024 * 1024
   ## The most a zip's ROM may unpack to: the largest DS cartridge. Deflate
   ## can turn a megabyte into a gigabyte, and the size a zip gives for an
   ## entry is the zip's word for it.
 
 type ZipError = object of CatchableError
 
-proc zip_first_rom(zip: string; exts: openArray[string]): tuple[name, data: string] =
+proc zip_first_rom*(zip: string; exts: openArray[string]): tuple[name, data: string] =
   ## The first entry of `zip` (a zip file's bytes) named with one of `exts`,
   ## unpacked: at most ZIP_ENTRY_MAX, and the size its directory entry gives.
   ## ("", "") when there is none. Stored and deflated entries; zip64 sizes

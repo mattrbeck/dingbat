@@ -667,6 +667,55 @@ jobs:
           ONLINE_PEER_BIN: ${{ github.workspace }}/online_peer
         run: node --test --test-concurrency=1 e2e/link-native.e2e.mjs e2e/link-sync.e2e.mjs
 
+  fuzz:
+    # A minute of libFuzzer on each parser of outside bytes (a save state, a
+    # packed stream, a zip), from the genuine seeds each target writes, after
+    # replaying tests/fuzz/regress. Not where bugs are looked for (that is
+    # hours of tools/fuzz.sh on a desk): a change that makes one of these
+    # fall over at once is caught here. danger = the web build's no checks,
+    # under AddressSanitizer; release = the checks iOS and the desktop keep.
+    strategy:
+      fail-fast: false
+      matrix:
+        run:
+          - { target: gbstate, mode: danger }
+          - { target: gbstate, mode: release }
+          - { target: gbastate, mode: danger }
+          - { target: gbastate, mode: release }
+          - { target: inflate, mode: danger }
+          - { target: zip, mode: danger }
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: jiro4989/setup-nim-action@v2
+        with:
+          nim-version: ${{ env.NIM_VERSION }}
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Cache nimble's zippy
+        id: nimble-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.nimble/pkgs2
+          key: nimble-wasm-${{ runner.os }}-nim${{ env.NIM_VERSION }}-zippy-0.10.20
+      - name: Install nimble dependencies
+        if: steps.nimble-cache.outputs.cache-hit != 'true'
+        working-directory: ${{ runner.temp }}
+        run: ${{ github.workspace }}/.github/scripts/retry.sh 3 nimble install -y zippy@0.10.20
+      - name: Fuzz ${{ matrix.run.target }} (${{ matrix.run.mode }})
+        env:
+          FUZZ_MODE: ${{ matrix.run.mode }}
+        run: tools/fuzz.sh ${{ matrix.run.target }} 60
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: fuzz-${{ matrix.run.target }}-${{ matrix.run.mode }}
+          path: |
+            .fuzz/crash-*
+            .fuzz/timeout-*
+            .fuzz/oom-*
+          retention-days: 14
+
   wasm:
     # The web build, made once for the end-to-end jobs (the test job never
     # makes it).
