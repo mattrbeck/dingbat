@@ -1,14 +1,9 @@
-# zlib_inflate_capped against zippy: the same bytes for every stream zippy
-# inflates, the limit honoured before the bytes past it are made, and damaged
-# streams refused without a fault. Built with -d:inflate_checks, which keeps
-# the runtime checks in the decode loop: an index the loop's own tests miss
-# is a Defect here.
+# zlib_inflate_capped (zlib's inflate under a limit) against zippy: the same
+# bytes for every stream zippy inflates, the limit honoured before the bytes
+# past it are made, and damaged streams refused.
 import std/[os, random, times]
 import zippy
 import dingbat/common/inflate_bound
-
-when not defined(inflate_checks):
-  {.error: "build with -d:inflate_checks".}
 
 var checked = 0
 
@@ -116,7 +111,7 @@ block:
   let t1 = cpuTime()
   discard uncompress(z, dfZlib)
   let t2 = cpuTime()
-  echo "8 MiB (", z.len div 1024, " KiB packed), checks on: capped ",
+  echo "8 MiB (", z.len div 1024, " KiB packed): capped ",
        int((t1 - t0) * 1000), " ms, zippy ", int((t2 - t1) * 1000), " ms"
 
 echo "inflate_bound: ", checked, " streams and ", fixtures,

@@ -10,6 +10,7 @@ licence asks to be kept.
 |---|---|---|
 | Nim compiler runtime and standard library | MIT | Andreas Rumpf and the Nim contributors |
 | zippy (zlib/deflate in Nim) | MIT | Ryan Oldenburg |
+| zlib's inflate (`src/dingbat/vendor/zlib/`, unmodified from 1.3.2) | zlib | Jean-loup Gailly and Mark Adler |
 | Emscripten runtime, emmalloc (web only) | MIT / NCSA | Emscripten authors |
 | musl libc (web only) | MIT | Rich Felker, et al. |
 | libc++, libc++abi, compiler-rt (web only) | Apache-2.0 with LLVM exception | LLVM Project |
