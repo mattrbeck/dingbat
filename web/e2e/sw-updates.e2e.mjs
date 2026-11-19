@@ -64,6 +64,16 @@ const serveSite = (dir) => new Promise((resolve) => {
   }));
 });
 
+// What a page's Content-Security-Policy refused, in any page of a context:
+// a build that updates into a policy its own files do not fit shows here.
+const refused = [];
+const watchPolicy = async (ctx) => {
+  await ctx.exposeFunction("__cspRefused", (what) => refused.push(what));
+  await ctx.addInitScript(() => document.addEventListener("securitypolicyviolation", (e) =>
+    window.__cspRefused(`${e.effectiveDirective} ${e.blockedURI} @ ${e.sourceFile || ""}:${e.lineNumber || ""}`)));
+};
+const nothingRefused = () => assert.deepEqual(refused.splice(0), [], "the page's policy refused nothing");
+
 for (const engine of ENGINES) {
   describe(`checkpoint worker across updates (${engine})`, { skip }, () => {
     let dir, site, browser, ctx, page;
@@ -180,6 +190,7 @@ for (const engine of ENGINES) {
       browser = await playwright[engine].launch({
         headless: true, ...(engine === "chromium" && channel ? { channel } : {}) });
       ctx = await browser.newContext({ viewport: { width: 1000, height: 800 } });
+      await watchPolicy(ctx);
       page = await ctx.newPage();
       await page.goto(site.url);
       await booted();
@@ -187,6 +198,7 @@ for (const engine of ENGINES) {
     });
     after(async () => {
       await browser?.close();
+      if (!skip) nothingRefused();
       site?.close();
       if (dir) await rm(dir, { recursive: true, force: true });
     });
@@ -390,6 +402,7 @@ for (const engine of ENGINES) {
 
     const open = async () => {
       const ctx = await browser.newContext({ viewport: { width: 1000, height: 800 } });
+      await watchPolicy(ctx);
       return { ctx, page: await ctx.newPage() };
     };
     const booted = (page) => page.waitForFunction(
@@ -446,6 +459,7 @@ for (const engine of ENGINES) {
     });
     after(async () => {
       await browser?.close();
+      if (!skip) nothingRefused();
       site?.close();
       if (dir) await rm(dir, { recursive: true, force: true });
       if (oldSrc) await rm(oldSrc.root, { recursive: true, force: true });
