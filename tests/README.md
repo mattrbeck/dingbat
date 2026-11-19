@@ -468,9 +468,8 @@ mode, as DocBoy's CGB build does: `cgb_dmg_mode` carts are DMG-flagged (compat
 mode), `cgb_dmg_ext_mode` carts carry `$0143 = $88..$8F`, which the CGB boot
 ROM copies to KEY0 and which enters what Pan Docs calls PGB mode (KEY0 bit 3).
 dingbat runs it as nocash's "Extended DMG Mode" (docs/dev/gb-derivations.md,
-"KEY0 bit 3 keeps part of the CGB register set"); the row it disagrees with
-(`key1_write_read`) is scored and red rather than skipped: the hardware it
-asserts is a CPU CGB E with that cart, which is what the row runs.
+"KEY0 bit 3 keeps part of the CGB register set") with KEY1 kept live, as
+`key1_write_read` asserts for a CPU CGB E with that cart.
 
 **Verdict** (`tests/testutils/testutils/runners.h` at the pin, reproduced by
 `docboy_batch` in `dingbat_test.nim`). No boot ROM (DocBoy's CI builds

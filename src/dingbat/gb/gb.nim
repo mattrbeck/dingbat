@@ -2560,8 +2560,9 @@ type
     cgb_enabled*:    bool
     cgb_native*:     bool
     # KEY0 bit 3 ($0143 = $88-$8F, $C8-$CF), nocash's "Extended DMG Mode": a
-    # compatibility mode that keeps VBK, SVBK, RP, OPRI, FF74 and SC.1 (only
-    # HDMA, BCPD, OCPD and KEY1 go). Recomputed with cgb_native, true with it.
+    # compatibility mode that keeps VBK, SVBK, RP, OPRI, FF74, SC.1 and KEY1
+    # (DocBoy key1_write_read; nocash drops KEY1 too); HDMA, BCPD and OCPD go.
+    # Recomputed with cgb_native, true with it.
     cgb_ext_io*:     bool
     # Frontend opt-in for Super Game Boy emulation; default off. Consulted only
     # at post_init, where the cart header has the final say.

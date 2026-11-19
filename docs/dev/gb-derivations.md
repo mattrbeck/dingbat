@@ -1907,8 +1907,8 @@ Dots are dingbat's line dots; W is the first dot of the writing M-cycle
 - Default: `GB.cgb_ext_io` (`gb.nim`, `gb_sync_cgb_native`), true with
   `cgb_native` and, after the boot ROM, for a CGB with `$0143 & $88 = $88`.
 - Claim: a bit-7 header byte with bit 3 set ($88-$8F, $C8-$CF) is KEY0's
-  "Extended DMG Mode": compatibility mode (picture, KEY1, HDMA, BCPD, OCPD
-  as with bit 2) with VBK, SVBK, RP, OPRI ($FF6C), FF74 and SC.1 still
+  "Extended DMG Mode": compatibility mode (picture, HDMA, BCPD, OCPD as
+  with bit 2) with VBK, SVBK, RP, OPRI ($FF6C), FF74, SC.1 and KEY1 still
   answering as in CGB mode. Bit 3 wins over bit 2 ($8C-$8F).
 - Evidence: nocash, nesdev "FF4C and FF6C" (2020-03-29): "Bit 3 - Disable
   Some CGB Functions (0=Normal, 1=Extended DMG Mode)", "Bit3 disables HDMA,
@@ -1916,9 +1916,13 @@ Dots are dingbat's line dots; W is the first dot of the writing M-cycle
   RP(IR), VBK(VRAM), SVBK(WRAM), and FF6Ch", bit 3 having priority. Pan Docs
   ("FF6C — OPRI"): OPRI "has an effect if a PGB value (`0xX8`, `0xXC`) is
   written to KEY0" (to be verified). SC.1 and FF74 are not named: live by
-  the list's reading. DocBoy `cgb_dmg_ext_mode/*` pass, except
-  `key1_write_read`, which wants KEY1 live against nocash's list and stays
-  red (gb-failure-triage.md I11).
+  the list's reading. KEY1 departs from nocash's list: DocBoy
+  `key1_write_read` (write 0 reads $7E, $FF reads $7F) is a ROM run on a
+  CGB E, nocash's note one unreplicated hand-wired experiment on an unstated
+  revision, and Pan Docs leaves bit 3 undocumented. All of DocBoy
+  `cgb_dmg_ext_mode/*` pass. STOP then switches speed as in CGB mode (the
+  switch is gated on the console); no row executes STOP in this mode, so
+  that part is inference.
 - No console measured. The picture, object priority and hand-off stay the
   compatibility ones (I11 lists them).
 - Clean-room: derived from test ROM disassembly, Pan Docs and nocash's
