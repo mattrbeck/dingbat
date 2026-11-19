@@ -3,8 +3,8 @@
 @
 @ Robustness, in the order things can go wrong:
 @  * a case that hangs with interrupts open: TM3 (/1024, IRQ) is armed
-@    around every run routine; its overflow (4 s) diverts the IRQ return to
-@    case_timeout_recover and the case reads TIMEOUT.
+@    around every run routine; its overflow (4 s) sends the IRQ handler
+@    straight to case_timeout_recover and the case reads TIMEOUT.
 @  * a case that hangs with interrupts masked, or that ends in the BIOS's
 @    undefined-instruction or abort handler: nothing inside the machine can
 @    take control back.  The results block says RUNNING and names the case
@@ -682,8 +682,11 @@ sp_irq_ewram:
 @ the BIOS returns through (`subs pc, lr, #4`).  First entry since the flag
 @ at SCRATCH+0x4C was cleared records the TM0 stamp and that address (the
 @ IRQ-window cases read it).  A TM3 overflow is the watchdog: a probe row
-@ armed with wdg_arm is diverted to its recovery label, otherwise a case
-@ run under call_guarded is diverted to case_timeout_recover.
+@ armed with wdg_arm goes to its recovery label, otherwise a case run under
+@ call_guarded goes to case_timeout_recover.  Either way the handler leaves
+@ for System mode itself and never returns to the BIOS, so recovery does not
+@ depend on how a BIOS (or an emulator's stand-in for one) lays out its
+@ stack; machine_reset puts the IRQ stack back before the next case.
 irq_handler:
     ldr r0, =0x04000100
     ldrh r1, [r0]
@@ -714,13 +717,12 @@ irq_handler:
     mov r3, #2
     str r3, [r2, #RT_INFLIGHT]
     ldr r3, =case_timeout_recover
-3:  add r3, r3, #4                 @ the BIOS returns to [sp,#20] - 4
-    str r3, [sp, #20]
-    mov r3, #0x9F                  @ System mode, ARM, IRQs masked
-    msr SPSR_cxsf, r3
-    ldr r2, =0x0400010C            @ and the watchdog stopped
-    mov r3, #0
-    str r3, [r2]
+3:  strh r1, [r0, #2]              @ acknowledge what we saw
+    ldr r2, =0x0400010C            @ the watchdog stopped
+    mov r0, #0
+    str r0, [r2]
+    msr cpsr_fc, #0x9F             @ System mode, ARM, IRQs masked, flags
+    bx  r3                         @ clear: what the old return gave
 9:  strh r1, [r0, #2]              @ acknowledge what we saw
     bx  lr
     .ltorg
