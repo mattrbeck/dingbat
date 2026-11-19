@@ -115,6 +115,14 @@ run_sweep:
 @ halt on a fixed cycle, answers more than one way in 232 of 256 cells
 @ (tools/hwlink/r0-agb.json psgrace): which way a first trigger goes is
 @ not the CPU's to fix.
+@ psg-ch1-first-trigger-dies is one of them too.  The cartridge build died
+@ there every time (the photograph and three cold boots), but those all
+@ reached it on the same path: dbsuite's own runs show it lives when a run
+@ starts at another moment (dingbat, START pressed 101 or 110 frames after
+@ boot), and from IWRAM the console's first trigger lives 3 times in 30
+@ (psgfirst-ram-agb-2026-11-19.json; 3 in 9 in sp-agb.json).  So it checks
+@ "dies or lives" like its siblings, with the band of the ch1 rows that
+@ live, and SOUNDCNT_X straight after it reads 0x80 (died) or 0x81.
 .macro pf_wait ctl, trig, bit
     strh r0, [r4, #\ctl]
     strh r1, [r4, #\trig]
@@ -226,7 +234,7 @@ run_psgfirst:
     strh r0, [r4, #0x84]
     pop {r4-r11, pc}
     .ltorg
-    chalf "psg-ch1-first-trigger-dies", run_psgfirst, 0, 0x0000, F_CART
+    czrange "psg-ch1-first-trigger-dies", run_psgfirst, 0, 0xFFFF, 18807 - 1500, 18807 + 1500, F_CART
     crange "psg-ch2-first-trigger-lives", RUN_SAME, 2, 0xFFFF, 17758 - 1500, 17758 + 1500, F_CART
     crange "psg-ch3-first-trigger-lives", RUN_SAME, 4, 0xFFFF, 18807 - 1500, 18807 + 1500, F_CART
     crange "psg-ch4-first-trigger-lives", RUN_SAME, 6, 0xFFFF, 18808 - 1500, 18808 + 1500, F_CART
@@ -236,7 +244,7 @@ run_psgfirst:
     crange "psg-ch2-before-ch1-lives", RUN_SAME, 14, 0xFFFF, 18807 - 1500, 18807 + 1500, F_CART
     czrange "psg-ch1-second-trigger-dies", RUN_SAME, 16, 0xFFFF, 18804 - 1500, 18804 + 1500, F_CART
     crange "psg-ch1-third-trigger-lives", RUN_SAME, 18, 0xFFFF, 18804 - 1500, 18804 + 1500, F_CART
-    cbyte "psg-soundcnt-x-after-ch1", RUN_SAME, 21, 0x80, F_CART
+    case "psg-soundcnt-x-after-ch1", RUN_SAME, 0, 0, 21, 0xFF, 0x80, 0x81, K_TWO, F_CART
     cbyte "psg-soundcnt-x-after-ch2", RUN_SAME, 22, 0x82, F_CART
     cbyte "psg-soundcnt-x-after-ch4", RUN_SAME, 23, 0x88, F_CART
     chalf "psg-ch1-length-off-never-expires", RUN_SAME, 24, 0xFFFF, F_CART

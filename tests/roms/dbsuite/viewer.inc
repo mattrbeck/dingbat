@@ -12,8 +12,8 @@
 @ A screen is drawn as text into RT_VNEXT, 40x20 cells, and vshow paints
 @ the cells that differ from the ones on the LCD (RT_VSHOWN), so a cursor
 @ move repaints two rows and no cell is blanked before it is drawn.  The
-@ painter runs from IWRAM, fast enough to stay ahead of the beam through a
-@ whole page; the IWRAM it stands on is put back before a run starts.
+@ painter runs from the cartridge: no code is copied anywhere, so an
+@ emulator needs nothing beyond plain ROM execution to show these screens.
 @
 @ The run screen and the cases do not come through here: from the moment a
 @ run starts they execute the instructions they did before this file
@@ -260,52 +260,19 @@ vshow:
     add r5, r4, #RT_VNEXT
     add r4, r4, #RT_VSHOWN
     ldr r6, =VRAM
-    ldr r12, =PAYLOAD
-    mov lr, pc
-    bx  r12
+    bl  vpaint
     bl  draw_verdict               @ it sits in the last cell
     ldmfd sp!, {r4-r8, r11, pc}
 
-@ r4 = RT: the painter into IWRAM, what was there kept for vrestore.  Every
-@ way in from boot or a run comes through here, so the LCD is marked
-@ stale too.
+@ r4 = RT: the LCD holds someone else's pixels (boot's, the run screen's).
+@ Every way in from boot or a run comes through here.
 vinstall:
     mov r0, #1
     str r0, [r4, #RT_VSTALE]
-    str r0, [r4, #RT_VINST]
-    ldr r0, =PAYLOAD
-    ldr r1, =vpaint
-    ldr r2, =RT + RT_VSAVE
-    ldr r3, =vpaint_end
-1:  ldr r12, [r0]
-    str r12, [r2], #4
-    ldr r12, [r1], #4
-    str r12, [r0], #4
-    cmp r1, r3
-    blo 1b
-    bx  lr
-
-@ r4 = RT: IWRAM as the last run left it, before the next one
-vrestore:
-    ldr r0, [r4, #RT_VINST]
-    cmp r0, #1
-    bxne lr
-    mov r0, #0
-    str r0, [r4, #RT_VINST]
-    ldr r0, =PAYLOAD
-    ldr r1, =vpaint
-    ldr r2, =RT + RT_VSAVE
-    ldr r3, =vpaint_end
-1:  ldr r12, [r2], #4
-    str r12, [r0], #4
-    add r1, r1, #4
-    cmp r1, r3
-    blo 1b
     bx  lr
     .ltorg
 
-@ The painter, run at PAYLOAD: nothing in it but PC-relative code and its
-@ own pool.  r4 = cells showing, r5 = the next screen, r6 = VRAM, r11 =
+@ The painter.  r4 = cells showing, r5 = the next screen, r6 = VRAM, r11 =
 @ paint everything.
     .align 2
 vpaint:
@@ -381,7 +348,6 @@ vpaint_cell:
     ldmfd sp!, {r4-r6}
     bx  lr
 5:  .word vfont_data
-vpaint_end:
 
     tally_fn vtally, vstr, vdec
 
@@ -770,10 +736,8 @@ home_key:                          @ r0 = keys, r1 = a repeat, r9 = paint anyway
     beq home_loop
     b   home_paint
 home_run_all:
-    bl  vrestore
     b   menu_go_all
 home_run_sel:
-    bl  vrestore
     b   menu_go_sel
     .ltorg
 

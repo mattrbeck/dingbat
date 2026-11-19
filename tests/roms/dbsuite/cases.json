@@ -9416,13 +9416,13 @@
    "index": 781,
    "suite": "apu",
    "name": "psg-ch1-first-trigger-dies",
-   "kind": "range",
+   "kind": "zero-or-range",
    "cartridge_only": true,
    "risky": false,
    "offset": 0,
    "mask": "0000FFFF",
-   "lo": "00000000",
-   "hi": "00000000"
+   "lo": "0000439B",
+   "hi": "00004F53"
   },
   {
    "index": 782,
@@ -9536,13 +9536,13 @@
    "index": 791,
    "suite": "apu",
    "name": "psg-soundcnt-x-after-ch1",
-   "kind": "range",
+   "kind": "one-of-two",
    "cartridge_only": true,
    "risky": false,
    "offset": 21,
    "mask": "000000FF",
    "lo": "00000080",
-   "hi": "00000080"
+   "hi": "00000081"
   },
   {
    "index": 792,

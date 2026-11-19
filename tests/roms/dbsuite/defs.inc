@@ -15,7 +15,7 @@
 @   0x02023FFF            and 0x02020000, 16 KB each)
 @   0x02014000  RESULTS   the documented results block (README.md)
 @   0x02018000  RT        runtime state (runner, menu, output buffer; the
-@                         viewer's text screens, list and IWRAM copy from +0x1000)
+@                         viewer's text screens and list from +0x1000)
 @   0x02024000  MB_HOME   where the multiboot build's body runs from
 @   0x03000000  PAYLOAD   link-rig payloads run here, as on the console
 @   0x03000200  IWBLOCK   copied-code blocks
@@ -98,13 +98,11 @@
 .equ RT_VN,       0x70            @ positions,
 .equ RT_VFILTER,  0x74            @ 1 = failures only
 .equ RT_VLOGOCH,  0x78            @ the home screen's logo cells: 0 or ' '
-.equ RT_VINST,    0x7C            @ 1 = the painter is in IWRAM
 .equ RT_VAUTO,    0x80            @ frames to the auto-run, 0 = none
 .equ RT_SB,        0x100           @ 256-byte output line
 .equ RT_VSHOWN,   0x1000          @ 40x20 cells on the LCD: character, ink | paper << 16
 .equ RT_VNEXT,    0x3000          @ ... and the screen being drawn
 .equ RT_VLIST,    0x5000          @ the list's cases, a halfword each
-.equ RT_VSAVE,    0x5800          @ the IWRAM the painter is standing on
 
 @ case descriptor (32 bytes, see the `case` macro)
 .equ CD_RUN,   0

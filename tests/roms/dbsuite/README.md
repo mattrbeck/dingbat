@@ -99,9 +99,11 @@ reaches the host", and a size-dependent upload failure from either.
     through the list, L and R through the failures.
 
   The screens are kept as a grid of text cells and only the cells that
-  change are repainted, from the top of V-blank and by a painter copied to
-  IWRAM, so a press shows as one new picture. The IWRAM it borrows is put
-  back before a run starts. The run screen and the cases execute the code
+  change are repainted, from the top of V-blank, so nothing flashes: a
+  cursor move is one new picture, a page two or three. The painter runs
+  from the cartridge, with no code copied anywhere, so an emulator needs
+  nothing past plain ROM execution to show the screens. The run screen and
+  the cases execute the code
   they always did. The time boot takes before the auto-run did change
   (2026-11-19), and with it some APU cases' answers in dingbat, all still
   inside the ranges the console gave. The multiboot build has no room for
