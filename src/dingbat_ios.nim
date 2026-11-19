@@ -48,6 +48,19 @@ import dingbat/nds/rewinding
 from dingbat/nds/gpu/gpu import hd_restart, gpu_epoch
 
 {.compile: "dingbat_ios_audio.c".}
+{.compile: "dingbat_ios_seal.c".}
+{.compile: "dingbat_ios_writer.c".}
+
+proc dingbat_writer_put(path: cstring; data: pointer; len: clong; sync: cint) {.importc, cdecl.}
+proc dingbat_writer_drain() {.importc, cdecl.}
+  ## Every file write queued so far is on disk: before anything reads a save.
+
+# Battery saves are written from inside a frame; on the writer thread a
+# phone's fsync and rename (up to ~100 ms) cannot hold up the display tick.
+atomic_writer = proc (path, data: string; sync: bool) {.nimcall.} =
+  dingbat_writer_put(cstring(path), (if data.len > 0: unsafeAddr data[0] else: nil),
+                     clong(data.len), cint(sync))
+{.passL: "-lz".}
 
 const GBA_W = 240
 const GBA_H = 160
@@ -600,6 +613,7 @@ proc flush_current_save() =
       stateGb.cartridge.mbc_save()
   of ekNDS: nds_flush()
   of ekNone: discard
+  dingbat_writer_drain()
 
 # --- Core faults ---
 # An exception out of a core (a Defect: an index or range check) must not
@@ -677,6 +691,7 @@ template guard_core(body: untyped) =
     note_fault(e)
 
 proc load_rom_impl(path, bios: string): cint =
+  dingbat_writer_drain()
   if not fileExists(path): return -1
   # A reset keeps the count and the last fault's frame: it replays from
   # power-on, so the same frame is the same moment.
@@ -1430,6 +1445,17 @@ proc dingbat_flush_save() {.exportc, cdecl.} =
   ## Call on scenePhase background/exit and before reading the .sav file.
   flush_current_save()
 
+proc dingbat_flush_save_queued() {.exportc, cdecl.} =
+  ## dingbat_flush_save without waiting for the file: for a checkpoint during
+  ## play, whose writer thread calls dingbat_writer_drain before reading it.
+  case stateKind
+  of ekGBA:
+    if stateGba != nil: stateGba.storage.write_save()
+  of ekGB:
+    if stateGb != nil: stateGb.cartridge.mbc_save()
+  of ekNDS: nds_flush()
+  of ekNone: discard
+
 # --- Audio ---
 
 proc dingbat_set_volume(volume: cint; mute: cint) {.exportc, cdecl.} =
@@ -1498,6 +1524,27 @@ proc dingbat_state_size(): cint {.exportc, cdecl.} =
     stateImage = if stateNds.powered_off(): ""
                  else: pack_state(stateNds.state_bytes(thumbnail = true))
   of ekNone: stateImage = ""
+  cint(stateImage.len)
+
+proc dingbat_state_open(): cint {.exportc, cdecl.} =
+  ## As dingbat_state_size, but the payload hash and the deflate are left to
+  ## dingbat_state_seal on another thread: for a DS they cost tens of ms,
+  ## enough to run the audio dry. The image is flagged packed already.
+  if faulted():
+    stateImage = ""
+    return 0
+  case stateKind
+  of ekGBA: stateImage = stateGba.state_bytes(thumbnail = true, hashed = false)
+  of ekGB:  stateImage = stateGb.state_bytes(thumbnail = true, hashed = false)
+  of ekNDS:
+    stateImage = if stateNds.powered_off(): ""
+                 else: stateNds.state_bytes(thumbnail = true, hashed = false)
+  of ekNone: stateImage = ""
+  if stateImage.len > STATE_HEADER_SIZE:
+    let flags = (uint16(byte(stateImage[14])) or (uint16(byte(stateImage[15])) shl 8)) or
+                STATE_FLAG_DEFLATED
+    stateImage[14] = char(flags and 0xFF)
+    stateImage[15] = char(flags shr 8)
   cint(stateImage.len)
 
 proc dingbat_state_data(): pointer {.exportc, cdecl.} =
@@ -2373,6 +2420,7 @@ proc dingbat_rollback_exit() {.exportc, cdecl.} =
     gbRtcNowOverride = -1
   else:
     return
+  dingbat_writer_drain()
   stateKind = ekNone
   stateGba = nil
   stateGb = nil
@@ -2585,6 +2633,7 @@ proc dingbat_link_flush_saves() {.exportc, cdecl.} =
     for core in lkGba.cores: core.storage.write_save()
   if lkGb != nil:
     for core in lkGb.cores: core.cartridge.mbc_save()
+  dingbat_writer_drain()
 
 proc dingbat_link_exit() {.exportc, cdecl.} =
   ## Both saves written, the pair dropped; no game left loaded.

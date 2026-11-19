@@ -324,6 +324,19 @@ int dingbat_audio_ahead(void);
  * nothing for a DS game (no rewind). */
 int dingbat_state_size(void);
 const void *dingbat_state_data(void);
+/* dingbat_state_size in two halves, for a state kept during play: _open
+ * (core's thread) leaves the image at dingbat_state_data with its payload
+ * hash and deflate still to do; _seal (any thread, on a copy) does them
+ * into out (_seal_bound bytes) and returns the packed length, 0 on
+ * failure. The result is a state as dingbat_state_size gives one. */
+int dingbat_state_open(void);
+/* The cores' file writes (battery saves) go to a writer thread; the flush
+ * calls return once they are on disk. _flush_save_queued does not wait:
+ * dingbat_writer_drain (any thread) does, before the .sav is read. */
+void dingbat_flush_save_queued(void);
+void dingbat_writer_drain(void);
+long dingbat_state_seal_bound(long len);
+long dingbat_state_seal(const void *image, long len, void *out, long cap);
 int dingbat_load_state(const void *data, int len, int keep_rewind);
 int dingbat_state_error_kind(void);
 const char *dingbat_state_error(void);
