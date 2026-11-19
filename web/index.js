@@ -8256,6 +8256,9 @@ tileMenuScrim.addEventListener("click", closeTileMenu);
 document.getElementById("tile-menu-close").addEventListener("click", closeTileMenu);
 // A right-click elsewhere while open: no browser menu over ours.
 tileMenuScrim.addEventListener("contextmenu", (e) => { e.preventDefault(); closeTileMenu(); });
+for (const id of ["canvas", "link-canvas-0", "link-canvas-1"]) {
+  document.getElementById(id)?.addEventListener("contextmenu", (e) => e.preventDefault());
+}
 tileMenu.addEventListener("keydown", (e) => {
   if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
   let items = tileMenuButtons().filter((b) => !b.disabled);

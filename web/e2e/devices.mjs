@@ -145,6 +145,10 @@ export const startRig = async () => {
       }
       const errors = [];
       page.on("pageerror", (e) => errors.push(e.message + " @ " + (e.stack || "").split("\n").slice(0, 3).join(" < ")));
+      // Something the page's Content-Security-Policy refused is an error too.
+      await page.exposeFunction("__cspRefused", (what) => errors.push("CSP refused " + what));
+      await page.addInitScript(() => document.addEventListener("securitypolicyviolation", (e) =>
+        window.__cspRefused(`${e.effectiveDirective} ${e.blockedURI} @ ${e.sourceFile || ""}:${e.lineNumber || ""}`)));
       const d = { who, kind, ctx, page, errors };
       // Signed in: the record a sign-in leaves, with a token good for an hour.
       await page.goto(web.url);

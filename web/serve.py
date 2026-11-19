@@ -13,6 +13,8 @@ unregisters itself, so no service worker left on the origin can hand out a
 stale em.js or nds.js. Every response is no-store.
 """
 import argparse
+import base64
+import hashlib
 import http.server
 import os
 import ssl
@@ -75,6 +77,13 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             # DINGBAT_ASSET_V.em (emAssetQuery).
             tag =('<script>window.DINGBAT_ASSET_V = {em: "%s", nds: "%s"};</script>'
                    % (em, nds)).encode()
+            # The page's policy (tools/csp.mjs) names its inline scripts by
+            # hash and knows no LAN address: this script is added to it, and
+            # a signaling server on any address is let through.
+            body = tag[len(b"<script>"):-len(b"</script>")]
+            sha = base64.b64encode(hashlib.sha256(body).digest())
+            html = html.replace(b"script-src 'self'", b"script-src 'self' 'sha256-" + sha + b"'", 1)
+            html = html.replace(b"connect-src 'self'", b"connect-src 'self' ws: http:", 1)
             return html.replace(b"<head>", b"<head>\n    " + tag, 1), "text/html"
         if path == "/em.js":
             with open(os.path.join(WEB, "em.js"), "rb") as f:

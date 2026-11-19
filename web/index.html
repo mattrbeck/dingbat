@@ -5,6 +5,9 @@
 
     <meta charset="utf-8" />
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    <!-- Written by tools/csp.mjs: each inline script below is named by its hash. -->
+    <meta http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval' blob: https://accounts.google.com/gsi/client 'sha256-Z1lE8TanpZeXqhVG+4sOBdp59gZTuJMnuhQ2tMD3Ixs=' 'sha256-SY4VnBZeO1NoPK6m22omGiNlBq099r5iiMyweVquoDQ=' 'sha256-ySzKfxMd/F1pSx02PX3DYBbNUvQCDJxK3rLmzYCX++Q=' 'sha256-4p2xVAuMEY6YGuws7WN6qC8IgvpzZcf9no84a7cj2K8=' 'sha256-jdHBV8ecIj4czQKNyCrhskMm59yoGVrwfkuLWa4LUHE=' 'sha256-9hxNOxTVFA+fZMD0/KHWtXpeX0eDbS+uxuqsQQgPYtQ=' 'sha256-D5xo7EctF3m8GCXmLnkEggQc6JlXlL0V4hecdX/Ix8Y='; style-src 'self' https://accounts.google.com/gsi/style; img-src 'self' blob: data:; media-src 'self' blob: data:; connect-src 'self' blob: data: https: wss: ws://localhost:* ws://127.0.0.1:* http://localhost:* http://127.0.0.1:*; frame-src https://accounts.google.com/gsi/; worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'" />
     <meta
       content="width=device-width, initial-scale=1, viewport-fit=cover"
       name="viewport"
@@ -453,7 +456,7 @@
 
       <!-- tabindex="-1": returnFocusToGame parks focus here; never in the
            tab order. -->
-      <canvas id="canvas" width="960" height="640" tabindex="-1" aria-label="Game screen" oncontextmenu="event.preventDefault()"></canvas>
+      <canvas id="canvas" width="960" height="640" tabindex="-1" aria-label="Game screen"></canvas>
 
       <!-- A DS game with its lid closed (the Screens panel, or N): the
            screens dim under this, and a tap opens the lid again. -->
@@ -503,11 +506,11 @@
       <!-- 2P link mode: two linked cores, one canvas per player -->
       <div id="link-stage">
         <div class="link-pane">
-          <canvas id="link-canvas-0" width="240" height="160" oncontextmenu="event.preventDefault()"></canvas>
+          <canvas id="link-canvas-0" width="240" height="160"></canvas>
           <span class="link-label">P1 &middot; Keyboard</span>
         </div>
         <div class="link-pane">
-          <canvas id="link-canvas-1" width="240" height="160" oncontextmenu="event.preventDefault()"></canvas>
+          <canvas id="link-canvas-1" width="240" height="160"></canvas>
           <span class="link-label">P2 &middot; Gamepad</span>
         </div>
       </div>
@@ -1812,12 +1815,12 @@
             <path d="M6 34 C 40 58, 100 10, 134 34" />
             <rect class="net-transfer-plug" x="0" y="28" width="9" height="12" rx="2" />
             <rect class="net-transfer-plug" x="131" y="28" width="9" height="12" rx="2" />
-            <rect class="net-transfer-bit net-transfer-out" width="5" height="5" style="animation-delay: 0s" />
-            <rect class="net-transfer-bit net-transfer-out" width="5" height="5" style="animation-delay: -0.53s" />
-            <rect class="net-transfer-bit net-transfer-out" width="5" height="5" style="animation-delay: -1.06s" />
-            <rect class="net-transfer-bit net-transfer-in" width="5" height="5" style="animation-delay: -0.27s" />
-            <rect class="net-transfer-bit net-transfer-in" width="5" height="5" style="animation-delay: -0.8s" />
-            <rect class="net-transfer-bit net-transfer-in" width="5" height="5" style="animation-delay: -1.33s" />
+            <rect class="net-transfer-bit net-transfer-out" width="5" height="5" />
+            <rect class="net-transfer-bit net-transfer-out" width="5" height="5" />
+            <rect class="net-transfer-bit net-transfer-out" width="5" height="5" />
+            <rect class="net-transfer-bit net-transfer-in" width="5" height="5" />
+            <rect class="net-transfer-bit net-transfer-in" width="5" height="5" />
+            <rect class="net-transfer-bit net-transfer-in" width="5" height="5" />
           </svg>
           <div class="net-transfer-end">
             <div class="net-transfer-bat net-transfer-friend" role="img" aria-label="Your friend"></div>

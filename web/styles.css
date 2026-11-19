@@ -8676,6 +8676,11 @@ body.rewind-off #report-slider {
 .net-transfer-bit {
   animation: net-transfer-bit 1.6s linear infinite;
 }
+.net-transfer-bit:nth-child(5) { animation-delay: -0.53s; }
+.net-transfer-bit:nth-child(6) { animation-delay: -1.06s; }
+.net-transfer-bit:nth-child(7) { animation-delay: -0.27s; }
+.net-transfer-bit:nth-child(8) { animation-delay: -0.8s; }
+.net-transfer-bit:nth-child(9) { animation-delay: -1.33s; }
 .net-transfer-out {
   fill: var(--accent);
   offset-path: path("M6 34 C 40 58, 100 10, 134 34");
