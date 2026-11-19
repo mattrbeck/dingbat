@@ -1134,6 +1134,30 @@ proc mem_stall_until_irq(mem: GbMemory; gb: GB; stall_cycles: int;
   ppu_debt = hold
   done
 
+const STOP_EXIT_RESTART* {.intdefine.} = 1
+  ## Leaving STOP mode restarts the oscillator as the KEY1 switch does: the
+  ## CPU waits SPEED_SWITCH_STALL_CPU (2^17) clocks run as the switch's stall
+  ## (timer on, OAM DMA frozen), and the PPU takes one M-cycle more, the key
+  ## edge's. DocBoy DMG `ppu/interactive/stop_read_{ly,stat}_*`,
+  ## `stop_trigger_interrupt` (0, 3, 5 and 8 extra dots fail; the timer taking
+  ## the extra M-cycle fails `stop_read_tima_*_round1`). Whether the timer runs
+  ## the 2^17 is unpinned (tools/gbprobe/probe_l_stopwake.gb). 0: resume at
+  ## once.
+
+proc stop_mode_exit*(mem: GbMemory; gb: GB) =
+  ## A P10-P13 edge has ended STOP mode (STOP_EXIT_RESTART).
+  when STOP_EXIT_RESTART != 0:
+    # The CPU is off the bus until the restart ends, as in the switch's stall:
+    # an HBlank block that came due waits for it (ppu_hdma_wake).
+    let hdma_live = gb.ppu.hdma_active
+    if hdma_live: gb.hdma_switch_stall = true
+    fifo_tick(gb.fifo_ppu, gb, 4 shr mem.current_speed)
+    mem_tick_stalled(mem, gb, SPEED_SWITCH_STALL_CPU, first_chunk = false)
+    if hdma_live:
+      gb.hdma_switch_stall = false
+      ppu_hdma_wake(gb.ppu, gb)
+    gb.wl_mark = gb.scheduler.cycles
+
 const STOP_RTC_RUNS* {.intdefine.} = 1
   ## Whether a cartridge clock (MBC3, HuC3, TAMA5) keeps counting in STOP.
   ## Pan Docs, "MBC3": the "RTC requires an external 32.768 kHz Quartz
@@ -1175,6 +1199,7 @@ proc stop_panel(mem: GbMemory; gb: GB) =
     ppu_blank_frame(ppu, gb)
   elif ppu.mode_flag != 3:
     for i in 0 ..< ppu.framebuffer.len: ppu.framebuffer[i] = 0'u16
+    ppu.panel_blank = false
     ppu.frame = true
     ppu.dots_since_frame = 0
 
@@ -1210,8 +1235,8 @@ proc stop_instr*(mem: GbMemory; gb: GB): bool =
   ##
   ## A held button beats a requested switch. The chart's IME split on the
   ## last leaf ("glitches non-deterministically") takes the defined leaf. Not
-  ## modelled: whether the skipped byte is read, and an oscillator restart
-  ## delay on leaving STOP mode.
+  ## modelled: whether the skipped byte is read. Leaving STOP mode:
+  ## stop_mode_exit.
   # The speed switch and stop_panel reach the pipeline and the idle horizon.
   fifo_sync(gb)
   gb.wl_mark = gb.scheduler.cycles

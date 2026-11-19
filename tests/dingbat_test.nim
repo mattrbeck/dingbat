@@ -1919,8 +1919,13 @@ proc docboy_fb_max_ticks(): int64 =
     try: result = min(DocboyMaxTicks, parseBiggestInt(v).int64)
     except ValueError: discard
 const DocboyDmgRgb565 = [0x84A0'u32, 0x4B40'u32, 0x2AA0'u32, 0x1200'u32]
+const DocboyDmgBlank = 0xAD00'u32
+  ## DocBoy's DMG panel with nothing driven (LCD off, the first frame after
+  ## LCDC.7 rises, STOP): Pan Docs' "whiter than color #0". dingbat draws that
+  ## panel in shade 0's grey and marks it GbPpu.panel_blank.
 
 proc docboy_rgb565(gb: GB; c: uint16): uint32 =
+  if not gb.cgb_enabled and gb.ppu.panel_blank: return DocboyDmgBlank
   if gb.cgb_enabled:
     let r = uint32(c and 0x1F)
     let g = uint32((c shr 5) and 0x1F)
@@ -1949,8 +1954,8 @@ proc docboy_load_ref(path: string; cache: var Table[string, seq[uint32]]): seq[u
 
 proc docboy_fb_diff(gb: GB; want: seq[uint32]): tuple[diff: int; first: string] =
   # DINGBAT_DOCBOY_DUMP=<file>: every check writes the frame as shade digits
-  # (0-3, `?` for a non-DMG colour), one line per row, then the reference's,
-  # so a red row shows WHERE it disagrees.
+  # (0-3, `-` the blank panel, `?` for a non-DMG colour), one line per row,
+  # then the reference's, so a red row shows WHERE it disagrees.
   let dump = getEnv("DINGBAT_DOCBOY_DUMP")
   if dump.len > 0:
     # CGB colours: a letter per distinct reference colour, in order of
@@ -1961,6 +1966,7 @@ proc docboy_fb_diff(gb: GB; want: seq[uint32]): tuple[diff: int; first: string] 
     proc shade(c: uint32): char =
       for k in 0 ..< 4:
         if DocboyDmgRgb565[k] == c: return char(ord('0') + k)
+      if c == DocboyDmgBlank: return '-'
       let i = cgb_tbl.find(c)
       if i >= 0: char(ord('A') + i) else: '?'
     var s = ""

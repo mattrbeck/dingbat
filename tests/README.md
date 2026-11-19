@@ -491,9 +491,11 @@ modes; ticks count from the hand-off at `$0100`, the run stops at 100,000,000.
 - Framebuffers compare exactly in RGB565 (the PNG's RGB888 truncated,
   `r>>3, g>>2, b>>3`). DMG shades are DocBoy's `$84A0 $4B40 $2AA0 $1200`;
   CGB colours are the raw BGR555 widened (`G6 = G5*2 + G5>>4`), no colour
-  correction. DocBoy also has a blank-panel colour (`$AD00`, Pan Docs'
-  "whiter than color #0" with the LCD off); dingbat draws a blank panel as
-  shade 0, so a reference showing it cannot match.
+  correction. DocBoy also has a DMG blank-panel colour (`$AD00`, Pan Docs'
+  "whiter than color #0" with the LCD off). dingbat's greys cannot show it
+  and draw a blank panel in shade 0's grey, but the core marks the frame
+  (`GbPpu.panel_blank`: LCD off, the first frame after LCDC.7 rises, STOP),
+  and the harness compares such a DMG frame as `$AD00` throughout.
 - `check_at_tick` appears in the manifests but DocBoy's `RunnerAdapter` never
   passes it on, so it is ignored here too. `palette` appears only on
   vendored entries, `color_tolerance` also on the SameSuite rebuilds, which
