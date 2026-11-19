@@ -343,13 +343,24 @@ final class DriveSync: ObservableObject {
     private static let stateURL = RomLibrary.support.appendingPathComponent("gdrive_sync.json")
 
     private init() {
-        if let data = try? Data(contentsOf: Self.stateURL),
-           let s = try? JSONDecoder().decode(State.self, from: data) {
+        let onDisk = try? Data(contentsOf: Self.stateURL)
+        if let data = onDisk, let s = try? JSONDecoder().decode(State.self, from: data) {
             state = s
+            // The tokens live in the Keychain (TokenVault). A file from a
+            // build that kept them beside the rest hands them over once.
+            if s.token != nil || s.refresh != nil {
+                TokenVault.write("token", s.token)
+                TokenVault.write("refresh", s.refresh)
+                saveState()
+            } else {
+                state.token = TokenVault.read("token")
+                state.refresh = TokenVault.read("refresh")
+            }
             // Kept by a build that took any name Drive gave.
             state.tomb.removeAll { !RomLibrary.validName($0.name) }
             state.ren.removeAll { !RomLibrary.validName($0.from) || !RomLibrary.validName($0.to) }
         }
+        if onDisk == nil { TokenVault.clear() }
         #if DEBUG
         // Dev hook: `-drive-stub http://127.0.0.1:PORT` talks to a fake Drive
         // (ios/e2e/drive-sync.mjs serves web/e2e/fakedrive.mjs), signed in as
@@ -367,6 +378,11 @@ final class DriveSync: ObservableObject {
             }
             state.token = "tok"
             state.tokenExp = Self.now() + 3600e3
+        }
+        // Dev hook: `-keychain-report` says what came back from the Keychain
+        // (lengths only).
+        if args.contains("-keychain-report") {
+            print("tokenvault: token \(state.token?.count ?? 0) chars, refresh \(state.refresh?.count ?? 0) chars")
         }
         #endif
         // The boot pull says so from the first frame: a linked device with a
@@ -389,7 +405,12 @@ final class DriveSync: ObservableObject {
 
     func saveState() {
         try? RomLibrary.ensureDir(RomLibrary.support)
-        if let data = try? JSONEncoder().encode(state) { try? data.write(to: Self.stateURL, options: .atomic) }
+        var disk = state
+        disk.token = nil
+        disk.refresh = nil
+        if let data = try? JSONEncoder().encode(disk) { try? data.write(to: Self.stateURL, options: .atomic) }
+        TokenVault.write("token", state.token)
+        TokenVault.write("refresh", state.refresh)
         stateTick &+= 1
     }
 
