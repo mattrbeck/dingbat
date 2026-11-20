@@ -11,7 +11,8 @@
 // Chromium only, two headless contexts on one machine: it hides host
 // candidates behind mDNS names the other context cannot resolve, so mDNS is
 // off here. WebKit filters host candidates outright and never pairs two of
-// its contexts, which is why CI's WebKit-only e2e shards leave this file out.
+// its contexts, which is why CI runs this in its Chromium job (test.yml
+// web-link), not the WebKit shards.
 
 import { test, after } from "node:test";
 import assert from "node:assert/strict";

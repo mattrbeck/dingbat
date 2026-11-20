@@ -667,6 +667,48 @@ jobs:
           ONLINE_PEER_BIN: ${{ github.workspace }}/online_peer
         run: node --test --test-concurrency=1 e2e/link-native.e2e.mjs e2e/link-sync.e2e.mjs
 
+  web-link:
+    # Two browsers linked online through the real signaling server and real
+    # WebRTC: pairing on a code (e2e/link-pairing), two different games and
+    # the different-game question (link-rom-skip), one side away and back
+    # (link-away), a dropped connection resumed (link-resume). Chromium
+    # only: WebKit never pairs two of its own contexts (link-pairing says
+    # why), so the WebKit shards above cannot run these. ~9 min in all on a
+    # desk, so two shards.
+    needs: wasm
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { shard: "pairing + different games", files: "e2e/link-pairing.e2e.mjs e2e/link-rom-skip.e2e.mjs" }
+          - { shard: "away + resume", files: "e2e/link-away.e2e.mjs e2e/link-resume.e2e.mjs" }
+    name: web-link (${{ matrix.shard }})
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: wasm
+          path: web
+      - name: Cache Playwright's browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-native-${{ runner.os }}-${{ hashFiles('web/package-lock.json') }}
+      - name: Chromium
+        working-directory: web
+        run: |
+          set -e
+          ../.github/scripts/retry.sh 3 npm ci
+          ../.github/scripts/retry.sh 3 npx playwright install --with-deps chromium
+      - name: ${{ matrix.shard }}
+        working-directory: web
+        run: node --test --test-concurrency=1 ${{ matrix.files }}
+
   fuzz:
     # A minute of libFuzzer on each parser of outside bytes (a save state, a
     # packed stream, a zip), from the genuine seeds each target writes, after
@@ -788,8 +830,9 @@ jobs:
           # The controller walk (~45 s), the clip speed check (~15 s), the
           # GB pictures check (~6 s), the boot sync check (~50 s, both
           # pairs) and the touch Settings taps (~20 s, phones and an iPad)
-          # ride along: a runner of their own costs more than they take.
-          - { shard: "crash recovery + gamepad", files: "e2e/crash-recovery.e2e.mjs e2e/gamepad.e2e.mjs e2e/clip-speed.e2e.mjs e2e/gb-pictures.e2e.mjs e2e/boot-sync.e2e.mjs e2e/settings-touch.e2e.mjs", pairs: "" }
+          # ride along: a runner of their own costs more than they take. So
+          # do the pages' Content-Security-Policy checks (~10 s).
+          - { shard: "crash recovery + gamepad", files: "e2e/crash-recovery.e2e.mjs e2e/gamepad.e2e.mjs e2e/clip-speed.e2e.mjs e2e/gb-pictures.e2e.mjs e2e/boot-sync.e2e.mjs e2e/settings-touch.e2e.mjs e2e/csp.e2e.mjs", pairs: "" }
     name: web-e2e (${{ matrix.shard }})
     steps:
       - uses: actions/checkout@v4
@@ -865,8 +908,9 @@ jobs:
           - { shard: "fourteen-steps iphone+mac", files: e2e/fourteen-steps.e2e.mjs, pairs: "iphone+mac" }
           - { shard: "fourteen-steps mac+iphone", files: e2e/fourteen-steps.e2e.mjs, pairs: "mac+iphone" }
           - { shard: "handoff", files: e2e/handoff.e2e.mjs, pairs: "iphone+mac,mac+mac" }
-          # The touch Settings taps again, in Apple's WebKit (an iPhone's, an iPad's).
-          - { shard: "crash recovery", files: "e2e/crash-recovery.e2e.mjs e2e/boot-sync.e2e.mjs e2e/settings-touch.e2e.mjs", pairs: "" }
+          # The touch Settings taps again, in Apple's WebKit (an iPhone's, an
+          # iPad's), and the pages' policies in the engine Safari runs.
+          - { shard: "crash recovery", files: "e2e/crash-recovery.e2e.mjs e2e/boot-sync.e2e.mjs e2e/settings-touch.e2e.mjs e2e/csp.e2e.mjs", pairs: "" }
     name: web-e2e-macos (${{ matrix.shard }})
     steps:
       - uses: actions/checkout@v4
