@@ -73,6 +73,9 @@ final class PadNav: ObservableObject {
         }
     }
 
+    /// The pane a registered item sits in.
+    func pane(of key: String) -> String? { items[key]?.pane }
+
     func focus(_ key: String) {
         showing = true
         focused = key

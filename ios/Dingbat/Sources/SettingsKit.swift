@@ -527,7 +527,22 @@ final class SettingsNav: ObservableObject {
     }
     @Published var selection: SettingsPane? = .appearance
     /// Sidebar + detail (iPad, wide windows): the top panes are a selection.
-    var wide = false
+    /// Learnt after a deep link may have pushed its pane: it moves to the sidebar.
+    var wide = false {
+        didSet {
+            guard wide, !oldValue, let first = path.first, Self.top.contains(first) else { return }
+            select(first, then: Array(path.dropFirst()))
+        }
+    }
+
+    /// A sidebar pane, and a sub-pane over it: a new selection resets the
+    /// detail's stack, so the sub-pane goes on after it has.
+    private func select(_ top: SettingsPane, then rest: [SettingsPane]) {
+        path = []
+        selection = top
+        guard !rest.isEmpty else { return }
+        DispatchQueue.main.async { [weak self] in self?.path = rest }
+    }
     /// The focused row each pushed pane was opened from, for B to return to.
     private var openedFrom: [String?] = []
 
@@ -576,8 +591,7 @@ final class SettingsNav: ObservableObject {
     func open(_ p: SettingsPane) {
         let top = Self.parent(p) ?? p
         if wide {
-            selection = top
-            path = top == p ? [] : [p]
+            select(top, then: top == p ? [] : [p])
         } else {
             path = top == p ? [p] : [top, p]
         }
@@ -585,8 +599,16 @@ final class SettingsNav: ObservableObject {
 
     /// B: one level up; false at the top (the sheet closes).
     func pop() -> Bool {
-        guard !path.isEmpty else { return false }
-        path.removeLast()
-        return true
+        if !path.isEmpty {
+            path.removeLast()
+            return true
+        }
+        // Beside the sidebar: back to the pane's row there before closing.
+        let pad = PadNav.shared
+        if wide, let sel = selection, let f = pad.focused, pad.pane(of: f) == "\(sel)" {
+            pad.focus(PadNav.key(AppModel.Sheet.settings(section: nil).id, "nav:" + sel.title))
+            return true
+        }
+        return false
     }
 }
