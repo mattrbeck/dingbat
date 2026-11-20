@@ -28,6 +28,7 @@ design notes, hardware evidence and test triage for people working on dingbat.
 - [nds/spec.md](nds/spec.md) — the DS core: spec, prototype map, and the way into the rest of `nds/`. DS maintainers.
 - [multiplayer.md](dev/multiplayer.md) — link-cable layers, rollback netplay and the network wire format. Link/netplay maintainers.
 - [speculative-rollback-handoff.md](dev/speculative-rollback-handoff.md) — speculative execution over the network link: design and bench hooks. Netplay maintainers.
+- [security.md](dev/security.md) — what dingbat takes from outside (ROMs, states, Drive, a link friend), what guards each, and what is open. Anyone touching those paths.
 - [savestate_compat.md](dev/savestate_compat.md) — the `.state` container, per-core payload revisions, compatibility rules. Anyone touching serialized state.
 - [sgb.md](dev/sgb.md) — the Super Game Boy adapter: transport, commands, rendering, save state. GB maintainers.
 - [fifo_ppu_changes.md](dev/fifo_ppu_changes.md) — the GB FIFO PPU model against Pan Docs' pixel FIFO. GB PPU maintainers.
