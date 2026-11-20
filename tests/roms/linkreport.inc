@@ -22,6 +22,10 @@
 @ now and then; read the block twice and compare.
 @
 @ Needs: 12 bytes of scratch at lr_state, and the includer's own .align.
+@ A ROM that runs from the cartridge sets LR_STATE to an address in RAM
+@ before including this: left in the image, the scratch is in ROM, the
+@ position never moves and the host is sent the magic for ever (ewrombench
+@ on the flashcart, 2026-11-20).
 
 .equ LR_MAGIC,    0x4C525054       @ 'LRPT'
 .equ LR_SIODATA32, 0x04000120
@@ -81,8 +85,12 @@ lr_stage:
 
     .ltorg                         @ this file's own literals
 
+.ifdef LR_STATE
+.equ lr_state, LR_STATE
+.else
     .align 2
 lr_state:
     .word 0                        @ block address
     .word 0                        @ word count
     .word 0                        @ position in the stream
+.endif

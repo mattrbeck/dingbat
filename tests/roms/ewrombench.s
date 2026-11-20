@@ -36,6 +36,7 @@
 .equ EWBLOCK,  0x02010000
 .equ IWBLOCK,  0x03002000
 .equ IWCODE,   0x03001000
+.equ LR_STATE, 0x03000F00         @ linkreport.inc's scratch: this code is in ROM
 
 _start:
     b   main
