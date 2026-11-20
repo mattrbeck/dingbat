@@ -24,14 +24,10 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 
 const playwright = createRequire(join(WEB, "package.json"))("playwright");
-// Not on CI unless asked (DINGBAT_E2E_UPDATES=1). On its own shard there
-// it still failed one run in two: after the "no network" test, Linux
-// WebKit's next update() never settled (an install hung, not failed), and
-// on the Mac a deploy while a checkpoint packs never reloaded the page.
-// Steady locally, Chromium and WebKit.
-const skip = !builtWeb() ? "web/em.wasm not built (nim c -d:emscripten src/dingbat_wasm.nim)"
-  : process.env.CI && !process.env.DINGBAT_E2E_UPDATES
-    ? "flaky on CI's runners (DINGBAT_E2E_UPDATES=1 runs it)" : false;
+// On CI in test.yml's crash recovery shards, Linux (WebKit) and the Mac
+// (Chromium and WebKit). It needs the DS core built too
+// (nim c -d:emscripten src/dingbat_nds_wasm.nim): every manifest lists it.
+const skip = !builtWeb() ? "web/em.wasm not built (nim c -d:emscripten src/dingbat_wasm.nim)" : false;
 const ENGINES = process.env.DINGBAT_E2E_NO_CHROMIUM ? ["webkit"] : ["chromium", "webkit"];
 const channel = process.env.DINGBAT_E2E_CHROMIUM_CHANNEL;
 
@@ -73,6 +69,55 @@ const watchPolicy = async (ctx) => {
     window.__cspRefused(`${e.effectiveDirective} ${e.blockedURI} @ ${e.sourceFile || ""}:${e.lineNumber || ""}`)));
 };
 const nothingRefused = () => assert.deepEqual(refused.splice(0), [], "the page's policy refused nothing");
+
+// Chromium: an update's swap stops the old worker, and a request of the
+// page's landing just then (the Updating card's bat, flap.png, on a page its
+// worker claimed rather than loaded) starts it again. Chromium stops an idle
+// worker in time, but not one DevTools is attached to, and Playwright
+// attaches to every worker: the new worker then waited out Chromium's
+// five-minute limit (CI: a third of the Mac runs; stopping the old worker
+// let it in at once). The worker states each page's registration went
+// through, from the ServiceWorker domain, so reloadedBy can tell.
+const workerStates = new WeakMap();
+const watchWorkers = async (page) => {
+  if (page.context().browser()?.browserType().name() !== "chromium") return page;
+  const cdp = await page.context().newCDPSession(page);
+  const seen = [];
+  cdp.on("ServiceWorker.workerVersionUpdated", (e) => seen.push(...e.versions));
+  await cdp.send("ServiceWorker.enable");
+  workerStates.set(page, { cdp, seen });
+  return page;
+};
+// The page `fn` reloads, booted: told apart from this one by a mark only
+// this one carries. Waiting for the next "load" event instead took a late
+// one of the reload before (CI: "then applied" still on build B). An old
+// worker started again mid-swap (above) is stopped, as Chrome would; a
+// reload that still never comes says where the update stood.
+const reloadedBy = async (page, fn) => {
+  const reloaded = (ms) => page.waitForFunction(() => !window.__beforeReload &&
+    typeof Module !== "undefined" && runtimeReady, null, { timeout: ms }).then(() => true, () => false);
+  await page.evaluate(() => { window.__beforeReload = true; });
+  const w = workerStates.get(page);
+  const from = w?.seen.length;
+  await page.evaluate(fn);
+  if (w && !(await reloaded(5000))) {
+    const since = w.seen.slice(from);
+    const again = since.find((v, i) => v.status === "activated" && v.runningStatus === "starting" &&
+      since.slice(0, i).some((u) => u.versionId === v.versionId && u.runningStatus === "stopped"));
+    const swapping = await page.evaluate(() => !!swRegistration?.waiting).catch(() => false);
+    if (again && swapping) {
+      console.log("# the old worker started again mid-swap: stopped");
+      await w.cdp.send("ServiceWorker.stopWorker", { versionId: again.versionId });
+    }
+  }
+  if (await reloaded(60000)) return;
+  const state = await page.evaluate(() => ({
+    reloaded: !window.__beforeReload, appUpdating, url: location.href,
+    workers: swRegistration && ["installing", "waiting", "active"].map((k) => k + " " + swRegistration[k]?.state),
+  })).catch((e) => e.message);
+  throw new Error("no reload: " + JSON.stringify(state) +
+    (w ? " " + JSON.stringify(w.seen.slice(from).map((v) => `${v.versionId} ${v.status} ${v.runningStatus}`)) : ""));
+};
 
 for (const engine of ENGINES) {
   describe(`checkpoint worker across updates (${engine})`, { skip }, () => {
@@ -160,14 +205,8 @@ for (const engine of ENGINES) {
       await page.goto(site.url).catch(() => {});
       await booted().catch(() => {});
     };
-    // The page `fn` reloads, booted: told apart from this one by a mark only
-    // this one carries. Waiting for the next "load" event instead took a
-    // late one of the reload before (CI: "then applied" still on build B).
-    const reloadedBy = async (fn) => {
-      await page.evaluate(() => { window.__beforeReload = true; });
-      await page.evaluate(fn);
-      await page.waitForFunction(() => !window.__beforeReload && typeof Module !== "undefined" &&
-        runtimeReady, null, { timeout: 60000 });
+    const reloadedByUpdate = async (fn) => {
+      await reloadedBy(page, fn);
       await sleep(500);
     };
     const takeCheckpoint = () => page.evaluate(async () => {
@@ -191,7 +230,7 @@ for (const engine of ENGINES) {
         headless: true, ...(engine === "chromium" && channel ? { channel } : {}) });
       ctx = await browser.newContext({ viewport: { width: 1000, height: 800 } });
       await watchPolicy(ctx);
-      page = await ctx.newPage();
+      page = await watchWorkers(await ctx.newPage());
       await page.goto(site.url);
       await booted();
       await page.evaluate(() => dbPut(THUMBS_OFFER_KEY, Date.now()));
@@ -214,7 +253,7 @@ for (const engine of ENGINES) {
     test("a deploy applied mid-game: page and worker both the new build", async () => {
       await playGame();
       await deploy("v2", "B");
-      await reloadedBy(() => { applyUpdate(); });
+      await reloadedByUpdate(() => { applyUpdate(); });
       await expectBuild("B", "after the update");
     });
 
@@ -222,7 +261,7 @@ for (const engine of ENGINES) {
       await deploy("v3", "C");
       await page.reload(); await booted();
       await expectBuild("B", "reloaded, update not applied");
-      await reloadedBy(() => { applyUpdate(); });
+      await reloadedByUpdate(() => { applyUpdate(); });
       await expectBuild("C", "then applied");
     });
 
@@ -230,7 +269,7 @@ for (const engine of ENGINES) {
       await playGame();
       await page.evaluate(() => getCkptWorker());
       await deploy("v4", "D");
-      await reloadedBy(() => {
+      await reloadedByUpdate(() => {
         runPlayMs = ckptLastAt + CHECKPOINT_PLAY_MS + 10;
         takeCheckpoint();
         applyUpdate();
@@ -248,7 +287,7 @@ for (const engine of ENGINES) {
       await page.reload(); await booted();
       await expectBuild("D", "plain reload: still cached");
       await playGame();
-      await reloadedBy(() => { forceUpdate(); });
+      await reloadedByUpdate(() => { forceUpdate(); });
       await expectBuild("E", "after Force update");
     });
 
@@ -266,7 +305,7 @@ for (const engine of ENGINES) {
 
     test("a sw.js that does not list the worker: network when online, the page when not", async () => {
       await deploy("v5", "F", { listsWorker: false });
-      await reloadedBy(() => { applyUpdate(); });
+      await reloadedByUpdate(() => { applyUpdate(); });
       await expectBuild("F", "online");
       site.offline(true);
       try {
@@ -395,15 +434,22 @@ const assetGets = (site, from = 0) => site.log.slice(from).filter((e) => !PROBES
 const assetPath = (u) => (u === "./" ? "/" : u.slice(1));
 const digestsOf = (dir) => Object.fromEntries(swAssets(readFileSync(join(dir, "sw.js"), "utf8"))
   .map((u) => [u, sha256(readFileSync(join(dir, fileFor(u))))]));
+// Linux's WebKit (the GTK port, which ships in no browser the app targets)
+// sends the worker's only-if-cached lookups (heldCopy) to the network, so
+// its install downloads every asset, the DS core too (CI: each one a
+// same-origin request from sw.js). What it downloads is not the app's to
+// count there; the Mac runs these in Apple's WebKit and in Chromium.
+const skipDownloads = (engine) => skip ||
+  (engine === "webkit" && process.platform === "linux" ? "Linux WebKit ignores only-if-cached" : false);
 
 for (const engine of ENGINES) {
-  describe(`what the service worker downloads (${engine})`, { skip }, () => {
+  describe(`what the service worker downloads (${engine})`, { skip: skipDownloads(engine) }, () => {
     let browser, site, dir, oldSrc;
 
     const open = async () => {
       const ctx = await browser.newContext({ viewport: { width: 1000, height: 800 } });
       await watchPolicy(ctx);
-      return { ctx, page: await ctx.newPage() };
+      return { ctx, page: await watchWorkers(await ctx.newPage()) };
     };
     const booted = (page) => page.waitForFunction(
       () => typeof Module !== "undefined" && runtimeReady && !!swRegistration, null, { timeout: 60000 });
@@ -442,12 +488,6 @@ for (const engine of ENGINES) {
       if (!reg.waiting && !reg.installing) reg.update().catch(() => {});
       return !!reg.waiting;
     }, null, { timeout: 60000, polling: 500 });
-    const reloadedBy = async (page, fn) => {
-      await page.evaluate(() => { window.__beforeReload = true; });
-      await page.evaluate(fn);
-      await page.waitForFunction(() => !window.__beforeReload && typeof Module !== "undefined" &&
-        runtimeReady, null, { timeout: 60000 });
-    };
 
     before(async () => {
       if (skip) return;
@@ -625,7 +665,7 @@ for (const engine of ENGINES) {
       try {
         await page.goto(site.url);
         await installedFresh(page);
-        const other = await ctx.newPage();
+        const other = await watchWorkers(await ctx.newPage());
         await other.goto(site.url);
         await booted(other);
         // This tab has a game in progress, so the other tab's Update leaves
