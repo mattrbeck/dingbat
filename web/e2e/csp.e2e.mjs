@@ -69,6 +69,25 @@ for (const engine of ENGINES) {
       await ctx.close();
     });
 
+    test("a browser that refuses to compile the core is told so, not to check its connection", async () => {
+      // As iOS 15 did before the policy carried 'unsafe-eval': the policy
+      // with neither keyword that lets wasm compile.
+      const { ctx } = await open();
+      const page = await ctx.newPage();
+      await page.route((url) => url.pathname === "/" || url.pathname === "/index.html", async (route) => {
+        const res = await route.fetch();
+        const html = (await res.text()).replace(" 'wasm-unsafe-eval' 'unsafe-eval'", "");
+        await route.fulfill({ response: res, body: html });
+      });
+      await page.goto((await site()).url);
+      await page.waitForFunction(() => typeof coreLoad !== "undefined" && coreLoad.state === "failed",
+        null, { timeout: 60000 });
+      await page.evaluate(() => { ensureRuntimeReady(); });
+      await page.getByText("This browser blocked the emulator. Try another browser.").waitFor({ timeout: 20000 });
+      assert.equal(await page.getByText("Check the connection").count(), 0);
+      await ctx.close();
+    });
+
     test("the embeddable player plays its demo, its controls swap, nothing refused", async () => {
       const { ctx, refused } = await open();
       const page = await ctx.newPage();

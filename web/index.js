@@ -20813,14 +20813,29 @@ const fetchCore = async (imports) => {
 // (a burst of toasts can push it out, TOAST_MAX).
 let coreWanted = false;
 let coreFailToast = null;
+// The page's Content-Security-Policy refused to compile code (as iOS 15 did
+// before the policy carried 'unsafe-eval'). The compile then fails with an
+// error that reads like a network one in some engines and a broken file in
+// others; neither toast is true and neither button helps.
+let codeRefused = false;
+document.addEventListener("securitypolicyviolation", (e) => {
+  if (/^(wasm-)?eval$/.test(e.blockedURI) || /^(wasm-)?eval\b/.test(e.sample || "")) codeRefused = true;
+});
 // Bytes that arrived but will not compile or link are no connection
 // problem, and fetching them again only fetches the same cached copy: an
 // em.wasm from another build. Force update replaces the whole app.
 const coreBroken = (e) => e instanceof WebAssembly.CompileError || e instanceof WebAssembly.LinkError;
-const showCoreFailed = (broken) => {
+// WebKit fires no violation event for a refused compile, only a
+// CompileError naming the policy (as Chromium's also does).
+const coreFailKind = (e) =>
+  codeRefused || e?.name === "EvalError" || /Content Security Policy|unsafe-eval/i.test(String(e?.message))
+    ? "refused" : coreBroken(e) ? "broken" : "network";
+const showCoreFailed = (kind) => {
   hideCoreWait();
   if (coreFailToast && !coreFailToast.gone) dismissToast(coreFailToast);
-  coreFailToast = broken
+  coreFailToast = kind === "refused"
+    ? pushToast("This browser blocked the emulator. Try another browser.", 20000, null)
+    : kind === "broken"
     ? showActionToast("The emulator's files don't match this version.", "Update", () => {
         coreFailToast = null;
         startForceUpdate(); // as the Force update row: its card, its failure
@@ -20837,7 +20852,7 @@ const coreFailed = (e, again) => {
   coreLoad.state = "failed";
   coreLoad.retry = () => { coreLoad.retry = null; again(); };
   noteCore();
-  if (coreWanted && !runtimeReady) showCoreFailed(coreBroken(e));
+  if (coreWanted && !runtimeReady) showCoreFailed(coreFailKind(e));
 };
 
 Module.instantiateWasm = (imports, receive) => {
