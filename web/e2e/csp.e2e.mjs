@@ -114,11 +114,12 @@ for (const engine of ENGINES) {
       const opener = await ctx.newPage();
       await opener.goto((await site()).url + "version.txt");
       await opener.evaluate(() => { window.__got = []; addEventListener("message", (e) => window.__got.push(e.data)); });
-      const [popup] = await Promise.all([ctx.waitForEvent("page"),
-        opener.evaluate((u) => { window.open(u, "signin", "popup"); },
-          (await site()).url + "oauth-callback.html?state=s1&code=c1")]);
-      await popup.waitForLoadState().catch(() => {});
+      // Not waited on as a page: it closes itself 300 ms after it posts, and
+      // on a Mac WebKit can be gone before the page event is seen.
+      await opener.evaluate((u) => { window.open(u, "signin", "popup"); },
+        (await site()).url + "oauth-callback.html?state=s1&code=c1");
       await opener.waitForFunction(() => window.__got.length > 0, null, { timeout: 10000 });
+      await new Promise((r) => setTimeout(r, 500)); // its refusals, had it any
       assert.deepEqual(await opener.evaluate(() => window.__got),
         [{ type: "dingbat-oauth", state: "s1", code: "c1", error: "" }]);
       assert.deepEqual(refused, []);

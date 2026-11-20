@@ -39,7 +39,8 @@ final class NetLink: ObservableObject {
     /// The games are crossing (or the friend's half is): the sheet shows the
     /// two bats on the cable instead of the code entry (web NET_TRANSFER_STATUS).
     var transferring: Bool {
-        !statusIsError && (status.hasPrefix("Transferring games") || status.hasPrefix("Ready — waiting for your friend"))
+        !statusIsError && (status.hasPrefix("Transferring games") || status.hasPrefix("Waiting for your friend to agree")
+                           || status.hasPrefix("Ready — waiting for your friend"))
     }
     /// Dialing or waiting: the spinner, and Connect reads Cancel.
     @Published private(set) var connecting = false
@@ -137,6 +138,9 @@ final class NetLink: ObservableObject {
         var mismatchAsked = false
         var mismatchOk = false
         var romWanted = false
+        /// The friend said yes to the different game too: its have-rom,
+        /// need-rom or rom-begin.
+        var friendAgreed = false
         var remoteRomHash: UInt32 = 0
         var remoteRomLen = 0
         var romBuf = Data()
@@ -565,7 +569,10 @@ final class NetLink: ObservableObject {
         peer.onClosed = { [weak self] in
             guard let self, self.session === s, s.peer === peer else { return }
             if s.started { self.dropped("channel closed", "Your friend disconnected") }
-            else if s.rb != nil && s.rb?.inited == false { self.fail("Connection lost during setup") }
+            else if let rb = s.rb, !rb.inited {
+                // Before the friend said yes to a different game: their no, or they left.
+                self.fail(rb.mismatchAsked && !rb.friendAgreed ? "Your friend didn't connect" : "Connection lost during setup")
+            }
         }
         peer.onMessage = { [weak self] data in
             guard let self, self.session === s else { return }
@@ -900,6 +907,10 @@ final class NetLink: ObservableObject {
 
     private func showTransfer(_ rb: RB) {
         guard rb.needRom, rb.mismatchOk else { return }
+        guard rb.friendAgreed else {
+            setStatus("Waiting for your friend to agree…")
+            return
+        }
         // The friend's ROM is estimated at ours until its rom-begin lands.
         let total = rb.romBytes.count + (rb.remoteRomLen > 0 ? rb.remoteRomLen : rb.romBytes.count)
         guard total > 0 else { return }
@@ -952,6 +963,7 @@ final class NetLink: ObservableObject {
             return
         case Self.haveRom:
             // Our ROM is already on the friend's side.
+            rb.friendAgreed = true
             rb.friendHasRom = true
             rb.romSendStarted = true
             rb.romSent = rb.romBytes.count
@@ -959,7 +971,9 @@ final class NetLink: ObservableObject {
             return
         case Self.needRom:
             // Only to a friend this player agreed to connect to.
+            rb.friendAgreed = true
             if rb.mismatchOk { sendOurRom(s) } else { rb.romWanted = true }
+            showTransfer(rb)
             return
         case Self.away:
             if data.count >= 2 { peerAway(data[data.startIndex + 1] == 1) }
@@ -1010,6 +1024,7 @@ final class NetLink: ObservableObject {
                 fail("Your friend's game looks invalid — try again")
                 return
             }
+            rb.friendAgreed = true
             rb.remoteRomLen = len
             rb.romBuf = Data()
             rb.romBuf.reserveCapacity(len)

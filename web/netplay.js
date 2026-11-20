@@ -67,7 +67,7 @@ const netSetConnecting = (on) => {
 // The link screen (two bats either end of the cable) is up while the games
 // cross: from the first progress line until the session starts, fails or
 // the modal closes. Every status passes through here, so this is the switch.
-const NET_TRANSFER_STATUS = /^(Transferring games|Ready — waiting for your friend)/;
+const NET_TRANSFER_STATUS = /^(Transferring games|Waiting for your friend to agree|Ready — waiting for your friend)/;
 
 const netSetStatus = (msg, isError) => {
   netStatusDiv.textContent = msg;
@@ -608,7 +608,12 @@ const wireChannel = (dc) => {
     if (!net || net.dc !== dc || net.ending) return;
     if (net.started) rbDropped("channel closed", "Your friend disconnected");
     // Dropped mid-handshake: surface it rather than leave the game frozen.
-    else if (net.rb && !net.rb.inited) netFail("Connection lost during setup");
+    // Before the friend said yes to a different game, that is their no (or
+    // they left): either way they did not connect.
+    else if (net.rb && !net.rb.inited) {
+      netFail(net.rb.mismatchAsked && !net.rb.friendAgreed
+        ? "Your friend didn't connect" : "Connection lost during setup");
+    }
   };
 };
 
@@ -1430,6 +1435,12 @@ const rbSendRom = async (bytes, onProgress) => {
 const rbShowXferProgress = () => {
   const rb = net?.rb;
   if (!rb || !rb.needRom || !rb.mismatchOk) return;
+  // Nothing crosses until the friend says yes too (its have-rom, need-rom or
+  // rom-begin is its yes).
+  if (!rb.friendAgreed) {
+    netSetStatus("Waiting for your friend to agree…");
+    return;
+  }
   // Estimate the peer's ROM at our own size until its rom-begin lands.
   const total = (rb.romLen || 0) + (rb.remoteRomLen || rb.romLen || 0);
   if (total <= 0) return;
@@ -1640,6 +1651,7 @@ const rbMessage = (data) => {
   }
   if (kind === RB_HAVE_ROM) {
     // Our ROM is already on the friend's side.
+    rb.friendAgreed = true;
     rb.friendHasRom = true;
     rb.romSendStarted = true;
     rb.romSent = rb.romLen;
@@ -1648,8 +1660,10 @@ const rbMessage = (data) => {
   }
   if (kind === RB_NEED_ROM) {
     // Only to a friend this player agreed to connect to with another game.
+    rb.friendAgreed = true;
     if (rb.mismatchOk) rbSendOurRom();
     else rb.romWanted = true;
+    rbShowXferProgress();
     return;
   }
   if (kind === RB_HELLO) {
@@ -1690,6 +1704,7 @@ const rbMessage = (data) => {
       netFail("Your friend's game looks invalid — try again");
       return;
     }
+    rb.friendAgreed = true;
     rb.remoteRomLen = len;
     rb.romBuf = new Uint8Array(len);
     rb.romGot = 0;

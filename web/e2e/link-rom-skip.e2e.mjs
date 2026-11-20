@@ -262,11 +262,13 @@ test("a different game refused: the link ends and no ROM crossed", { skip, timeo
   await b.page.locator("#net-mismatch-yes").click();
   await sleep(500);
   const sent = await b.page.evaluate(() => net.rb.romSent || 0);
+  assert.equal(await status(b), "Waiting for your friend to agree…", "B is told it waits on A, not shown 0%");
   await a.page.locator("#net-mismatch-no").click();
   await until(() => a.page.evaluate(() => !document.getElementById("net-modal").classList.contains("open")),
     "A's link screen closed", 10000);
   assert.equal(sent, 0, "B, who agreed, had sent nothing to a friend who had not");
   await until(async () => !(await asked(b)) && /\S/.test(await status(b)), "B told the link ended", 30000);
+  assert.equal(await status(b), "Your friend didn't connect");
   assert.equal(await b.page.evaluate(() => !!net?.rb?.inited), false, "B booted nothing");
   await a.ctx.close(); await b.ctx.close();
 });
