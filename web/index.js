@@ -20834,7 +20834,10 @@ const showCoreFailed = (kind) => {
   hideCoreWait();
   if (coreFailToast && !coreFailToast.gone) dismissToast(coreFailToast);
   coreFailToast = kind === "refused"
-    ? pushToast("This browser blocked the emulator. Try another browser.", 20000, null)
+    // Every browser on iOS is Safari's engine underneath, so another one
+    // would refuse the same; a newer iOS is the way out there.
+    ? pushToast(IS_IOS ? "Safari blocked the emulator. Updating iOS may fix this."
+      : "This browser blocked the emulator. Try another browser.", 20000, null)
     : kind === "broken"
     ? showActionToast("The emulator's files don't match this version.", "Update", () => {
         coreFailToast = null;
