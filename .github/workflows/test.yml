@@ -709,30 +709,21 @@ jobs:
         working-directory: web
         run: node --test --test-concurrency=1 ${{ matrix.files }}
 
-  web-nds:
-    # DS games in the real app (web/e2e/nds.e2e.mjs, headless Chromium): both
-    # screens, the stylus, sound, a battery save across a reload, firmware
-    # settings, rewind, run-ahead. Its test ROMs are not in the repo: ours
+  nds-roms:
+    # The DS suite's test ROMs (web-nds), which are not in the repo: ours
     # (tests/nds/src: fb_both, snd_tone, cheat_probe, save_write, fw_power)
-    # are built with Ubuntu's ARM toolchain, and four of devkitPro's
-    # nds-examples (touch_test, simple, Double_Buffer, Simple_Tri) at a
-    # pinned commit in devkitPro's own image, which has libnds. Cached on
-    # those sources and that commit.
-    needs: wasm
+    # with Ubuntu's ARM toolchain, and four of devkitPro's nds-examples
+    # (touch_test, simple, Double_Buffer, Simple_Tri) at a pinned commit in
+    # devkitPro's own image, which has libnds. Here, not on the Mac web-nds
+    # runs on: that runner has no Docker. Cached on those sources and that
+    # commit.
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 20
     env:
       DINGBAT_NDS_ROMS: ${{ github.workspace }}/nds-roms
       NDS_EXAMPLES_SHA: f1ba715a451c6407f8b0f805999d0153062ff552
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-      - uses: actions/download-artifact@v4
-        with:
-          name: wasm
-          path: web
       - name: Cache the DS test ROMs
         id: nds-roms
         uses: actions/cache@v4
@@ -760,26 +751,59 @@ jobs:
             docker run --rm -u "$(id -u):$(id -g)" -v "$PWD/nds-examples":/src -w /src devkitpro/devkitarm make -C "$p"
             cp "nds-examples/$p/$(basename "$p").nds" nds-roms/built/
           done
-          ls -l nds-roms nds-roms/built
+      - name: Every ROM the suite needs
+        # Without one the suite skips, and passes.
+        run: |
+          set -e
+          for f in fb_both snd_tone cheat_probe save_write fw_power built/touch_test built/simple built/Double_Buffer built/Simple_Tri; do
+            test -s "nds-roms/$f.nds" || { echo "::error::$f.nds was not built"; exit 1; }
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nds-roms
+          path: nds-roms
+          retention-days: 3
+
+  web-nds:
+    # DS games in the real app (web/e2e/nds.e2e.mjs, headless Chromium): both
+    # screens, the stylus, every layout, sound, a battery save across a
+    # reload, firmware settings, rewind, run-ahead. On a Mac: the Linux
+    # runners draw Chromium's WebGL in software, and the suite ran past 30
+    # minutes there.
+    needs: [wasm, nds-roms]
+    runs-on: macos-latest
+    timeout-minutes: 30
+    env:
+      DINGBAT_NDS_ROMS: ${{ github.workspace }}/nds-roms
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: wasm
+          path: web
+      - uses: actions/download-artifact@v4
+        with:
+          name: nds-roms
+          path: nds-roms
       - name: Cache Playwright's browsers
         uses: actions/cache@v4
         with:
-          path: ~/.cache/ms-playwright
-          key: playwright-native-${{ runner.os }}-${{ hashFiles('web/package-lock.json') }}
+          path: ~/Library/Caches/ms-playwright
+          key: playwright-e2e-${{ runner.os }}-${{ hashFiles('web/package-lock.json') }}
       - name: Chromium
         working-directory: web
         run: |
           set -e
           ../.github/scripts/retry.sh 3 npm ci
-          ../.github/scripts/retry.sh 3 npx playwright install --with-deps chromium
+          ../.github/scripts/retry.sh 3 npx playwright install chromium
       - name: DS games in the app
         working-directory: web
-        # Every ROM there first: without one the suite skips, and passes.
         run: |
           set -e
-          for f in fb_both snd_tone cheat_probe save_write fw_power built/touch_test built/simple built/Double_Buffer built/Simple_Tri; do
-            test -s "$DINGBAT_NDS_ROMS/$f.nds" || { echo "::error::$f.nds was not built"; exit 1; }
-          done
+          test -s "$DINGBAT_NDS_ROMS/built/touch_test.nds"
           node --test --test-concurrency=1 e2e/nds.e2e.mjs
 
   fuzz:
