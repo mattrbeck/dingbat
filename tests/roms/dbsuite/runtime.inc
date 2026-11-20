@@ -33,6 +33,9 @@ main:
     mov r0, #0
     mvn r1, #0
     str r0, [r4, #RT_INFLIGHT]
+.if MB == 0
+    str r0, [r4, #RT_ROMBAD]
+.endif
     str r1, [r4, #RT_LAST_RUN]
     str r0, [r4, #RT_VERDICT]
     str r0, [r4, #RT_LINKON]
@@ -57,6 +60,9 @@ main:
     ldr r4, =RT
 .endif
     bl  detect_debug_ports
+.if MB == 0
+    bl  rom_check
+.endif
     bl  resume_check               @ r0 = 1: a run was cut short by a reset
     cmp r0, #0
     bne main_resume
@@ -303,6 +309,55 @@ record_status:
     ldmfd sp!, {r4-r6, pc}
     .ltorg
 
+.if MB == 0
+@ Is the image what build.py wrote?  Sums it in 256-byte blocks against the
+@ table rom_sums points at; rom_config counts as zero, since a harness
+@ patches it.  The first block that differs and how many did stay in
+@ RT_ROMBAD until the next boot.  A flash cart with one bit that would not
+@ hold failed one case of a correct ROM (cart-agb-2026-11-20.json); this
+@ names the cartridge instead.
+rom_check:
+    stmfd sp!, {r4-r9, lr}
+    ldr r0, =rom_sums
+    ldr r5, [r0]                   @ blocks
+    ldr r4, [r0, #4]               @ their sums
+    cmp r5, #0
+    beq 9f
+    mov r6, #0x08000000
+    ldr r9, =rom_config
+    mov r7, #0                     @ block
+    mov r8, #0                     @ blocks wrong
+1:  mov r0, #0
+    mov r1, #64
+2:  cmp r6, r9
+    ldr r2, [r6], #4
+    moveq r2, #0
+    add r0, r2, r0, ror #31
+    subs r1, r1, #1
+    bne 2b
+    ldr r2, [r4], #4
+    cmp r0, r2
+    beq 3f
+    cmp r8, #0
+    moveq r12, r7
+    add r8, r8, #1
+3:  add r7, r7, #1
+    cmp r7, r5
+    blo 1b
+    cmp r8, #0
+    beq 9f
+    cmp r8, #15
+    movhi r8, #15
+    mov r0, r12, lsl #8
+    orr r0, r0, r8, lsl #28
+    ldr r1, =RT
+    ldr r2, [r1, #RT_ROMBAD]
+    cmp r2, #0
+    streq r0, [r1, #RT_ROMBAD]
+9:  ldmfd sp!, {r4-r9, pc}
+    .ltorg
+.endif
+
 @ ═════════════════════════════ the runner ════════════════════════════════
 @ r0 = first case, r1 = one past the last.  Resets those cases, runs them,
 @ recounts, and writes RB_DONE last.
@@ -360,6 +415,15 @@ run_range_continue:
 2:  mvn r0, #0
     str r0, [r6, #RB_CURRENT]
     bl  recount
+.if MB == 0
+    bl  rom_check
+    ldr r0, =RT
+    ldr r0, [r0, #RT_ROMBAD]
+    cmp r0, #0
+    orrne r0, r0, #4
+    orr r0, r0, #2
+    str r0, [r6, #RB_FLAGS]
+.endif
     mov r0, #2
     str r0, [r6, #RB_STATE]
     bl  emit_summary_lines
@@ -966,6 +1030,9 @@ str_scrash:  .asciz " crash="
 str_sskip:   .asciz " skip="
 str_stotal:  .asciz " total="
 str_alldone: .asciz "DBSUITE ALL DONE"
+.if MB == 0
+str_misread: .asciz "image misread at "
+.endif
     .align 2
 
 @ r0 = first, r1 = end
@@ -1092,6 +1159,22 @@ emit_summary_lines:
     mov r1, #0                     @ word counters
     bl  sb_counts
     bl  sb_emit
+.if MB == 0
+    ldr r0, =RT
+    ldr r4, [r0, #RT_ROMBAD]
+    cmp r4, #0
+    beq 3f
+    bl  sb_reset
+    ldr r0, =str_dbsuite
+    bl  sb_str
+    ldr r0, =str_misread
+    bl  sb_str
+    bic r0, r4, #0xF0000000
+    add r0, r0, #0x08000000
+    bl  sb_hex
+    bl  sb_emit
+3:
+.endif
     bl  sb_reset
     ldr r0, =str_alldone
     bl  sb_str

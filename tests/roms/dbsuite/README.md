@@ -60,7 +60,10 @@ sub-suite in `tests/results.md`, and every non-passing case in
 On the console: `python3 tests/roms/dbsuite/run.py --sp OUT.json` uploads
 the multiboot image over the link rig (`tools/hwlink`). It follows the ROM's
 progress beacons, reads the results block back, and reinstalls the monitor.
-Take the rig's lock first.
+Take the rig's lock first. For a run started by hand from a flash cart,
+`python3 tests/roms/dbsuite/run.py --cart OUT.json` waits for the results
+block on the link cable, saves and decodes it, and says whether the image
+read back as built.
 
 `python3 tests/roms/dbsuite/build.py --diag SIZE OUT [--nostub]` builds a
 multiboot smoke test (`mbdiag.s`) padded to SIZE bytes. It turns the screen
@@ -118,6 +121,16 @@ reaches the host", and a size-dependent upload failure from either.
   that hangs with interrupts masked cannot be taken back from inside the
   machine. The results block then says RUNNING and names the case in flight,
   and the screen keeps its white verdict block and red RUNNING banner.
+- **Self-check.** The cartridge image carries a sum for each 256 bytes of
+  itself, and the ROM adds the image up against them at boot and again
+  after every run. A block that reads wrong puts `read error at 0801D600`
+  (the block's address) on the home screen in place of `cartridge build`,
+  a `DBSUITE image misread at ...` line in the log and the flags below in
+  the results block. It is there because a flash cart with one bit that
+  would not hold failed one case of a correct ROM (2026-11-20,
+  `cart-agb-2026-11-20.json`): a failure beside a read error is the
+  cartridge's. `rom_config` is left out of the sums, so a harness may still
+  patch it.
 - **Verdict pixel.** A 4x4 block at (236..239, 156..159) stays white until a
   run finishes. It then turns green (`0x03E0`) if nothing failed, timed out
   or crashed, and red (`0x001F`) otherwise. Sample pixel (239,159).
@@ -165,7 +178,7 @@ At **0x02014000** in EWRAM, in both builds. All fields are little-endian.
 | +0x04 | version (1) |
 | +0x08 | done: `0x454E4F44` ("DONE") once a run has finished, 0 while running |
 | +0x0C | state: 0 idle, 1 running, 2 finished |
-| +0x10 | flags: bit 0 = multiboot build |
+| +0x10 | flags: bit 0 = multiboot build; bit 1 = the image was summed; bit 2 = a block read wrong, bits 8-27 the first one's byte offset, bits 28-31 how many (15 = that or more) |
 | +0x14 | number of cases N |
 | +0x18 | number of suites |
 | +0x1C | case in flight (0xFFFFFFFF none) |

@@ -16,7 +16,9 @@ Steps:
      (tools/hwlink/r0-agb.json, breakram-agb.json) are written as includes;
   3. dbsuite.s is assembled twice: MB=0 linked at 0x08000000 behind a
      cartridge header, MB=1 linked at MB_HOME and wrapped by mbstub.s;
-  4. cases.json lists every case (index, suite, name, check) as built, for
+  4. the cartridge image's sums are appended, one word per 256 bytes, for
+     the ROM to check itself against (runtime.inc's rom_check);
+  5. cases.json lists every case (index, suite, name, check) as built, for
      harnesses that read the results block out of a memory dump.
 """
 import json
@@ -727,6 +729,22 @@ def patch_header(rom, title, code):
     rom[0xBD] = (c - 0x19) & 0xFF
 
 
+SUM_BLOCK = 256
+
+
+def block_sums(rom, blocks):
+    """runtime.inc's rom_check, block by block: each word added to the sum
+    so far rotated left one bit, with rom_config (0xC4) read as zero."""
+    sums = []
+    for b in range(blocks):
+        s = 0
+        for off in range(b * SUM_BLOCK, (b + 1) * SUM_BLOCK, 4):
+            w = 0 if off == 0xC4 else struct.unpack_from('<I', rom, off)[0]
+            s = (w + ((s << 1 | s >> 31) & 0xFFFFFFFF)) & 0xFFFFFFFF
+        sums.append(s)
+    return sums
+
+
 def symbols(elf):
     out = subprocess.run(['arm-none-eabi-nm', elf], check=True, capture_output=True,
                          text=True).stdout
@@ -822,12 +840,22 @@ def main():
         # At least 512 KB: an emulator may take a file of 256 KB or less for
         # a multiboot image and run it from EWRAM. mGBA 0.10.5 does when the
         # word at 0xC0 is a forward branch (GBAIsMB), and this one's is.
-        size = max(1 << (len(rom) - 1).bit_length(), 0x80000)
+        # After the image, its sums, a word for each 256 bytes: the ROM
+        # checks itself against them at boot and after a run (rom_check).
+        blocks = -(-len(rom) // SUM_BLOCK)
+        table = blocks * SUM_BLOCK
+        size = max(1 << (table + 4 * blocks - 1).bit_length(), 0x80000)
         rom += b'\xff' * (size - len(rom))
+        cart_syms = symbols(elf)
+        struct.pack_into('<II', rom, cart_syms['rom_sums'] - 0x08000000,
+                         blocks, 0x08000000 + table)
         patch_header(rom, 'DBSUITE', 'ADBE')
         open(cart, 'wb').write(rom)
         romfix.gba_logo(cart)
-        suites, cases = case_list(bytes(rom), 0x08000000, symbols(elf))
+        rom = bytearray(open(cart, 'rb').read())
+        struct.pack_into(f'<{blocks}I', rom, table, *block_sums(rom, blocks))
+        open(cart, 'wb').write(rom)
+        suites, cases = case_list(bytes(rom), 0x08000000, cart_syms)
 
         # multiboot: the body runs at MB_HOME; mbstub.s copies it there
         body = os.path.join(build, 'body.bin')

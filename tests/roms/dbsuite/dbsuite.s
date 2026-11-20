@@ -43,6 +43,13 @@ rom_version:
     .ascii "dbsuite 1"
     .byte 0
     .align 2
+.if MB == 0
+@ rom_sums, filled in by build.py: how many 256-byte blocks the image has
+@ and where their sums are (runtime.inc's rom_check).
+rom_sums:
+    .word 0
+    .word 0
+.endif
 
     .include "runtime.inc"
     .include "suite_cpu.inc"

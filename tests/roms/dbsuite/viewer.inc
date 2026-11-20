@@ -431,6 +431,7 @@ vstatus_words:
 str_v_notrun:   .asciz "NOT RUN"
 str_v_skipped:  .asciz "SKIPPED"
 str_v_title:    .asciz "dbsuite"
+str_v_misread:  .asciz "read error at "
 str_v_auto:     .asciz "auto-run in "
 str_v_none:     .asciz "not run"
 str_v_all:      .asciz "all suites"
@@ -499,10 +500,27 @@ home_fill:
     mov r1, #4
     ldr r2, =str_sub2
     bl  vstr
+    ldr r5, [r4, #RT_ROMBAD]       @ the cartridge returned the image wrong:
+    cmp r5, #0                     @ say where, in place of the build's name
+    beq 1f
+    ldr r0, =C_RED
+    bl  vink
     mov r0, #18
+    mov r1, #6
+    ldr r2, =str_v_misread
+    bl  vstr
+    mov r1, #6
+    bic r2, r5, #0xF0000000
+    add r2, r2, #0x08000000
+    bl  vhex
+    ldr r0, =C_GREY
+    bl  vink
+    b   2f
+1:  mov r0, #18
     mov r1, #6
     ldr r2, =str_cartb
     bl  vstr
+2:
     mov r0, #2
     mov r1, #8
     ldr r2, =str_v_suite

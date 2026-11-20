@@ -8,6 +8,10 @@
     python3 tests/roms/dbsuite/run.py --sp OUT.json [--from=N]
                                                     # on the GBA SP over the
                                                     # link rig (see below)
+    python3 tests/roms/dbsuite/run.py --cart OUT.json
+                                                    # a flash cart run started
+                                                    # by hand: its results
+                                                    # block, off the link cable
 
 Emulator runs drive `./dingbat_test <rom> --mode=mgba-suite`, which stops at
 the ROM's `DBSUITE ALL DONE` line, and read the one `DBSUITE case ...` line
@@ -98,6 +102,42 @@ def decode_block(words):
     return got
 
 
+def image_note(words):
+    """What the cartridge build's self-check (rom_check) left in RB_FLAGS."""
+    flags = words[0x10 // 4]
+    if flags & 4:
+        n = flags >> 28
+        return (f'THE CARTRIDGE RETURNED THE IMAGE WRONG: first at '
+                f'0x{0x08000000 + (flags & 0x0FFFFF00):08X}, '
+                f'{"15 or more" if n == 15 else n} block(s) of 256 bytes')
+    return 'image read back as built' if flags & 2 else 'image not checked'
+
+
+def from_cartridge(out_path, wait=600):
+    """A run started by hand from a flash cart: wait for its results block
+    on the link cable, save it, decode it."""
+    sys.path.insert(0, os.path.join(ROOT, 'tools', 'hwlink'))
+    import gblink
+    end, words = time.time() + wait, None
+    while time.time() < end:
+        try:
+            with gblink.GBLink() as link:
+                link.open_link()
+                words, _ = gblink.read_report(link, limit=4096)
+        except OSError:
+            words = None
+        if words and words[0] == 0x55534244 and words[0x0C // 4] == 2:
+            break
+        words = None
+        time.sleep(15)
+    if not words:
+        sys.exit('no finished results block came over the link')
+    json.dump(words, open(out_path, 'w'))
+    print('saved', len(words), 'words to', out_path)
+    print(image_note(words))
+    return decode_block(words), bool(words[0x10 // 4] & 4)
+
+
 def patched_image(start, risky=True):
     """The multiboot image with rom_config set to run at once from `start`."""
     info = json.load(open(os.path.join(HERE, 'cases.json')))
@@ -172,6 +212,11 @@ def main(argv):
     bios = next((f.split('=', 1)[1] for f in flags if f.startswith('--bios=')), None)
     show_all = '--all' in flags
     bad = 0
+    if '--cart' in flags:
+        out = next(a for a in argv[1:] if not a.startswith('--'))
+        got, misread = from_cartridge(out)
+        bad = report('AGB SP, cartridge image', got, True, show_all)
+        return 1 if bad or misread else 0
     if '--sp' in flags:
         out = next(a for a in argv[1:] if not a.startswith('--'))
         start = next((int(f.split('=', 1)[1], 0) for f in flags

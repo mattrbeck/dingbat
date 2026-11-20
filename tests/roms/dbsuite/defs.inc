@@ -40,7 +40,10 @@
 .equ RB_VERSION,  0x04
 .equ RB_DONE,     0x08             @ 'DONE', written last
 .equ RB_STATE,    0x0C             @ 0 idle, 1 running, 2 finished
-.equ RB_FLAGS,    0x10             @ bit0 multiboot build
+.equ RB_FLAGS,    0x10             @ bit0 multiboot build; bit1 the image was
+                                   @ summed (rom_check); bit2 a block read
+                                   @ wrong: bits 8-27 the first one's byte
+                                   @ offset, bits 28-31 how many (15 = more)
 .equ RB_NCASES,   0x14
 .equ RB_NSUITES,  0x18
 .equ RB_CURRENT,  0x1C             @ case in flight, -1 none
@@ -99,6 +102,7 @@
 .equ RT_VFILTER,  0x74            @ 1 = failures only
 .equ RT_VLOGOCH,  0x78            @ the home screen's logo cells: 0 or ' '
 .equ RT_VAUTO,    0x80            @ frames to the auto-run, 0 = none
+.equ RT_ROMBAD,   0x84            @ rom_check: 0, or RB_FLAGS bits 8-31
 .equ RT_SB,        0x100           @ 256-byte output line
 .equ RT_VSHOWN,   0x1000          @ 40x20 cells on the LCD: character, ink | paper << 16
 .equ RT_VNEXT,    0x3000          @ ... and the screen being drawn
