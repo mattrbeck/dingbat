@@ -238,6 +238,51 @@ test("HD 3D draws the screens at the chosen multiple and leaves the 1x ones alon
   assert.deepEqual(errors, []);
   await ctx.close();
 });
+
+// The same scene with the graphics card drawing the 3D (gpu3d.js), where the
+// browser has a hardware one (CI's Mac does; a software one skips): at 1x it
+// draws the core's own picture exactly (docs/nds/gpu3d.md), and at 2x it
+// draws the screens at twice the size, the triangle in them.
+test("the graphics card draws the DS's 3D as the core does, and at the HD multiple", { skip }, async (t) => {
+  const ctx = await browser.newContext({ viewport: { width: 1000, height: 800 }, serviceWorkers: "block" });
+  const { page, errors } = await newPage(ctx);
+  await addGame(page, rom("built/Simple_Tri.nds"));
+  await page.evaluate(() => setNdsLayout("stack"));
+  await page.evaluate(() => setNdsDisplay({ gpu: "cpu", hd: 1 }));
+  await framesPast(page, 20);
+  const cpu = await page.evaluate(() =>
+    Array.from(new Uint16Array(ndsCore.HEAPU8.buffer, ndsCore._nds_fb555_top(), 256 * 192)));
+  await page.evaluate(() => setNdsDisplay({ gpu: "auto" }));
+  await framesPast(page, (await page.evaluate(() => ndsCore._nds_frame_count())) + 6);
+  if (!(await page.evaluate(() => ndsGpuActive()))) {
+    t.skip("this browser's graphics card does not draw the 3D (a software one, or none)");
+    await ctx.close();
+    return;
+  }
+  const gpu1 = await page.evaluate(() => { const a = ndsGpu555(); return a && Array.from(a.subarray(0, 256 * 192)); });
+  assert.ok(gpu1, "the graphics card's picture is read back");
+  let off = 0;
+  for (let i = 0; i < cpu.length; i++) if ((gpu1[i] & 0x7FFF) !== (cpu[i] & 0x7FFF)) off++;
+  assert.equal(off, 0, "at 1x the graphics card's top screen is the core's");
+  await page.evaluate(() => setNdsDisplay({ hd: 2 }));
+  await framesPast(page, (await page.evaluate(() => ndsCore._nds_frame_count())) + 6);
+  const hd = await page.evaluate(() => {
+    const st = ndsGpuState;
+    if (!st || !st.g.screens) return null;
+    const all = st.g.read(st.g.screens);
+    st.g.restore();
+    let lit = 0;
+    for (let i = 0; i < 512 * 384; i++) if (all[i] & 0x7FFF) lit++;
+    return { k: st.k, len: all.length, lit };
+  });
+  assert.ok(hd, "the graphics card's HD picture is read back");
+  assert.equal(hd.k, 2);
+  assert.equal(hd.len, 2 * 512 * 384, "both screens at twice the size");
+  assert.ok(hd.lit > 4 * 1000, "the triangle is drawn at 2x: " + hd.lit);
+  assert.equal(await page.evaluate(() => ndsCore._nds_hd_scale()), 1, "the core stays at 1x meanwhile");
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
 // --- Display modes (docs/nds/web.md "Screens") ---------------------------------
 
 // Every arrangement, swap, gap and turn the Screens panel offers.
