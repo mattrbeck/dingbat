@@ -39,6 +39,7 @@ struct SettingsView: View {
                 .environment(\.palette, settings.palette)
                 .environment(\.padScope, AppModel.Sheet.settings(section: nil).id)
                 .environment(\.padPane, "supporter")
+                .iPadSheet(width: 560, height: 780)
         }
         .onChange(of: supporter.sheetUp) { up in
             if up {
@@ -137,7 +138,7 @@ private struct RootPane: View {
 
     var body: some View {
         let sections = [
-            SSection(id: "banner", [.custom("banner", SupporterBanner())]),
+            SSection(id: "banner", [.custom("banner", SupporterBanner(small: sidebar))]),
             SSection(id: "look", [
                 row(.appearance, tile: Tile(color: 0x7A4FC4, glyph: .symbol("paintbrush.pointed.fill")), value: s.effectiveTheme.label),
                 row(.controls, tile: Tile(color: 0x636079, glyph: .symbol("gamecontroller.fill"))),
@@ -155,15 +156,22 @@ private struct RootPane: View {
             ]),
         ]
         if sidebar {
-            List(selection: $nav.selection) {
+            // Not List(selection:): its solid accent fill hides the controller's
+            // ring and greys the label; the detail follows nav.selection anyway.
+            List {
                 ForEach(sections) { sec in
                     Section {
                         ForEach(sec.rows) { r in
                             if case .nav(let label, _, let tile, _, let badge, _, let to) = r.kind {
-                                NavigationLink(value: to) { RowLine(label: label, tile: tile, badge: badge) { EmptyView() } }
-                                    .padFocus(r.id) { nav.open(to) }
+                                Button { nav.open(to) } label: {
+                                    RowLine(label: label, tile: tile, badge: badge) { EmptyView() }.contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityAddTraits(nav.selection == to ? .isSelected : [])
+                                .padFocus(r.id) { nav.open(to) }
+                                .listRowBackground(nav.selection == to ? palette.accent.opacity(0.24) : palette.surface2)
                             } else if case .custom(let v) = r.kind {
-                                v
+                                v.listRowBackground(palette.surface2)
                             }
                         }
                     }
@@ -184,19 +192,22 @@ private struct RootPane: View {
 
 /// The top row: "Support dingbat", or "dingbat" with the Supporter pill.
 private struct SupporterBanner: View {
+    /// In the sidebar: room for one line each.
+    var small = false
     @ObservedObject private var store = Supporter.shared
     @Environment(\.palette) private var palette
 
     var body: some View {
         Button { store.open() } label: {
-            HStack(spacing: 14) {
-                Circle().fill(palette.bg).frame(width: 56, height: 56)
-                    .overlay(Image("LogoCrown").interpolation(.none).resizable().scaledToFit().frame(width: 46))
+            HStack(spacing: small ? 10 : 14) {
+                Circle().fill(palette.bg).frame(width: small ? 44 : 56, height: small ? 44 : 56)
+                    .overlay(Image("LogoCrown").interpolation(.none).resizable().scaledToFit().frame(width: small ? 36 : 46))
                 VStack(alignment: .leading, spacing: 2) {
                     Text(store.unlocked ? "dingbat" : "Support dingbat")
-                        .font(.system(size: 20, weight: .semibold)).foregroundColor(palette.text)
+                        .font(.system(size: small ? 17 : 20, weight: .semibold)).foregroundColor(palette.text)
+                        .lineLimit(1).minimumScaleFactor(0.8)
                     Text(store.unlocked ? sinceText : "Themes, icons, palettes and more")
-                        .font(.system(size: 14)).foregroundColor(palette.textDim)
+                        .font(.system(size: small ? 13 : 14)).foregroundColor(palette.textDim)
                         .lineLimit(1).minimumScaleFactor(0.85)
                 }
                 Spacer(minLength: 4)

@@ -1,0 +1,43 @@
+# The app plus unit tests hosted in it, for the Supporter purchase flow
+# against the local Supporter.storekit products (SKTestSession: buy, refund,
+# Ask to Buy, failures; no App Store Connect). Generate beside the app's
+# project, from the repo root, then test on any simulator:
+#   xcodegen generate --spec ios/e2e/storekit/project.yml --project ios --project-root ios
+#   xcodebuild test -project ios/DingbatStoreTest.xcodeproj -scheme DingbatStoreTest \
+#     -destination 'platform=iOS Simulator,id=<udid>' CODE_SIGNING_ALLOWED=NO
+# On a new simulator the first run finds no products (StoreKit takes the
+# test configuration from the app's next launch): run it twice there.
+# Paths are from ios/, as in the app's own spec.
+include:
+  - path: project.yml
+    relativePaths: false
+name: DingbatStoreTest
+targets:
+  DingbatStoreTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: e2e/storekit/SupporterStoreTests.swift
+      - path: Dingbat/Supporter.storekit
+        buildPhase: resources
+    dependencies:
+      - target: Dingbat
+    settings:
+      base:
+        TEST_HOST: $(BUILT_PRODUCTS_DIR)/Dingbat.app/Dingbat
+        BUNDLE_LOADER: $(TEST_HOST)
+        # @testable import sees the app's bridging header and the core's C headers.
+        HEADER_SEARCH_PATHS: "$(PROJECT_DIR)/include $(PROJECT_DIR)/lib/include"
+        PRODUCT_BUNDLE_IDENTIFIER: com.mattrb.dingbat.storetests
+        GENERATE_INFOPLIST_FILE: YES
+        SWIFT_VERSION: "5.9"
+schemes:
+  DingbatStoreTest:
+    build:
+      targets:
+        Dingbat: all
+        DingbatStoreTests: [test]
+    test:
+      config: Debug
+      targets:
+        - DingbatStoreTests
