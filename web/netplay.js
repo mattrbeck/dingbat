@@ -1593,11 +1593,20 @@ const rbConnect = async () => {
   rbSendState(localState);
 };
 
+// The fewest bytes each kind is read at: a shorter one is dropped whole
+// rather than read past its end part way through its handler (the sync,
+// re-sync and resume-info kinds check their own; the rest are one byte).
+const RB_MIN_LEN = {
+  [RB_HELLO]: 9, [RB_INPUT]: 7, [RB_STATE_BEGIN]: 5, [RB_ROM_BEGIN]: 5,
+  [RB_SPEED]: 2, [RB_PAUSE]: 2, [RB_AWAY]: 2, [RB_RESUME]: 10,
+};
+
 const rbMessage = (data) => {
   const rb = net?.rb;
-  if (!rb || net.ending) return;
+  if (!rb || net.ending || !data.byteLength) return;
   const v = new DataView(data);
   const kind = v.getUint8(0);
+  if (data.byteLength < (RB_MIN_LEN[kind] || 1)) return;
   rb.lastMsgAt = Date.now();
   if (kind === RB_PING) return;
   if (kind === RB_INPUT) {
@@ -1710,7 +1719,7 @@ const rbMessage = (data) => {
     rb.romGot = 0;
     rbShowXferProgress();
   } else if (kind === RB_ROM_CHUNK) {
-    if (!rb.romBuf) return;
+    if (!rb.romBuf || rb.romGot + data.byteLength - 1 > rb.romBuf.length) return;
     rb.romBuf.set(new Uint8Array(data, 1), rb.romGot);
     rb.romGot += data.byteLength - 1;
     rb.remoteRomGot = rb.romGot;

@@ -1,7 +1,10 @@
 #!/bin/bash
 # Build and run a libFuzzer target of tests/fuzz/fuzz.nim.
 #
-#   tools/fuzz.sh <gbstate|gbastate|inflate|zip> [seconds] [libFuzzer args...]
+#   tools/fuzz.sh <gbstate|gbastate|ndsstate|inflate|zip> [seconds] [libFuzzer args...]
+#
+# ndsstate needs the DS test ROMs (not in the repo; DINGBAT_NDS_ROMS, default
+# ~/.cache/dingbat-nds/roms), so it runs on a desk, not in CI.
 #
 # FUZZ_MODE=danger (the default) builds as the web build is, with no runtime
 # checks, under AddressSanitizer: a read or write outside a buffer stops the
@@ -20,7 +23,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-target=${1:?target: gbstate, gbastate, inflate or zip}
+target=${1:?target: gbstate, gbastate, ndsstate, inflate or zip}
 seconds=${2:-60}
 shift; shift || true
 mode=${FUZZ_MODE:-danger}

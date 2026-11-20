@@ -1,6 +1,6 @@
 ## libFuzzer targets for the bytes dingbat takes from outside: a save state
 ## (a file, or a link peer's), a packed stream, a zip. One binary per target,
-## chosen with -d:fuzz_target=gbstate|gbastate|inflate|zip; tools/fuzz.sh
+## chosen with -d:fuzz_target=gbstate|gbastate|ndsstate|inflate|zip; tools/fuzz.sh
 ## builds and runs them.
 ##
 ## A state target's input is a machine index and a whole state image. The
@@ -125,6 +125,55 @@ elif fuzz_target == "gbastate":
       m.gba.step_frame()
       discard m.gba.state_bytes()
 
+elif fuzz_target == "ndsstate":
+  # On a desk only: the DS ROMs are not in the repo (DINGBAT_NDS_ROMS, as
+  # tests/nds_savestate_test.nim). With no BIOS dumps the HLE BIOS runs.
+  # A DS state is ~6 MB, past any input libFuzzer mutates well, so the input
+  # here is a machine index and then byte edits to that machine's own
+  # state: five bytes each, a little-endian offset (taken modulo the
+  # image's length, header included) and the byte to put there.
+  import dingbat/nds/[nds, savestate]
+
+  type Machine = object
+    nds: NDS
+    home: string
+
+  var machines: seq[Machine]
+
+  proc setup() =
+    let dir = getEnv("DINGBAT_NDS_ROMS", getHomeDir() / ".cache/dingbat-nds/roms")
+    for rom in ["homebrew-ex/dual_screen.nds", "3d/3d_sort.nds", "armwrestler.nds",
+                "homebrew-ex/2Dplus3D.nds"]:
+      if not fileExists(dir / rom): continue
+      let n = new_nds(cast[seq[uint8]](readFile(dir / rom)), @[], @[], @[])
+      for _ in 0 ..< 30: n.run_frame()
+      let home = n.state_bytes()
+      if not n.load_state_bytes(home):
+        stderr.writeLine rom, ": its own state does not load (", last_state_error, "); left out"
+        continue
+      machines.add Machine(nds: n, home: home)
+      seeds.add $char(machines.high)
+    doAssert machines.len > 0, "no DS ROM found under " & dir
+
+  proc one(data: string) =
+    if data.len < 1: return
+    let m = addr machines[int(uint8(data[0])) mod machines.len]
+    doAssert m.nds.load_state_bytes(m.home), "a DS machine refuses its own state: " & last_state_error
+    var image = m.home
+    var i = 1
+    while i + 5 <= data.len:
+      let off = (int(uint8(data[i])) or (int(uint8(data[i + 1])) shl 8) or
+                 (int(uint8(data[i + 2])) shl 16) or (int(uint8(data[i + 3])) shl 24)) mod image.len
+      image[off] = data[i + 4]
+      i += 5
+    reseal(image)
+    inc tried
+    if m.nds.load_state_bytes(image):
+      inc loaded
+      m.nds.run_frame()
+      m.nds.run_frame()
+      discard m.nds.state_bytes()
+
 elif fuzz_target == "inflate":
   import zippy
 
@@ -167,7 +216,7 @@ elif fuzz_target == "zip":
     except CatchableError: discard
 
 else:
-  {.error: "-d:fuzz_target=gbstate|gbastate|inflate|zip".}
+  {.error: "-d:fuzz_target=gbstate|gbastate|ndsstate|inflate|zip".}
 
 var ready = false
 var stats = false
