@@ -709,6 +709,79 @@ jobs:
         working-directory: web
         run: node --test --test-concurrency=1 ${{ matrix.files }}
 
+  web-nds:
+    # DS games in the real app (web/e2e/nds.e2e.mjs, headless Chromium): both
+    # screens, the stylus, sound, a battery save across a reload, firmware
+    # settings, rewind, run-ahead. Its test ROMs are not in the repo: ours
+    # (tests/nds/src: fb_both, snd_tone, cheat_probe, save_write, fw_power)
+    # are built with Ubuntu's ARM toolchain, and four of devkitPro's
+    # nds-examples (touch_test, simple, Double_Buffer, Simple_Tri) at a
+    # pinned commit in devkitPro's own image, which has libnds. Cached on
+    # those sources and that commit.
+    needs: wasm
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      DINGBAT_NDS_ROMS: ${{ github.workspace }}/nds-roms
+      NDS_EXAMPLES_SHA: f1ba715a451c6407f8b0f805999d0153062ff552
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: wasm
+          path: web
+      - name: Cache the DS test ROMs
+        id: nds-roms
+        uses: actions/cache@v4
+        with:
+          path: nds-roms
+          key: nds-roms-${{ env.NDS_EXAMPLES_SHA }}-${{ hashFiles('tests/nds/src/**', 'tests/nds/tools/build_fb.sh', 'tests/nds/tools/build_save.sh', 'tests/nds/tools/build_fw_power.sh', 'tests/nds/tools/mknds.py') }}
+      - name: Build our DS test ROMs
+        if: steps.nds-roms.outputs.cache-hit != 'true'
+        run: |
+          set -e
+          sudo apt-get -o Acquire::Retries=5 update
+          sudo apt-get -o Acquire::Retries=5 install -y --no-install-recommends binutils-arm-none-eabi gcc-arm-none-eabi libnewlib-arm-none-eabi
+          tests/nds/tools/build_fb.sh
+          tests/nds/tools/build_save.sh
+          tests/nds/tools/build_fw_power.sh
+      - name: Build devkitPro's examples the suite runs
+        if: steps.nds-roms.outputs.cache-hit != 'true'
+        run: |
+          set -e
+          git init -q nds-examples
+          git -C nds-examples fetch -q --depth 1 https://github.com/devkitPro/nds-examples "$NDS_EXAMPLES_SHA"
+          git -C nds-examples checkout -q FETCH_HEAD
+          mkdir -p nds-roms/built
+          for p in input/Touch_Pad/touch_test Graphics/Sprites/simple Graphics/Backgrounds/Double_Buffer Graphics/3D/Simple_Tri; do
+            docker run --rm -u "$(id -u):$(id -g)" -v "$PWD/nds-examples":/src -w /src devkitpro/devkitarm make -C "$p"
+            cp "nds-examples/$p/$(basename "$p").nds" nds-roms/built/
+          done
+          ls -l nds-roms nds-roms/built
+      - name: Cache Playwright's browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-native-${{ runner.os }}-${{ hashFiles('web/package-lock.json') }}
+      - name: Chromium
+        working-directory: web
+        run: |
+          set -e
+          ../.github/scripts/retry.sh 3 npm ci
+          ../.github/scripts/retry.sh 3 npx playwright install --with-deps chromium
+      - name: DS games in the app
+        working-directory: web
+        # Every ROM there first: without one the suite skips, and passes.
+        run: |
+          set -e
+          for f in fb_both snd_tone cheat_probe save_write fw_power built/touch_test built/simple built/Double_Buffer built/Simple_Tri; do
+            test -s "$DINGBAT_NDS_ROMS/$f.nds" || { echo "::error::$f.nds was not built"; exit 1; }
+          done
+          node --test --test-concurrency=1 e2e/nds.e2e.mjs
+
   fuzz:
     # A minute of libFuzzer on each parser of outside bytes (a save state, a
     # packed stream, a zip), from the genuine seeds each target writes, after
@@ -795,12 +868,17 @@ jobs:
         run: ${{ github.workspace }}/.github/scripts/retry.sh 3 nimble install -y zippy@0.10.20
       - name: Build WASM
         run: nim c -d:emscripten src/dingbat_wasm.nim
+      - name: Build the DS core
+        # For web-nds; the other jobs carry it unused.
+        run: nim c -d:emscripten src/dingbat_nds_wasm.nim
       - uses: actions/upload-artifact@v4
         with:
           name: wasm
           path: |
             web/em.js
             web/em.wasm
+            web/nds/nds.js
+            web/nds/nds.wasm
           retention-days: 3
 
   web-e2e:
