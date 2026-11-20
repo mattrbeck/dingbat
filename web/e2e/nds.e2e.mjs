@@ -192,6 +192,10 @@ test("HD 3D draws the screens at the chosen multiple and leaves the 1x ones alon
   const { page, errors } = await newPage(ctx);
   await addGame(page, rom("built/Simple_Tri.nds"));
   await page.evaluate(() => setNdsLayout("stack"));
+  // The core's own 3D and HD throughout: with a hardware graphics card
+  // "auto" has the GPU draw the 3D (at any scale), the core's screens then
+  // without it and its HD at 1x (ndsGpuActive).
+  await page.evaluate(() => setNdsDisplay({ gpu: "cpu" }));
   await framesPast(page, 20);
   const grab = () => page.evaluate(() => {
     const c = ndsCore;
