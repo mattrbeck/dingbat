@@ -169,7 +169,11 @@ private struct RootPane: View {
                                 .buttonStyle(.plain)
                                 .accessibilityAddTraits(nav.selection == to ? .isSelected : [])
                                 .padFocus(r.id) { nav.open(to) }
-                                .listRowBackground(nav.selection == to ? palette.accent.opacity(0.24) : palette.surface2)
+                                // Selected: a raised neutral with a hint of the accent, so the
+                                // label keeps its contrast in every theme.
+                                .listRowBackground(nav.selection == to
+                                    ? AnyView(ZStack { palette.surface3; palette.accent.opacity(0.14) })
+                                    : AnyView(palette.surface2))
                             } else if case .custom(let v) = r.kind {
                                 v.listRowBackground(palette.surface2)
                             }
