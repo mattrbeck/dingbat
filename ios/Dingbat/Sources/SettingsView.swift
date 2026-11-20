@@ -422,7 +422,7 @@ private struct PaneContent: View {
             ]),
             SSection(id: "rewind", [
                 .toggle("Rewind", $s.rewind),
-                .segmented("Run-ahead", ["Off", "1", "2", "3"], $s.runahead),
+                .segmented("Run-ahead", ["Off", "1", "2", "3"], $s.runahead, spoken: ["Off", "1 frame", "2 frames", "3 frames"]),
             ]),
         ]
     }
@@ -663,6 +663,7 @@ struct ThemeMini: View {
 private struct ShadeWells: View {
     @ObservedObject private var s = Settings.shared
     @Environment(\.palette) private var palette
+    @Environment(\.padScope) private var scope
 
     var body: some View {
         HStack(spacing: 14) {
@@ -673,10 +674,15 @@ private struct ShadeWells: View {
             }
             Spacer()
             Button("Reset") { s.gbPaletteCustom = Settings.defaultShades }
+                .accessibilityLabel("Reset the custom shades")
                 .foregroundColor(palette.accent)
                 .buttonStyle(.plain)
                 .disabled(s.gbPaletteCustom == Settings.defaultShades)
-                .padFocus("wells:reset") { s.gbPaletteCustom = Settings.defaultShades }
+                .padFocus("wells:reset") {
+                    // It greys out: the ring steps up to Custom, not back to the top.
+                    PadNav.shared.handOff(PadNav.key(scope, "wells:reset"), to: PadNav.key(scope, "check:Custom"))
+                    s.gbPaletteCustom = Settings.defaultShades
+                }
         }
         .padding(.vertical, 6)
     }

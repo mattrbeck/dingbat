@@ -34,15 +34,20 @@ struct SupporterView: View {
         .background(GeometryReader { g in
             Color.clear.onAppear { height = g.size.height }.onChange(of: g.size.height) { height = $0 }
         })
-        // A controller starts on the buy button ("supporter" is both the
-        // sheet's own scope and its pane inside Settings).
-        .onAppear { PadNav.shared.preferred["supporter"] = "supporter:buy" }
+        // A controller starts on the buy button, or on Done once bought
+        // ("supporter" is both the sheet's own scope and its pane in Settings).
+        .onAppear { preferFocus() }
+        .onChange(of: store.unlocked) { _ in preferFocus() }
         .alert(failure ?? "", isPresented: Binding(get: { failure != nil }, set: { if !$0 { failure = nil } })) {
             Button("OK", role: .cancel) {}
         }
     }
 
     private func close() { (onClose ?? SheetNav.close)() }
+
+    private func preferFocus() {
+        PadNav.shared.preferred["supporter"] = store.unlocked ? "supporter:done" : "supporter:buy"
+    }
 
     private var topBar: some View {
         HStack {

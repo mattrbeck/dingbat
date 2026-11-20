@@ -200,6 +200,37 @@ whenever play reaches that frame, until it closes.
       back. Restart the game restarts it. Back to the library closes it, and
       opening it again resumes from the last checkpoint before the stop.
 
+## iOS: the Supporter unlock
+
+Gated: `ios/e2e/storekit` (SKTestSession: every tier unlocks, the extras
+follow a purchase and a refund, Ask to Buy approved, a failed purchase, a
+relaunch). Checked on simulators: the sheet and Settings in five themes, the
+iPad sidebar, app icon and holiday switching, a simulated controller, and a
+browser showing an iOS supporter's crown. Not gated: the App Store itself
+and a real controller. Needs the three products in App Store Connect and a
+TestFlight build with a sandbox account.
+
+- [ ] **Buy.** Settings › Support dingbat, pick a price, buy: the sandbox
+      sheet shows that tier's price; afterwards the thank-you view, the
+      banner reads "Supporter since …", and every lock in Settings is gone.
+- [ ] **Restore.** Delete the app, reinstall from TestFlight: everything is
+      locked until StoreKit answers, then unlocked without a tap. On a second
+      device with the same Apple Account, Restore in the sheet unlocks it.
+- [ ] **Refund.** Refund the purchase (App Store Connect sandbox, or Settings
+      › App Store › Sandbox Account on the phone): on the next launch the
+      extras lock and fall back (Night, Night Flyer, no filter), and picking
+      the paid ones again opens the sheet.
+- [ ] **Family.** A family member's device unlocks without buying.
+- [ ] **Ask to Buy.** A child account's purchase waits; declining leaves it
+      locked (the test session cannot show this: it keeps a declined request).
+- [ ] **A controller.** With a real pad: Settings panes, back to the row that
+      opened them, the sheet starting on the buy button, its cards paging
+      with left/right, B closing it back to the banner; on an iPad, B from a
+      pane to the sidebar row.
+- [ ] **The crown over the link.** A supporter's phone linked to a free
+      phone and to a browser: each shows the supporter's bat crowned on the
+      transfer scene, the free player's bat plain.
+
 ## iOS: native touches (pauses, edges, haptics, VoiceOver)
 
 Not gated in CI. The app's side of most of it runs in the simulator:

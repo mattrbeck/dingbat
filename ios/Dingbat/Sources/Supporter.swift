@@ -44,14 +44,18 @@ final class Supporter: ObservableObject {
     private var updates: Task<Void, Never>?
 
     /// At launch: the icon follows the unlock, and on every return to the
-    /// app the light/dark theme and the holiday icon are checked again
-    /// (switching appearance in Control Center passes through inactive).
+    /// app the light/dark theme, the holiday icon and the purchase are
+    /// checked again (switching appearance in Control Center passes through
+    /// inactive).
     static func installLifecycle() {
         AppIconManager.shared.allowed = shared.unlocked
         NotificationCenter.default.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) { _ in
             Task { @MainActor in
                 Settings.shared.refreshSystemAppearance()
                 AppIconManager.shared.refresh()
+                // A refund or a family change made while away, should
+                // Transaction.updates not have said so.
+                await shared.refresh()
             }
         }
     }
@@ -103,6 +107,9 @@ final class Supporter: ObservableObject {
     /// Re-read what this Apple Account owns. A refunded tier is revoked and
     /// drops out of currentEntitlements.
     func refresh() async {
+        #if DEBUG
+        if debugForced { return }
+        #endif
         var first: Date?
         for await result in Transaction.currentEntitlements {
             guard case .verified(let t) = result, Self.productIDs.contains(t.productID),

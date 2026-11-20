@@ -15,7 +15,7 @@ import notify
 ///   com.mattrb.dingbat.debug.headphones-out     route change, old device unavailable
 ///   com.mattrb.dingbat.debug.pad-connect        a GCVirtualController connects
 ///   com.mattrb.dingbat.debug.pad-disconnect     ... and disconnects
-///   com.mattrb.dingbat.debug.nav-up|down|left|right|a|b
+///   com.mattrb.dingbat.debug.nav-up|down|left|right|a|b|y
 ///                                               a pad press as the UI gets it
 ///                                               (Controllers.debugPress)
 ///   com.mattrb.dingbat.debug.pictures-run       Add pictures from the library
@@ -64,6 +64,7 @@ enum DebugEvents {
             ("nav-right", { Controllers.shared.debugPress("right") }),
             ("nav-a", { Controllers.shared.debugPress("a") }),
             ("nav-b", { Controllers.shared.debugPress("b") }),
+            ("nav-y", { Controllers.shared.debugPress("y") }),
             ("home", { AppModel.shared.showMainMenu() }),
             // The library head's Add pictures, then the sheet's Add pictures;
             // and its Stop (ios/e2e/pictures-hold.mjs).

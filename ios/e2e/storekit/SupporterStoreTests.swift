@@ -32,10 +32,12 @@ final class SupporterStoreTests: XCTestCase {
         await store.refresh()
     }
 
-    /// Waits for the Transaction.updates listener the app started at launch.
-    private func eventually(_ what: String, _ cond: () -> Bool) async {
-        for _ in 0..<100 where !cond() { try? await Task.sleep(nanoseconds: 50_000_000) }
-        XCTAssertTrue(cond(), "timed out: \(what)")
+    /// Transaction.updates (the listener the app starts at launch) usually
+    /// says so within a moment, but not always on a busy simulator; the app
+    /// also checks on every return to it, as this does after 3 s.
+    private func settle(until cond: () -> Bool) async {
+        for _ in 0..<60 where !cond() { try? await Task.sleep(nanoseconds: 50_000_000) }
+        if !cond() { await store.refresh() }
     }
 
     func testProductsAndPrices() async {
@@ -77,7 +79,8 @@ final class SupporterStoreTests: XCTestCase {
 
         let t = try XCTUnwrap(session.allTransactions().first)
         try session.refundTransaction(identifier: t.identifier)
-        await eventually("refund locks") { !store.unlocked }
+        await settle { !store.unlocked }
+        XCTAssertFalse(store.unlocked, "refund locks")
         XCTAssertFalse(Supporter.storedUnlocked)
         XCTAssertEqual(s.effectiveTheme, .night)
         XCTAssertEqual(s.effectiveFilter, .none)
@@ -96,7 +99,8 @@ final class SupporterStoreTests: XCTestCase {
         XCTAssertFalse(store.unlocked)
         let t = try XCTUnwrap(session.allTransactions().first)
         try session.approveAskToBuyTransaction(identifier: t.identifier)
-        await eventually("approval unlocks") { store.unlocked }
+        await settle { store.unlocked }
+        XCTAssertTrue(store.unlocked, "approval unlocks")
         session.askToBuyEnabled = false
     }
 

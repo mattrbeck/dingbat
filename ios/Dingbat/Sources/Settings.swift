@@ -94,7 +94,7 @@ final class Settings: ObservableObject {
     @Published private(set) var systemDark = UIScreen.main.traitCollection.userInterfaceStyle != .light
     @Published var rewind: Bool { didSet { d.set(rewind, forKey: "rewindOn"); dingbat_set_rewind(rewind ? 1 : 0, 0) } }
     @Published var runahead: Int { didSet { d.set(runahead, forKey: "runahead") } }
-    /// General › Advanced › DS Beta (web dsBetaOn): off, the app is what it
+    /// General › Advanced › DS support (web DS Beta, dsBetaOn): off, the app is what it
     /// was before the DS core; .nds files are refused and DS games leave the
     /// library (their files and saves are kept).
     @Published var dsBeta: Bool { didSet { d.set(dsBeta, forKey: Self.dsBetaKey); dsBetaChanged(was: oldValue) } }

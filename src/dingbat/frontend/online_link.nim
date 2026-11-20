@@ -20,7 +20,7 @@
 ##   18 resync-begin [gen u8][len u32]       19 resync-chunk [bytes]
 ##   20 resync-ready [gen u8]
 ## The hello then goes on: [21] core id u64, [29] build time u32, [33] bit 0
-## "checks"; 16-20 go only to a friend whose hello says it checks (web
+## "checks" (bit 1, an iOS Supporter's crown, is not read here); 16-20 go only to a friend whose hello says it checks (web
 ## "Sync checks", docs/dev/multiplayer.md). Then [34] the GBA BIOS mode and
 ## [35] its image's hash u32: two that differ both run HLE without one.
 ## Core 0 is the host's game, core 1 the guest's. When the ROMs differ (a
