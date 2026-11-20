@@ -109,19 +109,26 @@ for (const engine of ENGINES) {
       await ctx.close();
     });
 
-    test("Google's redirect page hands the code to the page that opened it, nothing refused", async () => {
+    test("Google's redirect page hands the code back to the app, nothing refused", async () => {
+      // Opened as a tab, not a popup: a popup closes itself after it posts,
+      // and Playwright's WebKit on CI's Mac crashed on that close. The code
+      // is listened for on the page's BroadcastChannel route, one of the
+      // three it posts on; a tab it did not open by script it cannot close.
       const { ctx, refused } = await open();
-      const opener = await ctx.newPage();
-      await opener.goto((await site()).url + "version.txt");
-      await opener.evaluate(() => { window.__got = []; addEventListener("message", (e) => window.__got.push(e.data)); });
-      // Not waited on as a page: it closes itself 300 ms after it posts, and
-      // on a Mac WebKit can be gone before the page event is seen.
-      await opener.evaluate((u) => { window.open(u, "signin", "popup"); },
-        (await site()).url + "oauth-callback.html?state=s1&code=c1");
-      await opener.waitForFunction(() => window.__got.length > 0, null, { timeout: 10000 });
+      const app = await ctx.newPage();
+      await app.goto((await site()).url + "version.txt");
+      await app.evaluate(() => {
+        window.__got = [];
+        new BroadcastChannel("dingbat-oauth").onmessage = (e) => window.__got.push(e.data);
+      });
+      const tab = await ctx.newPage();
+      await tab.goto((await site()).url + "oauth-callback.html?state=s1&code=c1");
+      await app.waitForFunction(() => window.__got.length > 0, null, { timeout: 10000 });
       await new Promise((r) => setTimeout(r, 500)); // its refusals, had it any
-      assert.deepEqual(await opener.evaluate(() => window.__got),
+      assert.deepEqual(await app.evaluate(() => window.__got),
         [{ type: "dingbat-oauth", state: "s1", code: "c1", error: "" }]);
+      assert.equal(await tab.evaluate(() => document.getElementById("msg").textContent),
+        "Signed in. You can close this window.");
       assert.deepEqual(refused, []);
       await ctx.close();
     });
