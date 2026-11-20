@@ -48,6 +48,9 @@ final class NetLink: ObservableObject {
     @Published private(set) var linked = false
     /// The different-game question is up (LinkCableView's alert).
     @Published private(set) var askingMismatch = false
+    /// The friend's cartridge title for the question ("" when its HELLO
+    /// carried none: an older build).
+    @Published private(set) var mismatchTitle = ""
     /// The manual exchange is on screen instead of the shared code.
     @Published private(set) var manualView = false
     /// Our code, nil while it is being minted.
@@ -169,6 +172,7 @@ final class NetLink: ObservableObject {
         /// The GBA BIOS our HELLO named and the friend's (nil: an older build).
         var ownBios: (mode: UInt32, hash: UInt32) = (0, 0)
         var peerBios: (mode: UInt32, hash: UInt32)?
+        var peerTitle = ""
         var syncMine: [Int32: (UInt32, UInt32)] = [:]
         var syncTheirs: [Int32: (UInt32, UInt32)] = [:]
         var syncChecks = 0
@@ -289,6 +293,31 @@ final class NetLink: ObservableObject {
     private static let helloBuildLen = 34
     /// ... and the GBA BIOS: [34] mode, [35] image hash (web RB_HELLO_BIOS_LEN).
     private static let helloBiosLen = 39
+    /// ... then the cartridge's own header title: [39] its length, then the
+    /// bytes (web RB_TITLE_MAX, rbCartTitle, rbCleanTitle).
+    private static let titleMax = 16
+
+    /// The title a cartridge carries in its header: a GBA's 12 bytes at
+    /// 0xA0; a Game Boy's 16 at 0x134, or 11 under the newer layout (the
+    /// colour flag at 0x143 set; a maker code follows the title).
+    static func cartTitle(_ rom: Data, gb: Bool) -> String {
+        let at = gb ? 0x134 : 0xA0
+        guard rom.count > 0x143 else { return "" }
+        let n = gb ? (rom[rom.startIndex + 0x143] & 0x80 != 0 ? 11 : 16) : 12
+        return cleanTitle(rom[(rom.startIndex + at) ..< (rom.startIndex + at + n)])
+    }
+
+    /// Printable ASCII but quote marks, underscores as spaces, runs of
+    /// spaces as one, trimmed, at most titleMax.
+    static func cleanTitle(_ raw: Data) -> String {
+        var s = ""
+        for c in raw {
+            if c == 0 { break }
+            if c >= 0x20 && c <= 0x7E && c != 0x22 { s.append(c == 0x5F ? " " : Character(UnicodeScalar(c))) }
+        }
+        let words = s.split(separator: " ", omittingEmptySubsequences: true).joined(separator: " ")
+        return String(words.prefix(titleMax))
+    }
     private static let chunk = 16384
     private static let highWater = 4 * 1024 * 1024
     private static let romMax = 48 * 1024 * 1024
@@ -854,6 +883,9 @@ final class NetLink: ObservableObject {
         rb.ownBios = (bios[0], bios[1])
         hello.append(UInt8(truncatingIfNeeded: bios[0]))
         hello += Self.be32(bios[1])
+        let title = Array(Self.cartTitle(rom, gb: rb.ext != ".gba").utf8)
+        hello.append(UInt8(title.count))
+        hello += title
         send(hello, s)
         send([Self.stateBegin] + Self.be32(UInt32(state.count)), s)
         var off = 0
@@ -998,9 +1030,15 @@ final class NetLink: ObservableObject {
             if data.count >= Self.helloBiosLen {
                 rb.peerBios = (UInt32(data[data.startIndex + 34]), Self.read32(data, 35))
             }
+            if data.count > Self.helloBiosLen {
+                let at = data.startIndex + Self.helloBiosLen
+                let n = min(Int(data[at]), data.count - Self.helloBiosLen - 1)
+                rb.peerTitle = Self.cleanTitle(data[(at + 1) ..< (at + 1 + n)])
+            }
             if (answers ? rb.remoteRomId != rb.romId : rb.remoteRomHash != rb.romHash), !rb.mismatchAsked {
                 rb.needRom = true
                 rb.mismatchAsked = true
+                mismatchTitle = rb.peerTitle
                 if Self.acceptMismatch { answerMismatch(true) } else { askingMismatch = true }
             }
         case Self.stateBegin:

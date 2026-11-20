@@ -1197,6 +1197,30 @@ const RB_HELLO_BUILD_LEN = 34;
 // it), [35] the image's hash u32 (0 none). Two that differ both run HLE
 // without one (rbBiosHle): every BIOS call would otherwise drift them apart.
 const RB_HELLO_BIOS_LEN = 39;
+// ... and the cartridge's own title, for the different-game question: [39]
+// its length, then that many bytes. From the ROM's header, never the
+// player's file name; read as printable ASCII only, at most RB_TITLE_MAX.
+const RB_TITLE_MAX = 16;
+
+// The title a cartridge carries in its header: a GBA's 12 bytes at 0xA0; a
+// Game Boy's 16 at 0x134, or 11 when the colour flag at 0x143 marks the
+// newer layout (a maker code follows the title there).
+const rbCartTitle = (bytes, gb) => {
+  const at = gb ? 0x134 : 0xA0;
+  const n = gb ? ((bytes[0x143] & 0x80) ? 11 : 16) : 12;
+  return rbCleanTitle(bytes.subarray(at, at + n));
+};
+
+// Printable ASCII but quote marks (it is shown in quotes), underscores as
+// spaces, runs of spaces as one, trimmed.
+const rbCleanTitle = (raw) => {
+  let s = "";
+  for (const c of raw) {
+    if (c === 0) break;
+    if (c >= 0x20 && c <= 0x7E && c !== 0x22) s += c === 0x5F ? " " : String.fromCharCode(c);
+  }
+  return s.replace(/ +/g, " ").trim().slice(0, RB_TITLE_MAX);
+};
 const RB_CHUNK = 16384; // DataChannel-safe chunk size for state + ROM frames
 // Send-buffer high water while streaming a ROM; well under Chrome's ~16 MB
 // cap, past which send() throws and the dropped chunk corrupts the ROM.
@@ -1455,6 +1479,10 @@ const rbShowXferProgress = () => {
 const rbAskMismatch = (rb) => {
   rb.needRom = true;
   rb.mismatchAsked = true;
+  const q = document.querySelector("#net-mismatch p");
+  if (q) q.textContent = rb.peerTitle
+    ? `Your friend is playing “${rb.peerTitle}”, a different game than you. Are you sure you want to connect?`
+    : "Your friend is playing a different game than you. Are you sure you want to connect?";
   netShowMismatch(true);
   document.getElementById("net-mismatch-yes")?.focus();
 };
@@ -1561,6 +1589,7 @@ const rbConnect = async () => {
     peerBuilt: 0,       // the friend's build time (s)
     ownBios: null,      // the GBA BIOS our HELLO named (rbOwnBios)
     peerBios: null,     // the friend's, from its HELLO
+    peerTitle: "",      // the friend's cartridge title, from its HELLO (rbCleanTitle)
     syncMine: new Map(),   // frame -> our fingerprint [hi, lo], until the friend's
     syncTheirs: new Map(), // frame -> the friend's
     syncChecks: 0,
@@ -1573,7 +1602,8 @@ const rbConnect = async () => {
     resyncWarned: false,
   };
   netSetStatus("Syncing…");
-  const h = new ArrayBuffer(RB_HELLO_BIOS_LEN);
+  const title = new TextEncoder().encode(rbCartTitle(romBytes, linkIsGb));
+  const h = new ArrayBuffer(RB_HELLO_BIOS_LEN + 1 + title.length);
   const hv = new DataView(h);
   hv.setUint8(0, RB_HELLO);
   hv.setUint32(1, net.rb.epoch);
@@ -1589,6 +1619,8 @@ const rbConnect = async () => {
   net.rb.ownBios = rbOwnBios();
   hv.setUint8(34, net.rb.ownBios.mode);
   hv.setUint32(35, net.rb.ownBios.hash);
+  hv.setUint8(RB_HELLO_BIOS_LEN, title.length);
+  new Uint8Array(h).set(title, RB_HELLO_BIOS_LEN + 1);
   rbSend(h);
   rbSendState(localState);
 };
@@ -1689,6 +1721,10 @@ const rbMessage = (data) => {
       rb.peerSync = (v.getUint8(33) & 1) === 1 && rbCanSync();
     }
     if (data.byteLength >= RB_HELLO_BIOS_LEN) rb.peerBios = { mode: v.getUint8(34), hash: v.getUint32(35) };
+    if (data.byteLength > RB_HELLO_BIOS_LEN) {
+      const n = Math.min(v.getUint8(RB_HELLO_BIOS_LEN), data.byteLength - RB_HELLO_BIOS_LEN - 1);
+      rb.peerTitle = rbCleanTitle(new Uint8Array(data, RB_HELLO_BIOS_LEN + 1, n));
+    }
     if (answers ? !rbSameRom(rb.remoteRomId, rb.romId) : rb.remoteRomHash !== rb.romHash) {
       if (!rb.mismatchAsked) rbAskMismatch(rb);
     }

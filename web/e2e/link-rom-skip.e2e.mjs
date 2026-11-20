@@ -232,7 +232,12 @@ test("a different game asks first: no ROM leaves or boots until both agree", { s
   await sleep(500);
   await connect(b, "ASKE2E");
   await until(async () => (await asked(a)) && (await asked(b)), "both asked", 30000);
+  // A is told B's cartridge title (gbaedge.gba's header says GBAEDGE); B,
+  // whose friend's header holds no title (linktest.gba's is code), is asked
+  // without one.
   assert.equal(await a.page.evaluate(() => document.querySelector("#net-mismatch p").textContent),
+    "Your friend is playing “GBAEDGE”, a different game than you. Are you sure you want to connect?");
+  assert.equal(await b.page.evaluate(() => document.querySelector("#net-mismatch p").textContent),
     "Your friend is playing a different game than you. Are you sure you want to connect?");
   await sleep(1500);
   for (const p of [a, b]) {
