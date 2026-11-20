@@ -1,4 +1,13 @@
 {
-  "announcements": [],
+  "announcements": [
+    {
+      "id": "2026-11-20-announcement-test",
+      "text": "Testing announcements. Nothing to do here.",
+      "show": ["banner"],
+      "platforms": ["web"],
+      "from": "2026-11-20T16:00:00Z",
+      "until": "2026-11-20T19:00:00Z"
+    }
+  ],
   "required": []
 }
