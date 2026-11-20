@@ -373,7 +373,7 @@ struct SheetHost: View {
 
     var body: some View {
         switch sheet {
-        case .settings(let section): SettingsView(initialSection: section)
+        case .settings(let section): SettingsView(initialSection: section).iPadSheet(width: 1000, height: 1100)
         case .states: SaveStatesView()
         case .saves: ManageSavesView()
         case .rewind: RewindScrubberView()
@@ -388,7 +388,19 @@ struct SheetHost: View {
         case .tileMenu(let e): TileMenuView(entry: e)
         case .rename(let e): RenameView(entry: e)
         case .export(let e): ExportView(entry: e)
-        case .supporter: SupporterView()
+        case .supporter: SupporterView().iPadSheet(width: 560, height: 780)
+        }
+    }
+}
+
+extension View {
+    /// On iPad, a bigger card than the form sheet's: Settings gets its
+    /// sidebar, the Support sheet fits whole. Clamped to the window.
+    @ViewBuilder func iPadSheet(width: CGFloat, height: CGFloat) -> some View {
+        if #available(iOS 18, *), UIDevice.current.userInterfaceIdiom == .pad {
+            frame(idealWidth: width, idealHeight: height).presentationSizing(.fitted)
+        } else {
+            self
         }
     }
 }

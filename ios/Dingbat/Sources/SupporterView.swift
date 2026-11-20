@@ -17,9 +17,12 @@ struct SupporterView: View {
     @Environment(\.verticalSizeClass) private var vClass
     private let timer = Timer.publish(every: 3.8, on: .main, in: .common).autoconnect()
 
-    /// A short screen (iPhone mini, SE): smaller hero and card, so the
-    /// card's page dots sit above the price bar.
-    private var compact: Bool { UIScreen.main.bounds.height < 860 || vClass == .compact }
+    /// A short screen (iPhone mini, SE) or a short sheet (an iPad window):
+    /// smaller hero and card, so the card's page dots sit above the price bar.
+    private var compact: Bool {
+        UIScreen.main.bounds.height < 860 || vClass == .compact || (height > 0 && height < 760)
+    }
+    @State private var height: CGFloat = 0
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -28,6 +31,9 @@ struct SupporterView: View {
         }
         .foregroundColor(palette.text)
         .background(palette.surface1.ignoresSafeArea())
+        .background(GeometryReader { g in
+            Color.clear.onAppear { height = g.size.height }.onChange(of: g.size.height) { height = $0 }
+        })
         // A controller starts on the buy button ("supporter" is both the
         // sheet's own scope and its pane inside Settings).
         .onAppear { PadNav.shared.preferred["supporter"] = "supporter:buy" }
