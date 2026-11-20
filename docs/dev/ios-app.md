@@ -58,11 +58,11 @@ pull to sync against the fake Drive.
 | Record and "Clip that!": the last minute replayed frame-exact from the clip ring into an MP4 (H.264 at 4x, AAC), with the "Save a Clip" range picker and progress; Record captures play as it happens. The file goes to the share sheet | `ClipExporter`, `ClipViews`, `dingbat_clip_*` |
 | Link Cable online: the same code on both sides pairs through the web's signaling server, then a WebRTC data channel carries the web's input-rollback protocol, so an iPhone links with a browser or another iPhone. Cross-game trades send each side's ROM first; pause and 2x drive both sides; Disconnect (two taps, menu or the bar's pill); idle auto-disconnect; the game plays on when the friend leaves. With no server (or by choice) the manual code exchange: Share code / Copy code, the friend's code, Confirm; codes re-minted while unshared, the fallback when the server does not answer | `NetLink`, `RTCPeer` (libdatachannel), `LinkSignaling`, `SDPCodec` (the web's byte format), `LinkCableView`, `dingbat_rollback_*` |
 | Save States (9 slots, slot 1 is Quick, thumbnails), Manage Saves (export / import .sav incl. SharkPort and GameShark SP, reset; export / import .state), the rewind scrubber with its staged commit and Undo, Cheats, Printed Photos, Report a Bug (JSON with a state from any moment) | `SaveStatesView`, `ManageSavesView` + `SaveImport`, `RewindScrubberView`, `CheatsView`, `PrintsView`, `ReportBugView` |
-| Settings, the web's sections in its order (Controls, Video, Audio, Play, Game Boy, Game Boy Advance, General) with its rows, keys and defaults, the twelve app themes (Night the default) | `SettingsView`, `Settings`, `Theme` |
+| Settings, native grouped panes over the web's rows, keys and defaults (docs/dev/settings-design.md): Display & Appearance, Controls, Audio, Play, Game Boy, Game Boy Advance, Nintendo DS (once DS support is on), Google Drive, General; a sidebar and detail from 700 pt wide (iPad); the twelve app themes (Night the default; the rest Supporter) | `SettingsKit` (rows, `PaneList`, `SettingsNav`), `SettingsView`, `Settings`, `Theme` |
 | Presenter: colour correction per panel, None / LCD grid / RGB subpixels / hq4x / xBR, Game Boy shade palettes, the Super Game Boy border, integer scaling, LCD response, ambient glow, pinch zoom | `PresentShader` (the web shader in Metal), `GameRenderer`, `GameStage` |
 | Speeds and audio: 2x, unbounded fast-forward, slow motion, rewind, run-ahead, pitch-correct fast-forward, enhanced music, audio interpolation, the 12 kHz analog filter, channel mutes, Play in Silent Mode | `GameSession`, `AudioOutput`, `dingbat_ios_audio.c` |
 | Controllers (web mapping; RT holds fast-forward, LT rewind, R3 or Select+Start held opens the menu paused; hide touch controls), rumble, tilt carts, the Game Boy Camera, the Game Boy Printer, the save webhook | `Controllers`, `Peripherals`, `GameSession` |
-| A controller alone, outside the game: the d-pad and stick move focus spatially over the home screen, the in-game menu and every sheet, A presses, B goes back (a Settings section, then the sheet or menu; at home, the top), Y opens a game's options, LB/RB step the system filter, LT/RT the sort, Start resumes the hero's game; buttons held across a switch are not presses on arrival. No bar icon, toasts or readouts, as on the web | `PadNav` (iOS has no controller focus engine outside tvOS), `Controllers` |
+| A controller alone, outside the game: the d-pad and stick move focus spatially over the home screen, the in-game menu and every sheet, A presses, B goes back (a Settings pane to the row that opened it, on iPad the detail to its sidebar row, then the sheet or menu; at home, the top), Y opens a game's options, LB/RB step the system filter, LT/RT the sort, Start resumes the hero's game; buttons held across a switch are not presses on arrival. No bar icon, toasts or readouts, as on the web | `PadNav` (iOS has no controller focus engine outside tvOS), `Controllers` |
 | A hardware keyboard: the ten bindings with the Default and Home-row presets (Settings › Controls › Keyboard, shown while one is connected: tap a key, press its replacement), the web's shortcuts (Space, Tab, Shift+Tab, \`, Shift+\`, ., M, I, F5, F8, F9) and Escape for the menu; outside the game the arrows, Return and Escape drive the UI as the pad does | `Keyboard` (GCKeyboard; bindings in the web's SDL keycodes) |
 
 ## Native differences
@@ -78,7 +78,7 @@ pull to sync against the fake Drive.
   controls centre on the whole width; a GB or GBA picture short of height
   under the bar folds the bar away (a tap on the picture brings it down)
   and takes the room clear of the column, as near the centre as that
-  allows. Settings › Video › Picture held upright, shown only there: Under
+  allows. Settings › Display & Appearance › Picture held upright, shown only there: Under
   the camera centres it at full size with the camera over a corner; Full
   width, smaller buttons gives the controls the DS layout's measures (short
   L/R, round Select/Start in the main row) and the picture the screen's
@@ -203,6 +203,32 @@ program (`simctl spawn`), which also checked the picture and the ring's
 32728 Hz there. No device measurement yet. The DS core adds ~2.8 MB to
 each slice (2.07 MB to 4.86 MB).
 
+## Supporter
+
+A one-time, pay-what-you-want unlock (docs/dev/settings-design.md has the
+rules): three non-consumable tiers at $2.99 / $4.99 / $9.99, all unlocking
+the same extras, Family Sharing on. Everything that plays a game stays
+free. The web has no locks.
+
+| What | Where |
+|---|---|
+| StoreKit 2: products, buy, refresh from `currentEntitlements` (a refund revokes), Restore (`AppStore.sync`); the answer cached in `supporter.unlocked` so the unlock shows at launch | `Supporter` |
+| The extras, locked in place and falling back to the free choice (the pick is kept): every theme but Night, the separate light-mode theme, alternate and holiday app icons, the Custom GB palette, hq4x / xBR, Save webhook, DS support | `Settings.effectiveTheme` / `effectiveFilter` / `effectivePaletteMode` / `dsOn`, `GameSession` (webhook), `AppIconManager.allowed` |
+| The sheet: crowned bat, eight cards, price picker, buy; the thank-you view; opened from the Settings banner and from each locked row on its own card | `SupporterView`, `Supporter.open(_:)` |
+| The crown on the link cable's transfer scene: your bat if you support, your friend's if the hello says they do (capabilities bit 1; every client reads only bit 0 for sync checks) | `NetLink.peerCrown`, `LinkCableView`; web `netSetFriendCrown` |
+| App icons: 17 alternates (classic + holiday windows, holidays off by default) | `AppIcons.swift`, `tools/logo_flap/alt_icons.py`, `crown.py` |
+
+Tests: `ios/e2e/storekit` (SKTestSession against `Supporter.storekit`;
+its project.yml says how to run it). Running from Xcode, the scheme's
+StoreKit configuration serves the same local products.
+
+Dev hooks (DEBUG): `-supporter on|off` pretends (no purchase);
+`-sheet supporter[:card]`, `-sheet settings[:pane]` (a `SettingsPane`
+raw value, e.g. `appIcon`); `-icon-date YYYY-MM-DD` fakes the day for
+holiday icons; `-sheet link-transfer[:crown]` shows the transfer scene
+(with the friend crowned). The controller through `-debug-events`:
+`pad-connect`, then `nav-up|down|left|right|a|b` (DebugEvents.swift).
+
 ## Nintendo DS in the app
 
 The Swift side plays DS games as the web app does (docs/nds/web.md is the
@@ -210,9 +236,9 @@ reference; this follows it piece by piece). Everything is gated on the
 running game being a DS game (`GameSession.isNDS`, the web's
 body.nds-mode): Game Boy and GBA games keep every layout, control and
 menu exactly as before. DS games load only with Settings › General ›
-Advanced › DS Beta on (`Settings.dsBeta`, off by default; docs/nds/beta.md):
-off, `.nds` is refused, DS games leave the library and nothing of the DS
-shows in Settings.
+Advanced › DS support on (`Settings.dsBeta`, off by default; docs/nds/beta.md),
+a Supporter extra (`Settings.dsOn`): off, `.nds` is refused, DS games leave
+the library and nothing of the DS shows in Settings.
 
 | Web | iOS |
 |---|---|
@@ -221,8 +247,8 @@ shows in Settings.
 | BIOS / firmware dumps optional (HLE + synthesized firmware), the console's flash one per device | Settings › Nintendo DS (ARM9 BIOS 4 KB, ARM7 BIOS 16 KB, firmware 128/256/512 KB, sizes checked), stored beside the GBA BIOS; `NdsState.prepareLoad` sets them and the flash (`Application Support/dingbat/bios/nds_flash.bin`) before each DS load |
 | DS games stay local (`driveExcluded`, `driveLibraryOf`); "this device only" in the game's menu; the once-a-session toast | `driveExcluded` / `DriveLibrary.forDrive` in `DriveSync` (uploads, deletes, full sync, the library file), `TileMenu`, `AppModel.launch` |
 | The screens: `NdsUtil.layout/compose/views` (Automatic, Stacked, Side by side, Focus, One screen; swap; gap none / hinge 8 / console 90; turn upright / book left / book right), integer scaling, the filters and looks; no colour correction, palette, LCD response or glow | `NdsUtil.swift` (the math line for line), `GameStage.ndsLayout`, `GameRenderer.encodeNds` + `nds_vertex` in `PresentShader` (each screen a quad of the 256x384 texture, turned, its own texels and grid / subpixel pitch, the gaps in the stage's colour) |
-| Settings › Nintendo DS › 3D resolution (Native / 2x / 3x / 4x): the 3D scene drawn at k x; the presenter's texture is the HD screens, every filter and look on their pixels | `NdsState.hd` (`nds-display`'s `hd`, reset with the rest), `NdsSettingsPane`, `GameRenderer.picture` / `encodeNds` (texels k x); DEBUG `-nds-hd K` |
-| Settings › Nintendo DS › 3D drawn by (Automatic / Graphics card / Processor; docs/nds/gpu3d.md "Metal"): the 3D drawn by Metal at every scale, with the skip and (at 1x) the handback; the app's pictures and states take the GPU's screens; a line says what draws it; a failure hands it to the core for the run | `NdsState.gpu` (`nds-display`'s `gpu`, reset with the rest) / `coreHd` / `applyCore` / `gpuStatus`, `NdsSettingsPane`, `NdsGpu3d.swift`, `GameRenderer.encodeNds` / `syncNdsScreens` / `ndsGpuFailure`; DEBUG `-nds-gpu 1\|0\|auto`, `-nds-gpu-noskip`, `-gpu-stats`; `tools/gpu3d/metal` |
+| Settings › Nintendo DS › 3D resolution (Native / 2x / 3x / 4x): the 3D scene drawn at k x; the presenter's texture is the HD screens, every filter and look on their pixels | `NdsState.hd` (`nds-display`'s `hd`, reset with the rest), the Nintendo DS pane in `SettingsView`, `GameRenderer.picture` / `encodeNds` (texels k x); DEBUG `-nds-hd K` |
+| Settings › Nintendo DS › 3D drawn by (Automatic / Graphics card / Processor; docs/nds/gpu3d.md "Metal"): the 3D drawn by Metal at every scale, with the skip and (at 1x) the handback; the app's pictures and states take the GPU's screens; a line says what draws it; a failure hands it to the core for the run | `NdsState.gpu` (`nds-display`'s `gpu`, reset with the rest) / `coreHd` / `applyCore` / `gpuStatus`, the Nintendo DS pane in `SettingsView`, `NdsGpu3d.swift`, `GameRenderer.encodeNds` / `syncNdsScreens` / `ndsGpuFailure`; DEBUG `-nds-gpu 1\|0\|auto`, `-nds-gpu-noskip`, `-gpu-stats`; `tools/gpu3d/metal` |
 | The stylus: a touch that starts on the bottom screen, clamped while it drags, lifted with the finger, one at a time; in Focus / One screen a tap on the top screen (< 500 ms, < 12 px) swaps | `NdsStylus` / `NdsStylusView` over the picture (`NdsUtil.touchPoint`, `screenAt`); touches elsewhere fall through to the stage and the touch controls keep theirs |
 | X/Y: the diamond (X top, Y left, A right, B bottom, 0.75 of a button from the centre); controller X/Y by label; keys X = D, Y = C (home row I, U), only while a DS game runs; V / B / O / N / H | `PlayGeometry.placeDiamond`, `Controllers`, `Keyboard` (12 bindings; a saved 10-key profile gains them), Settings › Controls › Keyboard |
 | Phone held upright (docs/nds/web.md "Phone held upright"): the bar folded off the top ("Hide the top bar", on), a tap on the picture away from the touch screen brings it down over the top screen; the top screen up to the notch / Dynamic Island (`PhoneCutout`: measured per model, else safe top less 14, or 11 at 54 and over); L/R 120x28 at the strip's corners (hit 6 above and below); Select/Start 28 pt circles labelled underneath, between the d-pad and B (hit 8 past and on the label); the clusters' row the d-pad's height on max(10, safe bottom - 12) plus a 16pt lift on a phone with a home indicator; room left over below the screens | `PlayGeometry.ndsPortrait`, `PlayLayout.barLayer` (the fold), `GameStage.toggleBar` + `NdsState.tapTaken`, `CirclePillKey`, `ShoulderKey(short:)`. The status bar is hidden in play (as for every game), the island / notch keeps the same offset |

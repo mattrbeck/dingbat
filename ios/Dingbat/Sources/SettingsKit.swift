@@ -75,7 +75,8 @@ struct SRow: Identifiable {
     enum Kind {
         case nav(label: String, value: String?, tile: Tile?, image: String?, badge: Badge?, locked: Supporter.Perk?, to: SettingsPane)
         case toggle(label: String, isOn: Binding<Bool>, badge: Badge?, disabled: Bool, locked: Supporter.Perk?)
-        case segmented(label: String, options: [String], selection: Binding<Int>)
+        /// `spoken`: what VoiceOver says for each option, when its label is terse ("1" → "1 frame").
+        case segmented(label: String, options: [String], spoken: [String]?, selection: Binding<Int>)
         case menu(label: String, options: [MenuOption], selection: Binding<Int>)
         case check(label: String, selected: Bool, swatch: [UInt32]?, disabled: Bool, locked: Supporter.Perk?, action: () -> Void)
         case file(label: String, slot: FileSlot)
@@ -101,8 +102,8 @@ struct SRow: Identifiable {
                        locked: Supporter.Perk? = nil) -> SRow {
         SRow(id: "toggle:" + label, kind: .toggle(label: label, isOn: isOn, badge: badge, disabled: disabled, locked: locked))
     }
-    static func segmented(_ label: String, _ options: [String], _ selection: Binding<Int>) -> SRow {
-        SRow(id: "seg:" + label, kind: .segmented(label: label, options: options, selection: selection))
+    static func segmented(_ label: String, _ options: [String], _ selection: Binding<Int>, spoken: [String]? = nil) -> SRow {
+        SRow(id: "seg:" + label, kind: .segmented(label: label, options: options, spoken: spoken, selection: selection))
     }
     static func menu(_ label: String, _ options: [MenuOption], _ selection: Binding<Int>) -> SRow {
         SRow(id: "menu:" + label, kind: .menu(label: label, options: options, selection: selection))
@@ -211,11 +212,13 @@ private struct RowView: View {
                     .padFocus(row.id) { isOn.wrappedValue.toggle() }
             }
 
-        case let .segmented(label, options, selection):
+        case let .segmented(label, options, spoken, selection):
             VStack(alignment: .leading, spacing: 9) {
                 Text(label).font(.body).foregroundColor(palette.text)
                 Picker(label, selection: selection) {
-                    ForEach(options.indices, id: \.self) { i in Text(options[i]).tag(i) }
+                    ForEach(options.indices, id: \.self) { i in
+                        Text(options[i]).accessibilityLabel(spoken?[i] ?? options[i]).tag(i)
+                    }
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()

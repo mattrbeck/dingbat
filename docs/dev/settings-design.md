@@ -2,8 +2,8 @@
 
 The design for the native-style Settings rework and the Supporter unlock. The boards live on the
 design canvas (https://claude.ai/artifact/1MGcSNnpoSG3hDs1jxJpC4, page "Settings system"); this
-file is the part code needs. Status: proposal. iOS on branch `worktree-supporter-unlock` still has
-the older look.
+file is the part code needs. Status: built on iOS (`SettingsKit.swift` is the schema and its one
+renderer, `SettingsView.swift` the panes, docs/dev/ios-app.md "Supporter"); the web not yet.
 
 ## One schema, two renderers
 
@@ -48,15 +48,21 @@ Direction is Joystick.
   free users.
 - Switches and checks use the theme accent. Icon tiles have fixed hues on every theme.
 - Navigation: Settings has a large title and Close; panes an inline title and Back. From 700 pt
-  wide (iPad, web desktop) it is a sidebar plus detail. The up/down section stepper goes; a
-  controller steps sections with LB/RB.
-- Controller: a 2 pt accent ring on the focused row; A acts, B goes back.
+  wide (iPad, web desktop) it is a sidebar plus detail; on an iPad Settings opens as a large card
+  (iOS 18+), so the sidebar shows. The sidebar's selected row is the raised neutral with a light
+  accent wash, never the solid accent (the label must keep its contrast). A deep link selects its
+  sidebar pane and pushes a sub-pane over it.
+- Controller: a 2 pt accent ring on the focused row; A acts, B goes back. Only the pane on screen
+  is in reach; opening a pane focuses its first row, and B returns to the row that opened it (beside
+  the sidebar, to the pane's sidebar row first). The Supporter sheet starts on the buy button (Done
+  once bought), and left/right page its cards.
 - Destructive actions use the system confirmation (action sheet / dialog), not arm-then-tap.
 - A row that only matters for one choice appears with it; a row whose dependency is directly above
   it stays visible but disabled.
 - One warning badge: "Highly experimental" (amber) on General › DS support, "Experimental" on the
-  Nintendo DS row. Nothing else carries a badge. The pink Supporter pill only on the banner and in
-  the sheet.
+  Nintendo DS row. Nothing else carries a badge. Being a Supporter shows as a crown on the bat, not
+  a pill: the banner, the sheet, the Supporter app icon, and the link cable's transfer scene (yours,
+  and your friend's when their hello says they support).
 
 ## Decided (2026-11-19)
 
@@ -65,6 +71,11 @@ Direction is Joystick.
 - Holiday icons default off.
 - Prices $2.99 / $4.99 / $9.99, all three non-consumable and unlocking the same thing, $4.99
   preselected.
+- The banner shows the crowned bat to everyone ("Support dingbat", or "dingbat · Supporter since").
+- Theme previews in the gallery are the app in miniature with a d-pad and A/B.
+- App icons: the Supporter icon is the Night Flyer with the crown (light and dark); a standout
+  supporter icon was tried and dropped.
+- The sheet names no counts ("Every theme", not "12 themes").
 
 ## The web
 

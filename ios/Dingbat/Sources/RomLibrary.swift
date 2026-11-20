@@ -158,7 +158,7 @@ final class RomLibrary: ObservableObject {
     static let gbaBiosURL = biosDir.appendingPathComponent("gba_bios.bin")
     static let gbcBootromURL = biosDir.appendingPathComponent("gbc_bootrom.bin")
 
-    /// .nds only with DS Beta on (Settings.dsBetaOn).
+    /// .nds only with DS support on (Settings.dsBetaOn).
     static var romExtensions: Set<String> {
         Settings.dsBetaOn ? ["gba", "gb", "gbc", "cgb", "sgb", "nds"] : ["gba", "gb", "gbc", "cgb", "sgb"]
     }
@@ -244,7 +244,7 @@ final class RomLibrary: ObservableObject {
     }
 
     private func publish() {
-        // DS games only with DS Beta on; off, they wait in the index.
+        // DS games only with DS support on; off, they wait in the index.
         let ds = Settings.dsBetaOn
         let names = recents.compactMap { $0.string("name") }
         entries = names.map { RomEntry(fileName: $0) }.filter { ds || !$0.isNDS }

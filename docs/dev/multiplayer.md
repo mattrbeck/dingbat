@@ -147,7 +147,8 @@ or a determinism bug, can drift apart silently. Builds that check now say
 so in the HELLO: `[21]` core id (`common/linksync.nim CORE_ID`, the git trees
 of `gba/`, `gb/`, `common/`, the same on web, iOS and desktop when the
 core source is), `[29]` build time (the commit's, `BUILD_TIME`), `[33]`
-bit 0 "checks", `[34]` the GBA BIOS mode and `[35]` its image's hash u32
+bit 0 "checks" and bit 1 "supports dingbat" (an iOS Supporter: the transfer scene crowns their
+bat; every reader masks the bits it knows, so the desktop ignores it), `[34]` the GBA BIOS mode and `[35]` its image's hash u32
 (`linksync.bios_identity`, 0 = none). Older builds read the first 21 bytes
 and are sent none of the following. Web (`netplay.js`), iOS (`NetLink.swift`) and desktop
 (`frontend/online_link.nim`) each implement it; the desktop restarts on

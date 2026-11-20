@@ -625,8 +625,9 @@ final class NativeTouchesUITests: XCTestCase {
     }
 
     /// One armed look in every theme (web :root .armed): the game menu's
-    /// Delete and Settings' Reset all settings, armed, pictured per theme.
-    /// The fill and its ink are the same in each (Theme.swift dangerFill).
+    /// Delete, armed, pictured per theme (Theme.swift dangerFill). Settings'
+    /// Reset All Settings asks with the system's confirmation instead
+    /// (docs/dev/settings-design.md), pictured per theme too.
     func testArmedLookPerTheme() {
         // -theme is saved: the default back for the tests after this one.
         addTeardownBlock { [self] in launch(["-theme", "night", "-sheet", "tile"]).terminate() }
@@ -643,42 +644,34 @@ final class NativeTouchesUITests: XCTestCase {
             snap(app, "armed-menu-\(theme)")
             app.terminate()
             let again = launch(["-theme", theme, "-sheet", "settings:general"])
-            let reset = again.buttons["Reset all settings"].firstMatch
+            let reset = again.buttons["Reset All Settings"].firstMatch
             XCTAssertTrue(reset.waitForExistence(timeout: 5), "\(theme): Settings › General")
             for _ in 0..<5 where !reset.isHittable { again.swipeUp() }
-            XCTAssertTrue(reset.isHittable, "\(theme): scrolled to Reset all settings")
+            XCTAssertTrue(reset.isHittable, "\(theme): scrolled to Reset All Settings")
             reset.tap()
-            XCTAssertTrue(armed(again, "Reset all settings?").waitForExistence(timeout: 2),
-                          "\(theme): Reset all settings armed")
-            snap(again, "armed-button-\(theme)")
+            XCTAssertTrue(again.staticTexts["Reset all settings?"].waitForExistence(timeout: 2),
+                          "\(theme): Reset All Settings asks first")
+            snap(again, "confirm-reset-\(theme)")
             again.terminate()
         }
     }
 
     /// Sign out everywhere (a fake Drive account, `-drive-stub` at a closed
-    /// port: signed in, nothing syncs): the armed fill bleeds past the text
-    /// and nothing moves, in Settings › General and the account popover.
+    /// port: signed in, nothing syncs): Settings › Google Drive asks with the
+    /// system's confirmation; the account popover's arms in place, the fill
+    /// bleeding past the text and nothing moving.
     func testSignOutEverywhereArmed() {
         let app = XCUIApplication()
         app.launchArguments = ["-audio.muted", "YES", "-drive-stub", "http://127.0.0.1:9",
-                               "-sheet", "settings:general"]
+                               "-sheet", "settings:drive"]
         app.launch()
-        let out = app.buttons["Sign out everywhere"].firstMatch
-        XCTAssertTrue(out.waitForExistence(timeout: 10), "Settings › General: signed in")
-        app.swipeUp()
-        sleep(1)
-        let email = app.staticTexts["player@example.com"].firstMatch
-        let before = out.frame
-        print("NATIVE: settings unarmed \(before), email \(email.frame)")
+        let out = app.buttons["Sign Out Everywhere"].firstMatch
+        XCTAssertTrue(out.waitForExistence(timeout: 10), "Settings › Google Drive: signed in")
+        XCTAssertTrue(app.staticTexts["player@example.com"].exists, "the account")
         snap(app, "signout-settings")
         out.tap()
-        let armed = app.buttons["Sign out everywhere?"].firstMatch
-        XCTAssertTrue(armed.waitForExistence(timeout: 2), "armed")
-        print("NATIVE: settings armed \(armed.frame)")
-        XCTAssertEqual(armed.frame.minX, before.minX, accuracy: 0.5, "the text does not move")
-        XCTAssertEqual(armed.frame.minY, before.minY, accuracy: 0.5, "nor the row")
-        XCTAssertEqual(armed.frame.height, before.height, accuracy: 0.5, "still one line")
-        snap(app, "signout-settings-armed")
+        XCTAssertTrue(app.staticTexts["Sign out everywhere?"].waitForExistence(timeout: 2), "asks first")
+        snap(app, "signout-settings-confirm")
         app.terminate()
 
         app.launchArguments = ["-audio.muted", "YES", "-drive-stub", "http://127.0.0.1:9"]
@@ -869,103 +862,114 @@ final class NativeTouchesUITests: XCTestCase {
         let haptics = app.switches["Haptic feedback"].firstMatch
         XCTAssertTrue(haptics.waitForExistence(timeout: 10), "Haptic feedback is a switch to accessibility")
         let before = haptics.value as? String
-        haptics.tap()
-        let after = haptics.value as? String
+        // The switch at the row's end; as in iOS Settings, the label doesn't flip it.
+        let knob = haptics.coordinate(withNormalizedOffset: CGVector(dx: 0.94, dy: 0.5))
+        knob.tap()
+        var after = haptics.value as? String
+        for _ in 0..<20 where after == before { usleep(100_000); after = haptics.value as? String }
         print("NATIVE: Haptic feedback switch \(before ?? "?") -> \(after ?? "?")")
         XCTAssertNotEqual(before, after, "a tap flips it")
-        haptics.tap()
+        knob.tap()
         snap(app, "settings-controls")
     }
 
     /// Settings › Game Boy Advance with no BIOS file (the suite has none) and
-    /// Real BIOS and the intro stored: the rows show what the core will do,
-    /// HLE and no intro, disabled.
+    /// Your BIOS and the intro stored: the rows show what the core will do,
+    /// the built-in calls and no intro, disabled.
     func testGbaWithNoBiosShowsHle() {
         let app = launch(["-gbaBiosMode", "1", "-gbaRunBios", "YES", "-sheet", "settings:gba"])
         let intro = app.switches["Play BIOS intro"].firstMatch
         XCTAssertTrue(intro.waitForExistence(timeout: 10), "Settings › Game Boy Advance")
-        XCTAssertTrue(app.staticTexts["Not set"].exists, "the suite has no GBA BIOS file")
+        XCTAssertTrue(app.staticTexts["None"].exists, "the suite has no GBA BIOS file")
         XCTAssertEqual(intro.value as? String, "0", "no BIOS: the intro shows off")
         XCTAssertFalse(intro.isEnabled, "and can't be turned on")
-        let radio = { (name: String) in
-            app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", name)).firstMatch }
-        XCTAssertTrue(radio("HLE").isSelected, "no BIOS: HLE shows selected")
-        // A row reads "label, sub": the comma matches "Real BIOS, The most
-        // faithful…" and skips "Real BIOS boot, HLE calls".
-        XCTAssertFalse(radio("Real BIOS,").isSelected, "the stored Real BIOS does not")
-        XCTAssertFalse(radio("HLE").isEnabled, "the calls can't be changed")
-        XCTAssertFalse(app.buttons["Remove"].firstMatch.isEnabled, "nothing set: the BIOS row's Remove is off")
+        let check = { (name: String) in app.buttons[name].firstMatch }
+        XCTAssertTrue(check("Built-in").isSelected, "no BIOS: Built-in shows selected")
+        XCTAssertFalse(check("Your BIOS").isSelected, "the stored Your BIOS does not")
+        XCTAssertFalse(check("Built-in").isEnabled, "the calls can't be changed")
         snap(app, "settings-gba-no-bios")
     }
 
-    /// A BIOS row's Remove is off while nothing is set: greyed and no tap
-    /// beside "Not set", on once a file is there, and pressed with the pad it
-    /// goes off again with the ring stepping back to the row's Choose, not to
-    /// the top of Settings. The file is a dummy GBC boot ROM this test puts in
-    /// the app's container and takes away again whatever happens.
+    /// A BIOS file row is a menu: Choose File… alone while nothing is set
+    /// ("None"), Remove beside it once a file is there; with the pad, Y on the
+    /// row removes the file and the ring stays on the row. The file is a dummy
+    /// GBC boot ROM this test puts in the app's container and takes away
+    /// again whatever happens.
     func testBiosRemoveOffWhileNotSet() throws {
         var app = launch(["-sheet", "settings:gb"])
         let data = try XCTUnwrap(appContainer(), "the app's data container, beside the runner's")
         let fm = FileManager.default
         let (rom, name) = Self.dummyBootROM(in: data)
         defer { clearDummyBootROM() }
-        XCTAssertTrue(app.buttons["Remove"].firstMatch.waitForExistence(timeout: 10), "Settings › Game Boy's boot ROM row")
-        XCTAssertTrue(app.staticTexts["Not set"].exists, "no boot ROM")
-        XCTAssertFalse(app.buttons["Remove"].firstMatch.isEnabled, "nothing set: Remove is off")
-        snap(app, "bios-remove-off")
+        let rowButton = { app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'GBC boot ROM'")).firstMatch }
+        XCTAssertTrue(rowButton().waitForExistence(timeout: 10), "Settings › Game Boy's boot ROM row")
+        XCTAssertTrue(app.staticTexts["None"].exists, "no boot ROM")
+        rowButton().tap()
+        XCTAssertTrue(app.buttons["Choose File…"].waitForExistence(timeout: 3), "the row's menu")
+        XCTAssertFalse(app.buttons["Remove"].exists, "nothing set: no Remove")
+        snap(app, "bios-menu-none")
         app.terminate()
 
-        try fm.createDirectory(at: rom.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try Data(count: 2304).write(to: rom)
-        try Self.dummyName.write(to: name, atomically: true, encoding: .utf8)
-        app = launch(["-sheet", "settings:gb"])
-        let remove = app.buttons["Remove"].firstMatch
-        XCTAssertTrue(app.staticTexts[Self.dummyName].waitForExistence(timeout: 10), "the file shows")
-        XCTAssertTrue(remove.isEnabled, "a file set: Remove is on")
-        snap(app, "bios-remove-on")
-
-        // The pad, down to the row (PadNav's DEBUG dump says where the ring is).
-        let dump = data.appendingPathComponent("tmp/padnav.txt")
-        let row = "settings|bios:gbc_bootrom:"
-        // Its first line is where the ring is, then one line per item the
-        // pad can reach.
-        let lines = { () -> [String] in
-            ((try? String(contentsOf: dump, encoding: .utf8)) ?? "").split(separator: "\n").map(String.init)
+        func putFile() throws {
+            try fm.createDirectory(at: rom.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try Data(count: 2304).write(to: rom)
+            try Self.dummyName.write(to: name, atomically: true, encoding: .utf8)
         }
-        let ring = { lines().first.map { String($0.dropFirst("focused ".count)) } ?? "" }
-        try? fm.removeItem(at: dump)
-        for _ in 0..<40 where !ring().hasPrefix(row) { post("nav-down"); usleep(300_000) }
-        if ring() == row + "choose" { post("nav-right"); usleep(300_000) }
-        XCTAssertEqual(ring(), row + "remove", "the pad reaches the row's own Remove")
-        post("nav-a")
-        XCTAssertTrue(app.staticTexts["Not set"].waitForExistence(timeout: 3), "A on Remove takes the file away")
-        XCTAssertFalse(remove.isEnabled, "and Remove goes off")
-        // Down from Choose, the last row, has nowhere to go: the ring stays
-        // put, where a ring left on the gone Remove starts again at the top.
-        post("nav-down")
-        usleep(300_000)
-        XCTAssertEqual(ring(), row + "choose", "the ring stepped back to the row's Choose")
-        XCTAssertFalse(lines().dropFirst().contains { $0.hasPrefix(row + "remove ") },
-                       "the greyed Remove is out of the pad's reach")
-        snap(app, "bios-remove-pad-off")
+        try putFile()
+        app = launch(["-sheet", "settings:gb"])
+        XCTAssertTrue(app.staticTexts[Self.dummyName].waitForExistence(timeout: 10), "the file shows")
+        rowButton().tap()
+        let remove = app.buttons["Remove"].firstMatch
+        XCTAssertTrue(remove.waitForExistence(timeout: 3), "a file set: Remove in the menu")
+        snap(app, "bios-menu-file")
+        remove.tap()
+        XCTAssertTrue(app.staticTexts["None"].waitForExistence(timeout: 3), "Remove takes the file away")
         XCTAssertFalse(fm.fileExists(atPath: rom.path), "the file is gone")
+        app.terminate()
+
+        // The pad, down to the row (PadNav's DEBUG dump says where the ring is), then Y.
+        try putFile()
+        app = launch(["-sheet", "settings:gb"])
+        XCTAssertTrue(app.staticTexts[Self.dummyName].waitForExistence(timeout: 10), "the file shows")
+        let dump = data.appendingPathComponent("tmp/padnav.txt")
+        let ring = { () -> String in
+            let first = ((try? String(contentsOf: dump, encoding: .utf8)) ?? "").split(separator: "\n").first
+            return first.map { String($0.dropFirst("focused ".count)) } ?? ""
+        }
+        let row = "settings|file:GBC boot ROM"
+        try? fm.removeItem(at: dump)
+        for _ in 0..<40 where ring() != row { post("nav-down"); usleep(300_000) }
+        XCTAssertEqual(ring(), row, "the pad reaches the boot ROM row")
+        post("nav-y")
+        XCTAssertTrue(app.staticTexts["None"].waitForExistence(timeout: 3), "Y on the row takes the file away")
+        XCTAssertFalse(fm.fileExists(atPath: rom.path), "the file is gone")
+        post("nav-left")
+        usleep(300_000)
+        XCTAssertEqual(ring(), row, "the ring stays on the row")
+        snap(app, "bios-remove-pad")
     }
 
-    /// The Game Boy palette's Reset is off while there is nothing to reset,
-    /// on once a palette is picked, and A on it with the pad resets and steps
-    /// the ring to Default as it greys.
+    /// The custom palette's Reset (a Supporter extra) is off at the default
+    /// shades and on once they differ; A on it with the pad puts the defaults
+    /// back and steps the ring up to Custom as it greys.
     func testGbPaletteResetOffAtDefaults() throws {
-        // The default custom shades too (Settings.defaultShades), whatever an
-        // earlier session left in the simulator's defaults.
-        let app = launch(["-gb-palette.mode", "default",
+        var app = launch(["-supporter", "on", "-gb-palette.mode", "custom",
                           "-gb-palette.custom", "(16249855, 13021439, 10645455, 3810403)",
                           "-sheet", "settings:gb"])
         let data = try XCTUnwrap(appContainer(), "the app's data container, beside the runner's")
-        let reset = app.buttons["Reset the Game Boy palette"].firstMatch
-        XCTAssertTrue(reset.waitForExistence(timeout: 10), "Settings › Game Boy's palette Reset")
-        XCTAssertFalse(reset.isEnabled, "the default palette: Reset is off")
-        app.buttons["App theme"].firstMatch.tap()
-        XCTAssertTrue(reset.isEnabled, "a palette picked: Reset is on")
+        var reset = app.buttons["Reset the custom shades"].firstMatch
+        XCTAssertTrue(reset.waitForExistence(timeout: 10), "Settings › Game Boy's custom shades")
+        XCTAssertFalse(reset.isEnabled, "the default shades: Reset is off")
+        app.terminate()
+
+        app = launch(["-supporter", "on", "-gb-palette.mode", "custom",
+                      // XML: an old-style plist's numbers arrive as strings, which Settings drops.
+                      "-gb-palette.custom",
+                      "<array><integer>16777215</integer><integer>11184810</integer><integer>5592405</integer><integer>0</integer></array>",
+                      "-sheet", "settings:gb"])
+        reset = app.buttons["Reset the custom shades"].firstMatch
+        XCTAssertTrue(reset.waitForExistence(timeout: 10), "the custom shades")
+        XCTAssertTrue(reset.isEnabled, "other shades: Reset is on")
         snap(app, "gb-palette-reset-on")
 
         let dump = data.appendingPathComponent("tmp/padnav.txt")
@@ -974,22 +978,16 @@ final class NativeTouchesUITests: XCTestCase {
             return first.map { String($0.dropFirst("focused ".count)) } ?? ""
         }
         try? FileManager.default.removeItem(at: dump)
-        // Down to the palette's chips, right to Custom (the last), then down to
-        // Reset, under it at the row's right edge.
-        for _ in 0..<40 where !ring().hasPrefix("settings|chip:gbpalette:") { post("nav-down"); usleep(300_000) }
-        for _ in 0..<3 where ring() != "settings|chip:gbpalette:Custom" { post("nav-right"); usleep(300_000) }
-        post("nav-down")
-        usleep(300_000)
-        XCTAssertEqual(ring(), "settings|gbpalette:reset", "the pad reaches Reset")
+        for _ in 0..<40 where ring() != "settings|wells:reset" { post("nav-down"); usleep(300_000) }
+        XCTAssertEqual(ring(), "settings|wells:reset", "the pad reaches Reset")
         post("nav-a")
         usleep(500_000)
-        XCTAssertFalse(reset.isEnabled, "A on Reset puts the default back, and Reset goes off")
-        XCTAssertTrue(app.buttons["Default"].firstMatch.isSelected, "Default is the palette again")
-        // Left of Default, the first chip, is nothing: the ring stays put,
-        // where a ring left on the greyed Reset starts again at the top.
+        XCTAssertFalse(reset.isEnabled, "A on Reset puts the default shades back, and Reset goes off")
+        // Left of Custom is nothing: the ring stays put, where a ring left on
+        // the greyed Reset would start again at the top.
         post("nav-left")
         usleep(300_000)
-        XCTAssertEqual(ring(), "settings|chip:gbpalette:Default", "the ring stepped to Default")
+        XCTAssertEqual(ring(), "settings|check:Custom", "the ring stepped up to Custom")
         snap(app, "gb-palette-reset-off")
     }
 
@@ -997,7 +995,7 @@ final class NativeTouchesUITests: XCTestCase {
     /// "2 frames", "3 frames" (web aria-label), and a tap selects one.
     func testShortChipsSpeakTheirNames() {
         // Off at the start whatever an earlier run left.
-        let app = launch(["-runahead", "0", "-sheet", "settings:controls"])
+        let app = launch(["-runahead", "0", "-sheet", "settings:play"])
         let one = app.buttons["1 frame"].firstMatch
         XCTAssertTrue(one.waitForExistence(timeout: 10), "Run-ahead's 1 chip is \"1 frame\"")
         XCTAssertTrue(app.buttons["3 frames"].exists, "Run-ahead's 3 chip is \"3 frames\"")
