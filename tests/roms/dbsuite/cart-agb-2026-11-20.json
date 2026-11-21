@@ -1,7 +1,11 @@
 {
- "what": "dbsuite cartridge build at main e1d12918 (the run screen drawn as cells), run from an EZ-Flash Omega (not the Definitive Edition) on the AGB SP, 2026-11-20, started with START from the home screen; results block read back over the link cable (tools/hwlink/gblink.py read_report). Per case: [status, got] per run. The same image on the Omega Definitive Edition used for the earlier runs fails dma/dmatime-burst-palette (reads 0): on that unit bit 1 of the halfword at cartridge 0x5F2A, the case's `strh r0,[r8,#14]`, reads 1 once it has gone unread for more than about 10 ms. Measured on both carts with the link monitor booted from the cartridge: the plain Omega holds the bit and matches the file over all 512 KB.",
+ "what": "dbsuite cartridge build at main e1d12918 (the run screen drawn as cells), run from an EZ-Flash Omega (not the Definitive Edition) on the AGB SP, 2026-11-20, started with START from the home screen; results block read back over the link cable (tools/hwlink/gblink.py read_report). Per case: [status, got] per run. The same image on the Omega Definitive Edition used for the earlier runs fails dma/dmatime-burst-palette (reads 0): on that unit bit 1 of the halfword at cartridge 0x5F2A, the case's `strh r0,[r8,#14]`, reads 1 once it has gone unread for more than about 10 ms. Measured on both carts with the link monitor booted from the cartridge: the plain Omega holds the bit and matches the file over all 512 KB. Second run, same cart and console, same day: the build that sums its own image (rom_check), START from the home screen; RB_FLAGS read 2, the image as built.",
  "cases": {
   "cpu/psr-f-field-sets-nzcv": [
+   [
+    "PASS",
+    "F000001F"
+   ],
    [
     "PASS",
     "F000001F"
@@ -11,9 +15,17 @@
    [
     "PASS",
     "F000001F"
+   ],
+   [
+    "PASS",
+    "F000001F"
    ]
   ],
   "cpu/psr-x-field-writes-nothing": [
+   [
+    "PASS",
+    "F000001F"
+   ],
    [
     "PASS",
     "F000001F"
@@ -23,9 +35,17 @@
    [
     "PASS",
     "F00000FF"
+   ],
+   [
+    "PASS",
+    "F00000FF"
    ]
   ],
   "cpu/spsr-bit4-reads-one": [
+   [
+    "PASS",
+    "00000010"
+   ],
    [
     "PASS",
     "00000010"
@@ -35,9 +55,17 @@
    [
     "PASS",
     "0000001F"
+   ],
+   [
+    "PASS",
+    "0000001F"
    ]
   ],
   "cpu/system-mode-spsr-is-cpsr": [
+   [
+    "PASS",
+    "2000001F"
+   ],
    [
     "PASS",
     "2000001F"
@@ -47,9 +75,17 @@
    [
     "PASS",
     "9000009F"
+   ],
+   [
+    "PASS",
+    "9000009F"
    ]
   ],
   "cpu/thumb-cmp-pc-lands-in-system": [
+   [
+    "PASS",
+    "9000009F"
+   ],
    [
     "PASS",
     "9000009F"
@@ -59,9 +95,17 @@
    [
     "PASS",
     "00000092"
+   ],
+   [
+    "PASS",
+    "00000092"
    ]
   ],
   "cpu/thumb-mov-pc-keeps-cpsr": [
+   [
+    "PASS",
+    "00000092"
+   ],
    [
     "PASS",
     "00000092"
@@ -71,9 +115,17 @@
    [
     "PASS",
     "00000000"
+   ],
+   [
+    "PASS",
+    "00000000"
    ]
   ],
   "cpu/thumb-mov-pc-branches": [
+   [
+    "PASS",
+    "00000004"
+   ],
    [
     "PASS",
     "00000004"
@@ -83,9 +135,17 @@
    [
     "PASS",
     "00000004"
+   ],
+   [
+    "PASS",
+    "00000004"
    ]
   ],
   "cpu/msr-t-no-watchdog": [
+   [
+    "PASS",
+    "00000001"
+   ],
    [
     "PASS",
     "00000001"
@@ -95,9 +155,17 @@
    [
     "PASS",
     "0000000F"
+   ],
+   [
+    "PASS",
+    "0000000F"
    ]
   ],
   "cpu/msr-t-resumes-arm-system": [
+   [
+    "PASS",
+    "0000001F"
+   ],
    [
     "PASS",
     "0000001F"
@@ -107,9 +175,17 @@
    [
     "PASS",
     "00000004"
+   ],
+   [
+    "PASS",
+    "00000004"
    ]
   ],
   "cpu/bx-r1-control": [
+   [
+    "PASS",
+    "00000001"
+   ],
    [
     "PASS",
     "00000001"
@@ -119,9 +195,17 @@
    [
     "PASS",
     "00000001"
+   ],
+   [
+    "PASS",
+    "00000001"
    ]
   ],
   "cpu/bx-r15-branches-plus-8": [
+   [
+    "PASS",
+    "00000004"
+   ],
    [
     "PASS",
     "00000004"
@@ -131,9 +215,17 @@
    [
     "PASS",
     "00000001"
+   ],
+   [
+    "PASS",
+    "00000001"
    ]
   ],
   "cpu/blx-reg-word-clean": [
+   [
+    "PASS",
+    "00000001"
+   ],
    [
     "PASS",
     "00000001"
@@ -143,9 +235,17 @@
    [
     "PASS",
     "00000001"
+   ],
+   [
+    "PASS",
+    "00000001"
    ]
   ],
   "cpu/ldm-r15-wb-no-writeback": [
+   [
+    "PASS",
+    "0000000F"
+   ],
    [
     "PASS",
     "0000000F"
@@ -155,9 +255,17 @@
    [
     "PASS",
     "E2877002"
+   ],
+   [
+    "PASS",
+    "E2877002"
    ]
   ],
   "cpu/str-r15-post4-pc-base4": [
+   [
+    "PASS",
+    "0000000C"
+   ],
    [
     "PASS",
     "0000000C"
@@ -167,9 +275,17 @@
    [
     "PASS",
     "00000008"
+   ],
+   [
+    "PASS",
+    "00000008"
    ]
   ],
   "cpu/ldr-r15-post4-no-load": [
+   [
+    "PASS",
+    "00000000"
+   ],
    [
     "PASS",
     "00000000"
@@ -179,9 +295,17 @@
    [
     "PASS",
     "00000018"
+   ],
+   [
+    "PASS",
+    "00000018"
    ]
   ],
   "cpu/ldr-r15-post8-pc-base12": [
+   [
+    "PASS",
+    "00000010"
+   ],
    [
     "PASS",
     "00000010"
@@ -191,9 +315,17 @@
    [
     "PASS",
     "00000000"
+   ],
+   [
+    "PASS",
+    "00000000"
    ]
   ],
   "cpu/str-r15-post-4-pc-base-4": [
+   [
+    "PASS",
+    "0000001F"
+   ],
    [
     "PASS",
     "0000001F"
@@ -203,9 +335,17 @@
    [
     "PASS",
     "0000001C"
+   ],
+   [
+    "PASS",
+    "0000001C"
    ]
   ],
   "cpu/stm-r15-wb-no-writeback": [
+   [
+    "PASS",
+    "0000001F"
+   ],
    [
     "PASS",
     "0000001F"
@@ -215,9 +355,17 @@
    [
     "PASS",
     "00000000"
+   ],
+   [
+    "PASS",
+    "00000000"
    ]
   ],
   "cpu/stm-user-stores-user-r13": [
+   [
+    "PASS",
+    "CAFE0001"
+   ],
    [
     "PASS",
     "CAFE0001"
@@ -227,9 +375,17 @@
    [
     "PASS",
     "00000004"
+   ],
+   [
+    "PASS",
+    "00000004"
    ]
   ],
   "cpu/stm-user-banked-base-stores-user": [
+   [
+    "PASS",
+    "CAFE0001"
+   ],
    [
     "PASS",
     "CAFE0001"
@@ -239,9 +395,17 @@
    [
     "PASS",
     "00000000"
+   ],
+   [
+    "PASS",
+    "00000000"
    ]
   ],
   "cpu/stm-user-wb-to-user-bank": [
+   [
+    "PASS",
+    "37024043"
+   ],
    [
     "PASS",
     "37024043"
@@ -251,9 +415,17 @@
    [
     "PASS",
     "600000D2"
+   ],
+   [
+    "PASS",
+    "600000D2"
    ]
   ],
   "cpu/ldm-user-loads": [
+   [
+    "PASS",
+    "12345678"
+   ],
    [
     "PASS",
     "12345678"
@@ -263,9 +435,17 @@
    [
     "PASS",
     "0000FD02"
+   ],
+   [
+    "PASS",
+    "0000FD02"
    ]
   ],
   "cpu/ldm-user-glitch-gone-after-nop": [
+   [
+    "PASS",
+    "00009669"
+   ],
    [
     "PASS",
     "00009669"
@@ -275,9 +455,17 @@
    [
     "PASS",
     "2A6BA8C1"
+   ],
+   [
+    "PASS",
+    "2A6BA8C1"
    ]
   ],
   "cpu/ldm-user-glitch-gone-2-nops": [
+   [
+    "PASS",
+    "00009669"
+   ],
    [
     "PASS",
     "00009669"
@@ -287,9 +475,17 @@
    [
     "PASS",
     "0000FD02"
+   ],
+   [
+    "PASS",
+    "0000FD02"
    ]
   ],
   "cpu/ldm-user-glitch-from-ewram": [
+   [
+    "PASS",
+    "0000FD02"
+   ],
    [
     "PASS",
     "0000FD02"
@@ -299,9 +495,17 @@
    [
     "PASS",
     "0000FD02"
+   ],
+   [
+    "PASS",
+    "0000FD02"
    ]
   ],
   "cpu/stm-user-no-glitch": [
+   [
+    "PASS",
+    "00009669"
+   ],
    [
     "PASS",
     "00009669"
@@ -311,9 +515,17 @@
    [
     "PASS",
     "00001100"
+   ],
+   [
+    "PASS",
+    "00001100"
    ]
   ],
   "cpu/ldm-user-glitch-store-data-clean": [
+   [
+    "PASS",
+    "00001248"
+   ],
    [
     "PASS",
     "00001248"
@@ -323,9 +535,17 @@
    [
     "PASS",
     "0000FD02"
+   ],
+   [
+    "PASS",
+    "0000FD02"
    ]
   ],
   "cpu/ldm-user-glitch-shift-rs-only": [
+   [
+    "PASS",
+    "00000081"
+   ],
    [
     "PASS",
     "00000081"
@@ -335,9 +555,17 @@
    [
     "PASS",
     "0000005B"
+   ],
+   [
+    "PASS",
+    "0000005B"
    ]
   ],
   "cpu/ldm-user-glitch-msr-rm": [
+   [
+    "PASS",
+    "C0000000"
+   ],
    [
     "PASS",
     "C0000000"
@@ -347,9 +575,17 @@
    [
     "PASS",
     "0000000F"
+   ],
+   [
+    "PASS",
+    "0000000F"
    ]
   ],
   "cpu/ldm-user-glitch-shift-control": [
+   [
+    "PASS",
+    "00000021"
+   ],
    [
     "PASS",
     "00000021"
@@ -359,9 +595,17 @@
    [
     "PASS",
     "0000FD02"
+   ],
+   [
+    "PASS",
+    "0000FD02"
    ]
   ],
   "cpu/stm-base-first-stores-old": [
+   [
+    "PASS",
+    "02004000"
+   ],
    [
     "PASS",
     "02004000"
@@ -371,9 +615,17 @@
    [
     "PASS",
     "02004008"
+   ],
+   [
+    "PASS",
+    "02004008"
    ]
   ],
   "cpu/ldm-wb-loaded-base-wins": [
+   [
+    "PASS",
+    "CAFEBABE"
+   ],
    [
     "PASS",
     "CAFEBABE"
@@ -383,9 +635,17 @@
    [
     "PASS",
     "080042B8"
+   ],
+   [
+    "PASS",
+    "08004428"
    ]
   ],
   "cpu/stm-empty-list-base-plus-40": [
+   [
+    "PASS",
+    "00000040"
+   ],
    [
     "PASS",
     "00000040"
@@ -395,9 +655,17 @@
    [
     "PASS",
     "00000001"
+   ],
+   [
+    "PASS",
+    "00000001"
    ]
   ],
   "cpu/ldm-empty-list-base-plus-40": [
+   [
+    "PASS",
+    "00000040"
+   ],
    [
     "PASS",
     "00000040"
@@ -407,9 +675,17 @@
    [
     "PASS",
     "44112233"
+   ],
+   [
+    "PASS",
+    "44112233"
    ]
   ],
   "cpu/muls-carry-c1": [
+   [
+    "PASS",
+    "00002818"
+   ],
    [
     "PASS",
     "00002818"
@@ -419,9 +695,17 @@
    [
     "PASS",
     "00002818"
+   ],
+   [
+    "PASS",
+    "00002818"
    ]
   ],
   "cpu/mlas-carry-c1": [
+   [
+    "PASS",
+    "00002818"
+   ],
    [
     "PASS",
     "00002818"
@@ -431,9 +715,17 @@
    [
     "PASS",
     "00002818"
+   ],
+   [
+    "PASS",
+    "00002818"
    ]
   ],
   "cpu/umulls-carry": [
+   [
+    "PASS",
+    "00002812"
+   ],
    [
     "PASS",
     "00002812"
@@ -443,9 +735,17 @@
    [
     "PASS",
     "00002818"
+   ],
+   [
+    "PASS",
+    "00002818"
    ]
   ],
   "cpu/umlals-carry": [
+   [
+    "PASS",
+    "00002812"
+   ],
    [
     "PASS",
     "00002812"
@@ -455,9 +755,17 @@
    [
     "PASS",
     "00002818"
+   ],
+   [
+    "PASS",
+    "00002818"
    ]
   ],
   "cpu/muls-nzcv-c1-pairs-0-3": [
+   [
+    "PASS",
+    "02000004"
+   ],
    [
     "PASS",
     "02000004"
@@ -467,9 +775,17 @@
    [
     "PASS",
     "0808040A"
+   ],
+   [
+    "PASS",
+    "0808040A"
    ]
   ],
   "cpu/muls-16x-rs-1-byte": [
+   [
+    "PASS",
+    "000000DC"
+   ],
    [
     "PASS",
     "000000DC"
@@ -479,9 +795,17 @@
    [
     "PASS",
     "000000EC"
+   ],
+   [
+    "PASS",
+    "000000EC"
    ]
   ],
   "cpu/muls-16x-rs-3-bytes": [
+   [
+    "PASS",
+    "000000FC"
+   ],
    [
     "PASS",
     "000000FC"
@@ -491,9 +815,17 @@
    [
     "PASS",
     "0000010C"
+   ],
+   [
+    "PASS",
+    "0000010C"
    ]
   ],
   "cpu/muls-16x-rs-neg-1-byte": [
+   [
+    "PASS",
+    "000000DC"
+   ],
    [
     "PASS",
     "000000DC"
@@ -503,9 +835,17 @@
    [
     "PASS",
     "000000EC"
+   ],
+   [
+    "PASS",
+    "000000EC"
    ]
   ],
   "cpu/muls-16x-rs-neg-3-bytes": [
+   [
+    "PASS",
+    "000000FC"
+   ],
    [
     "PASS",
     "000000FC"
@@ -515,9 +855,17 @@
    [
     "PASS",
     "0000010C"
+   ],
+   [
+    "PASS",
+    "0000010C"
    ]
   ],
   "cpu/long-mul-nzcv": [
+   [
+    "PASS",
+    "0000000A"
+   ],
    [
     "PASS",
     "0000000A"
@@ -527,9 +875,17 @@
    [
     "PASS",
     "00000033"
+   ],
+   [
+    "PASS",
+    "00000033"
    ]
   ],
   "cpu/ldrsh-misaligned-is-ldrsb": [
+   [
+    "PASS",
+    "00000033"
+   ],
    [
     "PASS",
     "00000033"
@@ -539,9 +895,17 @@
    [
     "PASS",
     "00000000"
+   ],
+   [
+    "PASS",
+    "00000000"
    ]
   ],
   "cpu/mode-15-latches": [
+   [
+    "PASS",
+    "00000015"
+   ],
    [
     "PASS",
     "00000015"
@@ -551,9 +915,17 @@
    [
     "PASS",
     "00000000"
+   ],
+   [
+    "PASS",
+    "00000000"
    ]
   ],
   "cpu/mode-1a-r13-reads-0": [
+   [
+    "PASS",
+    "00000000"
+   ],
    [
     "PASS",
     "00000000"
@@ -563,9 +935,17 @@
    [
     "PASS",
     "0000001A"
+   ],
+   [
+    "PASS",
+    "0000001A"
    ]
   ],
   "cpu/mode-1a-r14-reads-0": [
+   [
+    "PASS",
+    "00000000"
+   ],
    [
     "PASS",
     "00000000"
@@ -575,9 +955,17 @@
    [
     "PASS",
     "00000000"
+   ],
+   [
+    "PASS",
+    "00000000"
    ]
   ],
   "cpu/mode-1e-latches": [
+   [
+    "PASS",
+    "0000001E"
+   ],
    [
     "PASS",
     "0000001E"
@@ -587,9 +975,17 @@
    [
     "PASS",
     "00000000"
+   ],
+   [
+    "PASS",
+    "00000000"
    ]
   ],
   "cpu/system-r13-survives": [
+   [
+    "PASS",
+    "51515151"
+   ],
    [
     "PASS",
     "51515151"
@@ -599,9 +995,17 @@
    [
     "PASS",
     "00000004"
+   ],
+   [
+    "PASS",
+    "00000004"
    ]
   ],
   "cpu/undefined-modes-clean": [
+   [
+    "PASS",
+    "00000001"
+   ],
    [
     "PASS",
     "00000001"
@@ -611,9 +1015,17 @@
    [
     "PASS",
     "00000000"
+   ],
+   [
+    "PASS",
+    "00000000"
    ]
   ],
   "cpu/mode-0c-r14-write-lost": [
+   [
+    "PASS",
+    "00000000"
+   ],
    [
     "PASS",
     "00000000"
@@ -623,9 +1035,17 @@
    [
     "PASS",
     "00000055"
+   ],
+   [
+    "PASS",
+    "00000055"
    ]
   ],
   "cpu/mode-0c-caller-r13-kept": [
+   [
+    "PASS",
+    "00000000"
+   ],
    [
     "PASS",
     "00000000"
@@ -635,9 +1055,17 @@
    [
     "PASS",
     "00000004"
+   ],
+   [
+    "PASS",
+    "00000004"
    ]
   ],
   "cpu/mrs-slot-imm-rn": [
+   [
+    "PASS",
+    "0000002A"
+   ],
    [
     "PASS",
     "0000002A"
@@ -647,9 +1075,17 @@
    [
     "PASS",
     "0000002A"
+   ],
+   [
+    "PASS",
+    "0000002A"
    ]
   ],
   "cpu/mrs-slot-imm-rm-unused": [
+   [
+    "PASS",
+    "000000FE"
+   ],
    [
     "PASS",
     "000000FE"
@@ -659,9 +1095,17 @@
    [
     "PASS",
     "FE012AFE"
+   ],
+   [
+    "PASS",
+    "FE012AFE"
    ]
   ],
   "cpu/thumb-cmp-pc-halfword-restores-spsr": [
+   [
+    "PASS",
+    "80000012"
+   ],
    [
     "PASS",
     "80000012"
@@ -671,9 +1115,17 @@
    [
     "PASS",
     "00000000"
+   ],
+   [
+    "PASS",
+    "00000000"
    ]
   ],
   "cpu/thumb-cmp-pc-halfword-skips-the-add": [
+   [
+    "PASS",
+    "00000000"
+   ],
    [
     "PASS",
     "00000000"
@@ -683,9 +1135,17 @@
    [
     "PASS",
     "00000001"
+   ],
+   [
+    "PASS",
+    "00000001"
    ]
   ],
   "cpu/thumb-cmp-pc-system-mode-no-op": [
+   [
+    "PASS",
+    "C000001F"
+   ],
    [
     "PASS",
     "C000001F"
@@ -695,9 +1155,17 @@
    [
     "PASS",
     "00000001"
+   ],
+   [
+    "PASS",
+    "00000001"
    ]
   ],
   "cpu/thumb-mul-64-iwram-cycles": [
+   [
+    "PASS",
+    "0000013D"
+   ],
    [
     "PASS",
     "0000013D"
@@ -707,9 +1175,17 @@
    [
     "PASS",
     "0000000C"
+   ],
+   [
+    "PASS",
+    "0000000C"
    ]
   ],
   "irq/irqwin-msr-clear-i-2-insns": [
+   [
+    "PASS",
+    "00000008"
+   ],
    [
     "PASS",
     "00000008"
@@ -719,9 +1195,17 @@
    [
     "PASS",
     "0000000C"
+   ],
+   [
+    "PASS",
+    "0000000C"
    ]
   ],
   "irq/irqwin-ewram-load-sled": [
+   [
+    "PASS",
+    "00000008"
+   ],
    [
     "PASS",
     "00000008"
@@ -731,9 +1215,17 @@
    [
     "PASS",
     "00000008"
+   ],
+   [
+    "PASS",
+    "00000008"
    ]
   ],
   "irq/irqwin-rom-load-sled": [
+   [
+    "PASS",
+    "00000008"
+   ],
    [
     "PASS",
     "00000008"
@@ -743,9 +1235,17 @@
    [
     "PASS",
     "0000000C"
+   ],
+   [
+    "PASS",
+    "0000000C"
    ]
   ],
   "irq/irqwin-if-ack-race": [
+   [
+    "PASS",
+    "00000008"
+   ],
    [
     "PASS",
     "00000008"
@@ -755,9 +1255,17 @@
    [
     "PASS",
     "FF01002F"
+   ],
+   [
+    "PASS",
+    "FF01002F"
    ]
   ],
   "irq/irqstorm-p1-no-dma": [
+   [
+    "PASS",
+    "FF01001E"
+   ],
    [
     "PASS",
     "FF01001E"
@@ -767,9 +1275,17 @@
    [
     "PASS",
     "F1010321"
+   ],
+   [
+    "PASS",
+    "F1010321"
    ]
   ],
   "irq/irqstorm-p16-128-words": [
+   [
+    "PASS",
+    "F1010621"
+   ],
    [
     "PASS",
     "F1010621"
@@ -779,9 +1295,17 @@
    [
     "PASS",
     "F1013021"
+   ],
+   [
+    "PASS",
+    "F1013021"
    ]
   ],
   "irq/irqstorm-p1-1024-words": [
+   [
+    "PASS",
+    "FF01301F"
+   ],
    [
     "PASS",
     "FF01301F"
@@ -791,9 +1315,17 @@
    [
     "PASS",
     "E1013021"
+   ],
+   [
+    "PASS",
+    "E1013021"
    ]
   ],
   "irq/irqstorm-p256-4096-words": [
+   [
+    "PASS",
+    "2101C021"
+   ],
    [
     "PASS",
     "2101C021"
@@ -803,9 +1335,17 @@
    [
     "PASS",
     "0000007C"
+   ],
+   [
+    "PASS",
+    "0000007C"
    ]
   ],
   "irq/irqlat-tm2-two-writes": [
+   [
+    "PASS",
+    "00000085"
+   ],
    [
     "PASS",
     "00000085"
@@ -815,9 +1355,17 @@
    [
     "PASS",
     "00000072"
+   ],
+   [
+    "PASS",
+    "00000072"
    ]
   ],
   "irq/irqlat-tm2-reload-0001": [
+   [
+    "PASS",
+    "00000072"
+   ],
    [
     "PASS",
     "00000072"
@@ -827,9 +1375,17 @@
    [
     "PASS",
     "00000087"
+   ],
+   [
+    "PASS",
+    "00000087"
    ]
   ],
   "irq/irqlat-hblank": [
+   [
+    "PASS",
+    "000003CC"
+   ],
    [
     "PASS",
     "000003CC"
@@ -839,9 +1395,17 @@
    [
     "PASS",
     "000003DD"
+   ],
+   [
+    "PASS",
+    "000003DD"
    ]
   ],
   "irq/irqlat-vblank": [
+   [
+    "PASS",
+    "00000989"
+   ],
    [
     "PASS",
     "00000989"
@@ -851,9 +1415,17 @@
    [
     "PASS",
     "00000974"
+   ],
+   [
+    "PASS",
+    "00000974"
    ]
   ],
   "irq/irqlat-dma3": [
+   [
+    "PASS",
+    "000000B2"
+   ],
    [
     "PASS",
     "000000B2"
@@ -863,9 +1435,17 @@
    [
     "PASS",
     "000000AC"
+   ],
+   [
+    "PASS",
+    "000000AC"
    ]
   ],
   "irq/if-ack-race-j0-3": [
+   [
+    "PASS",
+    "00000000"
+   ],
    [
     "PASS",
     "00000000"
@@ -875,9 +1455,17 @@
    [
     "PASS",
     "00000000"
+   ],
+   [
+    "PASS",
+    "00000000"
    ]
   ],
   "irq/if-ack-race-j6-7": [
+   [
+    "PASS",
+    "00000020"
+   ],
    [
     "PASS",
     "00000020"
@@ -887,9 +1475,17 @@
    [
     "PASS",
     "00000000"
+   ],
+   [
+    "PASS",
+    "00000000"
    ]
   ],
   "irq/wakeirq-00": [
+   [
+    "PASS",
+    "017009A1"
+   ],
    [
     "PASS",
     "017009A1"
@@ -899,9 +1495,17 @@
    [
     "PASS",
     "0000099D"
+   ],
+   [
+    "PASS",
+    "0000099D"
    ]
   ],
   "irq/wakeirq-20": [
+   [
+    "PASS",
+    "09CB099E"
+   ],
    [
     "PASS",
     "09CB099E"
@@ -911,9 +1515,17 @@
    [
     "PASS",
     "095F099E"
+   ],
+   [
+    "PASS",
+    "095F099E"
    ]
   ],
   "irq/wakeirq-60": [
+   [
+    "PASS",
+    "0AFA099E"
+   ],
    [
     "PASS",
     "0AFA099E"
@@ -923,9 +1535,17 @@
    [
     "PASS",
     "09B10984"
+   ],
+   [
+    "PASS",
+    "09B10984"
    ]
   ],
   "irq/wakeirq-2c": [
+   [
+    "PASS",
+    "093F0984"
+   ],
    [
     "PASS",
     "093F0984"
@@ -935,9 +1555,17 @@
    [
     "PASS",
     "0B000984"
+   ],
+   [
+    "PASS",
+    "0B000984"
    ]
   ],
   "irq/wakeirq-22": [
+   [
+    "PASS",
+    "099E0000"
+   ],
    [
     "PASS",
     "099E0000"
@@ -947,9 +1575,17 @@
    [
     "PASS",
     "09840000"
+   ],
+   [
+    "PASS",
+    "09840000"
    ]
   ],
   "irq/lyc-write-edge": [
+   [
+    "PASS",
+    "64101011"
+   ],
    [
     "PASS",
     "64101011"
@@ -959,9 +1595,17 @@
    [
     "PASS",
     "6301007C"
+   ],
+   [
+    "PASS",
+    "6301007C"
    ]
   ],
   "irq/dmamulirq-mul-k2": [
+   [
+    "PASS",
+    "6301007C"
+   ],
    [
     "PASS",
     "6301007C"
@@ -971,9 +1615,17 @@
    [
     "PASS",
     "6301007C"
+   ],
+   [
+    "PASS",
+    "6301007C"
    ]
   ],
   "irq/dmamulirq-mul-k4": [
+   [
+    "PASS",
+    "64010081"
+   ],
    [
     "PASS",
     "64010081"
@@ -983,9 +1635,17 @@
    [
     "PASS",
     "64010081"
+   ],
+   [
+    "PASS",
+    "64010081"
    ]
   ],
   "irq/dmamulirq-mul-k6": [
+   [
+    "PASS",
+    "64010081"
+   ],
    [
     "PASS",
     "64010081"
@@ -995,9 +1655,17 @@
    [
     "PASS",
     "64010081"
+   ],
+   [
+    "PASS",
+    "64010081"
    ]
   ],
   "irq/dmamulirq-mul-k8": [
+   [
+    "PASS",
+    "64010081"
+   ],
    [
     "PASS",
     "64010081"
@@ -1007,9 +1675,17 @@
    [
     "PASS",
     "64010081"
+   ],
+   [
+    "PASS",
+    "64010081"
    ]
   ],
   "irq/dmamulirq-mul-k10": [
+   [
+    "PASS",
+    "64010081"
+   ],
    [
     "PASS",
     "64010081"
@@ -1019,9 +1695,17 @@
    [
     "PASS",
     "64010081"
+   ],
+   [
+    "PASS",
+    "64010081"
    ]
   ],
   "irq/dmamulirq-mul-k12": [
+   [
+    "PASS",
+    "64010081"
+   ],
    [
     "PASS",
     "64010081"
@@ -1031,9 +1715,17 @@
    [
     "PASS",
     "64010081"
+   ],
+   [
+    "PASS",
+    "64010081"
    ]
   ],
   "irq/dmamulirq-mul-k14": [
+   [
+    "PASS",
+    "64010081"
+   ],
    [
     "PASS",
     "64010081"
@@ -1043,9 +1735,17 @@
    [
     "PASS",
     "64010081"
+   ],
+   [
+    "PASS",
+    "64010081"
    ]
   ],
   "irq/dmamulirq-mul-k16": [
+   [
+    "PASS",
+    "64010081"
+   ],
    [
     "PASS",
     "64010081"
@@ -1055,9 +1755,17 @@
    [
     "PASS",
     "64010081"
+   ],
+   [
+    "PASS",
+    "64010081"
    ]
   ],
   "irq/dmamulirq-mul-k42": [
+   [
+    "PASS",
+    "64010081"
+   ],
    [
     "PASS",
     "64010081"
@@ -1067,9 +1775,17 @@
    [
     "PASS",
     "64010081"
+   ],
+   [
+    "PASS",
+    "64010081"
    ]
   ],
   "irq/dmamulirq-mul-k82": [
+   [
+    "PASS",
+    "64010081"
+   ],
    [
     "PASS",
     "64010081"
@@ -1079,9 +1795,17 @@
    [
     "PASS",
     "64010081"
+   ],
+   [
+    "PASS",
+    "64010081"
    ]
   ],
   "irq/dmamulirq-mul-k122": [
+   [
+    "PASS",
+    "68010095"
+   ],
    [
     "PASS",
     "68010095"
@@ -1091,9 +1815,17 @@
    [
     "PASS",
     "65010086"
+   ],
+   [
+    "PASS",
+    "65010086"
    ]
   ],
   "irq/dmamulirq-mul-k110": [
+   [
+    "PASS",
+    "6601008B"
+   ],
    [
     "PASS",
     "6601008B"
@@ -1103,9 +1835,17 @@
    [
     "PASS",
     "67010090"
+   ],
+   [
+    "PASS",
+    "67010090"
    ]
   ],
   "irq/dmamulirq-mul-k118": [
+   [
+    "PASS",
+    "67010090"
+   ],
    [
     "PASS",
     "67010090"
@@ -1115,9 +1855,17 @@
    [
     "PASS",
     "92010081"
+   ],
+   [
+    "PASS",
+    "92010081"
    ]
   ],
   "irq/dmamulirq-ewram-ldr-k2": [
+   [
+    "PASS",
+    "92010081"
+   ],
    [
     "PASS",
     "92010081"
@@ -1127,9 +1875,17 @@
    [
     "PASS",
     "92010081"
+   ],
+   [
+    "PASS",
+    "92010081"
    ]
   ],
   "irq/dmamulirq-ewram-ldr-k4": [
+   [
+    "PASS",
+    "92010081"
+   ],
    [
     "PASS",
     "92010081"
@@ -1139,9 +1895,17 @@
    [
     "PASS",
     "92010081"
+   ],
+   [
+    "PASS",
+    "92010081"
    ]
   ],
   "irq/dmamulirq-ewram-ldr-k6": [
+   [
+    "PASS",
+    "92010081"
+   ],
    [
     "PASS",
     "92010081"
@@ -1151,9 +1915,17 @@
    [
     "PASS",
     "93010089"
+   ],
+   [
+    "PASS",
+    "93010089"
    ]
   ],
   "irq/dmamulirq-ewram-ldr-k8": [
+   [
+    "PASS",
+    "93010089"
+   ],
    [
     "PASS",
     "93010089"
@@ -1163,9 +1935,17 @@
    [
     "PASS",
     "93010089"
+   ],
+   [
+    "PASS",
+    "93010089"
    ]
   ],
   "irq/dmamulirq-ewram-ldr-k10": [
+   [
+    "PASS",
+    "93010089"
+   ],
    [
     "PASS",
     "93010089"
@@ -1175,9 +1955,17 @@
    [
     "PASS",
     "93010089"
+   ],
+   [
+    "PASS",
+    "93010089"
    ]
   ],
   "irq/dmamulirq-ewram-ldr-k12": [
+   [
+    "PASS",
+    "93010089"
+   ],
    [
     "PASS",
     "93010089"
@@ -1187,9 +1975,17 @@
    [
     "PASS",
     "93010089"
+   ],
+   [
+    "PASS",
+    "93010089"
    ]
   ],
   "irq/dmamulirq-ewram-ldr-k14": [
+   [
+    "PASS",
+    "93010089"
+   ],
    [
     "PASS",
     "93010089"
@@ -1199,9 +1995,17 @@
    [
     "PASS",
     "93010089"
+   ],
+   [
+    "PASS",
+    "93010089"
    ]
   ],
   "irq/dmamulirq-ewram-ldr-k16": [
+   [
+    "PASS",
+    "93010089"
+   ],
    [
     "PASS",
     "93010089"
@@ -1211,9 +2015,17 @@
    [
     "PASS",
     "93010089"
+   ],
+   [
+    "PASS",
+    "93010089"
    ]
   ],
   "irq/dmamulirq-ewram-ldr-k42": [
+   [
+    "PASS",
+    "93010089"
+   ],
    [
     "PASS",
     "93010089"
@@ -1223,9 +2035,17 @@
    [
     "PASS",
     "93010089"
+   ],
+   [
+    "PASS",
+    "93010089"
    ]
   ],
   "irq/dmamulirq-ewram-ldr-k82": [
+   [
+    "PASS",
+    "93010089"
+   ],
    [
     "PASS",
     "93010089"
@@ -1235,9 +2055,17 @@
    [
     "PASS",
     "93010089"
+   ],
+   [
+    "PASS",
+    "93010089"
    ]
   ],
   "irq/dmamulirq-ewram-ldr-k122": [
+   [
+    "PASS",
+    "95010099"
+   ],
    [
     "PASS",
     "95010099"
@@ -1247,9 +2075,17 @@
    [
     "PASS",
     "93010089"
+   ],
+   [
+    "PASS",
+    "93010089"
    ]
   ],
   "irq/dmamulirq-ewram-ldr-k110": [
+   [
+    "PASS",
+    "93010089"
+   ],
    [
     "PASS",
     "93010089"
@@ -1259,9 +2095,17 @@
    [
     "PASS",
     "94010091"
+   ],
+   [
+    "PASS",
+    "94010091"
    ]
   ],
   "irq/dmamulirq-ewram-ldr-k118": [
+   [
+    "PASS",
+    "94010091"
+   ],
    [
     "PASS",
     "94010091"
@@ -1271,9 +2115,17 @@
    [
     "PASS",
     "CD01001D"
+   ],
+   [
+    "PASS",
+    "CD01001D"
    ]
   ],
   "irq/dmamulirq-no-dma-k22": [
+   [
+    "PASS",
+    "D1010031"
+   ],
    [
     "PASS",
     "D1010031"
@@ -1283,9 +2135,17 @@
    [
     "PASS",
     "D5010045"
+   ],
+   [
+    "PASS",
+    "D5010045"
    ]
   ],
   "irq/dmamulirq-no-dma-k62": [
+   [
+    "PASS",
+    "DC010058"
+   ],
    [
     "PASS",
     "DC010058"
@@ -1295,9 +2155,17 @@
    [
     "PASS",
     "F001006C"
+   ],
+   [
+    "PASS",
+    "F001006C"
    ]
   ],
   "irq/dmamulirq-no-dma-k102": [
+   [
+    "PASS",
+    "38010080"
+   ],
    [
     "PASS",
     "38010080"
@@ -1307,9 +2175,17 @@
    [
     "PASS",
     "38010094"
+   ],
+   [
+    "PASS",
+    "38010094"
    ]
   ],
   "irq/dmairq-poll-iwram-n1": [
+   [
+    "PASS",
+    "6001002B"
+   ],
    [
     "PASS",
     "6001002B"
@@ -1319,9 +2195,17 @@
    [
     "PASS",
     "60010037"
+   ],
+   [
+    "PASS",
+    "60010037"
    ]
   ],
   "irq/dmairq-poll-iwram-n4": [
+   [
+    "PASS",
+    "6001004F"
+   ],
    [
     "PASS",
     "6001004F"
@@ -1331,9 +2215,17 @@
    [
     "PASS",
     "600100DF"
+   ],
+   [
+    "PASS",
+    "600100DF"
    ]
   ],
   "irq/dmairq-poll-iwram-n64": [
+   [
+    "PASS",
+    "6001031F"
+   ],
    [
     "PASS",
     "6001031F"
@@ -1343,9 +2235,17 @@
    [
     "PASS",
     "68010030"
+   ],
+   [
+    "PASS",
+    "68010030"
    ]
   ],
   "irq/dmairq-poll-ewram-n2": [
+   [
+    "PASS",
+    "6801003C"
+   ],
    [
     "PASS",
     "6801003C"
@@ -1355,9 +2255,17 @@
    [
     "PASS",
     "68010054"
+   ],
+   [
+    "PASS",
+    "68010054"
    ]
   ],
   "irq/dmairq-poll-ewram-n16": [
+   [
+    "PASS",
+    "680100E4"
+   ],
    [
     "PASS",
     "680100E4"
@@ -1367,9 +2275,17 @@
    [
     "PASS",
     "68010324"
+   ],
+   [
+    "PASS",
+    "68010324"
    ]
   ],
   "irq/dmairq-nop-sled-n1": [
+   [
+    "PASS",
+    "7101002B"
+   ],
    [
     "PASS",
     "7101002B"
@@ -1379,9 +2295,17 @@
    [
     "PASS",
     "71010037"
+   ],
+   [
+    "PASS",
+    "71010037"
    ]
   ],
   "irq/dmairq-nop-sled-n4": [
+   [
+    "PASS",
+    "7101004F"
+   ],
    [
     "PASS",
     "7101004F"
@@ -1391,9 +2315,17 @@
    [
     "PASS",
     "710100DF"
+   ],
+   [
+    "PASS",
+    "710100DF"
    ]
   ],
   "irq/dmairq-nop-sled-n64": [
+   [
+    "PASS",
+    "7101031F"
+   ],
    [
     "PASS",
     "7101031F"
@@ -1403,9 +2335,17 @@
    [
     "PASS",
     "0111002A"
+   ],
+   [
+    "PASS",
+    "0111002A"
    ]
   ],
   "irq/irqwait-iwram-arm-k24": [
+   [
+    "PASS",
+    "01190032"
+   ],
    [
     "PASS",
     "01190032"
@@ -1415,9 +2355,17 @@
    [
     "PASS",
     "0103003A"
+   ],
+   [
+    "PASS",
+    "0103003A"
    ]
   ],
   "irq/irqwait-ewram-arm-k18": [
+   [
+    "PASS",
+    "0103003A"
+   ],
    [
     "PASS",
     "0103003A"
@@ -1427,9 +2375,17 @@
    [
     "PASS",
     "0103003A"
+   ],
+   [
+    "PASS",
+    "0103003A"
    ]
   ],
   "irq/irqwait-ewram-arm-k20": [
+   [
+    "PASS",
+    "0103003A"
+   ],
    [
     "PASS",
     "0103003A"
@@ -1439,9 +2395,17 @@
    [
     "PASS",
     "0103003A"
+   ],
+   [
+    "PASS",
+    "0103003A"
    ]
   ],
   "irq/irqwait-ewram-arm-k22": [
+   [
+    "PASS",
+    "0103003A"
+   ],
    [
     "PASS",
     "0103003A"
@@ -1451,9 +2415,17 @@
    [
     "PASS",
     "01060031"
+   ],
+   [
+    "PASS",
+    "01060031"
    ]
   ],
   "irq/irqwait-ewram-thumb-k18": [
+   [
+    "PASS",
+    "01060031"
+   ],
    [
     "PASS",
     "01060031"
@@ -1463,9 +2435,17 @@
    [
     "PASS",
     "01060031"
+   ],
+   [
+    "PASS",
+    "01060031"
    ]
   ],
   "irq/irqwait-iwram-thumb-k16": [
+   [
+    "PASS",
+    "0111002A"
+   ],
    [
     "PASS",
     "0111002A"
@@ -1475,9 +2455,17 @@
    [
     "PASS",
     "01190032"
+   ],
+   [
+    "PASS",
+    "01190032"
    ]
   ],
   "irq/haltprobe-strb-haltcnt-tm0": [
+   [
+    "PASS",
+    "0000000B"
+   ],
    [
     "PASS",
     "0000000B"
@@ -1487,9 +2475,17 @@
    [
     "PASS",
     "00000064"
+   ],
+   [
+    "PASS",
+    "00000064"
    ]
   ],
   "irq/haltprobe-swi2-tm0": [
+   [
+    "PASS",
+    "00001345"
+   ],
    [
     "PASS",
     "00001345"
@@ -1499,9 +2495,17 @@
    [
     "PASS",
     "00000068"
+   ],
+   [
+    "PASS",
+    "00000068"
    ]
   ],
   "irq/vbwait-vblank-t0-T": [
+   [
+    "PASS",
+    "0000094B"
+   ],
    [
     "PASS",
     "0000094B"
@@ -1511,9 +2515,17 @@
    [
     "PASS",
     "0000210F"
+   ],
+   [
+    "PASS",
+    "0000210F"
    ]
   ],
   "irq/vbwait-vblank-t0-H": [
+   [
+    "PASS",
+    "000020BD"
+   ],
    [
     "PASS",
     "000020BD"
@@ -1523,9 +2535,17 @@
    [
     "PASS",
     "0000094B"
+   ],
+   [
+    "PASS",
+    "0000094B"
    ]
   ],
   "irq/vbwait-vblank-t5-R": [
+   [
+    "PASS",
+    "0000210F"
+   ],
    [
     "PASS",
     "0000210F"
@@ -1535,9 +2555,17 @@
    [
     "PASS",
     "000020BD"
+   ],
+   [
+    "PASS",
+    "000020BD"
    ]
   ],
   "irq/vbwait-vcount160-t0-T": [
+   [
+    "PASS",
+    "0000094A"
+   ],
    [
     "PASS",
     "0000094A"
@@ -1547,9 +2575,17 @@
    [
     "PASS",
     "00002110"
+   ],
+   [
+    "PASS",
+    "00002110"
    ]
   ],
   "irq/vbwait-vcount160-t0-H": [
+   [
+    "PASS",
+    "000020BE"
+   ],
    [
     "PASS",
     "000020BE"
@@ -1559,9 +2595,17 @@
    [
     "PASS",
     "0000094A"
+   ],
+   [
+    "PASS",
+    "0000094A"
    ]
   ],
   "irq/vbwait-vcount160-t5-R": [
+   [
+    "PASS",
+    "00002110"
+   ],
    [
     "PASS",
     "00002110"
@@ -1571,9 +2615,17 @@
    [
     "PASS",
     "000020BE"
+   ],
+   [
+    "PASS",
+    "000020BE"
    ]
   ],
   "timer/start-then-read": [
+   [
+    "PASS",
+    "00000007"
+   ],
    [
     "PASS",
     "00000007"
@@ -1583,9 +2635,17 @@
    [
     "PASS",
     "00000011"
+   ],
+   [
+    "PASS",
+    "00000011"
    ]
   ],
   "timer/cascade-counts-overflows": [
+   [
+    "PASS",
+    "00000033"
+   ],
    [
     "PASS",
     "00000033"
@@ -1595,9 +2655,17 @@
    [
     "PASS",
     "0000FFFC"
+   ],
+   [
+    "PASS",
+    "0000FFFC"
    ]
   ],
   "timer/reload-write-running-no-latch": [
+   [
+    "PASS",
+    "00000021"
+   ],
    [
     "PASS",
     "00000021"
@@ -1607,9 +2675,17 @@
    [
     "PASS",
     "0000123B"
+   ],
+   [
+    "PASS",
+    "0000123B"
    ]
   ],
   "timer/timer-read-vs-stop-00": [
+   [
+    "PASS",
+    "0007000F"
+   ],
    [
     "PASS",
     "0007000F"
@@ -1619,9 +2695,17 @@
    [
     "PASS",
     "00080010"
+   ],
+   [
+    "PASS",
+    "00080010"
    ]
   ],
   "timer/timer-read-vs-stop-02": [
+   [
+    "PASS",
+    "00090011"
+   ],
    [
     "PASS",
     "00090011"
@@ -1631,9 +2715,17 @@
    [
     "PASS",
     "0008000F"
+   ],
+   [
+    "PASS",
+    "0008000F"
    ]
   ],
   "timer/timer-read-vs-stop-11": [
+   [
+    "PASS",
+    "00090010"
+   ],
    [
     "PASS",
     "00090010"
@@ -1643,9 +2735,17 @@
    [
     "PASS",
     "00090011"
+   ],
+   [
+    "PASS",
+    "00090011"
    ]
   ],
   "timer/timer-read-vs-stop-21": [
+   [
+    "PASS",
+    "000A0012"
+   ],
    [
     "PASS",
     "000A0012"
@@ -1655,9 +2755,17 @@
    [
     "PASS",
     "000A0011"
+   ],
+   [
+    "PASS",
+    "000A0011"
    ]
   ],
   "timer/timergeo-p1-line100": [
+   [
+    "PASS",
+    "04B404B9"
+   ],
    [
     "PASS",
     "04B404B9"
@@ -1667,9 +2775,17 @@
    [
     "PASS",
     "001304B9"
+   ],
+   [
+    "PASS",
+    "001304B9"
    ]
   ],
   "timer/timergeo-p64-line101": [
+   [
+    "PASS",
+    "001304B9"
+   ],
    [
     "PASS",
     "001304B9"
@@ -1679,9 +2795,17 @@
    [
     "PASS",
     "001304B9"
+   ],
+   [
+    "PASS",
+    "001304B9"
    ]
   ],
   "timer/timergeo-p64-line103": [
+   [
+    "PASS",
+    "001204B9"
+   ],
    [
     "PASS",
     "001204B9"
@@ -1691,9 +2815,17 @@
    [
     "PASS",
     "001304B9"
+   ],
+   [
+    "PASS",
+    "001304B9"
    ]
   ],
   "timer/timergeo-p64-line105": [
+   [
+    "PASS",
+    "001304B9"
+   ],
    [
     "PASS",
     "001304B9"
@@ -1703,9 +2835,17 @@
    [
     "PASS",
     "001304B9"
+   ],
+   [
+    "PASS",
+    "001304B9"
    ]
   ],
   "timer/timergeo-p64-line107": [
+   [
+    "PASS",
+    "001204B9"
+   ],
    [
     "PASS",
     "001204B9"
@@ -1715,9 +2855,17 @@
    [
     "PASS",
     "001304C9"
+   ],
+   [
+    "PASS",
+    "001304C9"
    ]
   ],
   "timer/timergeo-p64-line103-e32": [
+   [
+    "PASS",
+    "001304D9"
+   ],
    [
     "PASS",
     "001304D9"
@@ -1727,9 +2875,17 @@
    [
     "PASS",
     "001304E9"
+   ],
+   [
+    "PASS",
+    "001304E9"
    ]
   ],
   "dma/cnth-hi-80-runs": [
+   [
+    "PASS",
+    "00000001"
+   ],
    [
     "PASS",
     "00000001"
@@ -1739,9 +2895,17 @@
    [
     "PASS",
     "00000080"
+   ],
+   [
+    "PASS",
+    "00000080"
    ]
   ],
   "dma/cnth-lo-80-no-run": [
+   [
+    "PASS",
+    "00000000"
+   ],
    [
     "PASS",
     "00000000"
@@ -1751,9 +2915,17 @@
    [
     "PASS",
     "00000000"
+   ],
+   [
+    "PASS",
+    "00000000"
    ]
   ],
   "dma/cnth-lo-44-control": [
+   [
+    "PASS",
+    "00000040"
+   ],
    [
     "PASS",
     "00000040"
@@ -1763,9 +2935,17 @@
    [
     "PASS",
     "00004400"
+   ],
+   [
+    "PASS",
+    "00004400"
    ]
   ],
   "dma/cnth-hi-c0-runs": [
+   [
+    "PASS",
+    "00000001"
+   ],
    [
     "PASS",
     "00000001"
@@ -1775,9 +2955,17 @@
    [
     "PASS",
     "00004080"
+   ],
+   [
+    "PASS",
+    "00004080"
    ]
   ],
   "dma/cnth-lo-c0-bit7-dropped": [
+   [
+    "PASS",
+    "00000040"
+   ],
    [
     "PASS",
     "00000040"
@@ -1787,9 +2975,17 @@
    [
     "PASS",
     "00000000"
+   ],
+   [
+    "PASS",
+    "00000000"
    ]
   ],
   "dma/cnth-hi-40-control": [
+   [
+    "PASS",
+    "00004000"
+   ],
    [
     "PASS",
     "00004000"
@@ -1799,9 +2995,17 @@
    [
     "PASS",
     "00000280"
+   ],
+   [
+    "PASS",
+    "00000280"
    ]
   ],
   "dma/capture-frame-2": [
+   [
+    "PASS",
+    "00000280"
+   ],
    [
     "PASS",
     "00000280"
@@ -1811,9 +3015,17 @@
    [
     "PASS",
     "00000280"
+   ],
+   [
+    "PASS",
+    "00000280"
    ]
   ],
   "dma/capture-enable-self-clears": [
+   [
+    "PASS",
+    "00003700"
+   ],
    [
     "PASS",
     "00003700"
@@ -1823,9 +3035,17 @@
    [
     "PASS",
     "00000280"
+   ],
+   [
+    "PASS",
+    "00000280"
    ]
   ],
   "dma/capture-rearm-2": [
+   [
+    "PASS",
+    "00000280"
+   ],
    [
     "PASS",
     "00000280"
@@ -1835,9 +3055,17 @@
    [
     "PASS",
     "00000280"
+   ],
+   [
+    "PASS",
+    "00000280"
    ]
   ],
   "dma/capture-rearm-self-clears": [
+   [
+    "PASS",
+    "00003700"
+   ],
    [
     "PASS",
     "00003700"
@@ -1847,9 +3075,17 @@
    [
     "PASS",
     "00000006"
+   ],
+   [
+    "PASS",
+    "00000006"
    ]
   ],
   "dma/imm-dma-1-word": [
+   [
+    "PASS",
+    "00000014"
+   ],
    [
     "PASS",
     "00000014"
@@ -1859,9 +3095,17 @@
    [
     "PASS",
     "00000020"
+   ],
+   [
+    "PASS",
+    "00000020"
    ]
   ],
   "dma/imm-dma-4-words": [
+   [
+    "PASS",
+    "00000038"
+   ],
    [
     "PASS",
     "00000038"
@@ -1871,9 +3115,17 @@
    [
     "PASS",
     "00000308"
+   ],
+   [
+    "PASS",
+    "00000308"
    ]
   ],
   "dma/imm-dma-1024-words": [
+   [
+    "PASS",
+    "00003008"
+   ],
    [
     "PASS",
     "00003008"
@@ -1883,9 +3135,17 @@
    [
     "PASS",
     "0000C008"
+   ],
+   [
+    "PASS",
+    "0000C008"
    ]
   ],
   "dma/imm-dma-1-halfword": [
+   [
+    "PASS",
+    "0000000E"
+   ],
    [
     "PASS",
     "0000000E"
@@ -1895,9 +3155,17 @@
    [
     "PASS",
     "00000014"
+   ],
+   [
+    "PASS",
+    "00000014"
    ]
   ],
   "dma/imm-dma-64-halfwords": [
+   [
+    "PASS",
+    "00000188"
+   ],
    [
     "PASS",
     "00000188"
@@ -1907,9 +3175,17 @@
    [
     "PASS",
     "FF24FF24"
+   ],
+   [
+    "PASS",
+    "FF24FF24"
    ]
   ],
   "dma/unmapped-src-after-ldrh": [
+   [
+    "PASS",
+    "FF24FF24"
+   ],
    [
     "PASS",
     "FF24FF24"
@@ -1919,9 +3195,17 @@
    [
     "PASS",
     "FFFFFFFF"
+   ],
+   [
+    "PASS",
+    "FFFFFFFF"
    ]
   ],
   "dma/unmapped-src-no-load-opcode": [
+   [
+    "PASS",
+    "46C046C0"
+   ],
    [
     "PASS",
     "46C046C0"
@@ -1931,9 +3215,17 @@
    [
     "PASS",
     "11223344"
+   ],
+   [
+    "PASS",
+    "11223344"
    ]
   ],
   "dma/bus-iw-thumb-adds": [
+   [
+    "PASS",
+    "31033104"
+   ],
    [
     "PASS",
     "31033104"
@@ -1943,9 +3235,17 @@
    [
     "PASS",
     "46C03344"
+   ],
+   [
+    "PASS",
+    "46C03344"
    ]
   ],
   "dma/bus-iw-ldrh-hi": [
+   [
+    "PASS",
+    "112246C0"
+   ],
    [
     "PASS",
     "112246C0"
@@ -1955,9 +3255,17 @@
    [
     "PASS",
     "46C04644"
+   ],
+   [
+    "PASS",
+    "46C04644"
    ]
   ],
   "dma/bus-iw-ldrb-1": [
+   [
+    "PASS",
+    "46C033C0"
+   ],
    [
     "PASS",
     "46C033C0"
@@ -1967,9 +3275,17 @@
    [
     "PASS",
     "462246C0"
+   ],
+   [
+    "PASS",
+    "462246C0"
    ]
   ],
   "dma/bus-iw-ldrb-3": [
+   [
+    "PASS",
+    "11C046C0"
+   ],
    [
     "PASS",
     "11C046C0"
@@ -1979,9 +3295,17 @@
    [
     "PASS",
     "46C046C0"
+   ],
+   [
+    "PASS",
+    "46C046C0"
    ]
   ],
   "dma/bus-iw-ldr": [
+   [
+    "PASS",
+    "11223344"
+   ],
    [
     "PASS",
     "11223344"
@@ -1991,9 +3315,17 @@
    [
     "PASS",
     "E2811004"
+   ],
+   [
+    "PASS",
+    "E2811004"
    ]
   ],
   "dma/bus-iw-ldrh-ewram": [
+   [
+    "PASS",
+    "55665566"
+   ],
    [
     "PASS",
     "55665566"
@@ -2003,9 +3335,17 @@
    [
     "PASS",
     "11223344"
+   ],
+   [
+    "PASS",
+    "11223344"
    ]
   ],
   "dma/bus-iw-arm-ldrh-hi": [
+   [
+    "PASS",
+    "11220000"
+   ],
    [
     "PASS",
     "11220000"
@@ -2015,9 +3355,17 @@
    [
     "PASS",
     "31033103"
+   ],
+   [
+    "PASS",
+    "31033103"
    ]
   ],
   "dma/bus-ew-ldrh-lo": [
+   [
+    "PASS",
+    "46C046C0"
+   ],
    [
     "PASS",
     "46C046C0"
@@ -2027,9 +3375,17 @@
    [
     "PASS",
     "46C046C0"
+   ],
+   [
+    "PASS",
+    "46C046C0"
    ]
   ],
   "dma/bus-ew-ldrb-0": [
+   [
+    "PASS",
+    "46C046C0"
+   ],
    [
     "PASS",
     "46C046C0"
@@ -2039,9 +3395,17 @@
    [
     "PASS",
     "46C046C0"
+   ],
+   [
+    "PASS",
+    "46C046C0"
    ]
   ],
   "dma/bus-ew-ldrb-2": [
+   [
+    "PASS",
+    "46C046C0"
+   ],
    [
     "PASS",
     "46C046C0"
@@ -2051,9 +3415,17 @@
    [
     "PASS",
     "46C046C0"
+   ],
+   [
+    "PASS",
+    "46C046C0"
    ]
   ],
   "dma/bus-ew-store-then-fetch": [
+   [
+    "PASS",
+    "46C046C0"
+   ],
    [
     "PASS",
     "46C046C0"
@@ -2063,9 +3435,17 @@
    [
     "PASS",
     "46C046C0"
+   ],
+   [
+    "PASS",
+    "46C046C0"
    ]
   ],
   "dma/bus-ew-arm-adds": [
+   [
+    "PASS",
+    "E2811003"
+   ],
    [
     "PASS",
     "E2811003"
@@ -2075,9 +3455,17 @@
    [
     "PASS",
     "46C046C0"
+   ],
+   [
+    "PASS",
+    "46C046C0"
    ]
   ],
   "dma/bus-ew-arm-ldr": [
+   [
+    "PASS",
+    "E1A00000"
+   ],
    [
     "PASS",
     "E1A00000"
@@ -2087,9 +3475,17 @@
    [
     "PASS",
     "E1A00000"
+   ],
+   [
+    "PASS",
+    "E1A00000"
    ]
   ],
   "dma/dmatime-imm-1-word-resume": [
+   [
+    "PASS",
+    "00000038"
+   ],
    [
     "PASS",
     "00000038"
@@ -2099,9 +3495,17 @@
    [
     "PASS",
     "0000002A"
+   ],
+   [
+    "PASS",
+    "0000002A"
    ]
   ],
   "dma/dmatime-imm-4-words-resume": [
+   [
+    "PASS",
+    "00000067"
+   ],
    [
     "PASS",
     "00000067"
@@ -2111,9 +3515,17 @@
    [
     "PASS",
     "000000F7"
+   ],
+   [
+    "PASS",
+    "000000F7"
    ]
   ],
   "dma/dmatime-burst-ewram": [
+   [
+    "PASS",
+    "0000011C"
+   ],
    [
     "PASS",
     "0000011C"
@@ -2123,9 +3535,17 @@
    [
     "PASS",
     "0000007C"
+   ],
+   [
+    "PASS",
+    "0000007C"
    ]
   ],
   "dma/dmatime-burst-vram-mode3": [
+   [
+    "PASS",
+    "000000B1"
+   ],
    [
     "PASS",
     "000000B1"
@@ -2135,9 +3555,17 @@
    [
     "PASS",
     "0000009C"
+   ],
+   [
+    "PASS",
+    "0000009C"
    ]
   ],
   "dma/dmatime-burst-oam": [
+   [
+    "PASS",
+    "0000007C"
+   ],
    [
     "PASS",
     "0000007C"
@@ -2147,9 +3575,17 @@
    [
     "PASS",
     "0000011E"
+   ],
+   [
+    "PASS",
+    "0000011E"
    ]
   ],
   "dma/dmatime-hblank-dma-in-hblank": [
+   [
+    "PASS",
+    "00000002"
+   ],
    [
     "PASS",
     "00000002"
@@ -2159,9 +3595,17 @@
    [
     "PASS",
     "00000001"
+   ],
+   [
+    "PASS",
+    "00000001"
    ]
   ],
   "dma/dmatime-vblank-dma-line-160": [
+   [
+    "PASS",
+    "000000A0"
+   ],
    [
     "PASS",
     "000000A0"
@@ -2171,9 +3615,17 @@
    [
     "PASS",
     "00000025"
+   ],
+   [
+    "PASS",
+    "00000025"
    ]
   ],
   "dma/dmatime-vblank-flag-to-word": [
+   [
+    "PASS",
+    "00000025"
+   ],
    [
     "PASS",
     "00000025"
@@ -2183,9 +3635,17 @@
    [
     "PASS",
     "0000006D"
+   ],
+   [
+    "PASS",
+    "0000006D"
    ]
   ],
   "dma/dmatime-cpu-resumes-after-last-word": [
+   [
+    "PASS",
+    "00000001"
+   ],
    [
     "PASS",
     "00000001"
@@ -2195,9 +3655,17 @@
    [
     "PASS",
     "04800484"
+   ],
+   [
+    "PASS",
+    "04800484"
    ]
   ],
   "dma/hdma-nodma-mul-k5": [
+   [
+    "PASS",
+    "04850489"
+   ],
    [
     "PASS",
     "04850489"
@@ -2207,9 +3675,17 @@
    [
     "PASS",
     "04800484"
+   ],
+   [
+    "PASS",
+    "04800484"
    ]
   ],
   "dma/hdma-nodma-iwram-k0": [
+   [
+    "PASS",
+    "04300434"
+   ],
    [
     "PASS",
     "04300434"
@@ -2219,9 +3695,17 @@
    [
     "PASS",
     "04400441"
+   ],
+   [
+    "PASS",
+    "04400441"
    ]
   ],
   "dma/hdma-mul-k0": [
+   [
+    "PASS",
+    "048303D5"
+   ],
    [
     "PASS",
     "048303D5"
@@ -2231,9 +3715,17 @@
    [
     "PASS",
     "048303D5"
+   ],
+   [
+    "PASS",
+    "048303D5"
    ]
   ],
   "dma/hdma-mul-k2": [
+   [
+    "PASS",
+    "048303D5"
+   ],
    [
     "PASS",
     "048303D5"
@@ -2243,9 +3735,17 @@
    [
     "PASS",
     "048303D5"
+   ],
+   [
+    "PASS",
+    "048303D5"
    ]
   ],
   "dma/hdma-mul-k4": [
+   [
+    "PASS",
+    "048803D5"
+   ],
    [
     "PASS",
     "048803D5"
@@ -2255,9 +3755,17 @@
    [
     "PASS",
     "048803D5"
+   ],
+   [
+    "PASS",
+    "048803D5"
    ]
   ],
   "dma/hdma-mul-k6": [
+   [
+    "PASS",
+    "048803D5"
+   ],
    [
     "PASS",
     "048803D5"
@@ -2267,9 +3775,17 @@
    [
     "PASS",
     "048803D5"
+   ],
+   [
+    "PASS",
+    "048803D5"
    ]
   ],
   "dma/hdma-mul-k8": [
+   [
+    "PASS",
+    "048803D5"
+   ],
    [
     "PASS",
     "048803D5"
@@ -2279,9 +3795,17 @@
    [
     "PASS",
     "048D03D5"
+   ],
+   [
+    "PASS",
+    "048D03D5"
    ]
   ],
   "dma/hdma-ewram-k0": [
+   [
+    "PASS",
+    "048303D7"
+   ],
    [
     "PASS",
     "048303D7"
@@ -2291,9 +3815,17 @@
    [
     "PASS",
     "048403D8"
+   ],
+   [
+    "PASS",
+    "048403D8"
    ]
   ],
   "dma/hdma-ewram-k2": [
+   [
+    "PASS",
+    "048503D9"
+   ],
    [
     "PASS",
     "048503D9"
@@ -2303,9 +3835,17 @@
    [
     "PASS",
     "048603DA"
+   ],
+   [
+    "PASS",
+    "048603DA"
    ]
   ],
   "dma/hdma-ewram-k4": [
+   [
+    "PASS",
+    "048803D5"
+   ],
    [
     "PASS",
     "048803D5"
@@ -2315,9 +3855,17 @@
    [
     "PASS",
     "048903D5"
+   ],
+   [
+    "PASS",
+    "048903D5"
    ]
   ],
   "dma/hdma-ewram-k6": [
+   [
+    "PASS",
+    "048903D5"
+   ],
    [
     "PASS",
     "048903D5"
@@ -2327,9 +3875,17 @@
    [
     "PASS",
     "048A03D6"
+   ],
+   [
+    "PASS",
+    "048A03D6"
    ]
   ],
   "dma/hdma-ewram-k8": [
+   [
+    "PASS",
+    "048B03D7"
+   ],
    [
     "PASS",
     "048B03D7"
@@ -2339,9 +3895,17 @@
    [
     "PASS",
     "048C03D8"
+   ],
+   [
+    "PASS",
+    "048C03D8"
    ]
   ],
   "dma/hdma-ewram-k10": [
+   [
+    "PASS",
+    "048D03D9"
+   ],
    [
     "PASS",
     "048D03D9"
@@ -2351,9 +3915,17 @@
    [
     "PASS",
     "048E03DA"
+   ],
+   [
+    "PASS",
+    "048E03DA"
    ]
   ],
   "dma/hdma-iwram-k0": [
+   [
+    "PASS",
+    "043303D5"
+   ],
    [
     "PASS",
     "043303D5"
@@ -2363,9 +3935,17 @@
    [
     "PASS",
     "043503D5"
+   ],
+   [
+    "PASS",
+    "043503D5"
    ]
   ],
   "dma/hdma-iwram-k2": [
+   [
+    "PASS",
+    "043603D5"
+   ],
    [
     "PASS",
     "043603D5"
@@ -2375,9 +3955,17 @@
    [
     "PASS",
     "043603D5"
+   ],
+   [
+    "PASS",
+    "043603D5"
    ]
   ],
   "dma/hdma-iwram-k4": [
+   [
+    "PASS",
+    "043803D5"
+   ],
    [
     "PASS",
     "043803D5"
@@ -2387,9 +3975,17 @@
    [
     "PASS",
     "043903D5"
+   ],
+   [
+    "PASS",
+    "043903D5"
    ]
   ],
   "dma/hdma-nop-k0": [
+   [
+    "PASS",
+    "044403D5"
+   ],
    [
     "PASS",
     "044403D5"
@@ -2399,9 +3995,17 @@
    [
     "PASS",
     "044503D5"
+   ],
+   [
+    "PASS",
+    "044503D5"
    ]
   ],
   "dma/hdma-nop-k2": [
+   [
+    "PASS",
+    "044603D5"
+   ],
    [
     "PASS",
     "044603D5"
@@ -2411,9 +4015,17 @@
    [
     "PASS",
     "F303FF81"
+   ],
+   [
+    "PASS",
+    "F303FF81"
    ]
   ],
   "dma/tmrdma-k1": [
+   [
+    "PASS",
+    "F501FFE9"
+   ],
    [
     "PASS",
     "F501FFE9"
@@ -2423,9 +4035,17 @@
    [
     "PASS",
     "F601FFEA"
+   ],
+   [
+    "PASS",
+    "F601FFEA"
    ]
   ],
   "dma/tmrdma-k3": [
+   [
+    "PASS",
+    "F701FFEB"
+   ],
    [
     "PASS",
     "F701FFEB"
@@ -2435,9 +4055,17 @@
    [
     "PASS",
     "F801FFEC"
+   ],
+   [
+    "PASS",
+    "F801FFEC"
    ]
   ],
   "dma/tmrdma-k5": [
+   [
+    "PASS",
+    "F901FFED"
+   ],
    [
     "PASS",
     "F901FFED"
@@ -2447,9 +4075,17 @@
    [
     "PASS",
     "FA01FFEE"
+   ],
+   [
+    "PASS",
+    "FA01FFEE"
    ]
   ],
   "dma/tmrdma-k7": [
+   [
+    "PASS",
+    "FB01FFEF"
+   ],
    [
     "PASS",
     "FB01FFEF"
@@ -2459,9 +4095,17 @@
    [
     "PASS",
     "EC00BEEF"
+   ],
+   [
+    "PASS",
+    "EC00BEEF"
    ]
   ],
   "dma/tmrdma-dma0-only": [
+   [
+    "PASS",
+    "8100FF81"
+   ],
    [
     "PASS",
     "8100FF81"
@@ -2471,9 +4115,17 @@
    [
     "PASS",
     "00040206"
+   ],
+   [
+    "PASS",
+    "00040206"
    ]
   ],
   "dma/dmastart-arm-ldr-ewram-dest": [
+   [
+    "PASS",
+    "0014000B"
+   ],
    [
     "PASS",
     "0014000B"
@@ -2483,9 +4135,17 @@
    [
     "PASS",
     "000F0206"
+   ],
+   [
+    "PASS",
+    "000F0206"
    ]
   ],
   "dma/dmastart-arm-nop-ldr-ewram": [
+   [
+    "PASS",
+    "00160106"
+   ],
    [
     "PASS",
     "00160106"
@@ -2495,9 +4155,17 @@
    [
     "PASS",
     "00170106"
+   ],
+   [
+    "PASS",
+    "00170106"
    ]
   ],
   "dma/dmastart-arm-mul-ldr-ewram": [
+   [
+    "PASS",
+    "00170106"
+   ],
    [
     "PASS",
     "00170106"
@@ -2507,9 +4175,17 @@
    [
     "PASS",
     "0014020B"
+   ],
+   [
+    "PASS",
+    "0014020B"
    ]
   ],
   "dma/dmastart-arm-ldm-iwram-2": [
+   [
+    "PASS",
+    "00110206"
+   ],
    [
     "PASS",
     "00110206"
@@ -2519,9 +4195,17 @@
    [
     "PASS",
     "000F0206"
+   ],
+   [
+    "PASS",
+    "000F0206"
    ]
   ],
   "dma/dmastart-arm-ldrh-ewram-dest": [
+   [
+    "PASS",
+    "00110008"
+   ],
    [
     "PASS",
     "00110008"
@@ -2531,9 +4215,17 @@
    [
     "PASS",
     "00040206"
+   ],
+   [
+    "PASS",
+    "00040206"
    ]
   ],
   "dma/dmastart-thumb-ldr-ewram-dest": [
+   [
+    "PASS",
+    "0014000B"
+   ],
    [
     "PASS",
     "0014000B"
@@ -2543,9 +4235,17 @@
    [
     "PASS",
     "000F0206"
+   ],
+   [
+    "PASS",
+    "000F0206"
    ]
   ],
   "dma/dmastart-thumb-nop-ldr-ewram": [
+   [
+    "PASS",
+    "00160106"
+   ],
    [
     "PASS",
     "00160106"
@@ -2555,9 +4255,17 @@
    [
     "PASS",
     "00170106"
+   ],
+   [
+    "PASS",
+    "00170106"
    ]
   ],
   "dma/dmastart-thumb-mul-ldr-ewram": [
+   [
+    "PASS",
+    "00170106"
+   ],
    [
     "PASS",
     "00170106"
@@ -2567,9 +4275,17 @@
    [
     "PASS",
     "0014020B"
+   ],
+   [
+    "PASS",
+    "0014020B"
    ]
   ],
   "dma/dmastart-thumb-ldm-iwram-2": [
+   [
+    "PASS",
+    "00110206"
+   ],
    [
     "PASS",
     "00110206"
@@ -2579,9 +4295,17 @@
    [
     "PASS",
     "000F0206"
+   ],
+   [
+    "PASS",
+    "000F0206"
    ]
   ],
   "dma/dmastart-thumb-ldrh-ewram-dest": [
+   [
+    "PASS",
+    "00110008"
+   ],
    [
     "PASS",
     "00110008"
@@ -2591,9 +4315,17 @@
    [
     "PASS",
     "00000000"
+   ],
+   [
+    "PASS",
+    "00000000"
    ]
   ],
   "dma/dmadur-iw-iw-32-n0": [
+   [
+    "PASS",
+    "00000002"
+   ],
    [
     "PASS",
     "00000002"
@@ -2603,9 +4335,17 @@
    [
     "PASS",
     "00000002"
+   ],
+   [
+    "PASS",
+    "00000002"
    ]
   ],
   "dma/dmadur-ew-iw-32-n0": [
+   [
+    "PASS",
+    "00000002"
+   ],
    [
     "PASS",
     "00000002"
@@ -2615,9 +4355,17 @@
    [
     "PASS",
     "00000002"
+   ],
+   [
+    "PASS",
+    "00000002"
    ]
   ],
   "dma/dmadur-io-iw-32-n0": [
+   [
+    "PASS",
+    "00000002"
+   ],
    [
     "PASS",
     "00000002"
@@ -2627,9 +4375,17 @@
    [
     "PASS",
     "00000001"
+   ],
+   [
+    "PASS",
+    "00000001"
    ]
   ],
   "dma/dmadur-dma32-starts-tm1-n1": [
+   [
+    "PASS",
+    "00000000"
+   ],
    [
     "PASS",
     "00000000"
@@ -2639,9 +4395,17 @@
    [
     "PASS",
     "00000000"
+   ],
+   [
+    "PASS",
+    "00000000"
    ]
   ],
   "dma/dmadur-iw-iw-32-n1": [
+   [
+    "PASS",
+    "00000007"
+   ],
    [
     "PASS",
     "00000007"
@@ -2651,9 +4415,17 @@
    [
     "PASS",
     "0000000C"
+   ],
+   [
+    "PASS",
+    "0000000C"
    ]
   ],
   "dma/dmadur-ew-iw-32-n1": [
+   [
+    "PASS",
+    "0000000C"
+   ],
    [
     "PASS",
     "0000000C"
@@ -2663,9 +4435,17 @@
    [
     "PASS",
     "00000007"
+   ],
+   [
+    "PASS",
+    "00000007"
    ]
   ],
   "dma/dmadur-io-iw-32-n1": [
+   [
+    "PASS",
+    "00000007"
+   ],
    [
     "PASS",
     "00000007"
@@ -2675,9 +4455,17 @@
    [
     "PASS",
     "00000002"
+   ],
+   [
+    "PASS",
+    "00000002"
    ]
   ],
   "dma/dmadur-dma32-starts-tm1-n2": [
+   [
+    "PASS",
+    "00000001"
+   ],
    [
     "PASS",
     "00000001"
@@ -2687,9 +4475,17 @@
    [
     "PASS",
     "00000001"
+   ],
+   [
+    "PASS",
+    "00000001"
    ]
   ],
   "dma/dmadur-iw-iw-32-n2": [
+   [
+    "PASS",
+    "00000008"
+   ],
    [
     "PASS",
     "00000008"
@@ -2699,9 +4495,17 @@
    [
     "PASS",
     "0000000D"
+   ],
+   [
+    "PASS",
+    "0000000D"
    ]
   ],
   "dma/dmadur-ew-iw-32-n2": [
+   [
+    "PASS",
+    "0000000D"
+   ],
    [
     "PASS",
     "0000000D"
@@ -2711,9 +4515,17 @@
    [
     "PASS",
     "00000008"
+   ],
+   [
+    "PASS",
+    "00000008"
    ]
   ],
   "dma/dmadur-io-iw-32-n2": [
+   [
+    "PASS",
+    "00000008"
+   ],
    [
     "PASS",
     "00000008"
@@ -2723,9 +4535,17 @@
    [
     "PASS",
     "00000003"
+   ],
+   [
+    "PASS",
+    "00000003"
    ]
   ],
   "dma/dmadur-dma32-starts-tm1-n3": [
+   [
+    "PASS",
+    "00000002"
+   ],
    [
     "PASS",
     "00000002"
@@ -2735,9 +4555,17 @@
    [
     "PASS",
     "00000002"
+   ],
+   [
+    "PASS",
+    "00000002"
    ]
   ],
   "dma/dmadur-iw-iw-32-n3": [
+   [
+    "PASS",
+    "00000009"
+   ],
    [
     "PASS",
     "00000009"
@@ -2747,9 +4575,17 @@
    [
     "PASS",
     "0000000E"
+   ],
+   [
+    "PASS",
+    "0000000E"
    ]
   ],
   "dma/dmadur-ew-iw-32-n3": [
+   [
+    "PASS",
+    "0000000E"
+   ],
    [
     "PASS",
     "0000000E"
@@ -2759,9 +4595,17 @@
    [
     "PASS",
     "00000009"
+   ],
+   [
+    "PASS",
+    "00000009"
    ]
   ],
   "dma/dmadur-io-iw-32-n3": [
+   [
+    "PASS",
+    "00000009"
+   ],
    [
     "PASS",
     "00000009"
@@ -2771,9 +4615,17 @@
    [
     "PASS",
     "00000004"
+   ],
+   [
+    "PASS",
+    "00000004"
    ]
   ],
   "dma/dmadur-dma32-starts-tm1-n4": [
+   [
+    "PASS",
+    "00000003"
+   ],
    [
     "PASS",
     "00000003"
@@ -2783,9 +4635,17 @@
    [
     "PASS",
     "00000003"
+   ],
+   [
+    "PASS",
+    "00000003"
    ]
   ],
   "dma/dmadur-iw-iw-32-n4": [
+   [
+    "PASS",
+    "0000000A"
+   ],
    [
     "PASS",
     "0000000A"
@@ -2795,9 +4655,17 @@
    [
     "PASS",
     "0000000F"
+   ],
+   [
+    "PASS",
+    "0000000F"
    ]
   ],
   "dma/dmadur-ew-iw-32-n4": [
+   [
+    "PASS",
+    "0000000F"
+   ],
    [
     "PASS",
     "0000000F"
@@ -2807,9 +4675,17 @@
    [
     "PASS",
     "0000000A"
+   ],
+   [
+    "PASS",
+    "0000000A"
    ]
   ],
   "dma/dmadur-io-iw-32-n4": [
+   [
+    "PASS",
+    "0000000A"
+   ],
    [
     "PASS",
     "0000000A"
@@ -2819,9 +4695,17 @@
    [
     "PASS",
     "00000006"
+   ],
+   [
+    "PASS",
+    "00000006"
    ]
   ],
   "dma/dmadur-dma32-starts-tm1-n6": [
+   [
+    "PASS",
+    "00000005"
+   ],
    [
     "PASS",
     "00000005"
@@ -2831,9 +4715,17 @@
    [
     "PASS",
     "00000005"
+   ],
+   [
+    "PASS",
+    "00000005"
    ]
   ],
   "dma/dmadur-iw-iw-32-n6": [
+   [
+    "PASS",
+    "0000000C"
+   ],
    [
     "PASS",
     "0000000C"
@@ -2843,9 +4735,17 @@
    [
     "PASS",
     "00000011"
+   ],
+   [
+    "PASS",
+    "00000011"
    ]
   ],
   "dma/dmadur-ew-iw-32-n6": [
+   [
+    "PASS",
+    "00000011"
+   ],
    [
     "PASS",
     "00000011"
@@ -2855,9 +4755,17 @@
    [
     "PASS",
     "0000000C"
+   ],
+   [
+    "PASS",
+    "0000000C"
    ]
   ],
   "dma/dmadur-io-iw-32-n6": [
+   [
+    "PASS",
+    "0000000C"
+   ],
    [
     "PASS",
     "0000000C"
@@ -2867,9 +4775,17 @@
    [
     "PASS",
     "00000008"
+   ],
+   [
+    "PASS",
+    "00000008"
    ]
   ],
   "dma/dmadur-dma32-starts-tm1-n8": [
+   [
+    "PASS",
+    "00000007"
+   ],
    [
     "PASS",
     "00000007"
@@ -2879,9 +4795,17 @@
    [
     "PASS",
     "00000007"
+   ],
+   [
+    "PASS",
+    "00000007"
    ]
   ],
   "dma/dmadur-iw-iw-32-n8": [
+   [
+    "PASS",
+    "0000000E"
+   ],
    [
     "PASS",
     "0000000E"
@@ -2891,9 +4815,17 @@
    [
     "PASS",
     "00000013"
+   ],
+   [
+    "PASS",
+    "00000013"
    ]
   ],
   "dma/dmadur-ew-iw-32-n8": [
+   [
+    "PASS",
+    "00000013"
+   ],
    [
     "PASS",
     "00000013"
@@ -2903,9 +4835,17 @@
    [
     "PASS",
     "0000000E"
+   ],
+   [
+    "PASS",
+    "0000000E"
    ]
   ],
   "dma/dmadur-io-iw-32-n8": [
+   [
+    "PASS",
+    "0000000E"
+   ],
    [
     "PASS",
     "0000000E"
@@ -2915,9 +4855,17 @@
    [
     "PASS",
     "0000000C"
+   ],
+   [
+    "PASS",
+    "0000000C"
    ]
   ],
   "dma/dmadur-dma32-starts-tm1-n12": [
+   [
+    "PASS",
+    "0000000B"
+   ],
    [
     "PASS",
     "0000000B"
@@ -2927,9 +4875,17 @@
    [
     "PASS",
     "0000000B"
+   ],
+   [
+    "PASS",
+    "0000000B"
    ]
   ],
   "dma/dmadur-iw-iw-32-n12": [
+   [
+    "PASS",
+    "00000012"
+   ],
    [
     "PASS",
     "00000012"
@@ -2939,9 +4895,17 @@
    [
     "PASS",
     "00000017"
+   ],
+   [
+    "PASS",
+    "00000017"
    ]
   ],
   "dma/dmadur-ew-iw-32-n12": [
+   [
+    "PASS",
+    "00000017"
+   ],
    [
     "PASS",
     "00000017"
@@ -2951,9 +4915,17 @@
    [
     "PASS",
     "00000012"
+   ],
+   [
+    "PASS",
+    "00000012"
    ]
   ],
   "dma/dmadur-io-iw-32-n12": [
+   [
+    "PASS",
+    "00000012"
+   ],
    [
     "PASS",
     "00000012"
@@ -2963,9 +4935,17 @@
    [
     "PASS",
     "00000013"
+   ],
+   [
+    "PASS",
+    "00000013"
    ]
   ],
   "dma/fifodma-k20-n14": [
+   [
+    "PASS",
+    "00000050"
+   ],
    [
     "PASS",
     "00000050"
@@ -2975,9 +4955,17 @@
    [
     "PASS",
     "00000015"
+   ],
+   [
+    "PASS",
+    "00000015"
    ]
   ],
   "dma/fifodma-k20-n16": [
+   [
+    "PASS",
+    "00000016"
+   ],
    [
     "PASS",
     "00000016"
@@ -2987,9 +4975,17 @@
    [
     "PASS",
     "00000035"
+   ],
+   [
+    "PASS",
+    "00000035"
    ]
   ],
   "dma/fifodma-k20-n23": [
+   [
+    "PASS",
+    "0000003B"
+   ],
    [
     "PASS",
     "0000003B"
@@ -2999,9 +4995,17 @@
    [
     "PASS",
     "0000005A"
+   ],
+   [
+    "PASS",
+    "0000005A"
    ]
   ],
   "dma/fifodma-k20-n25": [
+   [
+    "PASS",
+    "0000003D"
+   ],
    [
     "PASS",
     "0000003D"
@@ -3011,9 +5015,17 @@
    [
     "PASS",
     "00000036"
+   ],
+   [
+    "PASS",
+    "00000036"
    ]
   ],
   "dma/fifodma-ewram-load-k20-n11": [
+   [
+    "PASS",
+    "00000036"
+   ],
    [
     "PASS",
     "00000036"
@@ -3023,9 +5035,17 @@
    [
     "PASS",
     "0000003B"
+   ],
+   [
+    "PASS",
+    "0000003B"
    ]
   ],
   "dma/fifodma-ewram-load-k20-n17": [
+   [
+    "PASS",
+    "0000005B"
+   ],
    [
     "PASS",
     "0000005B"
@@ -3035,9 +5055,17 @@
    [
     "PASS",
     "0000003E"
+   ],
+   [
+    "PASS",
+    "0000003E"
    ]
   ],
   "dma/fifodma-ewram-load-k20-n20": [
+   [
+    "PASS",
+    "0000005E"
+   ],
    [
     "PASS",
     "0000005E"
@@ -3047,9 +5075,17 @@
    [
     "PASS",
     "0000005E"
+   ],
+   [
+    "PASS",
+    "0000005E"
    ]
   ],
   "dma/fifodma-k33-n29": [
+   [
+    "PASS",
+    "00000023"
+   ],
    [
     "PASS",
     "00000023"
@@ -3059,9 +5095,17 @@
    [
     "PASS",
     "00000042"
+   ],
+   [
+    "PASS",
+    "00000042"
    ]
   ],
   "dma/dmasteal-none": [
+   [
+    "PASS",
+    "000004B1"
+   ],
    [
     "PASS",
     "000004B1"
@@ -3071,9 +5115,17 @@
    [
     "PASS",
     "000004B6"
+   ],
+   [
+    "PASS",
+    "000004B6"
    ]
   ],
   "dma/dmasteal-iwram-to-iwram-16bit-n2": [
+   [
+    "PASS",
+    "000004B8"
+   ],
    [
     "PASS",
     "000004B8"
@@ -3083,9 +5135,17 @@
    [
     "PASS",
     "000004BC"
+   ],
+   [
+    "PASS",
+    "000004BC"
    ]
   ],
   "dma/dmasteal-iwram-to-iwram-16bit-n8": [
+   [
+    "PASS",
+    "000004C4"
+   ],
    [
     "PASS",
     "000004C4"
@@ -3095,9 +5155,17 @@
    [
     "PASS",
     "000004D4"
+   ],
+   [
+    "PASS",
+    "000004D4"
    ]
   ],
   "dma/dmasteal-iwram-to-iwram-16bit-n32": [
+   [
+    "PASS",
+    "000004F4"
+   ],
    [
     "PASS",
     "000004F4"
@@ -3107,9 +5175,17 @@
    [
     "PASS",
     "000004B6"
+   ],
+   [
+    "PASS",
+    "000004B6"
    ]
   ],
   "dma/dmasteal-iwram-to-iwram-32bit-n4": [
+   [
+    "PASS",
+    "000004BC"
+   ],
    [
     "PASS",
     "000004BC"
@@ -3119,9 +5195,17 @@
    [
     "PASS",
     "000004D4"
+   ],
+   [
+    "PASS",
+    "000004D4"
    ]
   ],
   "dma/dmasteal-ewram-to-iwram-16bit-n4": [
+   [
+    "PASS",
+    "000004C4"
+   ],
    [
     "PASS",
     "000004C4"
@@ -3131,9 +5215,17 @@
    [
     "PASS",
     "000004BC"
+   ],
+   [
+    "PASS",
+    "000004BC"
    ]
   ],
   "dma/dmasteal-pram-to-iwram-16bit-n4": [
+   [
+    "PASS",
+    "000004BC"
+   ],
    [
     "PASS",
     "000004BC"
@@ -3143,9 +5235,17 @@
    [
     "PASS",
     "000004BC"
+   ],
+   [
+    "PASS",
+    "000004BC"
    ]
   ],
   "dma/dmasteal-ewram-to-iwram-32bit-n4": [
+   [
+    "PASS",
+    "000004D0"
+   ],
    [
     "PASS",
     "000004D0"
@@ -3155,9 +5255,17 @@
    [
     "PASS",
     "000004C0"
+   ],
+   [
+    "PASS",
+    "000004C0"
    ]
   ],
   "dma/dmasteal-iwram-to-ewram-16bit-n4": [
+   [
+    "PASS",
+    "000004C4"
+   ],
    [
     "PASS",
     "000004C4"
@@ -3167,9 +5275,17 @@
    [
     "PASS",
     "000004BC"
+   ],
+   [
+    "PASS",
+    "000004BC"
    ]
   ],
   "dma/dmasteal-iwram-to-oam-16bit-n4": [
+   [
+    "PASS",
+    "000004BC"
+   ],
    [
     "PASS",
     "000004BC"
@@ -3179,9 +5295,17 @@
    [
     "PASS",
     "000004D0"
+   ],
+   [
+    "PASS",
+    "000004D0"
    ]
   ],
   "dma/halthb-wake-and-grant-k0": [
+   [
+    "PASS",
+    "03EC03D4"
+   ],
    [
     "PASS",
     "03EC03D4"
@@ -3191,9 +5315,17 @@
    [
     "PASS",
     "03EC03D4"
+   ],
+   [
+    "PASS",
+    "03EC03D4"
    ]
   ],
   "dma/halthb-wake-and-grant-k9": [
+   [
+    "PASS",
+    "03EC03D4"
+   ],
    [
     "PASS",
     "03EC03D4"
@@ -3203,9 +5335,17 @@
    [
     "PASS",
     "03EC03D4"
+   ],
+   [
+    "PASS",
+    "03EC03D4"
    ]
   ],
   "dma/vdmageo-wake-and-grant-k0": [
+   [
+    "PASS",
+    "04CD04B5"
+   ],
    [
     "PASS",
     "04CD04B5"
@@ -3215,9 +5355,17 @@
    [
     "PASS",
     "04CD04B5"
+   ],
+   [
+    "PASS",
+    "04CD04B5"
    ]
   ],
   "dma/vdmageo-wake-and-grant-k9": [
+   [
+    "PASS",
+    "04CD04B5"
+   ],
    [
     "PASS",
     "04CD04B5"
@@ -3227,9 +5375,17 @@
    [
     "PASS",
     "04CD04B5"
+   ],
+   [
+    "PASS",
+    "04CD04B5"
    ]
   ],
   "bus/io-010-bg0hofs-open-bus": [
+   [
+    "PASS",
+    "00006001"
+   ],
    [
     "PASS",
     "00006001"
@@ -3239,9 +5395,17 @@
    [
     "PASS",
     "00006001"
+   ],
+   [
+    "PASS",
+    "00006001"
    ]
   ],
   "bus/io-040-win0h-open-bus": [
+   [
+    "PASS",
+    "00006001"
+   ],
    [
     "PASS",
     "00006001"
@@ -3251,9 +5415,17 @@
    [
     "PASS",
     "00006001"
+   ],
+   [
+    "PASS",
+    "00006001"
    ]
   ],
   "bus/io-04e-open-bus": [
+   [
+    "PASS",
+    "0000E256"
+   ],
    [
     "PASS",
     "0000E256"
@@ -3263,9 +5435,17 @@
    [
     "PASS",
     "00006001"
+   ],
+   [
+    "PASS",
+    "00006001"
    ]
   ],
   "bus/io-056-open-bus": [
+   [
+    "PASS",
+    "0000E256"
+   ],
    [
     "PASS",
     "0000E256"
@@ -3275,9 +5455,17 @@
    [
     "PASS",
     "00000000"
+   ],
+   [
+    "PASS",
+    "00000000"
    ]
   ],
   "bus/io-06a-reads-0": [
+   [
+    "PASS",
+    "00000000"
+   ],
    [
     "PASS",
     "00000000"
@@ -3287,9 +5475,17 @@
    [
     "PASS",
     "00000000"
+   ],
+   [
+    "PASS",
+    "00000000"
    ]
   ],
   "bus/io-110-open-bus": [
+   [
+    "PASS",
+    "00006001"
+   ],
    [
     "PASS",
     "00006001"
@@ -3299,9 +5495,17 @@
    [
     "PASS",
     "00006001"
+   ],
+   [
+    "PASS",
+    "00006001"
    ]
   ],
   "bus/io-136-reads-0": [
+   [
+    "PASS",
+    "00000000"
+   ],
    [
     "PASS",
     "00000000"
@@ -3311,9 +5515,17 @@
    [
     "PASS",
     "00000000"
+   ],
+   [
+    "PASS",
+    "00000000"
    ]
   ],
   "bus/io-206-reads-0": [
+   [
+    "PASS",
+    "00000000"
+   ],
    [
     "PASS",
     "00000000"
@@ -3323,9 +5535,17 @@
    [
     "PASS",
     "00000000"
+   ],
+   [
+    "PASS",
+    "00000000"
    ]
   ],
   "bus/memctl-reads-0d000020": [
+   [
+    "PASS",
+    "0D000020"
+   ],
    [
     "PASS",
     "0D000020"
@@ -3335,9 +5555,17 @@
    [
     "PASS",
     "0D000020"
+   ],
+   [
+    "PASS",
+    "0D000020"
    ]
   ],
   "bus/memctl-mirror-04ff0800": [
+   [
+    "PASS",
+    "0D000020"
+   ],
    [
     "PASS",
     "0D000020"
@@ -3347,9 +5575,17 @@
    [
     "PASS",
     "0D000020"
+   ],
+   [
+    "PASS",
+    "0D000020"
    ]
   ],
   "bus/memctl-byte-reads": [
+   [
+    "PASS",
+    "0D000020"
+   ],
    [
     "PASS",
     "0D000020"
@@ -3359,9 +5595,17 @@
    [
     "PASS",
     "00000141"
+   ],
+   [
+    "PASS",
+    "00000141"
    ]
   ],
   "bus/ewram-16-reads-ws14": [
+   [
+    "PASS",
+    "00000121"
+   ],
    [
     "PASS",
     "00000121"
@@ -3371,9 +5615,17 @@
    [
     "PASS",
     "00000261"
+   ],
+   [
+    "PASS",
+    "00000261"
    ]
   ],
   "bus/memctl-ws14-reads-back": [
+   [
+    "PASS",
+    "0000000E"
+   ],
    [
     "PASS",
     "0000000E"
@@ -3383,9 +5635,17 @@
    [
     "PASS",
     "00000004"
+   ],
+   [
+    "PASS",
+    "00000004"
    ]
   ],
   "bus/memctl-ws13-reads-back": [
+   [
+    "PASS",
+    "0000000D"
+   ],
    [
     "PASS",
     "0000000D"
@@ -3395,9 +5655,17 @@
    [
     "PASS",
     "0000000D"
+   ],
+   [
+    "PASS",
+    "0000000D"
    ]
   ],
   "bus/contend-pram-mode0": [
+   [
+    "PASS",
+    "000000E6"
+   ],
    [
     "PASS",
     "000000E6"
@@ -3407,9 +5675,17 @@
    [
     "PASS",
     "000000F7"
+   ],
+   [
+    "PASS",
+    "000000F7"
    ]
   ],
   "bus/contend-oam-mode0": [
+   [
+    "PASS",
+    "000000E6"
+   ],
    [
     "PASS",
     "000000E6"
@@ -3419,9 +5695,17 @@
    [
     "PASS",
     "000000E6"
+   ],
+   [
+    "PASS",
+    "000000E6"
    ]
   ],
   "bus/contend-pram-mode2": [
+   [
+    "PASS",
+    "000000E7"
+   ],
    [
     "PASS",
     "000000E7"
@@ -3431,9 +5715,17 @@
    [
     "PASS",
     "0000042A"
+   ],
+   [
+    "PASS",
+    "0000042A"
    ]
   ],
   "bus/contend-oam-mode2": [
+   [
+    "PASS",
+    "000000E6"
+   ],
    [
     "PASS",
     "000000E6"
@@ -3443,9 +5735,17 @@
    [
     "PASS",
     "000000DC"
+   ],
+   [
+    "PASS",
+    "000000DC"
    ]
   ],
   "bus/contend-pram-no-obj": [
+   [
+    "PASS",
+    "000000E6"
+   ],
    [
     "PASS",
     "000000E6"
@@ -3455,9 +5755,17 @@
    [
     "PASS",
     "000000F8"
+   ],
+   [
+    "PASS",
+    "000000F8"
    ]
   ],
   "bus/contend-oam-no-obj": [
+   [
+    "PASS",
+    "000000E6"
+   ],
    [
     "PASS",
     "000000E6"
@@ -3467,9 +5775,17 @@
    [
     "PASS",
     "000000DD"
+   ],
+   [
+    "PASS",
+    "000000DD"
    ]
   ],
   "bus/contend-vram-hblank-free": [
+   [
+    "PASS",
+    "000000F6"
+   ],
    [
     "PASS",
     "000000F6"
@@ -3479,9 +5795,17 @@
    [
     "PASS",
     "000000E6"
+   ],
+   [
+    "PASS",
+    "000000E6"
    ]
   ],
   "bus/contend-vram-blank": [
+   [
+    "PASS",
+    "000000E6"
+   ],
    [
     "PASS",
     "000000E6"
@@ -3491,9 +5815,17 @@
    [
     "PASS",
     "000000E6"
+   ],
+   [
+    "PASS",
+    "000000E6"
    ]
   ],
   "bus/rom-window-64-reads-ws0-4-2": [
+   [
+    "PASS",
+    "0000037E"
+   ],
    [
     "PASS",
     "0000037E"
@@ -3503,9 +5835,17 @@
    [
     "PASS",
     "0000033E"
+   ],
+   [
+    "PASS",
+    "0000033E"
    ]
   ],
   "bus/rom-window-64-reads-ws0-2-2": [
+   [
+    "PASS",
+    "000002FE"
+   ],
    [
     "PASS",
     "000002FE"
@@ -3515,9 +5855,17 @@
    [
     "PASS",
     "000002FE"
+   ],
+   [
+    "PASS",
+    "000002FE"
    ]
   ],
   "bus/rom-window-64-reads-ws0-3-1-pf": [
+   [
+    "PASS",
+    "000002FE"
+   ],
    [
     "PASS",
     "000002FE"
@@ -3527,9 +5875,17 @@
    [
     "PASS",
     "0000037E"
+   ],
+   [
+    "PASS",
+    "0000037E"
    ]
   ],
   "bus/obus-arm-reads-pc-plus-8": [
+   [
+    "PASS",
+    "E58A0000"
+   ],
    [
     "PASS",
     "E58A0000"
@@ -3539,9 +5895,17 @@
    [
     "PASS",
     "3E0260A8"
+   ],
+   [
+    "PASS",
+    "3E0260A8"
    ]
   ],
   "bus/obus-thumb-ldr-align-b": [
+   [
+    "PASS",
+    "61283E02"
+   ],
    [
     "PASS",
     "61283E02"
@@ -3551,9 +5915,17 @@
    [
     "PASS",
     "000061A8"
+   ],
+   [
+    "PASS",
+    "000061A8"
    ]
   ],
   "bus/obus-thumb-ldrh-align-b": [
+   [
+    "PASS",
+    "00003E02"
+   ],
    [
     "PASS",
     "00003E02"
@@ -3563,9 +5935,17 @@
    [
     "PASS",
     "E59F0068"
+   ],
+   [
+    "PASS",
+    "E59F0068"
    ]
   ],
   "bus/obus-1-insn-after-dma-dma-word": [
+   [
+    "PASS",
+    "DEADBEE3"
+   ],
    [
     "PASS",
     "DEADBEE3"
@@ -3575,9 +5955,17 @@
    [
     "PASS",
     "E59F0024"
+   ],
+   [
+    "PASS",
+    "E59F0024"
    ]
   ],
   "bus/obuswin-nothing-burst-not-run": [
+   [
+    "PASS",
+    "E59F0198"
+   ],
    [
     "PASS",
     "E59F0198"
@@ -3587,9 +5975,17 @@
    [
     "PASS",
     "DEADBEE3"
+   ],
+   [
+    "PASS",
+    "DEADBEE3"
    ]
   ],
   "bus/obuswin-2-nops-closed": [
+   [
+    "PASS",
+    "E59F0144"
+   ],
    [
     "PASS",
     "E59F0144"
@@ -3599,9 +5995,17 @@
    [
     "PASS",
     "E59F011C"
+   ],
+   [
+    "PASS",
+    "E59F011C"
    ]
   ],
   "bus/obuswint-2-nops-half-dma-word": [
+   [
+    "PASS",
+    "DEAD6019"
+   ],
    [
     "PASS",
     "DEAD6019"
@@ -3611,9 +6015,17 @@
    [
     "PASS",
     "3E026028"
+   ],
+   [
+    "PASS",
+    "3E026028"
    ]
   ],
   "bus/obusbus-iwram-ldr-b": [
+   [
+    "PASS",
+    "60A83E02"
+   ],
    [
     "PASS",
     "60A83E02"
@@ -3623,9 +6035,17 @@
    [
     "PASS",
     "00006128"
+   ],
+   [
+    "PASS",
+    "00006128"
    ]
   ],
   "bus/obusbus-iwram-ldrh-b": [
+   [
+    "PASS",
+    "00003E02"
+   ],
    [
     "PASS",
     "00003E02"
@@ -3635,9 +6055,17 @@
    [
     "PASS",
     "60286028"
+   ],
+   [
+    "PASS",
+    "60286028"
    ]
   ],
   "bus/obusbus-ewram-ldr-b": [
+   [
+    "PASS",
+    "60A860A8"
+   ],
    [
     "PASS",
     "60A860A8"
@@ -3647,9 +6075,17 @@
    [
     "PASS",
     "00006128"
+   ],
+   [
+    "PASS",
+    "00006128"
    ]
   ],
   "bus/obusbus-ewram-ldrh-b": [
+   [
+    "PASS",
+    "000061A8"
+   ],
    [
     "PASS",
     "000061A8"
@@ -3659,9 +6095,17 @@
    [
     "PASS",
     "60286028"
+   ],
+   [
+    "PASS",
+    "60286028"
    ]
   ],
   "bus/obusbus-vram-ldr-b": [
+   [
+    "PASS",
+    "60A860A8"
+   ],
    [
     "PASS",
     "60A860A8"
@@ -3671,9 +6115,17 @@
    [
     "PASS",
     "00006128"
+   ],
+   [
+    "PASS",
+    "00006128"
    ]
   ],
   "bus/obusbus-vram-ldrh-b": [
+   [
+    "PASS",
+    "000061A8"
+   ],
    [
     "PASS",
     "000061A8"
@@ -3683,9 +6135,17 @@
    [
     "PASS",
     "606E6028"
+   ],
+   [
+    "PASS",
+    "606E6028"
    ]
   ],
   "bus/obusbus-oam-ldr-b": [
+   [
+    "PASS",
+    "60A83E02"
+   ],
    [
     "PASS",
     "60A83E02"
@@ -3695,9 +6155,17 @@
    [
     "PASS",
     "00006128"
+   ],
+   [
+    "PASS",
+    "00006128"
    ]
   ],
   "bus/obusbus-oam-ldrh-b": [
+   [
+    "PASS",
+    "00003E02"
+   ],
    [
     "PASS",
     "00003E02"
@@ -3707,9 +6175,17 @@
    [
     "PASS",
     "00000039"
+   ],
+   [
+    "PASS",
+    "00000039"
    ]
   ],
   "ppu/dispstat-hi-byte-is-lyc": [
+   [
+    "PASS",
+    "00003801"
+   ],
    [
     "PASS",
     "00003801"
@@ -3719,9 +6195,17 @@
    [
     "PASS",
     "00000039"
+   ],
+   [
+    "PASS",
+    "00000039"
    ]
   ],
   "ppu/dispstat-lo-byte-clear": [
+   [
+    "PASS",
+    "00000001"
+   ],
    [
     "PASS",
     "00000001"
@@ -3731,9 +6215,17 @@
    [
     "PASS",
     "00400000"
+   ],
+   [
+    "PASS",
+    "00400000"
    ]
   ],
   "ppu/breakram-loop-iwram-k1": [
+   [
+    "PASS",
+    "001B8C00"
+   ],
    [
     "PASS",
     "001B8C00"
@@ -3743,9 +6235,17 @@
    [
     "PASS",
     "00400000"
+   ],
+   [
+    "PASS",
+    "00400000"
    ]
   ],
   "ppu/breakram-loop-iwram-k3": [
+   [
+    "PASS",
+    "00400000"
+   ],
    [
     "PASS",
     "00400000"
@@ -3755,9 +6255,17 @@
    [
     "PASS",
     "00400000"
+   ],
+   [
+    "PASS",
+    "00400000"
    ]
   ],
   "ppu/breakram-loop-iwram-k5": [
+   [
+    "PASS",
+    "001BF201"
+   ],
    [
     "PASS",
     "001BF201"
@@ -3767,9 +6275,17 @@
    [
     "PASS",
     "00400000"
+   ],
+   [
+    "PASS",
+    "00400000"
    ]
   ],
   "ppu/breakram-loop-iwram-k7": [
+   [
+    "PASS",
+    "00400000"
+   ],
    [
     "PASS",
     "00400000"
@@ -3779,9 +6295,17 @@
    [
     "PASS",
     "00400000"
+   ],
+   [
+    "PASS",
+    "00400000"
    ]
   ],
   "ppu/breakram-loop-iwram-k9": [
+   [
+    "PASS",
+    "001C5802"
+   ],
    [
     "PASS",
     "001C5802"
@@ -3791,9 +6315,17 @@
    [
     "PASS",
     "00400000"
+   ],
+   [
+    "PASS",
+    "00400000"
    ]
   ],
   "ppu/breakram-loop-iwram-k11": [
+   [
+    "PASS",
+    "00400000"
+   ],
    [
     "PASS",
     "00400000"
@@ -3803,9 +6335,17 @@
    [
     "PASS",
     "00400000"
+   ],
+   [
+    "PASS",
+    "00400000"
    ]
   ],
   "ppu/breakram-loop-stale-k0": [
+   [
+    "PASS",
+    "00400000"
+   ],
    [
     "PASS",
     "00400000"
@@ -3815,9 +6355,17 @@
    [
     "PASS",
     "00400000"
+   ],
+   [
+    "PASS",
+    "00400000"
    ]
   ],
   "ppu/breakram-loop-stale-k2": [
+   [
+    "PASS",
+    "001B8B00"
+   ],
    [
     "PASS",
     "001B8B00"
@@ -3827,9 +6375,17 @@
    [
     "PASS",
     "00400000"
+   ],
+   [
+    "PASS",
+    "00400000"
    ]
   ],
   "ppu/breakram-loop-stale-k4": [
+   [
+    "PASS",
+    "00400000"
+   ],
    [
     "PASS",
     "00400000"
@@ -3839,9 +6395,17 @@
    [
     "PASS",
     "00400000"
+   ],
+   [
+    "PASS",
+    "00400000"
    ]
   ],
   "ppu/breakram-loop-stale-k6": [
+   [
+    "PASS",
+    "001BF101"
+   ],
    [
     "PASS",
     "001BF101"
@@ -3851,9 +6415,17 @@
    [
     "PASS",
     "00400000"
+   ],
+   [
+    "PASS",
+    "00400000"
    ]
   ],
   "ppu/breakram-loop-stale-k8": [
+   [
+    "PASS",
+    "00400000"
+   ],
    [
     "PASS",
     "00400000"
@@ -3863,9 +6435,17 @@
    [
     "PASS",
     "00400000"
+   ],
+   [
+    "PASS",
+    "00400000"
    ]
   ],
   "ppu/breakram-loop-stale-k10": [
+   [
+    "PASS",
+    "001C5702"
+   ],
    [
     "PASS",
     "001C5702"
@@ -3875,9 +6455,17 @@
    [
     "PASS",
     "00400000"
+   ],
+   [
+    "PASS",
+    "00400000"
    ]
   ],
   "ppu/breakram-loop-stale-k12": [
+   [
+    "PASS",
+    "00400000"
+   ],
    [
     "PASS",
     "00400000"
@@ -3887,9 +6475,17 @@
    [
     "PASS",
     "000D170D"
+   ],
+   [
+    "PASS",
+    "000D170D"
    ]
   ],
   "ppu/breakram-loop-ewram-k1": [
+   [
+    "PASS",
+    "000CEE0C"
+   ],
    [
     "PASS",
     "000CEE0C"
@@ -3899,9 +6495,17 @@
    [
     "PASS",
     "000C9C0A"
+   ],
+   [
+    "PASS",
+    "000C9C0A"
    ]
   ],
   "ppu/breakram-loop-ewram-k3": [
+   [
+    "PASS",
+    "000C7309"
+   ],
    [
     "PASS",
     "000C7309"
@@ -3911,9 +6515,17 @@
    [
     "PASS",
     "000C2107"
+   ],
+   [
+    "PASS",
+    "000C2107"
    ]
   ],
   "ppu/breakram-loop-ewram-k5": [
+   [
+    "PASS",
+    "000BF806"
+   ],
    [
     "PASS",
     "000BF806"
@@ -3923,9 +6535,17 @@
    [
     "PASS",
     "000BA604"
+   ],
+   [
+    "PASS",
+    "000BA604"
    ]
   ],
   "ppu/breakram-loop-ewram-k7": [
+   [
+    "PASS",
+    "000B7D03"
+   ],
    [
     "PASS",
     "000B7D03"
@@ -3935,9 +6555,17 @@
    [
     "PASS",
     "000B2B01"
+   ],
+   [
+    "PASS",
+    "000B2B01"
    ]
   ],
   "ppu/breakram-loop-ewram-k9": [
+   [
+    "PASS",
+    "000B0200"
+   ],
    [
     "PASS",
     "000B0200"
@@ -3947,9 +6575,17 @@
    [
     "PASS",
     "000D160D"
+   ],
+   [
+    "PASS",
+    "000D160D"
    ]
   ],
   "ppu/breakram-loop-ewram-k11": [
+   [
+    "PASS",
+    "000CED0C"
+   ],
    [
     "PASS",
     "000CED0C"
@@ -3959,9 +6595,17 @@
    [
     "PASS",
     "000C9B0A"
+   ],
+   [
+    "PASS",
+    "000C9B0A"
    ]
   ],
   "ppu/breakram-loop-ewram-k13": [
+   [
+    "PASS",
+    "000C7209"
+   ],
    [
     "PASS",
     "000C7209"
@@ -3971,9 +6615,17 @@
    [
     "PASS",
     "000C2007"
+   ],
+   [
+    "PASS",
+    "000C2007"
    ]
   ],
   "ppu/breakram-loop-ewram-k15": [
+   [
+    "PASS",
+    "000BF706"
+   ],
    [
     "PASS",
     "000BF706"
@@ -3983,9 +6635,17 @@
    [
     "PASS",
     "000BA504"
+   ],
+   [
+    "PASS",
+    "000BA504"
    ]
   ],
   "ppu/breakram-loop-ewram-k17": [
+   [
+    "PASS",
+    "000B7C03"
+   ],
    [
     "PASS",
     "000B7C03"
@@ -3995,9 +6655,17 @@
    [
     "PASS",
     "000B2A01"
+   ],
+   [
+    "PASS",
+    "000B2A01"
    ]
   ],
   "ppu/breakram-loop-ewram-k19": [
+   [
+    "PASS",
+    "000B0100"
+   ],
    [
     "PASS",
     "000B0100"
@@ -4007,9 +6675,17 @@
    [
     "PASS",
     "000D150D"
+   ],
+   [
+    "PASS",
+    "000D150D"
    ]
   ],
   "ppu/breakram-loop-ewram-k21": [
+   [
+    "PASS",
+    "000CEC0C"
+   ],
    [
     "PASS",
     "000CEC0C"
@@ -4019,9 +6695,17 @@
    [
     "PASS",
     "000C9A0A"
+   ],
+   [
+    "PASS",
+    "000C9A0A"
    ]
   ],
   "ppu/breakram-loop-ewram-k23": [
+   [
+    "PASS",
+    "000C7109"
+   ],
    [
     "PASS",
     "000C7109"
@@ -4031,9 +6715,17 @@
    [
     "PASS",
     "000C1F07"
+   ],
+   [
+    "PASS",
+    "000C1F07"
    ]
   ],
   "ppu/breakram-loop-ewram-k25": [
+   [
+    "PASS",
+    "000BF606"
+   ],
    [
     "PASS",
     "000BF606"
@@ -4043,9 +6735,17 @@
    [
     "PASS",
     "000BA404"
+   ],
+   [
+    "PASS",
+    "000BA404"
    ]
   ],
   "ppu/breakram-loop-ewram-k27": [
+   [
+    "PASS",
+    "000B7B03"
+   ],
    [
     "PASS",
     "000B7B03"
@@ -4055,9 +6755,17 @@
    [
     "PASS",
     "000B2901"
+   ],
+   [
+    "PASS",
+    "000B2901"
    ]
   ],
   "ppu/breakram-loop-ewram-k29": [
+   [
+    "PASS",
+    "000B0000"
+   ],
    [
     "PASS",
     "000B0000"
@@ -4067,9 +6775,17 @@
    [
     "PASS",
     "4A9F4000"
+   ],
+   [
+    "PASS",
+    "4A9F4000"
    ]
   ],
   "ppu/breakram-stamp-k1": [
+   [
+    "PASS",
+    "4A9E1B8C"
+   ],
    [
     "PASS",
     "4A9E1B8C"
@@ -4079,9 +6795,17 @@
    [
     "PASS",
     "4A9D4000"
+   ],
+   [
+    "PASS",
+    "4A9D4000"
    ]
   ],
   "ppu/breakram-stamp-v160-k0": [
+   [
+    "PASS",
+    "4A9E1B8C"
+   ],
    [
     "PASS",
     "4A9E1B8C"
@@ -4091,9 +6815,17 @@
    [
     "PASS",
     "4A9D4000"
+   ],
+   [
+    "PASS",
+    "4A9D4000"
    ]
   ],
   "ppu/breakram-stamp-v160-k2": [
+   [
+    "PASS",
+    "4A9C4000"
+   ],
    [
     "PASS",
     "4A9C4000"
@@ -4103,9 +6835,17 @@
    [
     "PASS",
     "035E00AD"
+   ],
+   [
+    "PASS",
+    "035E00AD"
    ]
   ],
   "ppu/breakram-stamp-v30-k1": [
+   [
+    "PASS",
+    "035D4000"
+   ],
    [
     "PASS",
     "035D4000"
@@ -4115,9 +6855,17 @@
    [
     "PASS",
     "035C4000"
+   ],
+   [
+    "PASS",
+    "035C4000"
    ]
   ],
   "ppu/breakram-stamp-dma0-v30-k0": [
+   [
+    "PASS",
+    "035E00AD"
+   ],
    [
     "PASS",
     "035E00AD"
@@ -4127,9 +6875,17 @@
    [
     "PASS",
     "035D4000"
+   ],
+   [
+    "PASS",
+    "035D4000"
    ]
   ],
   "ppu/breakram-stamp-dma0-v30-k2": [
+   [
+    "PASS",
+    "035C4000"
+   ],
    [
     "PASS",
     "035C4000"
@@ -4139,9 +6895,17 @@
    [
     "PASS",
     "043F4000"
+   ],
+   [
+    "PASS",
+    "043F4000"
    ]
   ],
   "ppu/breakram-stamp-vdma-v159-k1": [
+   [
+    "PASS",
+    "043E4000"
+   ],
    [
     "PASS",
     "043E4000"
@@ -4151,9 +6915,17 @@
    [
     "PASS",
     "043D4000"
+   ],
+   [
+    "PASS",
+    "043D4000"
    ]
   ],
   "ppu/breakram-stamp-hblank-v30-k0": [
+   [
+    "PASS",
+    "04620129"
+   ],
    [
     "PASS",
     "04620129"
@@ -4163,9 +6935,17 @@
    [
     "PASS",
     "04614000"
+   ],
+   [
+    "PASS",
+    "04614000"
    ]
   ],
   "ppu/breakram-stamp-hblank-v30-k2": [
+   [
+    "PASS",
+    "04604000"
+   ],
    [
     "PASS",
     "04604000"
@@ -4175,9 +6955,17 @@
    [
     "PASS",
     "00001E04"
+   ],
+   [
+    "PASS",
+    "00001E04"
    ]
   ],
   "ppu/breakram-edge200-v30-k29": [
+   [
+    "PASS",
+    "00001E04"
+   ],
    [
     "PASS",
     "00001E04"
@@ -4187,9 +6975,17 @@
    [
     "PASS",
     "00001E04"
+   ],
+   [
+    "PASS",
+    "00001E04"
    ]
   ],
   "ppu/breakram-edge200-v30-k31": [
+   [
+    "PASS",
+    "00001E04"
+   ],
    [
     "PASS",
     "00001E04"
@@ -4199,9 +6995,17 @@
    [
     "PASS",
     "00001E04"
+   ],
+   [
+    "PASS",
+    "00001E04"
    ]
   ],
   "ppu/breakram-edge200-v30-k33": [
+   [
+    "PASS",
+    "00001E04"
+   ],
    [
     "PASS",
     "00001E04"
@@ -4211,9 +7015,17 @@
    [
     "PASS",
     "00001E06"
+   ],
+   [
+    "PASS",
+    "00001E06"
    ]
   ],
   "ppu/breakram-edge200-v30-k35": [
+   [
+    "PASS",
+    "00001E06"
+   ],
    [
     "PASS",
     "00001E06"
@@ -4223,9 +7035,17 @@
    [
     "PASS",
     "00001E06"
+   ],
+   [
+    "PASS",
+    "00001E06"
    ]
   ],
   "ppu/breakram-edge200-v30-k37": [
+   [
+    "PASS",
+    "00001E06"
+   ],
    [
     "PASS",
     "00001E06"
@@ -4235,9 +7055,17 @@
    [
     "PASS",
     "00001E06"
+   ],
+   [
+    "PASS",
+    "00001E06"
    ]
   ],
   "ppu/breakram-edge200-v30-k39": [
+   [
+    "PASS",
+    "00001E06"
+   ],
    [
     "PASS",
     "00001E06"
@@ -4247,9 +7075,17 @@
    [
     "PASS",
     "00001E06"
+   ],
+   [
+    "PASS",
+    "00001E06"
    ]
   ],
   "ppu/breakram-edge212-running-v30-k18": [
+   [
+    "PASS",
+    "00001E04"
+   ],
    [
     "PASS",
     "00001E04"
@@ -4259,9 +7095,17 @@
    [
     "PASS",
     "00001E04"
+   ],
+   [
+    "PASS",
+    "00001E04"
    ]
   ],
   "ppu/breakram-edge212-running-v30-k20": [
+   [
+    "PASS",
+    "00001E04"
+   ],
    [
     "PASS",
     "00001E04"
@@ -4271,9 +7115,17 @@
    [
     "PASS",
     "00001E04"
+   ],
+   [
+    "PASS",
+    "00001E04"
    ]
   ],
   "ppu/breakram-edge212-running-v30-k22": [
+   [
+    "PASS",
+    "00001E04"
+   ],
    [
     "PASS",
     "00001E04"
@@ -4283,9 +7135,17 @@
    [
     "PASS",
     "00001E04"
+   ],
+   [
+    "PASS",
+    "00001E04"
    ]
   ],
   "ppu/breakram-edge212-running-v30-k24": [
+   [
+    "PASS",
+    "00001E06"
+   ],
    [
     "PASS",
     "00001E06"
@@ -4295,9 +7155,17 @@
    [
     "PASS",
     "00001E06"
+   ],
+   [
+    "PASS",
+    "00001E06"
    ]
   ],
   "ppu/breakram-edge212-running-v30-k26": [
+   [
+    "PASS",
+    "00001E06"
+   ],
    [
     "PASS",
     "00001E06"
@@ -4307,9 +7175,17 @@
    [
     "PASS",
     "00001E06"
+   ],
+   [
+    "PASS",
+    "00001E06"
    ]
   ],
   "ppu/breakram-edge212-running-v30-k28": [
+   [
+    "PASS",
+    "00001E06"
+   ],
    [
     "PASS",
     "00001E06"
@@ -4319,9 +7195,17 @@
    [
     "PASS",
     "00001E06"
+   ],
+   [
+    "PASS",
+    "00001E06"
    ]
   ],
   "ppu/breakram-edge212-running-v30-k30": [
+   [
+    "PASS",
+    "00001E06"
+   ],
    [
     "PASS",
     "00001E06"
@@ -4331,9 +7215,17 @@
    [
     "PASS",
     "00001E06"
+   ],
+   [
+    "PASS",
+    "00001E06"
    ]
   ],
   "ppu/breakram-edge255-v30-k29": [
+   [
+    "PASS",
+    "00001E06"
+   ],
    [
     "PASS",
     "00001E06"
@@ -4343,9 +7235,17 @@
    [
     "PASS",
     "00001E06"
+   ],
+   [
+    "PASS",
+    "00001E06"
    ]
   ],
   "ppu/breakram-edge255-v30-k31": [
+   [
+    "PASS",
+    "00001E06"
+   ],
    [
     "PASS",
     "00001E06"
@@ -4355,9 +7255,17 @@
    [
     "PASS",
     "00001F06"
+   ],
+   [
+    "PASS",
+    "00001F06"
    ]
   ],
   "ppu/breakram-edge255-v30-k33": [
+   [
+    "PASS",
+    "00001F06"
+   ],
    [
     "PASS",
     "00001F06"
@@ -4367,9 +7275,17 @@
    [
     "PASS",
     "00001F06"
+   ],
+   [
+    "PASS",
+    "00001F06"
    ]
   ],
   "ppu/breakram-edge255-v30-k35": [
+   [
+    "PASS",
+    "00001F04"
+   ],
    [
     "PASS",
     "00001F04"
@@ -4379,9 +7295,17 @@
    [
     "PASS",
     "00001F00"
+   ],
+   [
+    "PASS",
+    "00001F00"
    ]
   ],
   "ppu/breakram-edge255-v30-k37": [
+   [
+    "PASS",
+    "00001F00"
+   ],
    [
     "PASS",
     "00001F00"
@@ -4391,9 +7315,17 @@
    [
     "PASS",
     "00001F00"
+   ],
+   [
+    "PASS",
+    "00001F00"
    ]
   ],
   "ppu/breakram-edge255-v30-k39": [
+   [
+    "PASS",
+    "00001F00"
+   ],
    [
     "PASS",
     "00001F00"
@@ -4403,9 +7335,17 @@
    [
     "PASS",
     "00001F00"
+   ],
+   [
+    "PASS",
+    "00001F00"
    ]
   ],
   "ppu/breakram-edge255-v159-k28": [
+   [
+    "PASS",
+    "00009F06"
+   ],
    [
     "PASS",
     "00009F06"
@@ -4415,9 +7355,17 @@
    [
     "PASS",
     "00009F06"
+   ],
+   [
+    "PASS",
+    "00009F06"
    ]
   ],
   "ppu/breakram-edge255-v159-k30": [
+   [
+    "PASS",
+    "00009F06"
+   ],
    [
     "PASS",
     "00009F06"
@@ -4427,9 +7375,17 @@
    [
     "PASS",
     "00009F06"
+   ],
+   [
+    "PASS",
+    "00009F06"
    ]
   ],
   "ppu/breakram-edge255-v159-k32": [
+   [
+    "PASS",
+    "0000A006"
+   ],
    [
     "PASS",
     "0000A006"
@@ -4439,9 +7395,17 @@
    [
     "PASS",
     "0000A006"
+   ],
+   [
+    "PASS",
+    "0000A006"
    ]
   ],
   "ppu/breakram-edge255-v159-k34": [
+   [
+    "PASS",
+    "0000A006"
+   ],
    [
     "PASS",
     "0000A006"
@@ -4451,9 +7415,17 @@
    [
     "PASS",
     "0000A005"
+   ],
+   [
+    "PASS",
+    "0000A005"
    ]
   ],
   "ppu/breakram-edge255-v159-k36": [
+   [
+    "PASS",
+    "0000A001"
+   ],
    [
     "PASS",
     "0000A001"
@@ -4463,9 +7435,17 @@
    [
     "PASS",
     "0000A001"
+   ],
+   [
+    "PASS",
+    "0000A001"
    ]
   ],
   "ppu/breakram-edge255-v159-k38": [
+   [
+    "PASS",
+    "0000A001"
+   ],
    [
     "PASS",
     "0000A001"
@@ -4475,9 +7455,17 @@
    [
     "PASS",
     "0000A001"
+   ],
+   [
+    "PASS",
+    "0000A001"
    ]
   ],
   "ppu/breakram-edge255-v159-k40": [
+   [
+    "PASS",
+    "0000A001"
+   ],
    [
     "PASS",
     "0000A001"
@@ -4487,9 +7475,17 @@
    [
     "PASS",
     "00001E02"
+   ],
+   [
+    "PASS",
+    "00001E02"
    ]
   ],
   "ppu/breakram-edge12-nodma-hblank-v30-k35": [
+   [
+    "PASS",
+    "00001E02"
+   ],
    [
     "PASS",
     "00001E02"
@@ -4499,9 +7495,17 @@
    [
     "PASS",
     "00001E02"
+   ],
+   [
+    "PASS",
+    "00001E02"
    ]
   ],
   "ppu/breakram-edge12-nodma-hblank-v30-k37": [
+   [
+    "PASS",
+    "00001E02"
+   ],
    [
     "PASS",
     "00001E02"
@@ -4511,9 +7515,17 @@
    [
     "PASS",
     "00001E02"
+   ],
+   [
+    "PASS",
+    "00001E02"
    ]
   ],
   "ppu/breakram-edge12-nodma-hblank-v30-k39": [
+   [
+    "PASS",
+    "00001E02"
+   ],
    [
     "PASS",
     "00001E02"
@@ -4523,9 +7535,17 @@
    [
     "PASS",
     "00001F02"
+   ],
+   [
+    "PASS",
+    "00001F02"
    ]
   ],
   "ppu/breakram-edge12-nodma-hblank-v30-k41": [
+   [
+    "PASS",
+    "00001F02"
+   ],
    [
     "PASS",
     "00001F02"
@@ -4535,9 +7555,17 @@
    [
     "PASS",
     "00001F02"
+   ],
+   [
+    "PASS",
+    "00001F02"
    ]
   ],
   "ppu/breakram-edge12-nodma-hblank-v30-k43": [
+   [
+    "PASS",
+    "00001F00"
+   ],
    [
     "PASS",
     "00001F00"
@@ -4547,9 +7575,17 @@
    [
     "PASS",
     "00001F00"
+   ],
+   [
+    "PASS",
+    "00001F00"
    ]
   ],
   "ppu/breakram-edge12-nodma-hblank-v30-k45": [
+   [
+    "PASS",
+    "00001F00"
+   ],
    [
     "PASS",
     "00001F00"
@@ -4559,9 +7595,17 @@
    [
     "PASS",
     "00001F00"
+   ],
+   [
+    "PASS",
+    "00001F00"
    ]
   ],
   "ppu/breakram-edge12-hblank-v30-k32": [
+   [
+    "PASS",
+    "00001E02"
+   ],
    [
     "PASS",
     "00001E02"
@@ -4571,9 +7615,17 @@
    [
     "PASS",
     "00001E02"
+   ],
+   [
+    "PASS",
+    "00001E02"
    ]
   ],
   "ppu/breakram-edge12-hblank-v30-k34": [
+   [
+    "PASS",
+    "00001E02"
+   ],
    [
     "PASS",
     "00001E02"
@@ -4583,9 +7635,17 @@
    [
     "PASS",
     "00001E02"
+   ],
+   [
+    "PASS",
+    "00001E02"
    ]
   ],
   "ppu/breakram-edge12-hblank-v30-k36": [
+   [
+    "PASS",
+    "00001F02"
+   ],
    [
     "PASS",
     "00001F02"
@@ -4595,9 +7655,17 @@
    [
     "PASS",
     "00001F02"
+   ],
+   [
+    "PASS",
+    "00001F02"
    ]
   ],
   "ppu/breakram-edge12-hblank-v30-k38": [
+   [
+    "PASS",
+    "00001F02"
+   ],
    [
     "PASS",
     "00001F02"
@@ -4607,9 +7675,17 @@
    [
     "PASS",
     "00001F00"
+   ],
+   [
+    "PASS",
+    "00001F00"
    ]
   ],
   "ppu/breakram-edge12-hblank-v30-k40": [
+   [
+    "PASS",
+    "00001F00"
+   ],
    [
     "PASS",
     "00001F00"
@@ -4619,9 +7695,17 @@
    [
     "PASS",
     "00001F00"
+   ],
+   [
+    "PASS",
+    "00001F00"
    ]
   ],
   "ppu/breakram-edge12-hblank-v30-k42": [
+   [
+    "PASS",
+    "00001F00"
+   ],
    [
     "PASS",
     "00001F00"
@@ -4631,9 +7715,17 @@
    [
     "PASS",
     "00001F00"
+   ],
+   [
+    "PASS",
+    "00001F00"
    ]
   ],
   "ppu/breakram-edge12-hblank-v30-k44": [
+   [
+    "PASS",
+    "00001F00"
+   ],
    [
     "PASS",
     "00001F00"
@@ -4643,9 +7735,17 @@
    [
     "PASS",
     "00080000"
+   ],
+   [
+    "PASS",
+    "00080000"
    ]
   ],
   "apu/sweep-trigger-overflow": [
+   [
+    "PASS",
+    "00000000"
+   ],
    [
     "PASS",
     "00000000"
@@ -4655,15 +7755,27 @@
    [
     "PASS",
     "00000000"
+   ],
+   [
+    "PASS",
+    "00000000"
    ]
   ],
   "apu/sweep-first-tick-rechecks": [
    [
     "PASS",
     "00001025"
+   ],
+   [
+    "PASS",
+    "00001131"
    ]
   ],
   "apu/sweep-512-dies-tick-3": [
+   [
+    "PASS",
+    "00003682"
+   ],
    [
     "PASS",
     "00003682"
@@ -4673,9 +7785,17 @@
    [
     "PASS",
     "00001096"
+   ],
+   [
+    "PASS",
+    "00001096"
    ]
   ],
   "apu/sweep-940-same-offset": [
+   [
+    "PASS",
+    "00001093"
+   ],
    [
     "PASS",
     "00001093"
@@ -4685,9 +7805,17 @@
    [
     "PASS",
     "00000002"
+   ],
+   [
+    "PASS",
+    "00000002"
    ]
   ],
   "apu/psg-ch1-first-trigger-dies": [
+   [
+    "PASS",
+    "00000000"
+   ],
    [
     "PASS",
     "00000000"
@@ -4697,9 +7825,17 @@
    [
     "PASS",
     "0000496C"
+   ],
+   [
+    "PASS",
+    "0000496F"
    ]
   ],
   "apu/psg-ch3-first-trigger-lives": [
+   [
+    "PASS",
+    "00004976"
+   ],
    [
     "PASS",
     "00004976"
@@ -4709,21 +7845,37 @@
    [
     "PASS",
     "00004978"
+   ],
+   [
+    "PASS",
+    "00004978"
    ]
   ],
   "apu/psg-ch1-nr10-0-dies": [
    [
     "PASS",
     "00004977"
+   ],
+   [
+    "PASS",
+    "00000000"
    ]
   ],
   "apu/psg-ch1-sweep-running-lives": [
    [
     "PASS",
     "0000071A"
+   ],
+   [
+    "PASS",
+    "00000716"
    ]
   ],
   "apu/psg-ch1-after-ch2-lives": [
+   [
+    "PASS",
+    "00000000"
+   ],
    [
     "PASS",
     "00000000"
@@ -4733,21 +7885,37 @@
    [
     "PASS",
     "00004977"
+   ],
+   [
+    "PASS",
+    "00004977"
    ]
   ],
   "apu/psg-ch1-second-trigger-dies": [
    [
     "PASS",
     "00004BD8"
+   ],
+   [
+    "PASS",
+    "00000000"
    ]
   ],
   "apu/psg-ch1-third-trigger-lives": [
    [
     "PASS",
     "00004BD8"
+   ],
+   [
+    "PASS",
+    "00004972"
    ]
   ],
   "apu/psg-soundcnt-x-after-ch1": [
+   [
+    "PASS",
+    "00000080"
+   ],
    [
     "PASS",
     "00000080"
@@ -4757,9 +7925,17 @@
    [
     "PASS",
     "00000082"
+   ],
+   [
+    "PASS",
+    "00000082"
    ]
   ],
   "apu/psg-soundcnt-x-after-ch4": [
+   [
+    "PASS",
+    "00000088"
+   ],
    [
     "PASS",
     "00000088"
@@ -4769,9 +7945,17 @@
    [
     "PASS",
     "0000FFFF"
+   ],
+   [
+    "PASS",
+    "0000FFFF"
    ]
   ],
   "apu/psg-ch2-length-off-never-expires": [
+   [
+    "PASS",
+    "0000FFFF"
+   ],
    [
     "PASS",
     "0000FFFF"
@@ -4781,9 +7965,17 @@
    [
     "PASS",
     "00000001"
+   ],
+   [
+    "PASS",
+    "00000001"
    ]
   ],
   "apu/sweeptrig-shift0-400-d33": [
+   [
+    "PASS",
+    "00000001"
+   ],
    [
     "PASS",
     "00000001"
@@ -4793,9 +7985,17 @@
    [
     "PASS",
     "00000001"
+   ],
+   [
+    "PASS",
+    "00000001"
    ]
   ],
   "apu/sweeptrig-shift0-400-length-d30": [
+   [
+    "PASS",
+    "00000001"
+   ],
    [
     "PASS",
     "00000001"
@@ -4805,9 +8005,17 @@
    [
     "PASS",
     "00000001"
+   ],
+   [
+    "PASS",
+    "00000001"
    ]
   ],
   "apu/sweeptrig-shift0-400-length-d37": [
+   [
+    "PASS",
+    "00000001"
+   ],
    [
     "PASS",
     "00000001"
@@ -4817,9 +8025,17 @@
    [
     "PASS",
     "00040000"
+   ],
+   [
+    "PASS",
+    "00040000"
    ]
   ],
   "apu/sweeptrig-shift0-3ff-d33": [
+   [
+    "PASS",
+    "00040000"
+   ],
    [
     "PASS",
     "00040000"
@@ -4829,9 +8045,17 @@
    [
     "PASS",
     "00040000"
+   ],
+   [
+    "PASS",
+    "00040000"
    ]
   ],
   "apu/sweeptrig-shift0-3ff-length-d30": [
+   [
+    "PASS",
+    "00040000"
+   ],
    [
     "PASS",
     "00040000"
@@ -4841,9 +8065,17 @@
    [
     "PASS",
     "00040000"
+   ],
+   [
+    "PASS",
+    "00040000"
    ]
   ],
   "apu/sweeptrig-shift0-3ff-length-d37": [
+   [
+    "PASS",
+    "00040000"
+   ],
    [
     "PASS",
     "00040000"
@@ -4853,21 +8085,37 @@
    [
     "PASS",
     "00005AEA"
+   ],
+   [
+    "PASS",
+    "0000578A"
    ]
   ],
   "apu/sweeptrig-sweep21-1300-d33": [
    [
     "PASS",
     "00005E88"
+   ],
+   [
+    "PASS",
+    "00005B28"
    ]
   ],
   "apu/sweeptrig-sweep21-1300-d37": [
    [
     "PASS",
     "0000555A"
+   ],
+   [
+    "PASS",
+    "00005EC7"
    ]
   ],
   "apu/sweeptrig-shift0-400-after-rows-d30": [
+   [
+    "PASS",
+    "00000001"
+   ],
    [
     "PASS",
     "00000001"
@@ -4877,39 +8125,67 @@
    [
     "PASS",
     "00000000"
+   ],
+   [
+    "PASS",
+    "00000000"
    ]
   ],
   "apu/ram-psg-ch1-first": [
    [
     "PASS",
     "000073B3"
+   ],
+   [
+    "PASS",
+    "000089EC"
    ]
   ],
   "apu/ram-psg-ch2-first": [
    [
     "PASS",
     "00008CC8"
+   ],
+   [
+    "PASS",
+    "00008CC9"
    ]
   ],
   "apu/ram-psg-ch3-first": [
    [
     "PASS",
     "00008CC8"
+   ],
+   [
+    "PASS",
+    "00008CC7"
    ]
   ],
   "apu/ram-psg-ch4-first": [
    [
     "PASS",
     "00008CC8"
+   ],
+   [
+    "PASS",
+    "00008CC9"
    ]
   ],
   "apu/ram-psg-ch1-nr10-0": [
    [
     "PASS",
     "00008CC9"
+   ],
+   [
+    "PASS",
+    "00008CC8"
    ]
   ],
   "apu/ram-psg-ch1-nr10-11": [
+   [
+    "PASS",
+    "00002665"
+   ],
    [
     "PASS",
     "00002665"
@@ -4919,27 +8195,47 @@
    [
     "PASS",
     "00000000"
+   ],
+   [
+    "PASS",
+    "00000001"
    ]
   ],
   "apu/ram-psg-ch2-before-ch1": [
    [
     "PASS",
     "00008CC6"
+   ],
+   [
+    "PASS",
+    "00008CC7"
    ]
   ],
   "apu/ram-psg-ch1-second": [
    [
     "PASS",
     "00008CC4"
+   ],
+   [
+    "PASS",
+    "00000000"
    ]
   ],
   "apu/ram-psg-ch1-again": [
    [
     "PASS",
     "00009997"
+   ],
+   [
+    "PASS",
+    "00008CC1"
    ]
   ],
   "apu/ram-psg-ch1-length-off": [
+   [
+    "PASS",
+    "0000FFFF"
+   ],
    [
     "PASS",
     "0000FFFF"
@@ -4949,9 +8245,17 @@
    [
     "PASS",
     "0000FFFF"
+   ],
+   [
+    "PASS",
+    "0000FFFF"
    ]
   ],
   "bios/get-bios-checksum": [
+   [
+    "PASS",
+    "BAAE187F"
+   ],
    [
     "PASS",
     "BAAE187F"
@@ -4961,9 +8265,17 @@
    [
     "PASS",
     "00000003"
+   ],
+   [
+    "PASS",
+    "00000003"
    ]
   ],
   "bios/div-10-3-remainder": [
+   [
+    "PASS",
+    "00000001"
+   ],
    [
     "PASS",
     "00000001"
@@ -4973,9 +8285,17 @@
    [
     "PASS",
     "FFFFFFFD"
+   ],
+   [
+    "PASS",
+    "FFFFFFFD"
    ]
   ],
   "bios/div-neg7-2-remainder": [
+   [
+    "PASS",
+    "FFFFFFFF"
+   ],
    [
     "PASS",
     "FFFFFFFF"
@@ -4985,9 +8305,17 @@
    [
     "PASS",
     "00000001"
+   ],
+   [
+    "PASS",
+    "00000001"
    ]
   ],
   "bios/div-1-0-remainder": [
+   [
+    "PASS",
+    "00000001"
+   ],
    [
     "PASS",
     "00000001"
@@ -4997,9 +8325,17 @@
    [
     "PASS",
     "FFFFFFFF"
+   ],
+   [
+    "PASS",
+    "FFFFFFFF"
    ]
   ],
   "bios/div-min-neg1-quotient": [
+   [
+    "PASS",
+    "80000000"
+   ],
    [
     "PASS",
     "80000000"
@@ -5009,9 +8345,17 @@
    [
     "PASS",
     "00000000"
+   ],
+   [
+    "PASS",
+    "00000000"
    ]
   ],
   "bios/divarm-10-3-quotient": [
+   [
+    "PASS",
+    "00000003"
+   ],
    [
     "PASS",
     "00000003"
@@ -5021,9 +8365,17 @@
    [
     "PASS",
     "00000000"
+   ],
+   [
+    "PASS",
+    "00000000"
    ]
   ],
   "bios/sqrt-1": [
+   [
+    "PASS",
+    "00000001"
+   ],
    [
     "PASS",
     "00000001"
@@ -5033,9 +8385,17 @@
    [
     "PASS",
     "00007FFF"
+   ],
+   [
+    "PASS",
+    "00007FFF"
    ]
   ],
   "bios/sqrt-ffffffff": [
+   [
+    "PASS",
+    "0000FFFF"
+   ],
    [
     "PASS",
     "0000FFFF"
@@ -5045,9 +8405,17 @@
    [
     "PASS",
     "00000000"
+   ],
+   [
+    "PASS",
+    "00000000"
    ]
   ],
   "bios/arctan-1": [
+   [
+    "PASS",
+    "00002000"
+   ],
    [
     "PASS",
     "00002000"
@@ -5057,9 +8425,17 @@
    [
     "PASS",
     "FFFFE000"
+   ],
+   [
+    "PASS",
+    "FFFFE000"
    ]
   ],
   "bios/arctan2-origin": [
+   [
+    "PASS",
+    "00000000"
+   ],
    [
     "PASS",
     "00000000"
@@ -5069,9 +8445,17 @@
    [
     "PASS",
     "00000000"
+   ],
+   [
+    "PASS",
+    "00000000"
    ]
   ],
   "bios/arctan2-pos-y": [
+   [
+    "PASS",
+    "00004000"
+   ],
    [
     "PASS",
     "00004000"
@@ -5081,9 +8465,17 @@
    [
     "PASS",
     "00008000"
+   ],
+   [
+    "PASS",
+    "00008000"
    ]
   ],
   "bios/arctan2-neg-y": [
+   [
+    "PASS",
+    "0000C000"
+   ],
    [
     "PASS",
     "0000C000"
@@ -5093,9 +8485,17 @@
    [
     "PASS",
     "00002000"
+   ],
+   [
+    "PASS",
+    "00002000"
    ]
   ],
   "bios/switime-none": [
+   [
+    "PASS",
+    "00000000"
+   ],
    [
     "PASS",
     "00000000"
@@ -5105,9 +8505,17 @@
    [
     "PASS",
     "00000053"
+   ],
+   [
+    "PASS",
+    "00000053"
    ]
   ],
   "bios/switime-div-7fffffff-3": [
+   [
+    "PASS",
+    "000001BF"
+   ],
    [
     "PASS",
     "000001BF"
@@ -5117,9 +8525,17 @@
    [
     "PASS",
     "00000056"
+   ],
+   [
+    "PASS",
+    "00000056"
    ]
   ],
   "bios/switime-sqrt-0": [
+   [
+    "PASS",
+    "00000063"
+   ],
    [
     "PASS",
     "00000063"
@@ -5129,9 +8545,17 @@
    [
     "PASS",
     "00000236"
+   ],
+   [
+    "PASS",
+    "00000236"
    ]
   ],
   "bios/switime-sqrt-ffffffff": [
+   [
+    "PASS",
+    "00000256"
+   ],
    [
     "PASS",
     "00000256"
@@ -5141,9 +8565,17 @@
    [
     "PASS",
     "00000065"
+   ],
+   [
+    "PASS",
+    "00000065"
    ]
   ],
   "bios/switime-arctan2-100-100": [
+   [
+    "PASS",
+    "0000016A"
+   ],
    [
     "PASS",
     "0000016A"
@@ -5153,9 +8585,17 @@
    [
     "PASS",
     "00000162"
+   ],
+   [
+    "PASS",
+    "00000162"
    ]
   ],
   "bios/switime-cpuset-32-halfwords": [
+   [
+    "PASS",
+    "000001C1"
+   ],
    [
     "PASS",
     "000001C1"
@@ -5165,9 +8605,17 @@
    [
     "PASS",
     "00000140"
+   ],
+   [
+    "PASS",
+    "00000140"
    ]
   ],
   "bios/switime-cpufastset-256-words": [
+   [
+    "PASS",
+    "0000033E"
+   ],
    [
     "PASS",
     "0000033E"
@@ -5177,9 +8625,17 @@
    [
     "PASS",
     "00000208"
+   ],
+   [
+    "PASS",
+    "00000208"
    ]
   ],
   "bios/switime-getbioschecksum": [
+   [
+    "PASS",
+    "0000A033"
+   ],
    [
     "PASS",
     "0000A033"
@@ -5189,9 +8645,17 @@
    [
     "PASS",
     "0000009A"
+   ],
+   [
+    "PASS",
+    "0000009A"
    ]
   ],
   "bios/switime-objaffineset-1": [
+   [
+    "PASS",
+    "00000076"
+   ],
    [
     "PASS",
     "00000076"
@@ -5201,9 +8665,17 @@
    [
     "PASS",
     "0000036F"
+   ],
+   [
+    "PASS",
+    "0000036F"
    ]
   ],
   "bios/switime-lz77uncompwram-16": [
+   [
+    "PASS",
+    "00000156"
+   ],
    [
     "PASS",
     "00000156"
@@ -5213,9 +8685,17 @@
    [
     "PASS",
     "000000E1"
+   ],
+   [
+    "PASS",
+    "000000E1"
    ]
   ],
   "bios/switime-diff8bitunfilterwram-16": [
+   [
+    "PASS",
+    "00000121"
+   ],
    [
     "PASS",
     "00000121"
@@ -5225,9 +8705,17 @@
    [
     "PASS",
     "0000008C"
+   ],
+   [
+    "PASS",
+    "0000008C"
    ]
   ],
   "bios/switime-intrwait-flag-already-set": [
+   [
+    "PASS",
+    "00000053"
+   ],
    [
     "PASS",
     "00000053"
