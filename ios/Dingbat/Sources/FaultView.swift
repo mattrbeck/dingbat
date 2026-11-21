@@ -244,7 +244,7 @@ struct FaultView: View {
             break
         }
         thumb = GameSession.bgr555Image(base + pick * w * h * 2, width: w, height: h,
-                                       shades: GameSession.pictureShades())
+                                       shades: GameSession.pictureShades(), lut: dingbat_color_lut())
     }
 
     private func goBack() {

@@ -459,6 +459,14 @@ proc downscale_bgr555*(src: openArray[uint16]; src_w, src_h, dst_w, dst_h: int):
       result[o]     = byte(px and 0xFF)
       result[o + 1] = byte((px shr 8) and 0xFF)
 
+proc bgr555_bytes*(src: openArray[uint16]): seq[byte] =
+  ## A BGR555 framebuffer whole, as little-endian bytes (the scrubber strips'
+  ## pictures: a downscale drops pixels a preview then shows enlarged).
+  result = newSeq[byte](src.len * 2)
+  for i, px in src:
+    result[i * 2]     = byte(px and 0xFF)
+    result[i * 2 + 1] = byte(px shr 8)
+
 proc state_flags(data: string): uint16 =
   uint16(byte(data[14])) or (uint16(byte(data[15])) shl 8)
 

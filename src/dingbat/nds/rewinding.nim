@@ -10,15 +10,14 @@ import ../common/[rewind, serialize]
 import nds, savestate
 
 const
-  NDS_RW_THUMB_W* = 80    ## both screens, top above bottom: 2:3, the
-  NDS_RW_THUMB_H* = 120   ## pixel count of the GBA's 120x80 strip frames
+  NDS_RW_THUMB_W* = 256   ## both screens whole, top above bottom
+  NDS_RW_THUMB_H* = 384
 
 proc nds_rewind_thumb*(n: NDS): RewindThumb =
   var both = newSeq[uint16](256 * 384)
   copyMem(addr both[0], unsafeAddr n.gpu.top[0], 256 * 192 * 2)
   copyMem(addr both[256 * 192], unsafeAddr n.gpu.bottom[0], 256 * 192 * 2)
-  RewindThumb(w: NDS_RW_THUMB_W, h: NDS_RW_THUMB_H,
-              pixels: downscale_bgr555(both, 256, 384, NDS_RW_THUMB_W, NDS_RW_THUMB_H))
+  RewindThumb(w: NDS_RW_THUMB_W, h: NDS_RW_THUMB_H, pixels: bgr555_bytes(both))
 
 proc new_nds_rewind*(cap: int): Rewind =
   new_rewind(cap, key_every = 0)

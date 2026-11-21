@@ -1676,12 +1676,15 @@ final class GameSession: NSObject, ObservableObject {
     }
 
     /// BGR555 thumbnails (rewind strips, state trailers) to an image;
-    /// `shades` (pictureShades) for the strips the app shows.
-    static func bgr555Image(_ ptr: UnsafeRawPointer, width: Int, height: Int, shades: [UInt32]? = nil) -> UIImage? {
+    /// `shades` (pictureShades) and `lut` (dingbat_color_lut) for the strips
+    /// the app shows, coloured as the screen is.
+    static func bgr555Image(_ ptr: UnsafeRawPointer, width: Int, height: Int, shades: [UInt32]? = nil,
+                            lut: UnsafePointer<UInt32>? = nil) -> UIImage? {
         let src = ptr.assumingMemoryBound(to: UInt16.self)
         var rgba = [UInt32](repeating: 0, count: width * height)
         for i in 0..<(width * height) {
             if let shades, let s = shadeRGBA(src[i], shades) { rgba[i] = s; continue }
+            if let lut { rgba[i] = lut[Int(src[i] & 0x7FFF)]; continue }
             let v = UInt32(src[i])
             let r = (v & 31) * 255 / 31, g = ((v >> 5) & 31) * 255 / 31, b = ((v >> 10) & 31) * 255 / 31
             rgba[i] = 0xFF00_0000 | (b << 16) | (g << 8) | r

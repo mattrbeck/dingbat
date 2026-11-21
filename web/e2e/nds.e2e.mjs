@@ -973,7 +973,8 @@ test("the rewind scrubber and Report a Bug's timeline show a DS game's moments",
              frames: ndsCore._nds_frame_count() };
   });
   assert.ok(strip.n >= 4, "a strip of moments: " + strip.n);
-  assert.deepEqual([strip.w, strip.h], [80, 120], "each one both screens, upright");
+  assert.ok(strip.w % 256 === 0 && strip.h === strip.w / 256 * 384,
+            `each one both screens whole, upright: ${strip.w}x${strip.h}`);
   assert.match(strip.when, /s ago$/);
   assert.equal(strip.frames, at, "the game held still while the strip was open");
   await page.locator("#rewind-commit").click();
@@ -1005,7 +1006,8 @@ test("the rewind scrubber and Report a Bug's timeline show a DS game's moments",
              head, ok, live, was };
   });
   assert.ok(report.n >= 2, "the timeline has moments: " + report.n);
-  assert.deepEqual([report.w, report.h], [80, 120]);
+  assert.ok(report.w % 256 === 0 && report.h === report.w / 256 * 384,
+            `both screens whole: ${report.w}x${report.h}`);
   assert.match(report.when, /s ago$/);
   assert.equal(report.head, "DGBSTATE", "the moment's state attaches");
   assert.ok(report.ok && report.was < report.live - 60, `and it is that moment: ${report.was} vs ${report.live}`);

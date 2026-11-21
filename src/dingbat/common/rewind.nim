@@ -23,8 +23,8 @@ when defined(rewindprof):
     RpSerialize* = 0   ## the caller's state_payload()
     RpXor* = 1         ## XOR of the new payload against the previous one
     RpCompress* = 2    ## fast_pack of the delta body
-    RpThumbGrab* = 3   ## the caller's framebuffer downscale
-    RpThumbZlib* = 4   ## fast_pack of the downscaled thumbnail
+    RpThumbGrab* = 3   ## the caller's framebuffer copy
+    RpThumbZlib* = 4   ## fast_pack of the thumbnail
     RpKeyZlib* = 5     ## fast_pack of a whole keyframe payload
     RpEvict* = 6       ## eviction at the cap
     RpPushTotal* = 7   ## the whole push, serialize included
@@ -42,8 +42,8 @@ else:
 
 type
   RewindThumb* = object
-    ## One downscaled frame captured at push time: little-endian BGR555, 2
-    ## bytes per pixel, the save-state thumbnail trailer's layout.
+    ## One frame captured at push time, at the console's own size (a strip's
+    ## preview shows it enlarged): little-endian BGR555, 2 bytes per pixel.
     w*, h*: int
     pixels*: seq[byte]
 
@@ -303,9 +303,9 @@ proc push*(rw: Rewind; payload: string; thumb: proc(): RewindThumb = nil) =
       var t: RewindThumb
       rp(3): t = thumb()
       if t.pixels.len > 0:
-        # Raw BGR555 is 19-26 KB a picture, on GB three times the whole delta
-        # stream; game frames are flat-coloured, so they pack well (zlib
-        # BestSpeed: 4-22% of raw).
+        # Raw BGR555 is 46-77 KB a picture (a DS's two screens 197 KB), far
+        # more than the delta stream; game frames are flat-coloured, so they
+        # pack to 2-13 KB on GB/GBA, about a tenth of the ring.
         var packed: string
         rp(4): packed = fast_pack_bytes(t.pixels)
         rw.thumbs.addLast(ThumbEntry(id: id, w: t.w, h: t.h, packed: packed))

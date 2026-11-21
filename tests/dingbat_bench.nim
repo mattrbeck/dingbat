@@ -109,10 +109,6 @@ else:
 #   web     maybe_push(payload, thumb): src/dingbat_wasm.nim does
 # DINGBAT_BENCH_REWIND_CAP overrides the ring cap in bytes (web: 16 MB on
 # iOS, 64 MB elsewhere); DINGBAT_BENCH_REWIND_INTERVAL the snapshot interval.
-const SCRUB_THUMB_W = 120
-const GBA_SCRUB_THUMB_H = SCRUB_THUMB_W * 160 div 240
-const GB_SCRUB_THUMB_H = SCRUB_THUMB_W * 144 div 160
-
 proc rewind_mode(): string = getEnv("DINGBAT_BENCH_REWIND", "off")
 
 proc make_bench_rewind(): Rewind =
@@ -277,9 +273,7 @@ proc main() =
           discard rw.maybe_push(
             proc(): string = emu.state_payload(),
             proc(): RewindThumb =
-              RewindThumb(w: SCRUB_THUMB_W, h: GBA_SCRUB_THUMB_H,
-                          pixels: downscale_bgr555(emu.ppu.framebuffer, 240, 160,
-                                                   SCRUB_THUMB_W, GBA_SCRUB_THUMB_H)))
+              RewindThumb(w: 240, h: 160, pixels: bgr555_bytes(emu.ppu.framebuffer)))
         else:
           discard rw.maybe_push(proc(): string = emu.state_payload())
     let (ins0, cyc0) = hw_counters()
@@ -429,9 +423,7 @@ proc main() =
           discard rw.maybe_push(
             proc(): string = emu.state_payload(),
             proc(): RewindThumb =
-              RewindThumb(w: SCRUB_THUMB_W, h: GB_SCRUB_THUMB_H,
-                          pixels: downscale_bgr555(emu.ppu.framebuffer, 160, 144,
-                                                   SCRUB_THUMB_W, GB_SCRUB_THUMB_H)))
+              RewindThumb(w: 160, h: 144, pixels: bgr555_bytes(emu.ppu.framebuffer)))
         else:
           discard rw.maybe_push(proc(): string = emu.state_payload())
     total_cycles = 0

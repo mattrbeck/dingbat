@@ -134,6 +134,11 @@ const uint16_t *dingbat_framebuffer(void);
  * converted straight (5 to 8 bits a channel, no correction). */
 const uint32_t *dingbat_framebuffer_rgba(void);
 
+/* The loaded core's colour table: 0x8000 RGBA8888 entries indexed by BGR555
+ * (a straight conversion with correction off), for the stored pictures the
+ * scrub exports give. NULL on a DS and with no core. */
+const uint32_t *dingbat_color_lut(void);
+
 /* DS only: the top screen alone, 256x192 RGBA8888 (R first, straight), for
  * the library picture (the web's is the top screen). Converted on call,
  * valid until the next call; NULL unless a DS game is loaded. */

@@ -122,11 +122,11 @@ struct RewindScrubberView: View {
         let n = Int(dingbat_rewind_scrub_generate(Int32(Self.maxSamples)))
         guard n > 0, let base = dingbat_rewind_scrub_thumbs() else { return }
         let w = Int(dingbat_rewind_scrub_thumb_w()), h = Int(dingbat_rewind_scrub_thumb_h())
-        let shades = GameSession.pictureShades()
+        let shades = GameSession.pictureShades(), lut = dingbat_color_lut()
         var imgs: [UIImage] = []
         var ages: [Int] = []
         for i in 0..<n {
-            guard let img = GameSession.bgr555Image(base + i * w * h * 2, width: w, height: h, shades: shades) else { break }
+            guard let img = GameSession.bgr555Image(base + i * w * h * 2, width: w, height: h, shades: shades, lut: lut) else { break }
             imgs.append(img)
             ages.append(Int(dingbat_rewind_scrub_seconds_ago(Int32(i))))
         }
@@ -200,7 +200,7 @@ private struct FilmStrip: View {
                             c.addFilter(.grayscale(1))
                             c.opacity = 0.45
                         }
-                        c.draw(c.resolve(Image(uiImage: thumbs[n - 1 - i]).interpolation(.none)), in: r)
+                        c.draw(c.resolve(Image(uiImage: thumbs[n - 1 - i]).interpolation(.high)), in: r)
                     }
                 }
                 Rectangle()

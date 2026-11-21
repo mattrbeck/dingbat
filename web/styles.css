@@ -5086,7 +5086,6 @@ body.lib-has-games #home-notes {
   display: block;
   width: 100%;
   height: 100%;
-  image-rendering: pixelated;
 }
 
 /* A hairline inside a 44px pointer target. `left` is set from JS: the
@@ -5390,7 +5389,6 @@ body.lib-has-games #home-notes {
   margin: 8px auto;
   border-radius: 4px;
   background: var(--surface-3);
-  image-rendering: pixelated;
 }
 
 .report-slider {

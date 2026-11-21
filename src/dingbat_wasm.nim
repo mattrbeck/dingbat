@@ -109,6 +109,14 @@ proc build_color_luts(correct: bool) =
 
 proc sync_lcd_panel()   # defined with the LCD-response state below
 
+proc wasm_color_lut_ptr(): pointer {.exportc.} =
+  ## The loaded core's table (0x8000 RGBA8888 entries indexed by BGR555), so
+  ## JS can colour stored pictures (the scrubber strips) as the screen does.
+  case stateKind
+  of ekGBA: addr colorLutGba
+  of ekGB:  addr colorLutGbc
+  of ekNone: nil
+
 proc wasm_set_color_correction(on: cint) {.exportc.} =
   ## The LCD response table is built for the code->photon curve of the chain
   ## after it, so it re-syncs too.
@@ -600,12 +608,6 @@ proc wasm_cart_has_tilt(): cint {.exportc.} =
   elif stateKind == ekGBA and stateGba != nil and stateGba.bus.gpio.gyro_present: 2
   else: 0
 
-# Strip thumbnails: 120-wide BGR555, the geometry of the save-state
-# thumbnail trailer, so one JS decoder serves all three.
-const SCRUB_THUMB_W = 120
-const GBA_SCRUB_THUMB_H = SCRUB_THUMB_W * GBA_H div GBA_W  # 3:2  -> 120x80
-const GB_SCRUB_THUMB_H  = SCRUB_THUMB_W * GB_H  div GB_W   # 10:9 -> 120x108
-
 # --- Retroactive clip capture ---
 # A rolling ring of state anchors (one per second) plus a per-frame input log;
 # replay from the anchor at or before the chosen start rebuilds the frames
@@ -680,16 +682,10 @@ proc clip_reset() =
 proc clip_anchor_size(a: ClipAnchor): int = a.packed.len + a.thumb.len
 
 proc clip_capture_thumb(): tuple[pixels: seq[byte], w, h: int] =
-  ## The anchor's own frame, downscaled to the shared 120-wide geometry.
+  ## The anchor's own frame, whole: the sheet's preview shows it enlarged.
   case stateKind
-  of ekGBA:
-    (downscale_bgr555(stateGba.ppu.framebuffer, GBA_W, GBA_H,
-                      SCRUB_THUMB_W, GBA_SCRUB_THUMB_H),
-     SCRUB_THUMB_W, GBA_SCRUB_THUMB_H)
-  of ekGB:
-    (downscale_bgr555(stateGb.ppu.framebuffer, GB_W, GB_H,
-                      SCRUB_THUMB_W, GB_SCRUB_THUMB_H),
-     SCRUB_THUMB_W, GB_SCRUB_THUMB_H)
+  of ekGBA: (bgr555_bytes(stateGba.ppu.framebuffer), GBA_W, GBA_H)
+  of ekGB:  (bgr555_bytes(stateGb.ppu.framebuffer), GB_W, GB_H)
   of ekNone: (newSeq[byte](), 0, 0)
 
 proc clip_note_frame() =
@@ -1023,14 +1019,10 @@ proc setRewindEnabled(on: cint) {.exportc.} =
     rewindHistory = new_rewind(rewindCapBytes)
 
 proc gba_rewind_thumb(g: GBA): RewindThumb =
-  RewindThumb(w: SCRUB_THUMB_W, h: GBA_SCRUB_THUMB_H,
-              pixels: downscale_bgr555(g.ppu.framebuffer, GBA_W, GBA_H,
-                                       SCRUB_THUMB_W, GBA_SCRUB_THUMB_H))
+  RewindThumb(w: GBA_W, h: GBA_H, pixels: bgr555_bytes(g.ppu.framebuffer))
 
 proc gb_rewind_thumb(g: GB): RewindThumb =
-  RewindThumb(w: SCRUB_THUMB_W, h: GB_SCRUB_THUMB_H,
-              pixels: downscale_bgr555(g.ppu.framebuffer, GB_W, GB_H,
-                                       SCRUB_THUMB_W, GB_SCRUB_THUMB_H))
+  RewindThumb(w: GB_W, h: GB_H, pixels: bgr555_bytes(g.ppu.framebuffer))
 
 proc loop_tick() {.exportc.} =
   if stateNet != nil: return  # online link mode: netlink_tick drives frames

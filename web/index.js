@@ -10963,9 +10963,17 @@ let reportThumbs = null; // packed BGR555 thumbnails copied out of wasm
 let reportThumbW = 0;
 let reportThumbH = 0;
 
+// The loaded core's colour table (BGR555 to RGBA, the screen's correction
+// or a plain conversion with it off); null on a DS, which has none.
+const pictureLut = () => {
+  if (ndsGameLoaded() || typeof Module === "undefined" || !Module._wasm_color_lut_ptr) return null;
+  const ptr = Module._wasm_color_lut_ptr();
+  return ptr ? new Uint32Array(Module.memory.buffer, ptr, 0x8000) : null;
+};
+
 // shades: pictureShades(), so a monochrome game's picture wears the palette
-// the screen does.
-const bgr555ToImageData = (src, off, w, h, shades = null) => {
+// the screen does. lut: pictureLut(), for a picture coloured as the screen is.
+const bgr555ToImageData = (src, off, w, h, shades = null, lut = null) => {
   const out = new Uint8ClampedArray(w * h * 4);
   const memo = new Map();
   for (let i = 0; i < w * h; i++) {
@@ -10976,6 +10984,11 @@ const bgr555ToImageData = (src, off, w, h, shades = null) => {
       out[i * 4] = rgb[0];
       out[i * 4 + 1] = rgb[1];
       out[i * 4 + 2] = rgb[2];
+    } else if (lut) {
+      const c = lut[v];
+      out[i * 4] = c & 255;
+      out[i * 4 + 1] = (c >> 8) & 255;
+      out[i * 4 + 2] = (c >> 16) & 255;
     } else {
       out[i * 4] = Math.round((v & 31) * (255 / 31));
       out[i * 4 + 1] = Math.round(((v >> 5) & 31) * (255 / 31));
@@ -10986,27 +10999,42 @@ const bgr555ToImageData = (src, off, w, h, shades = null) => {
   return new ImageData(out, w, h);
 };
 
+// A picture into a preview canvas: enlarged a whole number of times, nearest
+// neighbour, to at least the canvas's size on screen; the browser's smooth
+// scaling takes it the rest of the way, so its pixels stay even at any ratio.
+let previewScratch = null;
+const paintPreview = (el, img) => {
+  const dpr = window.devicePixelRatio || 1;
+  // Painted before its modal is laid out: the previews' CSS width.
+  const need = Math.max((el.clientWidth || 240) * dpr / img.width,
+                        (el.clientHeight || 0) * dpr / img.height);
+  const k = Math.min(6, Math.max(1, Math.ceil(need)));
+  if (!previewScratch) previewScratch = document.createElement("canvas");
+  previewScratch.width = img.width;
+  previewScratch.height = img.height;
+  previewScratch.getContext("2d").putImageData(img, 0, 0);
+  el.width = img.width * k;
+  el.height = img.height * k;
+  const ctx = el.getContext("2d");
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(previewScratch, 0, 0, el.width, el.height);
+};
+
 const drawReportLivePreview = () => {
   // A DS game's two screens, as its timeline's thumbnails show them.
   const fb = ndsGameLoaded() ? ndsBothRgba() : copyFramebuffer();
   if (!fb) return;
   const { heap, w, h } = fb;
-  reportPreview.width = w;
-  reportPreview.height = h;
-  const ctx = reportPreview.getContext("2d");
-  const img = ctx.createImageData(w, h);
-  img.data.set(heap);
-  for (let i = 3; i < img.data.length; i += 4) img.data[i] = 255;
-  ctx.putImageData(img, 0, 0);
+  const data = new Uint8ClampedArray(heap);
+  for (let i = 3; i < data.length; i += 4) data[i] = 255;
+  paintPreview(reportPreview, new ImageData(data, w, h));
 };
 
 const drawReportSamplePreview = (sample) => {
   if (!reportThumbs) return;
   const stride = reportThumbW * reportThumbH * 2;
-  const img = bgr555ToImageData(reportThumbs, sample * stride, reportThumbW, reportThumbH, pictureShades());
-  reportPreview.width = reportThumbW;
-  reportPreview.height = reportThumbH;
-  reportPreview.getContext("2d").putImageData(img, 0, 0);
+  paintPreview(reportPreview,
+    bgr555ToImageData(reportThumbs, sample * stride, reportThumbW, reportThumbH, pictureShades(), pictureLut()));
 };
 
 // Slider 0..N, max = "now"; back = 0 is the live frame, 1..N are rewind
@@ -11141,6 +11169,10 @@ document.getElementById("report-download").addEventListener("click", async () =>
 // from wasm as packed little-endian BGR555, newest first.
 
 const STRIP_GAP = 2;             // px between frames in the strip
+// The strip is drawn in the screen's own pixels (a phone's three to a CSS
+// px), its baked film no wider than a canvas may be everywhere.
+const STRIP_BAKE_MAX = 16000;
+const stripDpr = () => Math.min(window.devicePixelRatio || 1, 3);
 const STRIP_TAP_SLOP = 5;        // px of travel below which a drag counts as a tap
 
 // Frame width follows how many frames fit the strip's own width (a 208px
@@ -11187,6 +11219,8 @@ const createFilmStrip = ({
   let thumbH = 0;
   let stripColor = null;  // offscreen: the whole strip, in colour
   let stripDim = null;    // ...and desaturated
+  let filmW = 0;          // the strip's size in CSS px (its bitmaps hold
+  let filmH = 0;          // the screen's own pixels, up to STRIP_BAKE_MAX wide)
   let pitch = 0;          // px per sample along the strip
   let values = markers.map(() => 0);
   let active = 0;         // which marker the view follows / a drag moves
@@ -11233,6 +11267,11 @@ const createFilmStrip = ({
     const { tw, th } = frameSize(Math.max(120, Math.round(layoutW(wrap))), stripH);
     pitch = tw + STRIP_GAP;
     const total = samples * pitch;
+    filmW = total;
+    filmH = stripH;
+    const bake = Math.max(1, Math.min(stripDpr(), STRIP_BAKE_MAX / total));
+    const bakedW = Math.round(total * bake);
+    const bakedH = Math.round(stripH * bake);
 
     const scratch = document.createElement("canvas");
     scratch.width = thumbW;
@@ -11240,24 +11279,28 @@ const createFilmStrip = ({
     const sctx = scratch.getContext("2d");
 
     stripColor = document.createElement("canvas");
-    stripColor.width = total;
-    stripColor.height = stripH;
+    stripColor.width = bakedW;
+    stripColor.height = bakedH;
     const cctx = stripColor.getContext("2d");
+    cctx.imageSmoothingQuality = "high";
     const stride = thumbW * thumbH * 2;
     const top = Math.round((stripH - th) / 2);
+    const shades = pictureShades(), lut = pictureLut();
     for (let s = 0; s < samples; s++) {
-      sctx.putImageData(bgr555ToImageData(thumbs, s * stride, thumbW, thumbH, pictureShades()), 0, 0);
+      sctx.putImageData(bgr555ToImageData(thumbs, s * stride, thumbW, thumbH, shades, lut), 0, 0);
       // Newest on the right.
       const x = (samples - 1 - s) * pitch + Math.floor(STRIP_GAP / 2);
-      cctx.drawImage(scratch, 0, 0, thumbW, thumbH, x, top, tw, th);
+      const bx = Math.round(x * bake), by = Math.round(top * bake);
+      cctx.drawImage(scratch, 0, 0, thumbW, thumbH, bx, by,
+                     Math.round((x + tw) * bake) - bx, Math.round((top + th) * bake) - by);
     }
 
     stripDim = document.createElement("canvas");
-    stripDim.width = total;
-    stripDim.height = stripH;
+    stripDim.width = bakedW;
+    stripDim.height = bakedH;
     const dctx = stripDim.getContext("2d");
     dctx.drawImage(stripColor, 0, 0);
-    const img = dctx.getImageData(0, 0, total, stripH);
+    const img = dctx.getImageData(0, 0, bakedW, bakedH);
     const px = img.data;
     for (let i = 0; i < px.length; i += 4) {
       // Rec.601 luma, halved: readable, never mistaken for the live side.
@@ -11303,7 +11346,7 @@ const createFilmStrip = ({
   const draw = () => {
     const cssW = Math.max(1, Math.round(layoutW(canvas)));
     const cssH = Math.max(1, Math.round(layoutH(canvas)));
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const dpr = stripDpr();
     if (canvas.width !== cssW * dpr || canvas.height !== cssH * dpr) {
       canvas.width = cssW * dpr;
       canvas.height = cssH * dpr;
@@ -11320,7 +11363,7 @@ const createFilmStrip = ({
       m.el.style.left = Math.min(Math.max(xs[i], 2), cssW - 2) + "px";
       m.el.classList.toggle("offscreen", xs[i] < -1 || xs[i] > cssW + 1);
     });
-    paint(ctx, { cssW, cssH, off, xs, color: stripColor, dim: stripDim });
+    paint(ctx, { cssW, cssH, off, xs, color: stripColor, dim: stripDim, filmW, filmH });
   };
 
   // Colour inside [x0, x1), greyed outside.
@@ -11330,7 +11373,7 @@ const createFilmStrip = ({
     ctx.beginPath();
     ctx.rect(x0, 0, Math.max(0, x1 - x0), g.cssH);
     ctx.clip();
-    ctx.drawImage(g.color, g.off, 0);
+    ctx.drawImage(g.color, g.off, 0, g.filmW, g.filmH);
     ctx.restore();
     for (const [a, b] of bands) {
       if (b <= a) continue;
@@ -11338,7 +11381,7 @@ const createFilmStrip = ({
       ctx.beginPath();
       ctx.rect(a, 0, b - a, g.cssH);
       ctx.clip();
-      ctx.drawImage(g.dim, g.off, 0);
+      ctx.drawImage(g.dim, g.off, 0, g.filmW, g.filmH);
       ctx.globalAlpha = 0.35;
       ctx.fillStyle = "#000";
       ctx.fillRect(a, 0, b - a, g.cssH);
@@ -11427,15 +11470,13 @@ const createFilmStrip = ({
     build,
     draw,
     shadeBetween,
-    /** Paint one thumbnail into a preview canvas at native size. */
+    /** Paint one thumbnail into a preview canvas. */
     preview(el, sample) {
       if (!thumbs || samples <= 0) return;
       const stride = thumbW * thumbH * 2;
       const s = Math.min(Math.max(sample, 0), samples - 1);
-      el.width = thumbW;
-      el.height = thumbH;
-      el.getContext("2d").putImageData(
-        bgr555ToImageData(thumbs, s * stride, thumbW, thumbH, pictureShades()), 0, 0);
+      paintPreview(el,
+        bgr555ToImageData(thumbs, s * stride, thumbW, thumbH, pictureShades(), pictureLut()));
     },
     /** Bind the drag/tap gesture. `bounds(i)` returns marker i's clamp. */
     attach(bounds) {

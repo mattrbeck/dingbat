@@ -134,7 +134,8 @@ block:
   for _ in 0 ..< 300: dingbat_run_frame()
   check dingbat_rewind_pop() == 1, "rewind pops a snapshot"
   let n = dingbat_rewind_scrub_generate(16)
-  check n > 1 and dingbat_rewind_scrub_thumb_w() == 120, "scrub strip of 120-wide thumbs"
+  check n > 1 and dingbat_rewind_scrub_thumb_w() == 240 and dingbat_rewind_scrub_thumb_h() == 160,
+        "scrub strip of whole 240x160 frames"
   let oldest = n - 1
   check dingbat_rewind_scrub_seconds_ago(oldest) > 0, "oldest sample is in the past"
   check dingbat_rewind_commit(oldest) == 1, "commit to the oldest moment"
@@ -726,8 +727,8 @@ if ndsHave("fb_both.nds"):
   check dingbat_rewind_pop() == 1 and dingbat_rewind_pop() == 1 and ndsFrames() < f1,
         "rewind pops snapshots: an earlier frame"
   let n = dingbat_rewind_scrub_generate(16)
-  check n > 1 and dingbat_rewind_scrub_thumb_w() == 80 and dingbat_rewind_scrub_thumb_h() == 120,
-        "a strip of 80x120 thumbs (both screens): " & $n
+  check n > 1 and dingbat_rewind_scrub_thumb_w() == 256 and dingbat_rewind_scrub_thumb_h() == 384,
+        "a strip of 256x384 thumbs (both screens whole): " & $n
   let oldest = n - 1
   check dingbat_rewind_scrub_seconds_ago(oldest) > 0, "the oldest sample is in the past"
   let live = takeState()

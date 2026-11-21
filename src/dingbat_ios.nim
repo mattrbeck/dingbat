@@ -833,13 +833,13 @@ proc push_rewind() =
   of ekGBA:
     discard rewindHistory.maybe_push(
       proc(): string = stateGba.state_payload(),
-      proc(): RewindThumb = RewindThumb(w: 120, h: 80,
-        pixels: downscale_bgr555(stateGba.ppu.framebuffer, GBA_W, GBA_H, 120, 80)))
+      proc(): RewindThumb = RewindThumb(w: GBA_W, h: GBA_H,
+        pixels: bgr555_bytes(stateGba.ppu.framebuffer)))
   of ekGB:
     discard rewindHistory.maybe_push(
       proc(): string = stateGb.state_payload(),
-      proc(): RewindThumb = RewindThumb(w: 120, h: 108,
-        pixels: downscale_bgr555(stateGb.ppu.framebuffer, GB_W, GB_H, 120, 108)))
+      proc(): RewindThumb = RewindThumb(w: GB_W, h: GB_H,
+        pixels: bgr555_bytes(stateGb.ppu.framebuffer)))
   of ekNDS: rewindHistory.nds_rewind_tick(stateNds)
   of ekNone: discard
   # Which frame each snapshot starts, so going back to a clip anchor can cut
@@ -951,6 +951,15 @@ proc dingbat_framebuffer(): ptr uint16 {.exportc, cdecl.} =
   ## The core's own BGR555 framebuffer (no LCD response).
   let fb = live_fb()
   if fb == nil: nil else: cast[ptr uint16](fb)
+
+proc dingbat_color_lut(): ptr uint32 {.exportc, cdecl.} =
+  ## The loaded core's colour table (0x8000 RGBA8888 entries indexed by
+  ## BGR555; a plain 5->8 bit expansion with correction off), for stored
+  ## pictures (the scrubber strips). nil on a DS: no panel model.
+  case stateKind
+  of ekGBA: cast[ptr uint32](addr colorLutGba)
+  of ekGB:  cast[ptr uint32](addr colorLutGbc)
+  of ekNDS, ekNone: nil
 
 proc dingbat_framebuffer_rgba(): ptr uint32 {.exportc, cdecl.} =
   ## Colour-corrected RGBA8888 (R first in memory) of the core's framebuffer,
@@ -1775,11 +1784,9 @@ proc clip_note_frame() =
       var a = ClipAnchor(frame: clipFrameIndex, packed: compress(payload, BestSpeed, dfZlib))
       let fb = live_fb()
       let (w, h) = if stateKind == ekGB: (GB_W, GB_H) else: (GBA_W, GBA_H)
-      let th = 120 * h div w
-      let pixels = downscale_bgr555(toOpenArray(fb, 0, w * h - 1), w, h, 120, th)
-      a.thumb = compress(pixels, BestSpeed, dfZlib)
-      a.tw = 120
-      a.th = th
+      a.thumb = compress(bgr555_bytes(toOpenArray(fb, 0, w * h - 1)), BestSpeed, dfZlib)
+      a.tw = w
+      a.th = h
       clipAnchors.add(a)
       clipAnchorBytes += clip_anchor_size(a)
   clipInputs.add(clipCurButtons)
