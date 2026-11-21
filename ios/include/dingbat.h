@@ -350,12 +350,15 @@ int dingbat_rewind_commit(int sample);
 const char *dingbat_load_cheats(const char *text);
 
 /* --- Clips ("Clip that!") --- */
-/* The core keeps a state each second and the inputs of every frame for the
- * last minute; a replay re-emulates a range of it exactly. GB/GBA only: a
+/* The core keeps the inputs of every frame and a state each second for the
+ * last minute, one every 5 s further back (the window: 60 s unless set);
+ * a replay re-emulates a range of it exactly. GB/GBA only: a
  * DS game keeps no history (dingbat_clip_history_frames 0, the strip
  * empty, begin 0, tick -1). Run-ahead is GB/GBA only too:
  * dingbat_run_frame_ahead runs one plain frame for a DS game. */
 void dingbat_set_clip_cap(int bytes);
+void dingbat_set_clip_window(int seconds);
+int dingbat_clip_ring_bytes(void);
 int dingbat_clip_history_frames(void);
 int dingbat_clip_scrub_generate(int max_samples);   /* newest first */
 int dingbat_clip_scrub_thumb_w(void);
@@ -368,6 +371,15 @@ int dingbat_clip_scrub_frames_ago(int sample);
 int dingbat_clip_begin(int start_ago, int end_ago);
 int dingbat_clip_tick(void);
 void dingbat_clip_abort(void);
+/* A clip as a GIF: begin (`shades`: a black-and-white game's four colours,
+ * 0xRRGGBB lightest first, or NULL), a frame after each dingbat_clip_tick,
+ * finish (the length; the bytes at dingbat_gif_data), then free. ~30 fps,
+ * scaled by whole pixels. */
+int dingbat_gif_begin(int scale, const unsigned int *shades);
+void dingbat_gif_frame(void);
+int dingbat_gif_finish(void);
+const void *dingbat_gif_data(void);
+void dingbat_gif_free(void);
 
 /* Core faults: a bug inside a core (an index or range check) stops it
  * instead of escaping. Ask dingbat_fault after running frames. A faulted

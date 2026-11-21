@@ -195,6 +195,7 @@ flashcart-kit/
 # Personal ROM list consumed by tools/gbgate/sweep.sh (supplied locally)
 tools/gbgate/roms.txt
 /dingbat_clipreplay_test
+/dingbat_gif_test
 /dingbat_cyclelaws_test
 /dingbat_swihalt_test
 /dingbat_irqburst_test

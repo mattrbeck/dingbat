@@ -327,7 +327,7 @@ private struct Perk {
         Perk(perk: .filters, title: "Smooth filters", desc: "hq4x and xBR round off the pixel steps."),
         Perk(perk: .advanced, title: "Advanced features", desc: "DS support and the save webhook."),
         Perk(perk: .early, title: "Early access", desc: "Try new builds a week before they ship."),
-        Perk(perk: .clips, title: "Clip studio", desc: "Export GIFs, and sharper, longer clips.", soon: true),
+        Perk(perk: .clips, title: "Clip studio", desc: "GIFs, sharper video, and five minutes to clip from."),
     ]
 }
 

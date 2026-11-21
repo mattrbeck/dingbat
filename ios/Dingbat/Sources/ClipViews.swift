@@ -1,9 +1,12 @@
 import SwiftUI
 
 /// "Save a Clip" (web #clip-modal): two markers over the clip ring's strip
-/// (one picture a second, the last minute), presets, and what it will cost.
+/// (the last minute, five with Clip studio), presets, video or GIF (Clip
+/// studio), and what it will cost.
 struct ClipRangeView: View {
     @Environment(\.palette) private var palette
+    @ObservedObject private var store = Supporter.shared
+    @State private var format: ClipExporter.Format = .video
     @State private var thumbs: [UIImage] = []
     /// Frames-ago of each sample, newest first.
     @State private var ago: [Int] = []
@@ -58,9 +61,13 @@ struct ClipRangeView: View {
             .buttonStyle(SheetButtonStyle())
             .padding(.top, 12)
             .disabled(thumbs.count <= 1)
+            HStack(spacing: 8) {
+                formatButton("Video", .video)
+                formatButton("GIF", .gif)
+            }
+            .padding(.top, 8)
             if len > 0 {
-                Text(String(format: "%.1fs of video, roughly %d MB. It records off screen; you'll see how far along it is.",
-                            Double(len) / 60, max(1, Int((Double(len) / 60).rounded()))))
+                Text(costText)
                     .font(.system(size: 12)).foregroundColor(palette.textDim)
                     .padding(.top, 10)
             }
@@ -77,6 +84,42 @@ struct ClipRangeView: View {
     }
 
     private func tenths(_ frames: Int) -> Int { Int((Double(frames) * 10 / 60).rounded()) }
+
+    private var costText: String {
+        let seconds = Double(len) / 60
+        if format == .gif {
+            return seconds > Double(ClipStudio.gifSeconds)
+                ? "A GIF keeps the last \(ClipStudio.gifSeconds)s, without sound."
+                : String(format: "%.1fs GIF, without sound.", seconds)
+        }
+        // The bitrate grows with the scale: ~1 MB a second at 4x.
+        let scale = Double(ClipStudio.videoScale(height: Int(dingbat_fb_height())))
+        return String(format: "%.1fs of video, roughly %d MB. It records off screen; you'll see how far along it is.",
+                      seconds, max(1, Int((seconds * scale / 4).rounded())))
+    }
+
+    /// Video or GIF; GIF is Clip studio's, and opens its card when locked.
+    private func formatButton(_ title: String, _ f: ClipExporter.Format) -> some View {
+        let locked = f == .gif && !store.unlocked
+        let pick = {
+            if locked {
+                Supporter.shared.startOn(.clips)
+                AppModel.shared.openSheet(.supporter)
+            } else {
+                format = f
+            }
+        }
+        return Button(action: pick) {
+            HStack(spacing: 5) {
+                if locked { Image(systemName: "lock.fill").font(.system(size: 10, weight: .semibold)) }
+                Text(title)
+            }
+        }
+        .buttonStyle(SheetButtonStyle(kind: format == f ? .primary : .normal))
+        .padFocus("button:format-" + title, press: pick)
+        .accessibilityLabel(locked ? "\(title), with Supporter" : title)
+        .accessibilityAddTraits(format == f ? .isSelected : [])
+    }
 
     private func agoAt(_ s: Int, out: Bool) -> Int {
         if out && s <= 0 { return 0 }
@@ -146,13 +189,16 @@ struct ClipRangeView: View {
 
     private func save() {
         guard len > 0 else { return }
-        let seconds = max(1, Int((Double(len) / 60).rounded()))
+        let f = format == .gif && store.unlocked ? ClipExporter.Format.gif : .video
+        var seconds = max(1, Int((Double(len) / 60).rounded()))
+        if f == .gif { seconds = min(seconds, ClipStudio.gifSeconds) }
         let (s, e) = (start, end)
         SheetNav.close()
         // After the sheet is gone: the replay owns the core from here.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
-            ClipExporter.shared.exportClip(startAgo: s, endAgo: e, slug: "clip\(seconds)s",
-                                           label: e == 0 ? "The last \(seconds)s" : "\(seconds)s of gameplay")
+            ClipExporter.shared.exportClip(startAgo: s, endAgo: e, slug: (f == .gif ? "gif" : "clip") + "\(seconds)s",
+                                           label: e == 0 ? "The last \(seconds)s" : "\(seconds)s of gameplay",
+                                           format: f)
         }
     }
 }

@@ -178,6 +178,27 @@ final class Supporter: ObservableObject {
 // effect (Settings.effectiveTheme and friends), so nothing is hidden and a
 // lapsed unlock never strands a setting.
 
+/// Clip studio: Clip that! as a GIF, five minutes to clip from instead of
+/// one, and video up to ~1080 tall instead of 4x. The ring past the first
+/// minute keeps a state every 5 s (common/clip_ring.nim), so five minutes
+/// cost about two of the free one.
+enum ClipStudio {
+    static var on: Bool { Supporter.storedUnlocked }
+    static var windowSeconds: Int { on ? 300 : 60 }
+    static let gifSeconds = 30
+
+    /// Whole-pixel video scale for a picture `height` tall.
+    static func videoScale(height: Int) -> Int { on ? max(4, 1080 / max(1, height)) : 4 }
+
+    /// GIFs stay small enough to post: ~480 wide.
+    static func gifScale(width: Int) -> Int { max(1, 480 / max(1, width)) }
+
+    static func apply() {
+        dingbat_set_clip_window(Int32(windowSeconds))
+        dingbat_set_clip_cap(Int32((on ? 48 : 24) * 1024 * 1024))
+    }
+}
+
 extension ThemeName {
     /// Night is free; the other eleven come with Supporter.
     var supporterOnly: Bool { self != .night }

@@ -133,6 +133,7 @@ final class Settings: ObservableObject {
     func supporterChanged() {
         objectWillChange.send()
         applyVideo()
+        ClipStudio.apply()
         RomLibrary.shared.refresh()
     }
 
@@ -219,6 +220,7 @@ final class Settings: ObservableObject {
         dingbat_set_pitch_correct_ff(pitchCorrectFF ? 1 : 0)
         dingbat_set_channel_mutes(Int32(channelMutes))
         dingbat_set_rewind(rewind ? 1 : 0, 0)
+        ClipStudio.apply()
         applyVolume()
         applyVideo()
     }

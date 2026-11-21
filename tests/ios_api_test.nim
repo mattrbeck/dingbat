@@ -51,6 +51,14 @@ proc dingbat_clip_begin(startAgo, endAgo: cint): cint {.importc, cdecl.}
 proc dingbat_clip_tick(): cint {.importc, cdecl.}
 proc dingbat_clip_scrub_generate(n: cint): cint {.importc, cdecl.}
 proc dingbat_clip_abort() {.importc, cdecl.}
+proc dingbat_clip_history_frames(): cint {.importc, cdecl.}
+proc dingbat_set_clip_window(seconds: cint) {.importc, cdecl.}
+proc dingbat_clip_ring_bytes(): cint {.importc, cdecl.}
+proc dingbat_gif_begin(scale: cint; shades: pointer): cint {.importc, cdecl.}
+proc dingbat_gif_frame() {.importc, cdecl.}
+proc dingbat_gif_finish(): cint {.importc, cdecl.}
+proc dingbat_gif_data(): pointer {.importc, cdecl.}
+proc dingbat_gif_free() {.importc, cdecl.}
 proc dingbat_set_turbo(on: cint) {.importc, cdecl.}
 proc dingbat_set_volume(volume, mute: cint) {.importc, cdecl.}
 proc dingbat_rollback_init(rom0, rom1: cstring; local: cint; epoch: cdouble): cint {.importc, cdecl.}
@@ -196,6 +204,55 @@ block:
   dingbat_clip_abort()
   check core_turbo(), "a cancelled replay leaves the speed picked during it"
   dingbat_set_turbo(0)
+
+echo "GBA: a longer clip window (Supporter), thinned past the first minute"
+block:
+  dingbat_set_clip_window(180)
+  var seen: seq[uint64] = @[]
+  var minute = 0
+  for f in 0 ..< 240 * 60:
+    dingbat_set_input(4, cint((f div 11) mod 2))
+    dingbat_set_input(5, cint((f div 37) mod 2))
+    dingbat_run_frame()
+    seen.add frameHash()
+    if f == 70 * 60: minute = int(dingbat_clip_ring_bytes())
+  dingbat_set_input(4, 0); dingbat_set_input(5, 0)
+  let hist = int(dingbat_clip_history_frames())
+  check hist >= 180 * 60 and hist < 186 * 60, "the ring reaches back 3 minutes (" & $(hist div 60) & " s)"
+  let anchors = int(dingbat_clip_scrub_generate(1000))
+  check anchors in 84 .. 86, "a state a second for a minute, then one every 5 s (" & $anchors & ")"
+  let bytes = int(dingbat_clip_ring_bytes())
+  check bytes < minute * 3 div 2 + 1024 * 1024, "costing ~1.4 minutes of states (" &
+        $(bytes div 1024) & " KB, a minute was " & $(minute div 1024) & " KB)"
+  # 170 s back lands between two thinned anchors: a long silent pre-roll.
+  let live = takeState()
+  let n = dingbat_clip_begin(170 * 60, 170 * 60 - 120)
+  check n == 120, "the replay from a thinned stretch runs (" & $n & ")"
+  let first = seen.len - 170 * 60
+  var same = true
+  for i in 0 ..< int(n):
+    if dingbat_clip_tick() < 0: same = false; break
+    if frameHash() != seen[first + i]: same = false
+  check same, "every replayed frame matches what was seen"
+  check dingbat_clip_tick() == -1 and takeState() == live, "the live game is back"
+  dingbat_set_clip_window(60)
+  dingbat_run_frame()
+  check dingbat_clip_history_frames() < 62 * 60, "back to a minute at the next frame (" & $(dingbat_clip_history_frames() div 60) & " s)"
+
+echo "GBA: a clip as a GIF"
+block:
+  check dingbat_gif_begin(2, nil) == 1, "a GIF starts"
+  let n = dingbat_clip_begin(600, 0)
+  check n == 600, "10 s to replay"
+  let t0 = getMonoTime()
+  while dingbat_clip_tick() >= 0: dingbat_gif_frame()
+  let len = int(dingbat_gif_finish())
+  let ms = (getMonoTime() - t0).inMilliseconds
+  var head = newString(6)
+  if len >= 6: copyMem(addr head[0], dingbat_gif_data(), 6)
+  check head == "GIF89a", "the bytes are a GIF (" & $(len div 1024) & " KB in " & $ms & " ms)"
+  dingbat_gif_free()
+  check dingbat_gif_data() == nil, "freed"
 
 echo "GBA: cheats"
 block:
@@ -459,7 +516,6 @@ proc dingbat_audio_open(format, freq, play: cint) {.importc, cdecl.}
 proc dingbat_audio_put(data: pointer; len: uint32) {.importc, cdecl.}
 proc dingbat_audio_set_target(frames: cint) {.importc, cdecl.}
 proc dingbat_audio_sample_rate(): cint {.importc, cdecl.}
-proc dingbat_clip_history_frames(): cint {.importc, cdecl.}
 proc dingbat_frame_static(): cint {.importc, cdecl.}
 
 let ndsRoms = getEnv("DINGBAT_NDS_ROMS", getHomeDir() / ".cache/dingbat-nds/roms")

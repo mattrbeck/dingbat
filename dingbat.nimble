@@ -190,6 +190,9 @@ task test_clipreplay, "Run the clip-capture replay determinism tests":
   exec "nim c -r -d:test_harness -d:release --path:src " &
        "-o:dingbat_clipreplay_test tests/clip_replay_test.nim"
 
+task test_gif, "Encode clip GIFs and decode them back":
+  exec "nim c -r -d:release --path:src -o:dingbat_gif_test tests/gif_test.nim"
+
 task test_printer, "Run the Game Boy Printer protocol unit tests":
   exec "nim c -r -d:test_harness -d:release --path:src -o:dingbat_printer_test tests/gb_printer_test.nim"
 

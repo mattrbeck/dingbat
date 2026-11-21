@@ -3,6 +3,8 @@ import zippy  # clip anchors + their strip thumbnails are stored deflated
 import dingbat/common/input
 import dingbat/common/web_audio
 import dingbat/common/rewind
+import dingbat/common/clip_ring
+import dingbat/common/gif
 import dingbat/common/serialize
 import dingbat/common/scheduler
 import dingbat/gba/gba
@@ -613,19 +615,13 @@ const GB_SCRUB_THUMB_H  = SCRUB_THUMB_W * GB_H  div GB_W   # 10:9 -> 120x108
 # rewind may be off and keeps no inputs. Known divergence: the GBA RTC reads
 # wall clock, so a replayed clock can differ by the clip length.
 # Anchors double as the scrubber strip, so one cadence serves both.
-const CLIP_SNAP_INTERVAL = 60          # anchor + thumbnail cadence (frames)
-const CLIP_MAX_FRAMES = 60 * 60        # rolling history window (~60 s)
+const CLIP_SNAP_INTERVAL = ClipSnapInterval
 const CLIP_CAP_BYTES = 12 * 1024 * 1024
   ## Byte budget for the anchor ring (the window is time-bounded too). JS
   ## lowers it on iOS, where memory pressure gets the wasm JIT demoted.
 
-type ClipAnchor = object
-  frame: int          # canonical frame index this state is the start of
-  packed: string      # zlib'd state payload
-  thumb: seq[byte]    # zlib'd BGR555 thumbnail (may be empty)
-  tw, th: int
-
 var clipCapBytes = CLIP_CAP_BYTES
+var clipWindow = ClipDefaultWindow     # frames back a clip may start
 var clipAnchors: seq[ClipAnchor] = @[]
 var clipAnchorBytes = 0                # packed + thumb across clipAnchors
 var clipInputs: seq[uint16] = @[]      # button mask per canonical frame
@@ -664,6 +660,10 @@ proc setClipCapBytes(n: cint) {.exportc.} =
   ## Takes effect at the next anchor, when the ring trims to the new cap.
   if n > 0: clipCapBytes = int(n)
 
+proc setClipWindow(seconds: cint) {.exportc.} =
+  ## How far back a clip may start (60 s unless set).
+  if seconds > 0: clipWindow = int(seconds) * 60
+
 proc clip_reset() =
   clipAnchors.setLen(0)
   clipAnchorBytes = 0
@@ -676,8 +676,6 @@ proc clip_reset() =
   # stay off for it.
   if clipReplaying: slowmoStretch = clipHeldSlowmo
   clipReplaying = false
-
-proc clip_anchor_size(a: ClipAnchor): int = a.packed.len + a.thumb.len
 
 proc clip_capture_thumb(): tuple[pixels: seq[byte], w, h: int] =
   ## The anchor's own frame, downscaled to the shared 120-wide geometry.
@@ -709,21 +707,14 @@ proc clip_note_frame() =
       if t.pixels.len > 0:
         a.thumb = compress(t.pixels, BestSpeed, dfZlib)
       clipAnchors.add(a)
-      clipAnchorBytes += clip_anchor_size(a)
+      clipAnchorBytes += anchorSize(a)
   clipInputs.add(clipCurButtons)
   inc clipFrameIndex
-  # Evict from the front by time, then by bytes.
-  let oldest = clipFrameIndex - CLIP_MAX_FRAMES
-  while clipAnchors.len > 1 and clipAnchors[1].frame <= oldest:
-    clipAnchorBytes -= clip_anchor_size(clipAnchors[0])
-    clipAnchors.delete(0)
-  while clipAnchors.len > 1 and clipAnchorBytes > clipCapBytes:
-    clipAnchorBytes -= clip_anchor_size(clipAnchors[0])
-    clipAnchors.delete(0)
+  trimAnchors(clipAnchors, clipAnchorBytes, clipFrameIndex, clipWindow, clipCapBytes)
   if clipAnchors.len > 0 and clipInputsStart < clipAnchors[0].frame:
     let drop = clipAnchors[0].frame - clipInputsStart
     if drop > 0 and drop <= clipInputs.len:
-      clipInputs = clipInputs[drop .. ^1]  # ≤3600 u16s, copying is trivial
+      clipInputs = clipInputs[drop .. ^1]  # 2 bytes a frame, copying is trivial
       clipInputsStart += drop
 
 proc clip_apply_payload(payload: string): bool =
@@ -898,6 +889,47 @@ proc clip_abort() {.exportc.} =
   clip_speed_restore()
   if statePrinter != nil: statePrinter.muted = false
   clip_set_buttons(clipCurButtons)
+
+# --- A clip as a GIF (common/gif.nim): gif_begin, gif_frame after each
+# clip_tick, gif_finish (the length), then the bytes at gif_data_ptr until
+# gif_free. ---
+var clipGif: GifWriter
+var clipGifOn = false
+
+proc gif_begin(scale: cint; shadesPtr: pointer): cint {.exportc.} =
+  ## `shades`: a black-and-white game's four colours (0xRRGGBB, lightest
+  ## first) or 0 for a colour game.
+  let shades = cast[ptr UncheckedArray[uint32]](shadesPtr)
+  let (w, h) = case stateKind
+    of ekGBA: (GBA_W, GBA_H)
+    of ekGB: (GB_W, GB_H)
+    of ekNone: return 0
+  if shades != nil:
+    clipGif.gifBegin(w, h, int(scale), [shades[0], shades[1], shades[2], shades[3]])
+  else:
+    clipGif.gifBegin(w, h, int(scale))
+  clipGifOn = true
+  1
+
+proc gif_frame() {.exportc.} =
+  if not clipGifOn: return
+  case stateKind
+  of ekGBA: clipGif.gifFrame(stateGba.ppu.framebuffer.toOpenArray(0, GBA_W * GBA_H - 1))
+  of ekGB: clipGif.gifFrame(stateGb.ppu.framebuffer.toOpenArray(0, GB_W * GB_H - 1))
+  of ekNone: discard
+
+proc gif_finish(): cint {.exportc.} =
+  if not clipGifOn: return 0
+  clipGifOn = false
+  clipGif.gifFinish()
+  cint(clipGif.data.len)
+
+proc gif_data_ptr(): pointer {.exportc.} =
+  if clipGif.data.len > 0: addr clipGif.data[0] else: nil
+
+proc gif_free() {.exportc.} =
+  clipGif = GifWriter()
+  clipGifOn = false
 
 # --- Game Boy Printer ---
 # Every solo GB core has a printer from the start (gb/printer.nim: the

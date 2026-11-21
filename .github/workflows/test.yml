@@ -329,6 +329,12 @@ jobs:
         # fail. Committed ROMs only.
         shell: bash
         run: ./dingbat_clipreplay_test
+      - name: Clip GIF encoder
+        # Encoded and decoded back: pictures as fed (scale, DMG shades),
+        # ~30 fps delays adding up to console time, still pictures folded,
+        # over 255 colours cut close, a small change a small frame.
+        shell: bash
+        run: ./dingbat_gif_test
       - name: GBA cycle laws recorded from an AGB SP
         # tests/roms/cyclelaws: the link rig's recorded tables frozen into
         # ROMs (tools/hwlink/lawrom.py). Each cell is ONE timing term the

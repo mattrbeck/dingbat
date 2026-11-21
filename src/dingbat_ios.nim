@@ -25,6 +25,8 @@ import std/[os, strutils, math]
 import zippy  # clip anchors and their thumbnails are stored deflated
 import dingbat/common/input
 import dingbat/common/rewind
+import dingbat/common/clip_ring
+import dingbat/common/gif
 import dingbat/common/serialize
 import dingbat/common/cheats
 import dingbat/common/lcd_response
@@ -70,17 +72,11 @@ var statePrinter: GbPrinter = nil      # always attached on a GB core
 var rewindHistory: Rewind = nil
 
 # Clip capture state (procs under "Retroactive clip capture").
-const CLIP_SNAP_INTERVAL = 60          # anchor + thumbnail cadence (frames)
-const CLIP_MAX_FRAMES = 60 * 60        # rolling history window (~60 s)
+const CLIP_SNAP_INTERVAL = ClipSnapInterval
 const CLIP_CAP_BYTES = 24 * 1024 * 1024
 
-type ClipAnchor = object
-  frame: int          # canonical frame index this state is the start of
-  packed: string      # zlib'd state payload
-  thumb: seq[byte]    # zlib'd BGR555 thumbnail (may be empty)
-  tw, th: int
-
 var clipCapBytes = CLIP_CAP_BYTES
+var clipWindow = ClipDefaultWindow     # frames back a clip may start
 var clipAnchors: seq[ClipAnchor] = @[]
 var clipAnchorBytes = 0
 var clipInputs: seq[uint16] = @[]      # button mask per canonical frame
@@ -1763,8 +1759,6 @@ proc clip_reset() =
   # cores): the session replay has nothing to replay from until one comes.
   segOk = false
 
-proc clip_anchor_size(a: ClipAnchor): int = a.packed.len + a.thumb.len
-
 proc clip_note_frame() =
   ## Once per canonical frame before it steps: an anchor every second, the
   ## held buttons every frame, and eviction past the window or the budget.
@@ -1781,17 +1775,11 @@ proc clip_note_frame() =
       a.tw = 120
       a.th = th
       clipAnchors.add(a)
-      clipAnchorBytes += clip_anchor_size(a)
+      clipAnchorBytes += anchorSize(a)
   clipInputs.add(clipCurButtons)
   seg_note(if aheadFrame: clipCurButtons or SEG_AHEAD else: clipCurButtons)
   inc clipFrameIndex
-  let oldest = clipFrameIndex - CLIP_MAX_FRAMES
-  while clipAnchors.len > 1 and clipAnchors[1].frame <= oldest:
-    clipAnchorBytes -= clip_anchor_size(clipAnchors[0])
-    clipAnchors.delete(0)
-  while clipAnchors.len > 1 and clipAnchorBytes > clipCapBytes:
-    clipAnchorBytes -= clip_anchor_size(clipAnchors[0])
-    clipAnchors.delete(0)
+  trimAnchors(clipAnchors, clipAnchorBytes, clipFrameIndex, clipWindow, clipCapBytes)
   if clipAnchors.len > 0 and clipInputsStart < clipAnchors[0].frame:
     let drop = clipAnchors[0].frame - clipInputsStart
     if drop > 0 and drop <= clipInputs.len:
@@ -1815,6 +1803,13 @@ proc clip_set_buttons(mask: uint16) =
 
 proc dingbat_set_clip_cap(bytes: cint) {.exportc, cdecl.} =
   if bytes > 0: clipCapBytes = int(bytes)
+
+proc dingbat_set_clip_window(seconds: cint) {.exportc, cdecl.} =
+  ## How far back a clip may start (60 s unless set); the ring trims to a
+  ## shorter one at the next frame.
+  if seconds > 0: clipWindow = int(seconds) * 60
+
+proc dingbat_clip_ring_bytes(): cint {.exportc, cdecl.} = cint(clipAnchorBytes)
 
 proc dingbat_clip_history_frames(): cint {.exportc, cdecl.} =
   ## How far back a clip may start, in frames.
@@ -1962,6 +1957,47 @@ proc dingbat_clip_abort() {.exportc, cdecl.} =
   clip_set_buttons(clipCurButtons)
   present_live()
 
+# --- A clip as a GIF (common/gif.nim) ---
+# ClipExporter feeds it every frame of a clip replay instead of the video
+# writer: begin, a frame after each dingbat_clip_tick, finish, then the bytes.
+
+var clipGif: GifWriter
+var clipGifOn = false
+
+proc dingbat_gif_begin(scale: cint; shades: ptr UncheckedArray[uint32]): cint {.exportc, cdecl.} =
+  ## `shades`: a black-and-white game's four colours (0xRRGGBB, lightest
+  ## first), nil for a colour game. 0 on the DS or with no game.
+  if stateKind notin {ekGB, ekGBA}: return 0
+  let w = int(dingbat_fb_width())
+  let h = int(dingbat_fb_height())
+  if shades != nil:
+    clipGif.gifBegin(w, h, int(scale), [shades[0], shades[1], shades[2], shades[3]])
+  else:
+    clipGif.gifBegin(w, h, int(scale))
+  clipGifOn = true
+  1
+
+proc dingbat_gif_frame() {.exportc, cdecl.} =
+  ## The core's picture now, as the next console frame.
+  if not clipGifOn: return
+  let fb = live_fb()
+  if fb != nil:
+    clipGif.gifFrame(toOpenArray(fb, 0, int(dingbat_fb_width() * dingbat_fb_height()) - 1))
+
+proc dingbat_gif_finish(): cint {.exportc, cdecl.} =
+  ## The file's length; its bytes at dingbat_gif_data until dingbat_gif_free.
+  if not clipGifOn: return 0
+  clipGifOn = false
+  clipGif.gifFinish()
+  cint(clipGif.data.len)
+
+proc dingbat_gif_data(): pointer {.exportc, cdecl.} =
+  if clipGif.data.len > 0: addr clipGif.data[0] else: nil
+
+proc dingbat_gif_free() {.exportc, cdecl.} =
+  clipGif = GifWriter()
+  clipGifOn = false
+
 # --- Core faults: what the shell shows and the ways out (see "Core faults") ---
 # Going back and the bug report both work from the clip ring: an anchor state
 # every second and the buttons held on every frame, for the last minute,
@@ -1979,7 +2015,7 @@ proc cut_timeline(frame: int) =
   ## holds from there on did not happen. The anchor at `frame` is taken again
   ## when it runs.
   while clipAnchors.len > 0 and clipAnchors[^1].frame >= frame:
-    clipAnchorBytes -= clip_anchor_size(clipAnchors[^1])
+    clipAnchorBytes -= anchorSize(clipAnchors[^1])
     clipAnchors.setLen(clipAnchors.len - 1)
   clipInputs.setLen(clamp(frame - clipInputsStart, 0, clipInputs.len))
   if clipInputs.len == 0: clipInputsStart = frame

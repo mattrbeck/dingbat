@@ -77,6 +77,7 @@ interface EmscriptenModule {
   _wasm_set_tilt?(x: number, y: number): void;
   _wasm_cart_has_tilt?(): number;
   _setClipCapBytes?(n: number): void;
+  _setClipWindow?(seconds: number): void;
   _clip_history_frames?(): number;
   _clip_scrub_generate?(maxSamples: number): number;
   _clip_scrub_count?(): number;
@@ -87,6 +88,11 @@ interface EmscriptenModule {
   _clip_begin?(startAgo: number, endAgo: number): number;
   _clip_tick?(): number;
   _clip_abort?(): void;
+  _gif_begin?(scale: number, shadesPtr: number): number;
+  _gif_frame?(): void;
+  _gif_finish?(): number;
+  _gif_data_ptr?(): number;
+  _gif_free?(): void;
   _printer_log_len?(): number;
   _printer_log_ptr?(): number;
   _printer_disconnect?(): void;

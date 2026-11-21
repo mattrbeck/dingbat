@@ -4,9 +4,11 @@ import SwiftUI
 import UIKit
 
 /// "Clip that!" and Record (web "Retroactive clip capture" and "Forward clip
-/// recording"): the console's own picture (the framebuffer at 4x: no
-/// filters, colour correction, LCD response, shade palette or border) and
-/// sound (no enhanced music, audio smoothing or channel mutes) into an MP4.
+/// recording"): the console's own picture (the framebuffer at 4x, or up to
+/// ~1080 tall with Clip studio: no filters, colour correction, LCD
+/// response or border; a black-and-white game in its shades) and sound (no
+/// enhanced music, audio smoothing or channel mutes) into an MP4. Clip
+/// studio also makes a clip a GIF (the core's encoder, common/gif.nim).
 ///
 /// A clip re-emulates a past range from the core's clip ring (one state per
 /// second plus every frame's inputs) off screen, as fast as the encoder
@@ -20,13 +22,17 @@ final class ClipExporter: ObservableObject {
     @Published private(set) var export: (label: String, progress: Double)?
     @Published private(set) var recording = false
 
+    enum Format { case video, gif }
+
     /// Both consoles run 70224 dots a frame at 4 MiHz.
     static let frameTime = CMTime(value: 70224, timescale: 4_194_304)
+    /// At 4x; a larger picture gets more in proportion to its scale.
     static let videoBitrate = 8_000_000
     static let audioRate: Double = 48000
     static let keyEvery = 120
 
     private var writer: Writer?
+    private var gif = false
     private var gen = 0
     private var wasPaused = false
     private var recTimer: Timer?
@@ -34,18 +40,25 @@ final class ClipExporter: ObservableObject {
 
     // MARK: Clip that!
 
-    /// Replay [startAgo, endAgo) frames before now into a video.
-    func exportClip(startAgo: Int, endAgo: Int, slug: String, label: String) {
+    /// Replay [startAgo, endAgo) frames before now into a video, or a GIF
+    /// of at most its last `ClipStudio.gifSeconds`.
+    func exportClip(startAgo: Int, endAgo: Int, slug: String, label: String, format: Format = .video) {
         let session = GameSession.shared
         guard export == nil, let game = session.game else { return }
+        if format == .gif {
+            exportGif(startAgo: min(startAgo, endAgo + ClipStudio.gifSeconds * 60), endAgo: endAgo,
+                      game: game, slug: slug, label: label)
+            return
+        }
         let frames = Int(dingbat_clip_begin(Int32(startAgo), Int32(endAgo)))
         guard frames > 0 else {
             AppModel.shared.toast("Not enough gameplay history yet")
             return
         }
-        let w = Int(dingbat_fb_width()) * 4, h = Int(dingbat_fb_height()) * 4
+        let scale = ClipStudio.videoScale(height: Int(dingbat_fb_height()))
         let url = Self.outputURL(game: game, slug: slug)
-        guard let writer = Writer(url: url, width: w, height: h, realtime: false) else {
+        guard let writer = Writer(url: url, fbWidth: Int(dingbat_fb_width()), fbHeight: Int(dingbat_fb_height()),
+                                  scale: scale, realtime: false) else {
             dingbat_clip_abort()
             AppModel.shared.toast("Couldn't start the recorder")
             return
@@ -53,9 +66,7 @@ final class ClipExporter: ObservableObject {
         self.writer = writer
         gen += 1
         let myGen = gen
-        // The player's pause, not the one the range sheet took.
-        wasPaused = session.paused && !AppModel.shared.sheetPausedGame
-        session.holdForClip(true)
+        hold()
         setNativeAudio(true)
         dingbat_audio_capture_clear()
         dingbat_audio_set_mode(1)
@@ -117,17 +128,81 @@ final class ClipExporter: ObservableObject {
         DispatchQueue.main.async(execute: batch)
     }
 
+    /// The same replay into the core's GIF encoder: no sound, ~30 fps.
+    private func exportGif(startAgo: Int, endAgo: Int, game: RomEntry, slug: String, label: String) {
+        let frames = Int(dingbat_clip_begin(Int32(startAgo), Int32(endAgo)))
+        guard frames > 0 else {
+            AppModel.shared.toast("Not enough gameplay history yet")
+            return
+        }
+        let scale = Int32(ClipStudio.gifScale(width: Int(dingbat_fb_width())))
+        let began = GameSession.pictureShades().map { s in
+            s.withUnsafeBufferPointer { dingbat_gif_begin(scale, $0.baseAddress) }
+        } ?? dingbat_gif_begin(scale, nil)
+        guard began == 1 else {
+            dingbat_clip_abort()
+            AppModel.shared.toast("Couldn't start the GIF")
+            return
+        }
+        gif = true
+        gen += 1
+        let myGen = gen
+        hold()
+        dingbat_audio_set_mode(2)
+        export = (label, 0)
+        var done = 0
+        func batch() {
+            guard myGen == self.gen, self.export != nil else { return }
+            let t0 = CACurrentMediaTime()
+            while CACurrentMediaTime() - t0 < 0.012 {
+                if dingbat_clip_tick() < 0 {
+                    finishGif(game: game, slug: slug, gen: myGen)
+                    return
+                }
+                dingbat_gif_frame()
+                done += 1
+            }
+            export = (label, 0.95 * Double(done) / Double(max(1, frames)))
+            DispatchQueue.main.async(execute: batch)
+        }
+        DispatchQueue.main.async(execute: batch)
+    }
+
+    private func finishGif(game: RomEntry, slug: String, gen myGen: Int) {
+        guard myGen == gen, gif else { return }
+        let n = Int(dingbat_gif_finish())
+        let data = n > 0 ? dingbat_gif_data().map { Data(bytes: $0, count: n) } : nil
+        dingbat_gif_free()
+        release()
+        export = nil
+        let url = Self.outputURL(game: game, slug: slug, ext: "gif")
+        Self.deliver(data.flatMap { (try? $0.write(to: url)) == nil ? nil : url }, empty: "The GIF came out empty")
+    }
+
     func cancelExport() {
         guard export != nil else { return }
         dingbat_clip_abort()
-        finish(save: false, gen: gen, slug: "")
+        if gif {
+            dingbat_gif_free()
+            release()
+            export = nil
+        } else {
+            finish(save: false, gen: gen, slug: "")
+        }
         AppModel.shared.toast("Clip canceled")
     }
 
-    private func finish(save: Bool, gen myGen: Int, slug: String) {
-        guard myGen == gen, let writer else { return }
+    /// The live game held still for a replay; the player's pause (not the
+    /// one the range sheet took) kept for after.
+    private func hold() {
+        wasPaused = GameSession.shared.paused && !AppModel.shared.sheetPausedGame
+        GameSession.shared.holdForClip(true)
+    }
+
+    /// The live game back as it was: its sound, its pause.
+    private func release() {
         gen += 1
-        self.writer = nil
+        gif = false
         dingbat_audio_set_mode(recording ? 3 : 0)
         dingbat_audio_capture_clear()
         if !recording { setNativeAudio(false) }
@@ -136,6 +211,12 @@ final class ClipExporter: ObservableObject {
             GameSession.shared.setPaused(wasPaused)
         }
         GameRenderer.shared.present()
+    }
+
+    private func finish(save: Bool, gen myGen: Int, slug: String) {
+        guard myGen == gen, let writer else { return }
+        self.writer = nil
+        release()
         guard save else {
             writer.cancel()
             export = nil
@@ -156,8 +237,9 @@ final class ClipExporter: ObservableObject {
     func toggleRecording() {
         if recording { stopRecording(); return }
         guard export == nil, let game = GameSession.shared.game else { return }
-        let w = Int(dingbat_fb_width()) * 4, h = Int(dingbat_fb_height()) * 4
-        guard let writer = Writer(url: Self.outputURL(game: game, slug: "clip"), width: w, height: h, realtime: true) else {
+        let fw = Int(dingbat_fb_width()), fh = Int(dingbat_fb_height())
+        guard let writer = Writer(url: Self.outputURL(game: game, slug: "clip"), fbWidth: fw, fbHeight: fh,
+                                  scale: ClipStudio.videoScale(height: fh), realtime: true) else {
             AppModel.shared.toast("Couldn't start the recorder")
             return
         }
@@ -217,10 +299,10 @@ final class ClipExporter: ObservableObject {
         }
     }
 
-    private static func outputURL(game: RomEntry, slug: String) -> URL {
+    private static func outputURL(game: RomEntry, slug: String, ext: String = "mp4") -> URL {
         let f = DateFormatter()
         f.dateFormat = "yyyy-MM-dd-HH-mm-ss"
-        let name = "\(game.stem)-\(slug)-\(f.string(from: Date())).mp4"
+        let name = "\(game.stem)-\(slug)-\(f.string(from: Date())).\(ext)"
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(name)
         try? FileManager.default.removeItem(at: url)
         return url
@@ -246,14 +328,14 @@ final class ClipExporter: ObservableObject {
     }
 }
 
-/// One MP4: H.264 frames from the core's framebuffer at 4x, AAC from its
-/// captured samples (32768 Hz, resampled to 48 kHz).
+/// One MP4: H.264 frames from the core's framebuffer at a whole-pixel
+/// scale, AAC from its captured samples (32768 Hz, resampled to 48 kHz).
 private final class Writer {
     private let writer: AVAssetWriter
     private let video: AVAssetWriterInput
     private let adaptor: AVAssetWriterInputPixelBufferAdaptor
     private let audio: AVAssetWriterInput
-    private let width: Int, height: Int
+    private let width: Int, height: Int, scale: Int
     private let srcFormat = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 32768, channels: 2, interleaved: false)!
     private let dstFormat = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: ClipExporter.audioRate, channels: 2, interleaved: false)!
     private let converter: AVAudioConverter
@@ -264,19 +346,21 @@ private final class Writer {
     /// A black-and-white game's shades, as on screen (the core's are greys).
     private let shades = GameSession.pictureShades()
 
-    init?(url: URL, width: Int, height: Int, realtime: Bool) {
+    init?(url: URL, fbWidth: Int, fbHeight: Int, scale: Int, realtime: Bool) {
         guard let w = try? AVAssetWriter(outputURL: url, fileType: .mp4),
               let conv = AVAudioConverter(from: srcFormat, to: dstFormat) else { return nil }
         writer = w
         converter = conv
+        let width = fbWidth * scale, height = fbHeight * scale
         self.width = width
         self.height = height
+        self.scale = scale
         video = AVAssetWriterInput(mediaType: .video, outputSettings: [
             AVVideoCodecKey: AVVideoCodecType.h264,
             AVVideoWidthKey: width,
             AVVideoHeightKey: height,
             AVVideoCompressionPropertiesKey: [
-                AVVideoAverageBitRateKey: ClipExporter.videoBitrate,
+                AVVideoAverageBitRateKey: ClipExporter.videoBitrate * scale / 4,
                 AVVideoMaxKeyFrameIntervalKey: ClipExporter.keyEvery,
                 AVVideoProfileLevelKey: AVVideoProfileLevelH264HighAutoLevel,
             ],
@@ -312,7 +396,7 @@ private final class Writer {
 
     func queueFrame(at t: CMTime) {
         guard let fb = dingbat_framebuffer() else { return }
-        queue.append((Data(bytes: fb, count: (width / 4) * (height / 4) * 2), t))
+        queue.append((Data(bytes: fb, count: (width / scale) * (height / scale) * 2), t))
     }
 
     func drainVideo() {
@@ -324,7 +408,7 @@ private final class Writer {
         }
     }
 
-    /// The core's framebuffer, 4x nearest: no colour correction, a
+    /// The core's framebuffer, nearest at `scale`: no colour correction, a
     /// black-and-white game in the shade palette.
     func appendFrame(at t: CMTime, dropLate: Bool = false) {
         guard let fb = dingbat_framebuffer() else { return }
@@ -339,9 +423,10 @@ private final class Writer {
         CVPixelBufferLockBaseAddress(pb, [])
         let base = CVPixelBufferGetBaseAddress(pb)!.assumingMemoryBound(to: UInt32.self)
         let stride = CVPixelBufferGetBytesPerRow(pb) / 4
-        let fw = width / 4, fh = height / 4
+        let s = scale
+        let fw = width / s, fh = height / s
         for y in 0..<fh {
-            let row = base + (y * 4) * stride
+            let row = base + (y * s) * stride
             for x in 0..<fw {
                 let px: UInt32   // BGRA in memory
                 if let shades, let s = GameSession.shadeRGBA(fb[y * fw + x], shades) {
@@ -351,10 +436,10 @@ private final class Writer {
                     let r = (v & 31) * 255 / 31, g = ((v >> 5) & 31) * 255 / 31, b = ((v >> 10) & 31) * 255 / 31
                     px = 0xFF00_0000 | (r << 16) | (g << 8) | b
                 }
-                let o = x * 4
-                row[o] = px; row[o + 1] = px; row[o + 2] = px; row[o + 3] = px
+                let o = x * s
+                for k in 0..<s { row[o + k] = px }
             }
-            for k in 1..<4 { memcpy(row + k * stride, row, fw * 4 * 4) }
+            for k in 1..<s { memcpy(row + k * stride, row, width * 4) }
         }
         CVPixelBufferUnlockBaseAddress(pb, [])
         if adaptor.append(pb, withPresentationTime: t) { lastVideo = t }

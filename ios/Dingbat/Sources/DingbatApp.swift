@@ -41,7 +41,8 @@ struct DingbatApp: App {
     ///   -sheet <id>           open a sheet: settings[:section], states,
     ///                         saves, rewind, cheats, prints, report,
     ///                         tile (first game's menu), rename, export,
-    ///                         supporter
+    ///                         supporter, clip
+    ///   -sheet-after <s>      ...that many seconds in (1 by default)
     ///   -supporter on|off     (DEBUG) pretend the unlock is or isn't bought
     private func autoplay() {
         let args = ProcessInfo.processInfo.arguments
@@ -148,7 +149,9 @@ struct DingbatApp: App {
                     }
                     if let c = value("-clip-after").flatMap(Double.init) {
                         DispatchQueue.main.asyncAfter(deadline: .now() + c) {
-                            ClipExporter.shared.exportClip(startAgo: 3600, endAgo: 0, slug: "clipcheck", label: "Everything")
+                            // `-clip-format gif`: as a GIF (Clip studio).
+                            ClipExporter.shared.exportClip(startAgo: ClipStudio.windowSeconds * 60, endAgo: 0, slug: "clipcheck",
+                                                           label: "Everything", format: value("-clip-format") == "gif" ? .gif : .video)
                         }
                     }
                 } else if left > 0 {
@@ -237,7 +240,7 @@ struct DingbatApp: App {
             }
         }
         #endif
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + (value("-sheet-after").flatMap(Double.init) ?? 1.0)) {
             if args.contains("-home") { model.showMainMenu() }
             if args.contains("-menu") { model.openMenu(paused: true) }
             if let s = value("-sheet") {

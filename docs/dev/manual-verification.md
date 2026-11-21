@@ -230,6 +230,10 @@ TestFlight build with a sandbox account.
 - [ ] **The crown over the link.** A supporter's phone linked to a free
       phone and to a browser: each shows the supporter's bat crowned on the
       transfer scene, the free player's bat plain.
+- [ ] **Clip studio on a phone.** Five minutes into a real game, Save a
+      Clip reaches back five minutes; a 30 s GIF of busy play saves and
+      plays in Messages and Photos; a 6x video shares without the phone
+      warming; free, GIF shows a lock and opens the Clip studio card.
 
 ## iOS: native touches (pauses, edges, haptics, VoiceOver)
 

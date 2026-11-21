@@ -50,7 +50,8 @@ const CLIP_API = [
   "_clip_history_frames", "_clip_scrub_generate", "_clip_scrub_count",
   "_clip_scrub_thumb_w", "_clip_scrub_thumb_h", "_clip_scrub_thumbs_ptr",
   "_clip_scrub_frames_ago", "_clip_begin", "_clip_tick", "_clip_abort",
-  "_setClipCapBytes",
+  "_setClipCapBytes", "_setClipWindow",
+  "_gif_begin", "_gif_frame", "_gif_finish", "_gif_data_ptr", "_gif_free",
 ];
 
 test("the clip API is exported in full", () => {

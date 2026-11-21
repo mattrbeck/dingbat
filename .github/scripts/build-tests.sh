@@ -68,6 +68,7 @@ if [ -f deps/webrtc/lib/libwebrtcdc.a ]; then
   build desktoponline dingbat_desktop_online_link_test tests/desktop_online_link_test.nim
 fi
 build clipreplay      dingbat_clipreplay_test       tests/clip_replay_test.nim
+build gif             dingbat_gif_test              tests/gif_test.nim
 build mp2kpass        dingbat_mp2kpass_test         tests/mp2k_pass_test.nim
 build cyclelaws       dingbat_cyclelaws_test        tests/cyclelaws_test.nim
 build swihalt         dingbat_swihalt_test          tests/swihalt_test.nim
