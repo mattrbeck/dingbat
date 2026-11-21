@@ -23,6 +23,10 @@
 @   H  16 x (ldr r0, [r5]; 3 x mov r0, r0)       a load with fetch time after it
 @   I  subject G copied into IWRAM               the floor: no gamepak fetches
 @
+@ Answered 2026-11-20 from a flash cart on the AGB SP
+@ (ewrombench-agb-2026-11-20.json): all 36 counts are dingbat's, so the
+@ prefetcher's EWRAM pricing holds at WS0 3/1 as well as 4/2.
+@
 @ Results: 9 subjects x 4 wait settings, 36 words at 0x02000000 (TM0 at one
 @ tick a cycle, call overhead included and identical everywhere), marker
 @ 0x600D0000 at 0x02000FFC, then offered over the link (linkreport.inc).

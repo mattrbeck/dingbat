@@ -1,0 +1,59 @@
+{
+ "what": "tests/roms/ewrombench.gba run from an EZ-Flash Omega on the AGB SP, 2026-11-20; the 36 words read back over the link cable twice (tools/hwlink/gblink.py report), both reads the same. Cycles by TM0, call overhead included. dingbat gives all 36. The playtest harness's mGBA gives 24: it charges fewer cycles on twelve prefetch-on rows (B, C, D, E and G at both wait settings, F and H at 3/1).",
+ "cycles": {
+  "A 64 nops": {
+   "3/1 pf-ON": 182,
+   "3/1 pf-off": 185,
+   "4/2 pf-ON": 267,
+   "4/2 pf-off": 270
+  },
+  "B 16 ldr EWRAM": {
+   "3/1 pf-ON": 185,
+   "3/1 pf-off": 233,
+   "4/2 pf-ON": 207,
+   "4/2 pf-off": 270
+  },
+  "C 16 ldr EW+cmp": {
+   "3/1 pf-ON": 206,
+   "3/1 pf-off": 265,
+   "4/2 pf-ON": 225,
+   "4/2 pf-off": 318
+  },
+  "D 16 str EWRAM": {
+   "3/1 pf-ON": 169,
+   "3/1 pf-off": 217,
+   "4/2 pf-ON": 192,
+   "4/2 pf-off": 254
+  },
+  "E 16 ldrh EWRAM": {
+   "3/1 pf-ON": 138,
+   "3/1 pf-off": 185,
+   "4/2 pf-ON": 155,
+   "4/2 pf-off": 222
+  },
+  "F 16 ldr IWRAM": {
+   "3/1 pf-ON": 102,
+   "3/1 pf-off": 153,
+   "4/2 pf-ON": 123,
+   "4/2 pf-off": 190
+  },
+  "G Banjo x8": {
+   "3/1 pf-ON": 653,
+   "3/1 pf-off": 893,
+   "4/2 pf-ON": 704,
+   "4/2 pf-off": 1092
+  },
+  "H 16 ldr EW+3 nop": {
+   "3/1 pf-ON": 242,
+   "3/1 pf-off": 329,
+   "4/2 pf-ON": 267,
+   "4/2 pf-off": 414
+  },
+  "I Banjo x8 IWRAM": {
+   "3/1 pf-ON": 555,
+   "3/1 pf-off": 558,
+   "4/2 pf-ON": 573,
+   "4/2 pf-off": 576
+  }
+ }
+}
