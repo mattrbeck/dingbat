@@ -214,7 +214,7 @@ free. The web has no locks.
 |---|---|
 | StoreKit 2: products, buy, refresh from `currentEntitlements` (a refund revokes), Restore (`AppStore.sync`); the answer cached in `supporter.unlocked` so the unlock shows at launch | `Supporter` |
 | The extras, locked in place and falling back to the free choice (the pick is kept): every theme but Night, the separate light-mode theme, alternate and holiday app icons, the Custom GB palette, hq4x / xBR, Save webhook, DS support | `Settings.effectiveTheme` / `effectiveFilter` / `effectivePaletteMode` / `dsOn`, `GameSession` (webhook), `AppIconManager.allowed` |
-| The sheet: crowned bat, eight cards, price picker, buy; the thank-you view; opened from the Settings banner and from each locked row on its own card | `SupporterView`, `Supporter.open(_:)` |
+| The sheet: crowned bat, six cards, price picker, buy; the thank-you view; opened from the Settings banner and from each locked row on its own card | `SupporterView`, `Supporter.open(_:)` |
 | The crown on the link cable's transfer scene: your bat if you support, your friend's if the hello says they do (capabilities bit 1; every client reads only bit 0 for sync checks) | `NetLink.peerCrown`, `LinkCableView`; web `netSetFriendCrown` |
 | App icons: 17 alternates (classic + holiday windows, holidays off by default) | `AppIcons.swift`, `tools/logo_flap/alt_icons.py`, `crown.py` |
 

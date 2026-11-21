@@ -75,7 +75,7 @@ Direction is Joystick.
 - Theme previews in the gallery are the app in miniature with a d-pad and A/B.
 - App icons: the Supporter icon is the Night Flyer with the crown (light and dark); a standout
   supporter icon was tried and dropped.
-- The sheet names no counts ("Every theme", not "12 themes").
+- The sheet names no counts ("Themes", not "12 themes").
 
 ## The web
 

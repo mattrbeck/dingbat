@@ -317,17 +317,14 @@ private struct Perk {
     let perk: Supporter.Perk
     let title: String
     let desc: String
-    var soon = false
 
     static let all: [Perk] = [
-        Perk(perk: .themes, title: "Every theme", desc: "Amber, Pure Black, Light, DMG, Kiwi and more."),
+        Perk(perk: .themes, title: "Themes", desc: "Amber, Pure Black, Light, DMG, Kiwi and more."),
         Perk(perk: .icons, title: "App icons", desc: "Classic bats, plus holiday ones that can switch by themselves."),
         Perk(perk: .crown, title: "A crown for your bat", desc: "Your friend sees it over the link cable."),
         Perk(perk: .palette, title: "Your own Game Boy colors", desc: "Pick all four shades of a custom palette."),
         Perk(perk: .filters, title: "Smooth filters", desc: "hq4x and xBR round off the pixel steps."),
         Perk(perk: .advanced, title: "Advanced features", desc: "DS support and the save webhook."),
-        Perk(perk: .early, title: "Early access", desc: "Try new builds a week before they ship."),
-        Perk(perk: .clips, title: "Clip studio", desc: "Export GIFs, and sharper, longer clips.", soon: true),
     ]
 }
 
@@ -337,17 +334,7 @@ private struct PerkCard: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            ZStack(alignment: .topTrailing) {
-                art.frame(maxWidth: .infinity, maxHeight: .infinity)
-                if perk.soon {
-                    Text("Soon")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundColor(palette.textDim)
-                        .padding(.horizontal, 8).padding(.vertical, 3)
-                        .background(Capsule().fill(palette.surface3))
-                        .padding(10)
-                }
-            }
+            art.frame(maxWidth: .infinity, maxHeight: .infinity)
             .frame(height: 200)
             .background(palette.surface2Lo)
             VStack(alignment: .leading, spacing: 3) {
@@ -370,9 +357,7 @@ private struct PerkCard: View {
         case .icons: IconsArt()
         case .palette: PaletteArt()
         case .filters: FiltersArt()
-        case .early: EarlyArt()
         case .advanced: AdvancedArt()
-        case .clips: ClipsArt()
         case .crown: CrownArt()
         }
     }
@@ -461,35 +446,6 @@ private struct FiltersArt: View {
     }
 }
 
-private struct EarlyArt: View {
-    @Environment(\.palette) private var palette
-    var body: some View {
-        ZStack(alignment: .top) {
-            RoundedRectangle(cornerRadius: 18, style: .continuous).fill(palette.bg.opacity(0.6))
-                .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).stroke(palette.border, lineWidth: 1))
-                .frame(width: 268, height: 76)
-            HStack(spacing: 12) {
-                Image("IconPreview-night-flyer").interpolation(.none).resizable().frame(width: 50, height: 50)
-                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("dingbat beta").font(.system(size: 15, weight: .semibold))
-                    Text("Next update, a week early").font(.system(size: 12)).foregroundColor(palette.textDim)
-                }
-                Spacer(minLength: 0)
-                Text("Get").font(.system(size: 13, weight: .bold)).foregroundColor(palette.accentInk)
-                    .padding(.horizontal, 14).padding(.vertical, 6)
-                    .background(Capsule().fill(palette.accent))
-            }
-            .padding(.horizontal, 14)
-            .frame(width: 296, height: 80)
-            .background(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(palette.bg))
-            .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).stroke(palette.border2, lineWidth: 1))
-            .padding(.top, 16)
-        }
-        .frame(height: 110)
-    }
-}
-
 private struct AdvancedArt: View {
     @Environment(\.palette) private var palette
     var body: some View {
@@ -514,46 +470,6 @@ private struct AdvancedArt: View {
         .background(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(palette.surface2))
         .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).stroke(palette.border, lineWidth: 1))
         .accessibilityHidden(true)
-    }
-}
-
-/// The clip as it would land in Messages: a GIF of the game, looping.
-private struct ClipsArt: View {
-    @Environment(\.palette) private var palette
-    var body: some View {
-        VStack(spacing: 12) {
-            ZStack {
-                Color(hex: 0xE6DEFC)
-                FlappingBat().frame(width: 156, height: 84)
-            }
-            .frame(width: 192, height: 120)
-            .overlay(alignment: .topLeading) { tag("GIF", bold: true).padding(8) }
-            .overlay(alignment: .bottomTrailing) { tag("0:06").padding(8) }
-            .overlay(alignment: .topTrailing) {
-                Image(systemName: "square.and.arrow.up").font(.system(size: 11, weight: .semibold)).foregroundColor(.white)
-                    .frame(width: 26, height: 26).background(Circle().fill(Color(hex: 0x0E0A16).opacity(0.78))).padding(8)
-            }
-            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .shadow(color: .black.opacity(0.35), radius: 10, y: 8)
-            HStack(spacing: 6) {
-                chip("GIF export")
-                chip("Sharper clips")
-                chip("Longer clips")
-            }
-        }
-    }
-
-    private func tag(_ t: String, bold: Bool = false) -> some View {
-        Text(t).font(.system(size: 11, weight: bold ? .heavy : .semibold)).foregroundColor(.white)
-            .padding(.horizontal, 7).padding(.vertical, 3)
-            .background(RoundedRectangle(cornerRadius: 6).fill(Color(hex: 0x0E0A16).opacity(0.78)))
-    }
-
-    private func chip(_ t: String) -> some View {
-        Text(t).font(.system(size: 12, weight: .semibold))
-            .foregroundColor(palette.text)
-            .padding(.horizontal, 10).padding(.vertical, 5)
-            .background(Capsule().fill(palette.surface3))
     }
 }
 

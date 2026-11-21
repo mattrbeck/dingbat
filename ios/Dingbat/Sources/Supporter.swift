@@ -28,7 +28,7 @@ final class Supporter: ObservableObject {
     nonisolated static var storedUnlocked: Bool { UserDefaults.standard.bool(forKey: cacheKey) }
 
     /// The sheet's cards, in order; a locked row opens the sheet on its own.
-    enum Perk: Int, CaseIterable { case themes, icons, crown, palette, filters, advanced, early, clips }
+    enum Perk: Int, CaseIterable { case themes, icons, crown, palette, filters, advanced }
 
     @Published private(set) var unlocked: Bool
     @Published private(set) var since: Date?
