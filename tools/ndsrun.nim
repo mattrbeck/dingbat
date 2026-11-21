@@ -609,8 +609,10 @@ when isMainModule:
       let names = ["serialize", "xor", "compress", "thumb_grab", "thumb_zlib",
                    "key_zlib", "evict", "PUSH TOTAL", "pops"]
       let pushes = rewindprof_n[7]
-      echo "rewind: ", pushes, " pushes, ", formatFloat(rw.mem_used().float / 1048576.0, ffDecimal, 2), " MB",
-           " (thumbs ", formatFloat(rw.mem_breakdown().thumbs.float / 1048576.0, ffDecimal, 2), ")"
+      let (d, l, t, k) = rw.mem_breakdown()
+      proc mb(b: int): string = formatFloat(b.float / 1048576.0, ffDecimal, 2)
+      echo "rewind: ", pushes, " pushes, ", rw.len, " held, ", mb(rw.mem_used()), " MB",
+           " (deltas ", mb(d), " latest ", mb(l), " thumbs ", mb(t), " keys ", mb(k), ")"
       for i, nm in names:
         if rewindprof_n[i] == 0: continue
         echo "  ", nm.alignLeft(11), " calls=", align($rewindprof_n[i], 6),
