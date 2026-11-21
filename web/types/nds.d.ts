@@ -114,6 +114,7 @@ interface NdsCoreModule {
   _nds_rewind_scrub_thumb_w?: () => number;
   _nds_rewind_scrub_thumb_h?: () => number;
   _nds_rewind_scrub_thumbs_ptr?: () => number;
+  _nds_rewind_scrub_release?: () => void;
   _nds_rewind_scrub_seconds_ago?: (sample: number) => number;
   _nds_rewind_scrub_state_size?: (sample: number) => number;
   _nds_rewind_scrub_save_differs?: (sample: number) => number;

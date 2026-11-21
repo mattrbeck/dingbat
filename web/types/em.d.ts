@@ -84,6 +84,7 @@ interface EmscriptenModule {
   _clip_scrub_thumb_w?(): number;
   _clip_scrub_thumb_h?(): number;
   _clip_scrub_thumbs_ptr?(): number;
+  _clip_scrub_release?(): void;
   _clip_scrub_frames_ago?(sample: number): number;
   _clip_begin?(startAgo: number, endAgo: number): number;
   _clip_tick?(): number;
@@ -108,6 +109,7 @@ interface EmscriptenModule {
   _wasm_rewind_scrub_thumb_w?(): number;
   _wasm_rewind_scrub_thumb_h?(): number;
   _wasm_rewind_scrub_thumbs_ptr?(): number;
+  _wasm_rewind_scrub_release?(): void;
   _wasm_rewind_scrub_seconds_ago?(sample: number): number;
   _wasm_rewind_scrub_state_size?(sample: number): number;
   _wasm_rewind_scrub_save_differs?(sample: number): number;

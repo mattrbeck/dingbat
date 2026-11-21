@@ -3150,7 +3150,7 @@ document.getElementById("net-close").addEventListener("click", netDismissModal);
 document.getElementById("net-mismatch-yes")?.addEventListener("click", () => rbMismatchAnswer(true));
 document.getElementById("net-mismatch-no")?.addEventListener("click", () => rbMismatchAnswer(false));
 netModal.addEventListener("click", (e) => {
-  if (e.target === netModal) netDismissModal();
+  if (backdropPress(e, netModal)) netDismissModal();
 });
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape" && netModalOpen()) netDismissModal();

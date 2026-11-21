@@ -679,8 +679,9 @@ proc clip_reset() =
   if clipReplaying: slowmoStretch = clipHeldSlowmo
   clipReplaying = false
 
-# The cap is the states' alone: the pictures (a minute of them at most,
-# under 1 MB) are not to cut the window short.
+# The cap is the states' alone: the pictures are not to cut the window
+# short. A minute of them at most: under 1 MB as games pack, 4.7 MB if
+# none packed at all.
 proc clip_anchor_size(a: ClipAnchor): int = a.packed.len
 
 proc clip_capture_thumb(): tuple[pixels: seq[byte], w, h: int] =
@@ -794,6 +795,10 @@ proc clip_scrub_thumb_w(): cint {.exportc.} = cint(clipStripW)
 proc clip_scrub_thumb_h(): cint {.exportc.} = cint(clipStripH)
 proc clip_scrub_thumbs_ptr(): pointer {.exportc.} =
   if clipStripThumbs.len > 0: addr clipStripThumbs[0] else: nil
+
+proc clip_scrub_release() {.exportc.} =
+  ## Drops the pictures once JS has copied them; the samples stay good.
+  clipStripThumbs = @[]
 
 proc clip_scrub_frames_ago(sample: cint): cint {.exportc.} =
   ## How far back `sample` sits, in frames (0 = the live moment).
@@ -1194,6 +1199,10 @@ proc wasm_rewind_scrub_thumb_w(): cint {.exportc.} = cint(scrubThumbW)
 proc wasm_rewind_scrub_thumb_h(): cint {.exportc.} = cint(scrubThumbH)
 proc wasm_rewind_scrub_thumbs_ptr(): pointer {.exportc.} =
   if scrubThumbs.len > 0: addr scrubThumbs[0] else: nil
+
+proc wasm_rewind_scrub_release() {.exportc.} =
+  ## Drops the pictures once JS has copied them; the samples stay good.
+  scrubThumbs = @[]
 
 proc wasm_rewind_scrub_seconds_ago(sample: cint): cint {.exportc.} =
   ## Age in tenths of a second, counted in snapshots back from the newest

@@ -1638,6 +1638,10 @@ proc dingbat_rewind_scrub_thumbs(): pointer {.exportc, cdecl.} =
   ## Packed BGR555 thumbnails, w*h*2 bytes each, in sample order.
   if scrubThumbs.len > 0: addr scrubThumbs[0] else: nil
 
+proc dingbat_rewind_scrub_release() {.exportc, cdecl.} =
+  ## Drops the pictures once the app has its images; the samples stay good.
+  scrubThumbs = @[]
+
 proc dingbat_rewind_scrub_seconds_ago(sample: cint): cint {.exportc, cdecl.} =
   ## Age in tenths of a second.
   if sample < 0 or sample >= scrubIds.len or rewindHistory == nil: return 0
@@ -1772,8 +1776,9 @@ proc clip_reset() =
   # cores): the session replay has nothing to replay from until one comes.
   segOk = false
 
-# The cap is the states' alone: the pictures (a minute of them at most,
-# under 1 MB) are not to cut the window short.
+# The cap is the states' alone: the pictures are not to cut the window
+# short. A minute of them at most: under 1 MB as games pack, 4.7 MB if
+# none packed at all.
 proc clip_anchor_size(a: ClipAnchor): int = a.packed.len
 
 proc clip_note_frame() =
@@ -1861,6 +1866,9 @@ proc dingbat_clip_scrub_thumb_w(): cint {.exportc, cdecl.} = cint(clipStripW)
 proc dingbat_clip_scrub_thumb_h(): cint {.exportc, cdecl.} = cint(clipStripH)
 proc dingbat_clip_scrub_thumbs(): pointer {.exportc, cdecl.} =
   if clipStripThumbs.len > 0: addr clipStripThumbs[0] else: nil
+
+proc dingbat_clip_scrub_release() {.exportc, cdecl.} =
+  clipStripThumbs = @[]
 
 proc dingbat_clip_scrub_frames_ago(sample: cint): cint {.exportc, cdecl.} =
   if sample < 0 or sample >= clipStripAgo.len: return 0

@@ -342,6 +342,8 @@ int dingbat_rewind_scrub_generate(int max_samples);
 int dingbat_rewind_scrub_thumb_w(void);
 int dingbat_rewind_scrub_thumb_h(void);
 const void *dingbat_rewind_scrub_thumbs(void); /* BGR555, w*h*2 per sample */
+/* Frees the pictures once they are copied; the samples stay good. */
+void dingbat_rewind_scrub_release(void);
 int dingbat_rewind_scrub_seconds_ago(int sample); /* tenths */
 int dingbat_rewind_scrub_save_differs(int sample);
 /* Sample's full .state image into the dingbat_state_data() buffer; its
@@ -366,6 +368,7 @@ int dingbat_clip_scrub_generate(int max_samples);   /* newest first */
 int dingbat_clip_scrub_thumb_w(void);
 int dingbat_clip_scrub_thumb_h(void);
 const void *dingbat_clip_scrub_thumbs(void);          /* BGR555 */
+void dingbat_clip_scrub_release(void);                /* as the rewind's */
 int dingbat_clip_scrub_frames_ago(int sample);
 /* Arm a replay of [start_ago, end_ago) frames before now: frames it runs,
  * or 0. Step it with dingbat_clip_tick (frames left, -1 = done and the live

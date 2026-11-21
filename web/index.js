@@ -440,7 +440,7 @@ document.getElementById("update-not-now").addEventListener("click", closeUpdateM
 document.getElementById("update-modal-close").addEventListener("click", closeUpdateModal);
 
 updateModal.addEventListener("click", (e) => {
-  if (e.target === updateModal) closeUpdateModal();
+  if (backdropPress(e, updateModal)) closeUpdateModal();
 });
 
 // Force update: the live worker re-downloads every asset under a nonce
@@ -678,6 +678,15 @@ document.getElementById("log-copy").addEventListener("click", async () => {
     showToast("Couldn't access the clipboard");
   }
 });
+
+// --- Modal backdrop ---
+// A click goes to the nearest common ancestor of its press and its release,
+// so a drag begun inside a modal's box and let go outside it "clicks" the
+// overlay. Only a press that began on the overlay is the backdrop's.
+let pressTarget = null;
+document.addEventListener("pointerdown", (e) => { pressTarget = e.target; }, true);
+const backdropPress = (e, overlay) =>
+  e.target === overlay && (pressTarget === null || pressTarget === overlay);
 
 // --- Modal focus management ---
 
@@ -1646,7 +1655,7 @@ channelsIndicator.addEventListener("click", () => {
 renderChannels();
 
 settingsModal.addEventListener("click", (e) => {
-  if (e.target === settingsModal) closeSettingsModal();
+  if (backdropPress(e, settingsModal)) closeSettingsModal();
 });
 
 // BIOS / bootrom files update FS and IndexedDB on pick; the next core
@@ -1699,7 +1708,7 @@ document.getElementById("manage-saves").addEventListener("click", openSavesModal
 document.getElementById("saves-close").addEventListener("click", closeSavesModal);
 
 savesModal.addEventListener("click", (e) => {
-  if (e.target === savesModal) closeSavesModal();
+  if (backdropPress(e, savesModal)) closeSavesModal();
 });
 
 // --- Cheats modal ---
@@ -1873,7 +1882,7 @@ const closeCheatsModal = () => {
 document.getElementById("open-cheats").addEventListener("click", openCheatsModal);
 document.getElementById("cheats-close").addEventListener("click", closeCheatsModal);
 cheatsModal.addEventListener("click", (e) => {
-  if (e.target === cheatsModal) closeCheatsModal();
+  if (backdropPress(e, cheatsModal)) closeCheatsModal();
 });
 
 document.getElementById("cheat-add").addEventListener("click", () => {
@@ -6176,7 +6185,7 @@ const buildSyncModal = ({ title, hint, onDismiss }) => {
   document.addEventListener("keydown", onKey, true);
   if (onDismiss) {
     closeBtn.addEventListener("click", onDismiss);
-    overlay.addEventListener("click", (e) => { if (e.target === overlay) onDismiss(); });
+    overlay.addEventListener("click", (e) => { if (backdropPress(e, overlay)) onDismiss(); });
   } else {
     closeBtn.hidden = true;
   }
@@ -7684,7 +7693,7 @@ document.getElementById("rom-clash-replace")?.addEventListener("click", () => se
 document.getElementById("rom-clash-both")?.addEventListener("click", () => settleRomClash("both"));
 document.getElementById("rom-clash-cancel")?.addEventListener("click", () => settleRomClash(null));
 romClashModal?.addEventListener("click", (e) => {
-  if (e.target === romClashModal) settleRomClash(null);
+  if (backdropPress(e, romClashModal)) settleRomClash(null);
 });
 
 // Where a file the player is adding goes: { name, replace }, or null when
@@ -10661,7 +10670,7 @@ const closeStatesModal = () => {
 document.getElementById("open-states").addEventListener("click", openStatesModal);
 document.getElementById("states-close").addEventListener("click", closeStatesModal);
 statesModal.addEventListener("click", (e) => {
-  if (e.target === statesModal) closeStatesModal();
+  if (backdropPress(e, statesModal)) closeStatesModal();
 });
 
 statesSaveBtn.addEventListener("click", async () => {
@@ -10890,7 +10899,7 @@ momentsFromSaveBtn.addEventListener("click", () => {
 });
 document.getElementById("moments-close").addEventListener("click", closeMomentsModal);
 momentsModal.addEventListener("click", (e) => {
-  if (e.target === momentsModal) closeMomentsModal();
+  if (backdropPress(e, momentsModal)) closeMomentsModal();
 });
 
 // --- Report a Bug modal ---
@@ -10913,11 +10922,16 @@ const scrubApi = () => {
     const c = ndsCore;
     if (!c || !c._nds_rewind_scrub_generate || ndsCoreGame === null) return null;
     return {
-      generate: (n) => c._nds_rewind_scrub_generate(n),
+      // Both screens whole, 197 KB a picture: half the samples.
+      generate: (n) => c._nds_rewind_scrub_generate(Math.min(n, 48)),
       thumbW: () => c._nds_rewind_scrub_thumb_w(),
       thumbH: () => c._nds_rewind_scrub_thumb_h(),
-      thumbs: (len) => c.HEAPU8.slice(c._nds_rewind_scrub_thumbs_ptr(),
-                                      c._nds_rewind_scrub_thumbs_ptr() + len),
+      thumbs: (len) => {
+        const copy = c.HEAPU8.slice(c._nds_rewind_scrub_thumbs_ptr(),
+                                    c._nds_rewind_scrub_thumbs_ptr() + len);
+        c._nds_rewind_scrub_release?.();
+        return copy;
+      },
       tenthsAgo: (sample) => c._nds_rewind_scrub_seconds_ago(sample),
       stateBytes: (sample) => {
         const sz = c._nds_rewind_scrub_state_size(sample);
@@ -10940,8 +10954,12 @@ const scrubApi = () => {
     generate: (n) => Module._wasm_rewind_scrub_generate(n),
     thumbW: () => Module._wasm_rewind_scrub_thumb_w(),
     thumbH: () => Module._wasm_rewind_scrub_thumb_h(),
-    thumbs: (len) => new Uint8Array(Module.memory.buffer,
-                                    Module._wasm_rewind_scrub_thumbs_ptr(), len).slice(),
+    thumbs: (len) => {
+      const copy = new Uint8Array(Module.memory.buffer,
+                                  Module._wasm_rewind_scrub_thumbs_ptr(), len).slice();
+      Module._wasm_rewind_scrub_release?.();
+      return copy;
+    },
     tenthsAgo: (sample) => Module._wasm_rewind_scrub_seconds_ago(sample),
     stateBytes: (sample) => {
       const sz = Module._wasm_rewind_scrub_state_size(sample);
@@ -11111,7 +11129,7 @@ document.getElementById("report-bug").addEventListener("click", openReportModal)
 document.getElementById("report-close").addEventListener("click", closeReportModal);
 document.getElementById("report-cancel").addEventListener("click", closeReportModal);
 reportModal.addEventListener("click", (e) => {
-  if (e.target === reportModal) closeReportModal();
+  if (backdropPress(e, reportModal)) closeReportModal();
 });
 
 const base64FromBytes = (bytes) => {
@@ -11174,6 +11192,9 @@ const STRIP_GAP = 2;             // px between frames in the strip
 const STRIP_BAKE_MAX = 16000;
 const stripDpr = () => Math.min(window.devicePixelRatio || 1, 3);
 const STRIP_TAP_SLOP = 5;        // px of travel below which a drag counts as a tap
+// Half of .film-marker's pointer target (styles.css): a press this near a
+// marker is on it.
+const STRIP_MARKER_REACH = 22;
 
 // Frame width follows how many frames fit the strip's own width (a 208px
 // phone strip and a 400px desktop one show the same history), clamped.
@@ -11198,7 +11219,7 @@ const STRIP_FRAME_W_FLOOR = 16;
  * @param {number} [opts.frameWMax]      px ceiling on a frame's width
  * @param {number} [opts.fitFrames]      frame pitches that MUST fit the width
  * @param {number} [opts.frameWFloor]    px floor the fit rule may shrink to
- * @param {boolean} [opts.direct]       a drag carries the marker (else scrolls the film)
+ * @param {boolean} [opts.direct]       a drag on a marker carries it (else every drag scrolls the film)
  */
 const createFilmStrip = ({
   canvas, wrap, markers, paint, onChange,
@@ -11208,9 +11229,10 @@ const createFilmStrip = ({
   fitFrames = 0,
   frameWFloor = STRIP_FRAME_W_FLOOR,
   // false: the marker stays put and a drag scrolls the film under it (the
-  // rewind playhead). true: a drag carries the grabbed marker with the
+  // rewind playhead). true: a drag begun on a marker carries it with the
   // finger over a still film, which scrolls only at the strip's ends (the
-  // clip's two bounds, which are pulled in and out, not scrubbed).
+  // clip's two bounds, which are pulled in and out, not scrubbed); one begun
+  // anywhere else scrolls the film, the markers riding on their frames.
   direct = false,
 }) => {
   let samples = 0;
@@ -11224,8 +11246,9 @@ const createFilmStrip = ({
   let pitch = 0;          // px per sample along the strip
   let values = markers.map(() => 0);
   let active = 0;         // which marker the view follows / a drag moves
-  // Direct mode: the film offset a drag holds still (and keeps once the
-  // finger lifts, so nothing jumps); null lets placement() frame the view.
+  // Direct mode: the film offset a marker drag holds still and a film drag
+  // moves (kept once the finger lifts, so nothing jumps); null lets
+  // placement() frame the view.
   let held = null;
 
   // Layout sizes, not getBoundingClientRect's: the modal opens with a
@@ -11347,9 +11370,12 @@ const createFilmStrip = ({
     const cssW = Math.max(1, Math.round(layoutW(canvas)));
     const cssH = Math.max(1, Math.round(layoutH(canvas)));
     const dpr = stripDpr();
-    if (canvas.width !== cssW * dpr || canvas.height !== cssH * dpr) {
-      canvas.width = cssW * dpr;
-      canvas.height = cssH * dpr;
+    // Whole numbers: at a fractional ratio the product never matches, and
+    // setting the size again clears and reallocates on every draw.
+    const bw = Math.round(cssW * dpr), bh = Math.round(cssH * dpr);
+    if (canvas.width !== bw || canvas.height !== bh) {
+      canvas.width = bw;
+      canvas.height = bh;
     }
     const ctx = canvas.getContext("2d");
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -11416,8 +11442,10 @@ const createFilmStrip = ({
   let edgeTimer = 0;      // direct: the rAF scrolling the film at an end
   let edgeLast = 0;
   let heading = 0;        // direct: -1 / +1, the way the finger last moved
+  let panning = false;    // direct: the press missed the markers, so it has the film
+  let previewed = null;   // [canvas, sample] of the last preview painted
 
-  // A press grabs the nearest marker on screen.
+  // The marker nearest a press.
   const grabNearest = (clientX) => {
     if (markers.length === 1) return 0;
     const rect = filmFrame();
@@ -11441,6 +11469,7 @@ const createFilmStrip = ({
     at(i) { return Math.round(values[i]); },
     /** Adopt a captured strip. `data` is a copy: the wasm heap can move. */
     load(data, w, h, n) {
+      previewed = null;
       thumbs = data;
       thumbW = w;
       thumbH = h;
@@ -11451,6 +11480,7 @@ const createFilmStrip = ({
     },
     /** Drop everything on close (tens of thumbnails). */
     release() {
+      previewed = null;
       thumbs = null;
       stripColor = null;
       stripDim = null;
@@ -11475,6 +11505,10 @@ const createFilmStrip = ({
       if (!thumbs || samples <= 0) return;
       const stride = thumbW * thumbH * 2;
       const s = Math.min(Math.max(sample, 0), samples - 1);
+      // A drag within one frame refreshes at every move: a whole frame to
+      // convert each time.
+      if (previewed && previewed[0] === el && previewed[1] === s) return;
+      previewed = [el, s];
       paintPreview(el,
         bgr555ToImageData(thumbs, s * stride, thumbW, thumbH, pictureShades(), pictureLut()));
     },
@@ -11523,13 +11557,18 @@ const createFilmStrip = ({
         travel = 0;
         heading = 0;
         lastX = e.clientX;
-        active = grabNearest(e.clientX);
+        const near = grabNearest(e.clientX);
+        panning = false;
         if (direct) {
           const rect = filmFrame();
           const { off, xs } = placement(rect.width);
           held = off;
-          grabDX = e.clientX - rect.left - xs[active];
+          grabDX = e.clientX - rect.left - xs[near];
+          // A marker off the strip has no target to press.
+          panning = Math.abs(grabDX) > STRIP_MARKER_REACH ||
+                    xs[near] < -1 || xs[near] > rect.width + 1;
         }
+        if (!panning) active = near;
         wrap.setPointerCapture(e.pointerId);
         draw();  // the view follows the newly active marker
       });
@@ -11539,6 +11578,12 @@ const createFilmStrip = ({
         lastX = e.clientX;
         travel += Math.abs(dx);
         if (dx !== 0) heading = Math.sign(dx);
+        if (panning) {
+          const { lo, hi } = offRange(filmFrame().width);
+          held = Math.min(hi, Math.max(lo, held + dx));
+          draw();
+          return;
+        }
         if (direct) {
           followFinger();
           if (!edgeTimer) {
@@ -11558,10 +11603,13 @@ const createFilmStrip = ({
         if (travel <= STRIP_TAP_SLOP && e.type === "pointerup") {
           // A tap moves the nearest marker to the frame under the finger,
           // resolved through the draw's own placement.
+          if (panning) active = grabNearest(e.clientX);
           const rect = filmFrame();
           const { off } = placement(rect.width);
           const filmX = e.clientX - rect.left - off;
           setValue(active, samples - 1 - Math.floor(filmX / pitch), true, boundsFor(active));
+        } else if (panning) {
+          return;  // the film moved; no marker did
         } else {
           setValue(active, values[active], true, boundsFor(active)); // settle
         }
@@ -11770,7 +11818,7 @@ rwCommitBtn.addEventListener("click", () => {
 document.getElementById("rewind-scrub-close").addEventListener("click", closeRewindScrubber);
 document.getElementById("rewind-scrub-cancel").addEventListener("click", closeRewindScrubber);
 rewindModal.addEventListener("click", (e) => {
-  if (e.target === rewindModal) closeRewindScrubber();
+  if (backdropPress(e, rewindModal)) closeRewindScrubber();
 });
 document.getElementById("open-rewind-scrub").addEventListener("click", openRewindScrubber);
 
@@ -14042,7 +14090,7 @@ document.getElementById("rom-warn-load").addEventListener("click", () => settleR
 document.getElementById("rom-warn-cancel").addEventListener("click", closeRomWarnModal);
 document.getElementById("rom-warn-close").addEventListener("click", closeRomWarnModal);
 romWarnModal.addEventListener("click", (e) => {
-  if (e.target === romWarnModal) closeRomWarnModal();
+  if (backdropPress(e, romWarnModal)) closeRomWarnModal();
 });
 
 // A dingbat export's map of path -> kind, from its info.json; null for any
@@ -15138,6 +15186,7 @@ const openClipScrubber = () => {
     const h = Module._clip_scrub_thumb_h();
     const ptr = Module._clip_scrub_thumbs_ptr();
     clipStrip.load(new Uint8Array(Module.memory.buffer, ptr, n * w * h * 2).slice(), w, h, n);
+    Module._clip_scrub_release?.();
     for (let i = 0; i < n; i++) clipAgo.push(Module._clip_scrub_frames_ago(i));
   }
   // Open on the quick action's range.
@@ -15182,7 +15231,7 @@ clipSaveBtn.addEventListener("click", () => {
 document.getElementById("clip-scrub-close").addEventListener("click", closeClipScrubber);
 document.getElementById("clip-scrub-cancel").addEventListener("click", closeClipScrubber);
 clipModal.addEventListener("click", (e) => {
-  if (e.target === clipModal) closeClipScrubber();
+  if (backdropPress(e, clipModal)) closeClipScrubber();
 });
 clipLastItem.addEventListener("click", openClipScrubber);
 
@@ -16915,7 +16964,7 @@ thumbsStopBtn.addEventListener("click", cancelThumbnailRun);
 // offer, and during a run stops it at once (closeThumbsModal); the pictures
 // already added are kept.
 thumbsModal.addEventListener("click", (e) => {
-  if (e.target === thumbsModal) closeThumbsModal();
+  if (backdropPress(e, thumbsModal)) closeThumbsModal();
 });
 
 // --- Screenshot ---
@@ -18022,7 +18071,7 @@ captureToggle.addEventListener("click", () => {
 
 document.getElementById("prints-close").addEventListener("click", closePrintsModal);
 printsModal.addEventListener("click", (e) => {
-  if (e.target === printsModal) closePrintsModal();
+  if (backdropPress(e, printsModal)) closePrintsModal();
 });
 
 // --- GB Camera webcam source ---

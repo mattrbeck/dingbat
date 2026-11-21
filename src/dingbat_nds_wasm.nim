@@ -509,6 +509,11 @@ proc nds_rewind_scrub_thumbs_ptr(): pointer {.exportc.} =
   ## Packed little-endian BGR555, w*h*2 bytes each, in sample order.
   if scrubThumbs.len > 0: addr scrubThumbs[0] else: nil
 
+proc nds_rewind_scrub_release() {.exportc.} =
+  ## Drops the pictures (197 KB each) once JS has copied them; the samples
+  ## stay good for the other scrub calls.
+  scrubThumbs = @[]
+
 proc scrub_snap(sample: cint): string =
   if sample < 0 or sample >= scrubIds.len or rewindRing == nil: ""
   else: rewindRing.snapshot_by_id(scrubIds[sample])

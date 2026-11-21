@@ -367,9 +367,9 @@ test("no selector repeats `body.<mode>` inside itself", () => {
 });
 
 // --- Dragging a bound on the film ------------------------------------------
-// The two bounds are pulled in and out: a press grabs the nearer one and it
-// goes where the finger goes, over a film that holds still. (The rewind
-// strip is the other kind: its playhead stays put and the film scrolls.)
+// The two bounds are pulled in and out: a press on one grabs it and it goes
+// where the finger goes, over a film that holds still. A press anywhere else
+// has the film, as on the rewind strip (whose playhead stays put).
 
 const film = (app) => {
   const wrap = app.document.getElementById("clip-strip-wrap");
@@ -433,6 +433,89 @@ test("the view stays where the drag left it, until a knob moves a bound", async 
   slider.value = "9";                       // sample 30: off this view
   await slider.dispatch("input");
   assert.equal(offscreen(app, "start"), false, "the knob brings the view to its bound");
+});
+
+// --- Dragging the film itself ----------------------------------------------
+// A 277px strip opens at the "now" end with the in point at 2px and the out
+// point at 277px; the film (40 frames) can only go right from there.
+
+test("a drag that starts on the film, off both bounds, scrolls it under them", async () => {
+  const app = await open(40, 277);
+  const wrap = film(app);
+  const pitch = app.runIn("clipStrip.pitch");
+  const x0 = leftOf(app, "start");
+  const mid = 140;
+  await wrap.dispatch("pointerdown", { clientX: mid, pointerId: 1 });
+  await wrap.dispatch("pointermove", { clientX: mid + 3 * pitch, pointerId: 1 });
+  assert.deepEqual(markers(app), [10, 0], "no bound moves off its frame");
+  assert.equal(leftOf(app, "start"), x0 + 3 * pitch, "the bounds ride the film");
+  assert.equal(offscreen(app, "end"), true, "...the out point off the strip's end");
+  await wrap.dispatch("pointerup", { clientX: mid + 3 * pitch, pointerId: 1 });
+  assert.deepEqual(markers(app), [10, 0]);
+  assert.equal(leftOf(app, "start"), x0 + 3 * pitch, "the film stays where it was left");
+  assert.equal(following(app), "start", "scrolling claims neither bound");
+
+  // The next drag goes on from there, and stops at the film's end.
+  await wrap.dispatch("pointerdown", { clientX: mid, pointerId: 1 });
+  await wrap.dispatch("pointermove", { clientX: mid - 1 * pitch, pointerId: 1 });
+  assert.equal(leftOf(app, "start"), x0 + 2 * pitch);
+  await wrap.dispatch("pointermove", { clientX: mid - 30 * pitch, pointerId: 1 });
+  await wrap.dispatch("pointerup", { clientX: mid - 30 * pitch, pointerId: 1 });
+  assert.equal(leftOf(app, "start"), x0, "the film cannot be pulled past 'now'");
+  assert.deepEqual(markers(app), [10, 0]);
+});
+
+test("a bound's reach is its 44px target: inside carries it, outside scrolls", async () => {
+  const app = await open(40, 277);
+  const wrap = film(app);
+  const pitch = app.runIn("clipStrip.pitch");
+  const x0 = leftOf(app, "start");
+  await wrap.dispatch("pointerdown", { clientX: x0 + 20, pointerId: 1 });
+  await wrap.dispatch("pointermove", { clientX: x0 + 20 + 2 * pitch, pointerId: 1 });
+  await wrap.dispatch("pointerup", { clientX: x0 + 20 + 2 * pitch, pointerId: 1 });
+  assert.deepEqual(markers(app), [8, 0], "20px off the line is still the bound");
+
+  const app2 = await open(40, 277);
+  const wrap2 = film(app2);
+  await wrap2.dispatch("pointerdown", { clientX: x0 + 24, pointerId: 1 });
+  await wrap2.dispatch("pointermove", { clientX: x0 + 24 + 2 * pitch, pointerId: 1 });
+  await wrap2.dispatch("pointerup", { clientX: x0 + 24 + 2 * pitch, pointerId: 1 });
+  assert.deepEqual(markers(app2), [10, 0], "24px off it is the film");
+  assert.equal(leftOf(app2, "start"), x0 + 2 * pitch);
+});
+
+test("a tap on the film still brings the nearer bound to that frame", async () => {
+  const app = await open(40, 277);
+  const wrap = film(app);
+  const pitch = app.runIn("clipStrip.pitch");
+  // Two and a half frames in from the in point: the third frame of the clip.
+  const x = leftOf(app, "start") + 2.5 * pitch;
+  await wrap.dispatch("pointerdown", { clientX: x, pointerId: 1 });
+  await wrap.dispatch("pointerup", { clientX: x, pointerId: 1 });
+  assert.deepEqual(markers(app), [8, 0]);
+  assert.equal(following(app), "start");
+
+  const x1 = leftOf(app, "end") - 1.5 * pitch;
+  await wrap.dispatch("pointerdown", { clientX: x1, pointerId: 1 });
+  await wrap.dispatch("pointerup", { clientX: x1, pointerId: 1 });
+  assert.deepEqual(markers(app), [8, 1], "the out point is the nearer one there");
+  assert.equal(following(app), "end");
+});
+
+// --- The backdrop ----------------------------------------------------------
+// The click that ends a drag lands on the common ancestor of where it began
+// and ended: the overlay, for a knob dragged out of the box.
+
+test("a drag out of the box, let go on the backdrop, leaves the picker open", async () => {
+  const app = await open();
+  const modal = app.document.getElementById("clip-modal");
+  await app.dispatchDoc("pointerdown", { target: app.document.getElementById("clip-range") });
+  await modal.dispatch("click", { target: modal });
+  assert.equal(modal.classList.contains("open"), true, "the press began on a knob");
+
+  await app.dispatchDoc("pointerdown", { target: modal });
+  await modal.dispatch("click", { target: modal });
+  assert.equal(modal.classList.contains("open"), false, "a press on the backdrop closes it");
 });
 
 // --- Recording --------------------------------------------------------------

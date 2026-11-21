@@ -84,13 +84,13 @@ const
   REWIND_CAP_BYTES* = 64 * 1024 * 1024
   REWIND_INTERVAL*  = 10  # ~6 snapshots/second
   REWIND_KEY_EVERY* = 60
+    ## Snapshots between keyframes: ~10 s of history at the default interval,
+    ## so a seek costs at most ~60 inflations.
   REWIND_PICTURE_SHARE* = 4
     ## The thumbnails' own allowance, cap div this, on top of the cap: whole
     ## frames come to 5-27% of a cap's worth of history (19% more than the
     ## 120-wide ones they replaced, at worst), which is not theirs to
     ## shorten. Past the allowance they count against the cap.
-    ## Snapshots between keyframes: ~10 s of history at the default interval,
-    ## so a seek costs at most ~60 inflations.
 
 proc thumbs_per_second(interval: int): int =
   ## One thumbnail per second of history (pushes are `interval` frames apart

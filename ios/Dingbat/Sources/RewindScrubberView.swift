@@ -119,8 +119,11 @@ struct RewindScrubberView: View {
         stage = 0
         sel = 0
         guard GameSession.shared.game != nil, settings.rewind else { return }
-        let n = Int(dingbat_rewind_scrub_generate(Int32(Self.maxSamples)))
+        // A DS picture is both screens whole: half the samples.
+        let want = GameSession.shared.isNDS ? Self.maxSamples / 2 : Self.maxSamples
+        let n = Int(dingbat_rewind_scrub_generate(Int32(want)))
         guard n > 0, let base = dingbat_rewind_scrub_thumbs() else { return }
+        defer { dingbat_rewind_scrub_release() }
         let w = Int(dingbat_rewind_scrub_thumb_w()), h = Int(dingbat_rewind_scrub_thumb_h())
         let shades = GameSession.pictureShades(), lut = dingbat_color_lut()
         var imgs: [UIImage] = []

@@ -232,10 +232,12 @@ struct FaultView: View {
     private func load() {
         history = Int(dingbat_fault_history())
         rewindSamples = settings.rewind ? Int(dingbat_rewind_scrub_generate(2)) : 0
+        dingbat_rewind_scrub_release()
         thumb = nil
         // The anchor going back lands on: the newest at least backSeconds old.
         let n = Int(dingbat_clip_scrub_generate(60))
         guard n > 0, let base = dingbat_clip_scrub_thumbs() else { return }
+        defer { dingbat_clip_scrub_release() }
         let w = Int(dingbat_clip_scrub_thumb_w()), h = Int(dingbat_clip_scrub_thumb_h())
         let want = Self.backSeconds * 60
         var pick = n - 1

@@ -40,6 +40,8 @@ proc dingbat_set_rewind(on, cap: cint) {.importc, cdecl.}
 proc dingbat_rewind_pop(): cint {.importc, cdecl.}
 proc dingbat_rewind_scrub_generate(n: cint): cint {.importc, cdecl.}
 proc dingbat_rewind_scrub_thumb_w(): cint {.importc, cdecl.}
+proc dingbat_rewind_scrub_thumbs(): pointer {.importc, cdecl.}
+proc dingbat_rewind_scrub_release() {.importc, cdecl.}
 proc dingbat_rewind_scrub_seconds_ago(s: cint): cint {.importc, cdecl.}
 proc dingbat_rewind_commit(s: cint): cint {.importc, cdecl.}
 proc dingbat_rewind_scrub_thumb_h(): cint {.importc, cdecl.}
@@ -136,6 +138,9 @@ block:
   let n = dingbat_rewind_scrub_generate(16)
   check n > 1 and dingbat_rewind_scrub_thumb_w() == 240 and dingbat_rewind_scrub_thumb_h() == 160,
         "scrub strip of whole 240x160 frames"
+  check dingbat_rewind_scrub_thumbs() != nil, "the strip's pictures"
+  dingbat_rewind_scrub_release()
+  check dingbat_rewind_scrub_thumbs() == nil, "released once copied (the samples stay good below)"
   let oldest = n - 1
   check dingbat_rewind_scrub_seconds_ago(oldest) > 0, "oldest sample is in the past"
   check dingbat_rewind_commit(oldest) == 1, "commit to the oldest moment"

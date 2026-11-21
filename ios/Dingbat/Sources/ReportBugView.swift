@@ -270,6 +270,7 @@ struct ReportBugView: View {
                 let shades = GameSession.pictureShades(), lut = dingbat_color_lut()
                 thumbs = (0..<n).compactMap { GameSession.bgr555Image(base + $0 * w * h * 2, width: w, height: h, shades: shades, lut: lut) }
                 samples = thumbs.count
+                dingbat_rewind_scrub_release()
             }
         }
         slider = Double(samples)
