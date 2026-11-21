@@ -629,7 +629,7 @@ type ClipAnchor = object
 
 var clipCapBytes = CLIP_CAP_BYTES
 var clipAnchors: seq[ClipAnchor] = @[]
-var clipAnchorBytes = 0                # packed + thumb across clipAnchors
+var clipAnchorBytes = 0                # packed states across clipAnchors
 var clipInputs: seq[uint16] = @[]      # button mask per canonical frame
 var clipInputsStart = 0                # absolute frame of clipInputs[0]
 var clipFrameIndex = 0                 # canonical frames since core init
@@ -679,7 +679,9 @@ proc clip_reset() =
   if clipReplaying: slowmoStretch = clipHeldSlowmo
   clipReplaying = false
 
-proc clip_anchor_size(a: ClipAnchor): int = a.packed.len + a.thumb.len
+# The cap is the states' alone: the pictures (a minute of them at most,
+# under 1 MB) are not to cut the window short.
+proc clip_anchor_size(a: ClipAnchor): int = a.packed.len
 
 proc clip_capture_thumb(): tuple[pixels: seq[byte], w, h: int] =
   ## The anchor's own frame, whole: the sheet's preview shows it enlarged.

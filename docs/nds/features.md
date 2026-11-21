@@ -37,7 +37,9 @@ speed up scrubber seeks, which take under half a second without). A pop applies 
 snapshot with `load_own_payload` (below). The ring starts empty at every
 boot, reboot and state load. Cap: 64 MB (the iOS app too); 32 MB in iOS
 Safari, twice the GB/GBA ring's 16 MB there (Safari demotes the wasm JIT
-under memory pressure; the newest DS snapshot alone is 6-7 MB).
+under memory pressure; the newest DS snapshot alone is 6-7 MB). The
+scrubber's pictures have a quarter of the cap again to themselves
+(`REWIND_PICTURE_SHARE`), so they shorten no history.
 `index.js`: `ndsApplyRewind` follows the Rewind switch, `ndsRewindStep`
 pops ~30 snapshots a second while rewind is held (5x speed backwards, as
 GB/GBA), `body.nds-rewind` shows the button.

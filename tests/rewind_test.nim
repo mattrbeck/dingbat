@@ -192,7 +192,7 @@ block:
     let p = c.payload()
     rw.push(p, proc(): RewindThumb = thumb_of(c))
     seen.add (rw.newest_id, p)
-    if rw.mem_used > CAP and bad_cap < 0: bad_cap = i
+    if rw.mem_used > CAP + CAP div REWIND_PICTURE_SHARE and bad_cap < 0: bad_cap = i
     if i mod 25 == 0 and i > 0:
       # Every ID ever handed out either still reconstructs its ORIGINAL bytes
       # or is gone. Never someone else's bytes.
@@ -223,7 +223,7 @@ block:
   check "evicted IDs were seen (the test exercised eviction)", evicted > 0
   check "no orphaned or outliving thumbnails", bad_thumb < 0
   check "thumbnail IDs are newest-first", bad_order < 0
-  check "mem_used never exceeds the cap", bad_cap < 0
+  check "mem_used never exceeds the cap and the thumbnails' allowance", bad_cap < 0
   verify_all(rw, "after eviction", every = 7)
 
   # The oldest thumbnail must not predate the oldest snapshot, and the
@@ -249,7 +249,10 @@ block:
   check "thumbnails are stored compressed",
         b.thumbs < rw.thumb_count * THUMB_W * THUMB_H * 2
   check "keyframes are accounted", b.keyframes > 0
-  check "the cap includes them", rw.mem_used <= MEM_CAP
+  check "the cap holds the states and keyframes",
+        b.deltas + b.latest + b.keyframes <= MEM_CAP
+  check "the thumbnails' allowance bounds the whole ring",
+        rw.mem_used <= MEM_CAP + MEM_CAP div REWIND_PICTURE_SHARE
   # Without the side tables in the accounting the ring would hold strictly
   # more history at the same cap — that difference is the bug this guards.
   let loose = new_rewind(cap = MEM_CAP, interval = 10, key_every = 0)
@@ -257,10 +260,39 @@ block:
   for _ in 0 ..< 800:
     c2.advance()
     loose.push(c2.payload())
-  check "side tables shorten the ring (they are inside the budget)",
+  check "keyframes shorten the ring (they are inside the budget)",
         loose.len > rw.len
   echo &"    depth with thumbs+keyframes {rw.len}, without {loose.len} " &
        &"(thumbs {b.thumbs}, keyframes {b.keyframes} bytes)"
+
+  # Thumbnails inside their allowance cost no history; past it they do, and
+  # the ring still never passes cap + allowance.
+  proc noise_thumb(seed, bytes: int): RewindThumb =
+    result = RewindThumb(w: bytes div 2, h: 1, pixels: newSeq[byte](bytes))
+    var x = uint32(seed) * 2654435761'u32 + 1
+    for i in 0 ..< bytes:
+      x = x * 1664525'u32 + 1013904223'u32
+      result.pixels[i] = byte(x shr 24)
+  proc depth(thumb_bytes: int): tuple[len, used: int] =
+    let r = new_rewind(cap = MEM_CAP, interval = 60, key_every = 0)
+    var core = new_core(0xC0FF_EE01'u32)
+    var worst = 0
+    for i in 0 ..< 800:
+      core.advance()
+      if thumb_bytes > 0:
+        r.push(core.payload(), proc(): RewindThumb = noise_thumb(i, thumb_bytes))
+      else:
+        r.push(core.payload())
+      worst = max(worst, r.mem_used)
+    (r.len, worst)
+  let bare_depth = depth(0)
+  let small = depth(64)
+  let big = depth(64 * 1024)
+  check "the ring turned over", bare_depth.len < 800
+  check "thumbnails inside the allowance cost no history", small.len == bare_depth.len
+  check "thumbnails past it shorten the ring", big.len < bare_depth.len
+  check "and stay inside cap + allowance",
+        big.used <= MEM_CAP + MEM_CAP div REWIND_PICTURE_SHARE
 
 # --- 6. Thumbnail cadence ------------------------------------------------
 

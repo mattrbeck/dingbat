@@ -1772,7 +1772,9 @@ proc clip_reset() =
   # cores): the session replay has nothing to replay from until one comes.
   segOk = false
 
-proc clip_anchor_size(a: ClipAnchor): int = a.packed.len + a.thumb.len
+# The cap is the states' alone: the pictures (a minute of them at most,
+# under 1 MB) are not to cut the window short.
+proc clip_anchor_size(a: ClipAnchor): int = a.packed.len
 
 proc clip_note_frame() =
   ## Once per canonical frame before it steps: an anchor every second, the

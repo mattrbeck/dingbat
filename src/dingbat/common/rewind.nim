@@ -8,9 +8,11 @@
 # eviction; IDs are never reused, so a stale ID resolves to "gone"), thumbnails
 # captured at push time (rendering the strip from history would walk every
 # delta), and keyframes every `key_every` pushes bounding a seek to that many
-# unpacks. Thumbnails and keyframes count toward mem_used and are evicted
-# with the deltas they belong to: the cap is a real budget (16 MB on iOS,
-# where memory pressure gets the wasm JIT demoted).
+# unpacks. Thumbnails and keyframes are evicted with the deltas they belong
+# to. The cap bounds the states and keyframes; the thumbnails have a quarter
+# of it again to themselves (REWIND_PICTURE_SHARE), so a ring is a real
+# budget of cap * 5/4 at most (16 MB caps on iOS Safari, where memory
+# pressure gets the wasm JIT demoted).
 
 import std/deques
 import fastpack
@@ -70,7 +72,7 @@ type
     total: int                  # compressed bytes retained across deltas
     thumb_total: int
     key_total: int
-    cap: int                    # eviction threshold for mem_used
+    cap: int                    # eviction threshold for charged()
     interval: int               # emulated frames between snapshots
     frame_count: int
     thumb_every: int            # pushes between thumbnails (0 = never)
@@ -82,6 +84,11 @@ const
   REWIND_CAP_BYTES* = 64 * 1024 * 1024
   REWIND_INTERVAL*  = 10  # ~6 snapshots/second
   REWIND_KEY_EVERY* = 60
+  REWIND_PICTURE_SHARE* = 4
+    ## The thumbnails' own allowance, cap div this, on top of the cap: whole
+    ## frames come to 5-27% of a cap's worth of history (19% more than the
+    ## 120-wide ones they replaced, at worst), which is not theirs to
+    ## shorten. Past the allowance they count against the cap.
     ## Snapshots between keyframes: ~10 s of history at the default interval,
     ## so a seek costs at most ~60 inflations.
 
@@ -100,6 +107,11 @@ proc len*(rw: Rewind): int =
 
 proc mem_used*(rw: Rewind): int =
   rw.total + rw.latest.len + rw.thumb_total + rw.key_total
+
+proc charged(rw: Rewind): int =
+  ## What the cap is held against: thumbnails only past their allowance.
+  rw.total + rw.latest.len + rw.key_total +
+    max(0, rw.thumb_total - rw.cap div REWIND_PICTURE_SHARE)
 
 proc mem_breakdown*(rw: Rewind): tuple[deltas, latest, thumbs, keyframes: int] =
   ## What mem_used is made of (debug overlays, tests).
@@ -322,7 +334,7 @@ proc push*(rw: Rewind; payload: string; thumb: proc(): RewindThumb = nil) =
     else:
       dec rw.key_due
   rp(6):
-    while rw.mem_used > rw.cap and rw.deltas.len > 0:
+    while rw.charged > rw.cap and rw.deltas.len > 0:
       rw.evict_oldest()
 
 proc push_next*(rw: Rewind): bool =
