@@ -277,7 +277,11 @@ iPhone Duo ones and AddPicturesSkipsBlank, which needs its knobs)
   DB_ROMS=tests/roms/gbedge.gb
   DB_PICTURES="1 picture added — 1 blank, skipped until played"), and a
   blank game leaving Add pictures until it is played
-  (BlankGameLeavesAddPictures).
+  (BlankGameLeavesAddPictures);
+- Save a Clip's strip (ClipStripDrags, 2026-11-21): a drag on the film
+  scrolls it and moves neither marker, a tap moves the nearer one, a drag
+  on a marker carries it, and one held at the strip's end scrolls on to
+  the oldest picture.
 
 The interruptions and route change are the notifications AVAudioSession
 posts, sent by the `-debug-events` hook, so iOS's own delivery of them, the

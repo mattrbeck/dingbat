@@ -157,10 +157,7 @@ struct ReportBugView: View {
             ZStack {
                 RoundedRectangle(cornerRadius: 6).fill(palette.stage)
                 if let img = back == 0 ? live : (back - 1 < thumbs.count ? thumbs[back - 1] : nil) {
-                    Image(uiImage: img)
-                        .resizable()
-                        .interpolation(.none)
-                        .aspectRatio(contentMode: .fit)
+                    PicturePreview(image: img)
                 }
             }
             .aspectRatio(3 / 2, contentMode: .fit)

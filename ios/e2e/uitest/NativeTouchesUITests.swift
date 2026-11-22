@@ -215,6 +215,67 @@ final class NativeTouchesUITests: XCTestCase {
         XCTAssertTrue(close.waitForNonExistence(timeout: 3), "a tap 3 pt outside the drawn Close closes")
     }
 
+    // MARK: Save a Clip
+
+    /// The clip strip (ClipViews.swift ClipStrip, as the web's): a drag on
+    /// the film scrolls it and moves neither marker, a tap moves the nearer
+    /// one to the frame under it, a drag on a marker carries it, and a marker
+    /// held at the strip's end scrolls the film on to the oldest picture.
+    func testClipStripDrags() {
+        let app = launch()
+        sleep(25)   // a picture a second for the strip
+        post("sheet-clip")
+        let range = app.otherElements["Clip range"].firstMatch
+        XCTAssertTrue(range.waitForExistence(timeout: 10), "Save a Clip, with a history")
+        let when = app.staticTexts.matching(
+            NSPredicate(format: "label BEGINSWITH 'the last ' OR label CONTAINS ' ago · '")).firstMatch
+        // The strip stands over the "ago ... now" row, as wide as the slider.
+        let w = range.frame.width
+        let mid = app.staticTexts["now"].firstMatch.frame.minY - 10 - 24
+        let origin = app.coordinate(withNormalizedOffset: .zero)
+        func at(_ x: CGFloat) -> XCUICoordinate {
+            origin.withOffset(CGVector(dx: range.frame.minX + x, dy: mid))
+        }
+        func drag(_ a: CGFloat, _ b: CGFloat, hold: Double = 0) {
+            at(a).press(forDuration: 0.1, thenDragTo: at(b), withVelocity: .slow, thenHoldForDuration: hold)
+        }
+        let opened = when.label
+        print("NATIVE: clip opens on '\(opened)', strip \(w) pt")
+        XCTAssertTrue(opened.hasPrefix("the last "), "it opens on the last ten seconds")
+        snap(app, "clip-open")
+
+        drag(w / 2, w / 2 + 90)
+        XCTAssertEqual(when.label, opened, "a drag on the film moves neither marker")
+        snap(app, "clip-film-dragged")
+
+        at(w / 2).tap()
+        print("NATIVE: clip after a tap '\(when.label)'")
+        XCTAssertNotEqual(when.label, opened, "a tap moves the nearer marker")
+
+        app.buttons["Last 10s"].firstMatch.tap()
+        XCTAssertEqual(when.label, opened, "the preset puts it back")
+        // The out marker stands at the strip's right end.
+        drag(w - 4, w - 94)
+        print("NATIVE: clip out marker carried '\(when.label)'")
+        XCTAssertTrue(when.label.contains(" ago · "), "a drag on the out marker carries it")
+        snap(app, "clip-out-carried")
+
+        app.buttons["Everything"].firstMatch.tap()
+        let everything = when.label
+        app.buttons["Last 10s"].firstMatch.tap()
+        // A tap puts the in marker on the left edge of the frame under it;
+        // from there it is pulled to the strip's left end and held.
+        var fw = min(40, max(26, w / 11)).rounded()
+        fw = max(16, min(fw, (w / 11).rounded(.down) - 2))
+        let pitch = fw + 2
+        at(60).tap()
+        let xIn = w - ((w - 60) / pitch).rounded(.up) * pitch
+        drag(xIn + 4, 8, hold: 3)
+        print("NATIVE: clip in marker held at the end '\(when.label)', everything '\(everything)'")
+        XCTAssertEqual(when.label, everything, "held at the end, the film scrolls to the oldest picture")
+        snap(app, "clip-in-at-oldest")
+    }
+
     /// A toast raised while a sheet is up shows once, on the sheet: the root
     /// stack underneath stays hidden while the sheet draws its own.
     func testToastOverASheetShowsOnce() {

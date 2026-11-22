@@ -68,7 +68,7 @@ struct FaultView: View {
                 ZStack {
                     RoundedRectangle(cornerRadius: 6).fill(palette.stage)
                     if let thumb {
-                        Image(uiImage: thumb).resizable().interpolation(.none).aspectRatio(contentMode: .fit)
+                        PicturePreview(image: thumb)
                     }
                 }
                 .frame(width: 80, height: 72)

@@ -102,10 +102,7 @@ struct RewindScrubberView: View {
         ZStack {
             RoundedRectangle(cornerRadius: 6).fill(palette.stage)
             if sel < thumbs.count {
-                Image(uiImage: thumbs[sel])
-                    .resizable()
-                    .interpolation(.none)
-                    .aspectRatio(contentMode: .fit)
+                PicturePreview(image: thumbs[sel])
             }
         }
         .aspectRatio(thumbs.first.map { $0.size.width / max(1, $0.size.height) } ?? 1.5, contentMode: .fit)

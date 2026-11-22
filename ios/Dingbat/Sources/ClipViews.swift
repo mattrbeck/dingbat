@@ -13,6 +13,8 @@ struct ClipRangeView: View {
     @State private var outS = 0
     /// Which marker the preview shows (the last one moved).
     @State private var active = 0
+    /// Where a finger left the strip's film; nil lets the strip frame the clip.
+    @State private var held: CGFloat?
 
     static let maxSamples = 96
     static let quickSeconds = 10
@@ -35,15 +37,15 @@ struct ClipRangeView: View {
                     .font(.system(size: 11)).foregroundColor(palette.textFaint)
                     .frame(maxWidth: .infinity)
                 if thumbs.count > 1 {
-                    ClipStrip(thumbs: thumbs, inS: $inS, outS: $outS, active: $active)
-                        .frame(height: 40)
+                    ClipStrip(thumbs: thumbs, inS: $inS, outS: $outS, active: $active, held: $held)
+                        .frame(height: 48)
                     HStack {
                         Text(fmtDuration(tenths: tenths(ago.last ?? 0)) + " ago")
                         Spacer()
                         Text("now")
                     }
                     .font(.system(size: 11)).foregroundColor(palette.textFaint)
-                    DualRange(count: thumbs.count, inS: $inS, outS: $outS, active: $active)
+                    DualRange(count: thumbs.count, inS: $inS, outS: $outS, active: $active, held: $held)
                         .frame(height: 30)
                 }
             }
@@ -97,7 +99,7 @@ struct ClipRangeView: View {
         return ZStack {
             RoundedRectangle(cornerRadius: 6).fill(palette.stage)
             if s < thumbs.count {
-                Image(uiImage: thumbs[s]).resizable().interpolation(.none).aspectRatio(contentMode: .fit)
+                PicturePreview(image: thumbs[s])
             }
         }
         .aspectRatio(thumbs.first.map { $0.size.width / max(1, $0.size.height) } ?? 1.5, contentMode: .fit)
@@ -122,6 +124,7 @@ struct ClipRangeView: View {
         outS = 0
         inS = max(1, nearest(seconds))
         active = 0
+        held = nil
     }
 
     private func load() {
@@ -143,6 +146,7 @@ struct ClipRangeView: View {
         outS = 0
         inS = max(1, min(n - 1, nearest(Self.quickSeconds)))
         active = 0
+        held = nil
     }
 
     private func save() {
@@ -158,54 +162,244 @@ struct ClipRangeView: View {
     }
 }
 
-/// The strip: every second's picture, oldest left, the kept span bright and
-/// bracketed, the rest dimmed. A tap moves the nearer marker.
+/// The strip (web createFilmStrip, direct): every second's picture on a film
+/// at a fixed pitch, oldest left, the kept span in colour between two
+/// markers. A drag begun on a marker carries it, the film scrolling while the
+/// finger is held at either end; one begun anywhere else scrolls the film. A
+/// tap moves the nearer marker to the frame under the finger.
 private struct ClipStrip: View {
-    let thumbs: [UIImage]
+    let thumbs: [UIImage]   // newest first, as the core gives them
     @Binding var inS: Int
     @Binding var outS: Int
     @Binding var active: Int
+    /// The film's offset once a finger has placed it; nil frames the clip.
+    @Binding var held: CGFloat?
     @Environment(\.palette) private var palette
+    @State private var grab: Grab?
+    /// The carried marker mid-drag, in samples; it settles on a whole one.
+    @State private var live: CGFloat?
+    @GestureState private var pressed = false
+
+    private static let gap: CGFloat = 2
+    /// Half a marker's touch target (web STRIP_MARKER_REACH).
+    private static let reach: CGFloat = 22
+    private static let tapSlop: CGFloat = 5
+    /// How near either end a carried marker scrolls the film, and how fast
+    /// at the very edge (points a second).
+    private static let edge: CGFloat = 28
+    private static let edgeSpeed: CGFloat = 700
+
+    private struct Grab {
+        var marker: Int
+        /// The press missed both markers: it has the film.
+        var panning: Bool
+        /// Finger x less the grabbed marker's, at the press.
+        var dx: CGFloat
+        var off: CGFloat
+        var lastX: CGFloat
+        var travel: CGFloat = 0
+        var heading: CGFloat = 0
+    }
+
+    private struct Film {
+        let n: Int
+        let width: CGFloat
+        let fw: CGFloat
+        let fh: CGFloat
+        var pitch: CGFloat { fw + ClipStrip.gap }
+
+        /// A film shorter than the strip sits centred.
+        func clamp(_ off: CGFloat) -> CGFloat {
+            let slack = width - CGFloat(n) * pitch
+            return slack >= 0 ? slack / 2 : min(0, max(slack, off))
+        }
+        /// Film x of a marker: the in point on its frame's left edge, the
+        /// out point on its frame's right.
+        func x(_ v: CGFloat, _ marker: Int) -> CGFloat { (CGFloat(marker == 0 ? n - 1 : n) - v) * pitch }
+        func value(_ x: CGFloat, _ marker: Int) -> CGFloat { CGFloat(marker == 0 ? n - 1 : n) - x / pitch }
+    }
+
+    /// Eleven frames across (the quick range and both its brackets must land
+    /// inside the width), no taller than the strip.
+    private func film(_ size: CGSize) -> Film {
+        let aspect = thumbs.first.map { $0.size.width / max(1, $0.size.height) } ?? 1.5
+        let maxH = max(8, size.height - 6)
+        var fw = min(40, max(26, size.width / 11)).rounded()
+        fw = max(16, min(fw, (size.width / CGFloat(ClipRangeView.quickSeconds + 1)).rounded(.down) - Self.gap))
+        var fh = (fw / aspect).rounded()
+        if fh > maxH {
+            fh = maxH
+            fw = max(12, (fh * aspect).rounded())
+        }
+        return Film(n: thumbs.count, width: size.width, fw: fw, fh: fh)
+    }
+
+    private var values: [CGFloat] {
+        var v = [CGFloat(inS), CGFloat(outS)]
+        if let live, let g = grab, !g.panning { v[g.marker] = live }
+        return v
+    }
+
+    /// The clip rides the middle when it fits, else the marker last moved,
+    /// until the film runs out.
+    private func offset(_ f: Film, _ v: [CGFloat]) -> CGFloat {
+        if let held { return f.clamp(held) }
+        let a = f.x(v[0], 0), b = f.x(v[1], 1)
+        return f.clamp(f.width / 2 - (b - a <= f.width ? (a + b) / 2 : (active == 0 ? a : b)))
+    }
 
     var body: some View {
         GeometryReader { geo in
-            let n = thumbs.count
-            let pitch = geo.size.width / CGFloat(n)
-            let h = geo.size.height
-            let dIn = n - 1 - inS, dOut = n - 1 - outS   // display indexes, oldest = 0
-            ZStack(alignment: .topLeading) {
-                Canvas { ctx, size in
-                    for i in 0..<n {
-                        let r = CGRect(x: CGFloat(i) * pitch, y: 0, width: pitch + 0.5, height: h)
-                        var c = ctx
-                        if i < dIn || i > dOut { c.opacity = 0.35 }
-                        c.draw(c.resolve(Image(uiImage: thumbs[n - 1 - i]).interpolation(.high)), in: r)
-                    }
-                }
-                marker(x: CGFloat(dIn) * pitch, h: h)
-                marker(x: CGFloat(dOut + 1) * pitch - 3, h: h)
+            let f = film(geo.size)
+            let v = values
+            let off = offset(f, v)
+            Canvas { ctx, size in
+                draw(ctx, size, f, off, off + f.x(v[0], 0), off + f.x(v[1], 1))
             }
             .contentShape(Rectangle())
-            .gesture(DragGesture(minimumDistance: 0).onChanged { v in
-                let d = min(n - 1, max(0, Int(v.location.x / pitch)))
-                let s = n - 1 - d
-                // The nearer marker moves; neither crosses the other.
-                if v.translation == .zero {
-                    active = abs(d - dIn) <= abs(d - dOut) ? 0 : 1
-                }
-                if active == 0 { inS = max(outS + 1, s) } else { outS = min(inS - 1, s) }
-            })
+            .gesture(DragGesture(minimumDistance: 0)
+                .updating($pressed) { _, on, _ in on = true }
+                .onChanged { moved($0, f) }
+                .onEnded { ended($0, f) })
+            // A drag the sheet's scrolling took never ends; it only lets go.
+            .onChange(of: pressed) { if !$0 { release() } }
+            .task(id: grab.map { !$0.panning } ?? false) { await scrollAtEnds(f) }
         }
         .clipShape(RoundedRectangle(cornerRadius: 4))
         .background(RoundedRectangle(cornerRadius: 4).fill(palette.stage))
+        .accessibilityHidden(true)
     }
 
-    private func marker(x: CGFloat, h: CGFloat) -> some View {
-        Rectangle()
-            .fill(palette.accent)
-            .frame(width: 3, height: h)
-            .shadow(color: palette.accentGlow, radius: 3)
-            .offset(x: x)
+    private func draw(_ ctx: GraphicsContext, _ size: CGSize, _ f: Film, _ off: CGFloat,
+                      _ x0: CGFloat, _ x1: CGFloat) {
+        let top = ((size.height - f.fh) / 2).rounded()
+        func frames(_ c: GraphicsContext, _ a: CGFloat, _ b: CGFloat) {
+            let first = max(0, Int(((a - off) / f.pitch).rounded(.down)))
+            let last = min(f.n - 1, Int(((b - off) / f.pitch).rounded(.down)))
+            guard first <= last else { return }
+            for i in first...last {
+                let r = CGRect(x: off + CGFloat(i) * f.pitch + Self.gap / 2, y: top, width: f.fw, height: f.fh)
+                c.draw(c.resolve(Image(uiImage: thumbs[f.n - 1 - i]).interpolation(.high)), in: r)
+            }
+        }
+        let (keptA, keptB) = (max(0, x0), min(size.width, x1))
+        if keptB > keptA {
+            var lit = ctx
+            lit.clip(to: Path(CGRect(x: keptA, y: 0, width: keptB - keptA, height: size.height)))
+            frames(lit, keptA, keptB)
+        }
+        // Outside the clip: grey and dark, never mistaken for the kept side.
+        for (a, b) in [(0, min(x0, size.width)), (max(0, x1), size.width)] where b > a {
+            let band = Path(CGRect(x: a, y: 0, width: b - a, height: size.height))
+            var dim = ctx
+            dim.clip(to: band)
+            dim.addFilter(.grayscale(1))
+            dim.opacity = 0.5
+            frames(dim, a, b)
+            ctx.fill(band, with: .color(.black.opacity(0.35)))
+        }
+        // A marker off the strip is not drawn: pinned to the edge it would
+        // claim the clip ends there.
+        for (i, x) in [x0, x1].enumerated() where x >= -1 && x <= size.width + 1 {
+            let mx = min(max(x, 2), size.width - 2)
+            var p = Path(CGRect(x: mx - 1.5, y: 0, width: 3, height: size.height))
+            // Chevrons point into the clip.
+            let d: CGFloat = i == 0 ? 1 : -1
+            for y in [0, size.height - 9] {
+                p.move(to: CGPoint(x: mx + d * 1.5, y: y))
+                p.addLine(to: CGPoint(x: mx + d * 10.5, y: y + 4.5))
+                p.addLine(to: CGPoint(x: mx + d * 1.5, y: y + 9))
+                p.closeSubpath()
+            }
+            var m = ctx
+            m.addFilter(.shadow(color: palette.accentGlow, radius: 3))
+            m.fill(p, with: .color(palette.accent))
+        }
+    }
+
+    private func nearest(_ x: CGFloat, _ xs: [CGFloat]) -> Int {
+        abs(xs[0] - x) <= abs(xs[1] - x) ? 0 : 1
+    }
+
+    private func press(_ x: CGFloat, _ f: Film) -> Grab {
+        let v = values, off = offset(f, v)
+        let xs = [off + f.x(v[0], 0), off + f.x(v[1], 1)]
+        let near = nearest(x, xs)
+        let dx = x - xs[near]
+        // A marker off the strip has no target to press.
+        let panning = abs(dx) > Self.reach || xs[near] < -1 || xs[near] > f.width + 1
+        if !panning { active = near }
+        held = off
+        return Grab(marker: near, panning: panning, dx: dx, off: off, lastX: x)
+    }
+
+    private func moved(_ e: DragGesture.Value, _ f: Film) {
+        var g = grab ?? press(e.startLocation.x, f)
+        let dx = e.location.x - g.lastX
+        g.lastX = e.location.x
+        g.travel += abs(dx)
+        if dx != 0 { g.heading = dx < 0 ? -1 : 1 }
+        if g.panning {
+            g.off = f.clamp(g.off + dx)
+            held = g.off
+        } else if dx != 0 {
+            carry(g, f)
+        }
+        grab = g
+    }
+
+    /// The grabbed marker goes where the finger is, over a film held still;
+    /// neither marker crosses the other.
+    private func carry(_ g: Grab, _ f: Film) {
+        let lo = g.marker == 0 ? CGFloat(outS + 1) : 0
+        let hi = g.marker == 0 ? CGFloat(f.n - 1) : CGFloat(inS - 1)
+        let v = max(lo, min(hi, f.value(g.lastX - g.dx - g.off, g.marker)))
+        live = v
+        let s = Int(v.rounded())
+        if g.marker == 0 {
+            if inS != s { inS = s }
+        } else if outS != s {
+            outS = s
+        }
+    }
+
+    /// While a marker is carried: a finger near either end, having moved
+    /// toward it, scrolls the film that way, faster the nearer the edge, so a
+    /// marker can be pulled past what is on screen.
+    private func scrollAtEnds(_ f: Film) async {
+        guard let g = grab, !g.panning else { return }
+        var last = CACurrentMediaTime()
+        while !Task.isCancelled {
+            try? await Task.sleep(nanoseconds: 16_000_000)
+            let now = CACurrentMediaTime()
+            let dt = min(0.05, now - last)
+            last = now
+            guard var g = grab, !g.panning else { return }
+            let x = g.lastX
+            let push: CGFloat = x < Self.edge && g.heading < 0 ? (Self.edge - x) / Self.edge
+                : x > f.width - Self.edge && g.heading > 0 ? -(x - (f.width - Self.edge)) / Self.edge : 0
+            let next = f.clamp(g.off + max(-1, min(1, push)) * Self.edgeSpeed * CGFloat(dt))
+            guard next != g.off else { continue }
+            g.off = next
+            grab = g
+            held = next
+            carry(g, f)
+        }
+    }
+
+    private func ended(_ e: DragGesture.Value, _ f: Film) {
+        defer { release() }
+        guard let g = grab, g.travel <= Self.tapSlop else { return }
+        let v = values
+        let m = g.panning ? nearest(e.location.x, [g.off + f.x(v[0], 0), g.off + f.x(v[1], 1)]) : g.marker
+        let s = f.n - 1 - Int(((e.location.x - g.off) / f.pitch).rounded(.down))
+        active = m
+        if m == 0 { inS = min(f.n - 1, max(outS + 1, s)) } else { outS = max(0, min(inS - 1, s)) }
+    }
+
+    private func release() {
+        grab = nil
+        live = nil
     }
 }
 
@@ -215,6 +409,7 @@ private struct DualRange: View {
     @Binding var inS: Int
     @Binding var outS: Int
     @Binding var active: Int
+    @Binding var held: CGFloat?
     @Environment(\.palette) private var palette
 
     var body: some View {
@@ -242,6 +437,7 @@ private struct DualRange: View {
                     active = abs(v.location.x - knob / 2 - xIn) <= abs(v.location.x - knob / 2 - xOut) ? 0 : 1
                 }
                 if active == 0 { inS = max(outS + 1, s) } else { outS = min(inS - 1, s) }
+                held = nil   // the strip goes to the marker that moved
             })
         }
         .accessibilityElement()

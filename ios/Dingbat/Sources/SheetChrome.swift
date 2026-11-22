@@ -672,6 +672,47 @@ struct SheetWarning: View {
     }
 }
 
+/// A core picture shown large (web paintPreview): enlarged a whole number of
+/// times, nearest neighbour, to at least its size on screen; smooth scaling
+/// takes it the rest of the way, so its pixels stay even at any ratio. Fits
+/// the space it is given, centred.
+struct PicturePreview: View {
+    let image: UIImage
+    @Environment(\.displayScale) private var displayScale
+
+    var body: some View {
+        GeometryReader { geo in
+            let fit = min(geo.size.width / max(1, image.size.width),
+                          geo.size.height / max(1, image.size.height))
+            Image(uiImage: Self.enlarged(image, by: min(6, max(1, Int((fit * displayScale).rounded(.up))))))
+                .resizable()
+                .interpolation(.high)
+                .frame(width: image.size.width * fit, height: image.size.height * fit)
+                .frame(width: geo.size.width, height: geo.size.height)
+        }
+        .onDisappear { Self.last = nil }
+    }
+
+    /// The last picture enlarged: a sheet redraws far more often than its
+    /// preview changes.
+    private static var last: (src: UIImage, k: Int, out: UIImage)?
+
+    private static func enlarged(_ image: UIImage, by k: Int) -> UIImage {
+        guard k > 1, let cg = image.cgImage else { return image }
+        if let l = last, l.src === image, l.k == k { return l.out }
+        let w = cg.width * k, h = cg.height * k
+        guard let ctx = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: 0,
+                                  space: CGColorSpaceCreateDeviceRGB(),
+                                  bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue) else { return image }
+        ctx.interpolationQuality = .none
+        ctx.draw(cg, in: CGRect(x: 0, y: 0, width: w, height: h))
+        guard let big = ctx.makeImage() else { return image }
+        let out = UIImage(cgImage: big)
+        last = (image, k, out)
+        return out
+    }
+}
+
 /// A modal confirm (web confirm()) as a SwiftUI alert payload.
 struct SheetAsk: Identifiable {
     let id = UUID()

@@ -21,6 +21,7 @@ import notify
 ///   com.mattrb.dingbat.debug.pictures-run       Add pictures from the library
 ///                                               head, and its run started
 ///   com.mattrb.dingbat.debug.pictures-stop      the run's Stop
+///   com.mattrb.dingbat.debug.sheet-clip         Save a Clip, over the game
 ///
 /// The interruption and route notifications are the ones AVAudioSession
 /// posts, with the userInfo it gives them, so what runs is the app's own
@@ -73,6 +74,7 @@ enum DebugEvents {
                 Task { @MainActor in await AddPictures.shared.run(includeDrive: false) }
             }),
             ("pictures-stop", { AddPictures.debugLog("stop"); AddPictures.shared.cancel() }),
+            ("sheet-clip", { AppModel.shared.openSheet(.clip) }),
         ]
         for (name, run) in handlers {
             var token: Int32 = 0
