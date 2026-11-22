@@ -235,9 +235,11 @@ TestFlight build with a sandbox account.
 
 Not gated in CI. The app's side of most of it runs in the simulator:
 `node ios/e2e/native-touches.mjs <derivedData>` (ios/e2e/uitest/
-NativeTouchesUITests.swift; 24 tests, 20 passing and 4 skipped (the three
+NativeTouchesUITests.swift; 32 tests, 28 passing and 4 skipped (the three
 iPhone Duo ones and AddPicturesSkipsBlank, which needs its knobs)
-2026-11-07). It covers:
+2026-11-22, on the iPhone 17 simulator the runner defaults to. An iPhone
+Air's fails MenuScrollsInLandscape and ToastsInPlay: its bar leads with
+the logo, and its touches land wrong held sideways). It covers:
 - an audio interruption (began, ended with and without shouldResume, the
   player's own pause winning);
 - the background and back;

@@ -215,13 +215,28 @@ private struct RowView: View {
         case let .segmented(label, options, spoken, selection):
             VStack(alignment: .leading, spacing: 9) {
                 Text(label).font(.body).foregroundColor(palette.text)
-                Picker(label, selection: selection) {
-                    ForEach(options.indices, id: \.self) { i in
-                        Text(options[i]).accessibilityLabel(spoken?[i] ?? options[i]).tag(i)
-                    }
+                let picker = Picker(label, selection: selection) {
+                    ForEach(options.indices, id: \.self) { i in Text(options[i]).tag(i) }
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
+                if let spoken {
+                    // A segmented picker drops a label put on its segments:
+                    // VoiceOver gets a button a segment, each over its own.
+                    picker.accessibilityRepresentation {
+                        HStack(spacing: 0) {
+                            ForEach(options.indices, id: \.self) { i in
+                                Button(spoken[i]) { selection.wrappedValue = i }
+                                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                                    .accessibilityAddTraits(selection.wrappedValue == i ? .isSelected : [])
+                            }
+                        }
+                        .accessibilityElement(children: .contain)
+                        .accessibilityLabel(label)
+                    }
+                } else {
+                    picker
+                }
             }
             .padding(.vertical, 6)
             .padFocus(row.id, adjust: { d in
