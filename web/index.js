@@ -379,6 +379,28 @@ var appUpdating = false;
 // which kept its game (controllerchange above): all that is left is the reload.
 var updateActivated = false;
 
+// Asks `sw` to take over once it is installed; controllerchange then reloads
+// the page. One dropped before it takes over hands the ask on: its install
+// failed (one bad asset fetch fails it whole), or a newer worker finished
+// installing first and took its place, the ask lost with it (CI: the page
+// left on "Updating…" with that newer worker waiting). With no worker left
+// in line, the clean-slate path.
+const takeOverWhenInstalled = (sw) => {
+  let took = false;
+  const step = () => {
+    if (sw.state === "installed") sw.postMessage({ type: "skipWaiting" });
+    else if (sw.state === "activating" || sw.state === "activated") took = true;
+    else if (sw.state === "redundant" && !took) {
+      sw.removeEventListener("statechange", step);
+      const next = swRegistration.installing || swRegistration.waiting;
+      if (next && next !== sw) takeOverWhenInstalled(next);
+      else fullResetReload();
+    }
+  };
+  sw.addEventListener("statechange", step);
+  step();
+};
+
 const applyUpdate = async () => {
   appUpdating = true;
   updateReloadComing = true;
@@ -396,23 +418,9 @@ const applyUpdate = async () => {
   if (swRegistration) {
     try {
       await swRegistration.update();
-      let waiting = swRegistration.waiting;
-      if (waiting) {
-        waiting.postMessage({ type: "skipWaiting" });
-        return;
-      }
-      let installing = swRegistration.installing;
-      if (installing) {
-        // controllerchange then reloads the page.
-        installing.addEventListener("statechange", () => {
-          if (installing.state === "installed") {
-            installing.postMessage({ type: "skipWaiting" });
-          } else if (installing.state === "redundant") {
-            // Install failed (one bad asset fetch fails the whole install):
-            // recover with the clean-slate path.
-            fullResetReload();
-          }
-        });
+      const next = swRegistration.waiting || swRegistration.installing;
+      if (next) {
+        takeOverWhenInstalled(next);
         return;
       }
     } catch {}

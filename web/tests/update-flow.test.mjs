@@ -103,6 +103,43 @@ test("failed install (redundant worker) falls back to the clean-slate reset", as
   assert.equal(app.state.reloads, 1); // fullResetReload, not silence
 });
 
+// CI (sw-updates, a deploy applied while a checkpoint packs): the worker asked
+// was replaced before it took over, and the page stayed on "Updating…" with
+// the newer one waiting, never asked.
+test("a waiting worker replaced by a newer one hands the ask on", async () => {
+  const app = await bootApp({ serviceWorker: { controlled: true } });
+  await settle();
+  const older = await clickUpdateWithWaiting(app);
+  const newer = app.sw.makeWorker("installing");
+  app.sw.registration.installing = newer;
+  older.state = "redundant";
+  older.dispatch("statechange");
+  assert.equal(newer.messages.length, 0, "not before it is installed");
+  app.sw.registration.installing = null;
+  app.sw.registration.waiting = newer;
+  newer.state = "installed";
+  newer.dispatch("statechange");
+  assert.equal(newer.messages[0]?.type, "skipWaiting");
+  assert.equal(app.sw.registration.unregisterCalls, 0, "no clean slate: a worker was in line");
+  app.sw.takeControl(newer);
+  await settle();
+  assert.equal(app.state.reloads, 1);
+});
+
+test("a worker that took over and is later replaced resets nothing", async () => {
+  const app = await bootApp({ serviceWorker: { controlled: true } });
+  await settle();
+  const waiting = await clickUpdateWithWaiting(app);
+  app.sw.registration.waiting = null;
+  for (const state of ["activating", "activated", "redundant"]) {
+    waiting.state = state;
+    waiting.dispatch("statechange");
+  }
+  await settle();
+  assert.equal(app.sw.registration.unregisterCalls, 0);
+  assert.equal(waiting.messages.length, 1);
+});
+
 // ServiceWorker.lean's bug_update_in_one_tab_reloads_the_other_midgame: the
 // Update click in one tab activates the new worker, which claims every tab.
 test("another tab's update does not reload this tab mid-game; it offers the reload", async () => {
