@@ -15,11 +15,10 @@
 
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { createRequire } from "node:module";
-import { serveWeb, builtWeb, sleep, WEB } from "./devices.mjs";
+import { serveWeb, startSignal, builtWeb, sleep, WEB } from "./devices.mjs";
 import { synctestRom, SYNCTEST_NAME } from "./synctest-rom.mjs";
 
 const playwright = createRequire(join(WEB, "package.json"))("playwright");
@@ -67,13 +66,8 @@ let codes = 0;
 const pair = async (game, { queryB = "" } = {}) => {
   web ??= await serveWeb();
   if (!signal) {
-    signalPort = 20000 + Math.floor(Math.random() * 20000);
-    signal = spawn(process.execPath, [join(WEB, "signaling/server.js"), String(signalPort)], { stdio: "ignore" });
-    for (let i = 0; ; i++) {
-      try { await fetch(`http://127.0.0.1:${signalPort}/`); break; } catch {}
-      if (i > 100) throw new Error("signaling server never came up");
-      await sleep(50);
-    }
+    signal = await startSignal();
+    signalPort = signal.port;
   }
   browser ??= await playwright.chromium.launch({ headless: true, args: ["--mute-audio"] });
   // One context: the two tabs share a BroadcastChannel and link through it.

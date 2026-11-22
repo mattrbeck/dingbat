@@ -85,7 +85,9 @@
 const http = require('http');
 const crypto = require('crypto');
 
-const PORT = parseInt(process.argv[2], 10) || parseInt(process.env.PORT, 10) || 8790;
+// Port 0: one the OS picks (the e2e suites); the listening line says which.
+const PORT = process.argv[2] === '0' ? 0
+  : parseInt(process.argv[2], 10) || parseInt(process.env.PORT, 10) || 8790;
 const ROOM_TTL_MS = 10 * 60 * 1000;
 const MAX_MSG_BYTES = 64 * 1024; // SDP + ICE are a few KB; anything bigger is abuse
 const MIN_CODE_LEN = 3; // user-chosen; short enough to say aloud, long enough to not collide by accident
@@ -802,5 +804,5 @@ const reaper = setInterval(() => {
 reaper.unref(); // never keep the process alive just for the sweep
 
 server.listen(PORT, () => {
-  console.log(`dingbat signaling server listening on ws://localhost:${PORT}`);
+  console.log(`dingbat signaling server listening on ws://localhost:${server.address().port}`);
 });

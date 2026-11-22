@@ -88,6 +88,27 @@ const watchWorkers = async (page) => {
   workerStates.set(page, { cdp, seen });
   return page;
 };
+// Where a boot that never finished stood. CI's Linux WebKit has left one
+// unfinished at a different load each time, and a bare timeout does not say
+// which leg it waited on: the core's download, the storage the core waits
+// for, or the registration, which register() hands over only once any update
+// already running for the scope is done.
+const bootState = (page) => page.evaluate(async () => ({
+  url: location.href, oldPage: !!window.__beforeReload, appUpdating, runtimeReady, core: coreLoad.state,
+  coreFiles: performance.getEntriesByType("resource").map((e) => new URL(e.name).pathname.split("/").pop())
+    .filter((n) => /^em\./.test(n)),
+  storage: !db ? "not open" : await Promise.race([
+    storageReady.then(() => "ready", (e) => "failed: " + e),
+    new Promise((r) => setTimeout(() => r("open, still reading"), 200))]),
+  controlled: !!navigator.serviceWorker?.controller,
+  workers: swRegistration ? ["installing", "waiting", "active"].map((k) => k + " " + swRegistration[k]?.state)
+    : "no registration",
+  log: [...document.querySelectorAll("#log-entries p")].slice(-4).map((e) => e.textContent),
+})).catch((e) => "page: " + e.message);
+const bootedOrSays = (waiting, page) => waiting.catch(async (e) => {
+  throw new Error("never booted: " + JSON.stringify(await bootState(page)), { cause: e });
+});
+
 // The page `fn` reloads, booted: told apart from this one by a mark only
 // this one carries. Waiting for the next "load" event instead took a late
 // one of the reload before (CI: "then applied" still on build B). An old
@@ -100,8 +121,12 @@ const reloadedBy = async (page, fn) => {
   const w = workerStates.get(page);
   const from = w?.seen.length;
   await page.evaluate(fn);
-  if (w && !(await reloaded(5000))) {
-    const since = w.seen.slice(from);
+  // Five seconds in as well as at the end: an old page still waiting on its
+  // new worker and a new page that cannot boot end up reading the same.
+  let early = null;
+  if (!(await reloaded(5000))) {
+    early = await bootState(page);
+    const since = w ? w.seen.slice(from) : [];
     const again = since.find((v, i) => v.status === "activated" && v.runningStatus === "starting" &&
       since.slice(0, i).some((u) => u.versionId === v.versionId && u.runningStatus === "stopped"));
     const swapping = await page.evaluate(() => !!swRegistration?.waiting).catch(() => false);
@@ -111,11 +136,7 @@ const reloadedBy = async (page, fn) => {
     }
   }
   if (await reloaded(60000)) return;
-  const state = await page.evaluate(() => ({
-    reloaded: !window.__beforeReload, appUpdating, url: location.href,
-    workers: swRegistration && ["installing", "waiting", "active"].map((k) => k + " " + swRegistration[k]?.state),
-  })).catch((e) => e.message);
-  throw new Error("no reload: " + JSON.stringify(state) +
+  throw new Error("no reload: at 5 s " + JSON.stringify(early) + ", at the end " + JSON.stringify(await bootState(page)) +
     (w ? " " + JSON.stringify(w.seen.slice(from).map((v) => `${v.versionId} ${v.status} ${v.runningStatus}`)) : ""));
 };
 
@@ -138,9 +159,9 @@ for (const engine of ENGINES) {
     };
     // Up, and its service worker registration in hand: an applyUpdate before
     // register() resolves finds none and takes the clean-slate path.
-    const booted = () => page.waitForFunction(
+    const booted = () => bootedOrSays(page.waitForFunction(
       () => typeof Module !== "undefined" && runtimeReady &&
-        (!("serviceWorker" in navigator) || !!swRegistration), null, { timeout: 60000 });
+        (!("serviceWorker" in navigator) || !!swRegistration), null, { timeout: 60000 }), page);
     // Which build the page is, and which its checkpoint worker is.
     const builds = () => page.evaluate(async () => {
       const w = getCkptWorker();
@@ -451,8 +472,8 @@ for (const engine of ENGINES) {
       await watchPolicy(ctx);
       return { ctx, page: await watchWorkers(await ctx.newPage()) };
     };
-    const booted = (page) => page.waitForFunction(
-      () => typeof Module !== "undefined" && runtimeReady && !!swRegistration, null, { timeout: 60000 });
+    const booted = (page) => bootedOrSays(page.waitForFunction(
+      () => typeof Module !== "undefined" && runtimeReady && !!swRegistration, null, { timeout: 60000 }), page);
     const installedFresh = async (page) => {
       await booted(page);
       await page.waitForFunction(() => !!navigator.serviceWorker.controller &&

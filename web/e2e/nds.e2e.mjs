@@ -396,7 +396,21 @@ const ctlRects = (page) => page.evaluate(async () => {
     return [id, Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height)];
   });
 });
-const boxes = (page) => page.evaluate(() => {
+// Controls not laid out at all (CI, once, mid-test, cause not found) say what
+// decides that: the page's state classes, the pointer, a controller.
+const staysPut = async (page, ref, what, errors) => {
+  const now = await ctlRects(page);
+  const gone = now[0][3] ? "" : " " + JSON.stringify(await page.evaluate(() => ({
+    body: document.body.className, coarse: matchMedia("(pointer: coarse)").matches,
+    size: [innerWidth, innerHeight], pads: [...(navigator.getGamepads?.() || [])].filter(Boolean).map((p) => p.id),
+    paused, game: currentRomName, url: location.href,
+  }))) + " " + JSON.stringify(errors);
+  assert.deepEqual(now, ref, `${what}: the controls stay put${gone}`);
+};
+// Read once nothing is moving: the bar's fold is 0.2 s from the frame that
+// starts it, and a busy machine draws that frame late.
+const boxes = (page) => page.evaluate(async () => {
+  await Promise.all(document.getAnimations().map((a) => a.finished.catch(() => {})));
   const g = (el) => { const r = el.getBoundingClientRect();
                       return { l: r.left, t: r.top, r: r.right, b: r.bottom, w: r.width, h: r.height }; };
   return { canvas: g(canvasEl), stage: g(stageEl), bar: g(document.getElementById("topbar")),
@@ -430,13 +444,12 @@ for (const vp of [{ width: 375, height: 812 }, { width: 390, height: 844 }]) {
       });
       assert.deepEqual(small, { w: 28, h: 28, label: "select", side: "start", l: 28 });
       await page.evaluate(() => setNdsDisplay({ barHide: true }));
-      await sleep(400);
       const hidden = await boxes(page);
       assert.ok(hidden.bar.b <= 0.5, "the bar went off the top: " + hidden.bar.b);
       assert.ok(hidden.canvas.h > shown.canvas.h + 20, `the screens grew: ${shown.canvas.h} -> ${hidden.canvas.h}`);
       for (const m of MODES) {
         await setMode(page, m);
-        assert.deepEqual(await ctlRects(page), ref, `${tag(m)}: the controls stay put`);
+        await staysPut(page, ref, tag(m), errors);
         const b = await boxes(page);
         assert.ok(b.canvas.b <= b.controls.t + 0.5 && b.canvas.t >= b.stage.t - 0.5 &&
                   b.canvas.l >= -0.5 && b.canvas.r <= vp.width + 0.5, `${tag(m)}: the screens fit the stage`);
@@ -449,7 +462,6 @@ for (const vp of [{ width: 375, height: 812 }, { width: 390, height: 844 }]) {
         const at = await page.evaluate((sc) => NdsUtil.clientPoint(sc, 128, 96,
           canvasEl.getBoundingClientRect(), ndsLay), screen);
         await page.touchscreen.tap(at[0], at[1]);
-        await sleep(350);
       };
       await tapAt("bottom");
       assert.ok((await boxes(page)).bar.b <= 0.5, "the touch screen leaves the bar alone");
@@ -472,7 +484,7 @@ test("phone sideways: every arrangement stays clear of the control rails", { ski
   const ref = await ctlRects(page);
   for (const m of MODES) {
     await setMode(page, m);
-    assert.deepEqual(await ctlRects(page), ref, `${tag(m)}: the controls stay put`);
+    await staysPut(page, ref, tag(m), errors);
     const b = await boxes(page);
     assert.ok(b.canvas.l >= b.dpad.r - 0.5 && b.canvas.r <= b.ab.l + 0.5,
               `${tag(m)}: between the d-pad and the face buttons`);
@@ -936,10 +948,13 @@ test("rewind on a DS game: held, it steps back through moments that happened", {
   const box = await page.locator("#rewind").boundingBox();
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
   await page.mouse.down();
-  await sleep(500);
+  // Held until it has gone back: a step is a drawn frame's, and how many a
+  // machine draws in half a second is its own business.
+  const back = await page.waitForFunction((n) => ndsCore._nds_frame_count() < n, before - 20,
+                                          { timeout: 20000 }).then(() => true, () => false);
   const during = await page.evaluate(() => ndsCore._nds_frame_count());
   await page.mouse.up();
-  assert.ok(during < before - 20, `held for 0.5 s it went back: ${during} from ${before}`);
+  assert.ok(back, `held, it went back: ${during} from ${before}`);
   await framesPast(page, during + 20);
   // Off in Settings: the ring goes, the button with it.
   await page.evaluate(() => { rewindToggle.checked = false; rewindToggle.dispatchEvent(new Event("change")); });

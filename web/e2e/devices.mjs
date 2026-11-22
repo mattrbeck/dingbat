@@ -6,6 +6,7 @@
 // and the observations read the page directly.
 
 import { createServer } from "node:http";
+import { spawn } from "node:child_process";
 import { readFile, stat, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { existsSync } from "node:fs";
@@ -53,6 +54,25 @@ export const serveWeb = () => new Promise((resolve) => {
   });
   server.listen(0, "127.0.0.1", () =>
     resolve({ url: `http://127.0.0.1:${server.address().port}/`, close: () => server.close() }));
+});
+
+// The signaling server on a port the OS picks, read from the line it prints.
+// A port chosen here can be one a connection of the last minute still holds
+// (Linux deals 32768 and up to them): the server then exits without ever
+// listening. One that exits says why.
+export const startSignal = () => new Promise((resolve, reject) => {
+  const proc = spawn(process.execPath, [join(WEB, "signaling/server.js"), "0"],
+                     { stdio: ["ignore", "pipe", "pipe"] });
+  let out = "", err = "";
+  proc.stderr.on("data", (d) => { err = (err + d).slice(-2000); });
+  proc.stdout.on("data", (d) => {
+    out = (out + d).slice(-2000);
+    const port = Number(out.match(/listening on ws:\/\/localhost:(\d+)/)?.[1]);
+    if (port) resolve({ port, kill: (sig) => proc.kill(sig) });
+  });
+  proc.on("error", reject);
+  proc.on("exit", (code, sig) =>
+    reject(new Error(`signaling server exited (${code ?? sig}): ${err.trim() || "no output"}`)));
 });
 
 // What each device is. The phone is WebKit with an iPhone's screen, touch
