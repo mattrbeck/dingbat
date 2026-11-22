@@ -33,7 +33,7 @@ const swift = (cases) => {
 };
 
 const app = await loadApp();
-const web = app.runIn("({ mergeLibrary, titleOf, stripExt, fileTitle, withGen })");
+const web = app.runIn("({ mergeLibrary, titleOf, stripExt, fileTitle, withGen, titleBeside, noteTitles, displayName })");
 const wmerge = (a, b) => JSON.stringify(web.mergeLibrary(JSON.parse(a), JSON.parse(b)));
 const L = (recents, tomb = [], ren = []) => JSON.stringify({ recents, tomb, ren });
 
@@ -61,6 +61,7 @@ const fixed = [
   ["a newer generation, the title with its claim", L([{ name: ROM, ts: 50, imp: 2, title: T }]),
    L([{ name: ROM, ts: 5, imp: 9, gen: 2, title: "Second" }])],
   ["a tombstone beside a titled entry", L([{ name: ROM, ts: 60, imp: 60, gen: 1, title: T }], [{ name: ROM, ts: 50 }]), L([])],
+  ["an odd title from Drive is cleaned", L([{ name: ROM, ts: 1, imp: 1, title: "\u001b[1m Odd\r\nTitle " + "\u{1F600}".repeat(60) }]), L([])],
 ];
 
 // Seeded random libraries over three names.
@@ -91,9 +92,29 @@ await check(`mergeLibrary: ${fixed.length} title cases and ${random.length} rand
 });
 
 await check("titleOf", () => {
-  const xs = ["Pokemon Collection", "  padded\t", "", "   ", "x".repeat(101), "é".repeat(120), "Zelda: ☃"];
+  const xs = ["Pokemon Collection", "  padded\t", "", "   ", "x".repeat(101), "é".repeat(120), "Zelda: ☃",
+              "\u0000Ctl\u0085 \u009f", "x y ", "﻿BOM﻿", " nbsp　", "\u0007\t\r\n",
+              "Pokemon " + "\u{1F600}".repeat(60), "é".repeat(60), "a" + "\u{1F600}".repeat(50)];
   const got = swift([...xs, 7, null].map((s) => ({ op: "titleOf", s })));
   [...xs, 7, null].forEach((s, i) => assert.equal(got[i], web.titleOf(s), JSON.stringify(s)));
+});
+
+// Keep both: the title of the game put beside another, as its tile shows.
+await check("the title of a game kept beside another", () => {
+  const ROM2 = "Pokemon - Emerald Version (USA) (2).gba";
+  const cs = [
+    { title: T, asked: ROM, name: ROM2 },
+    { title: "GBA Pack", asked: ROM, name: ROM2 },
+    { title: T, asked: ROM, name: ROM },
+    { title: null, asked: ROM, name: ROM2 },
+    { title: "Tetris", asked: "Tetris", name: "Tetris (3)" },
+    { title: "x".repeat(100), asked: "X.gb", name: "X (2).gb" },
+  ];
+  web.noteTitles([{ name: ROM, title: T }, { name: "X.gb", title: "x".repeat(100) }]);
+  const got = swift(cs.map((c) => ({ op: "titleBeside", ...c, shown: web.displayName(c.asked) })));
+  cs.forEach((c, i) => assert.equal(got[i], web.titleBeside(c.title, c.asked, c.name), JSON.stringify(c)));
+  assert.equal(got[0], T + " (2)");
+  web.noteTitles([]);
 });
 
 // The title a zip import sets (web handleZipFile): a dingbat export's is its

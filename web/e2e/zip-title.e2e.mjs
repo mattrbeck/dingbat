@@ -33,18 +33,30 @@ before(async () => { if (!skip) rig = await startRig(); });
 after(async () => { await rig?.close(); });
 afterEach(async () => { await rig?.endTest(); });
 
-const addZip = async (d) => {
+// `answer`: the button clicked when another game has the ROM's name; the
+// Keep both line as it read is returned.
+const addZip = async (d, { name = ZIP, rom = synctestRom(), answer = null } = {}) => {
   await front(d);
   const [chooser] = await Promise.all([
     d.page.waitForEvent("filechooser"),
     d.page.locator("#home-load, #lib-add, #home-solo-add").locator("visible=true").first().click(),
   ]);
-  const zip = Buffer.concat(globalThis.ZipWrite.build([{ name: GAME, data: synctestRom() }], new Date()));
-  await chooser.setFiles({ name: ZIP, mimeType: "application/zip", buffer: zip });
+  const zip = Buffer.concat(globalThis.ZipWrite.build([{ name: GAME, data: rom }], new Date()));
+  await chooser.setFiles({ name, mimeType: "application/zip", buffer: zip });
+  let asked = null;
+  if (answer) {
+    await d.page.locator("#rom-clash-modal.open").waitFor({ timeout: 20000 });
+    asked = await d.page.locator("#rom-clash-both-sub").textContent();
+    await d.page.click("#" + answer);
+  }
   await d.page.waitForFunction(() => document.body.classList.contains("running") &&
     !document.body.classList.contains("home-flying") && !paused, null, { timeout: 20000 });
   await sleep(400);
+  return asked;
 };
+// Another game under the ROM's name: one byte past its code changed.
+const otherRom = (b) => { const r = synctestRom(); r[r.length - 1] = b; return r; };
+const GAME2 = GAME.replace(/(\.[^.]+)$/, " (2)$1");
 const names = (d) => d.page.evaluate(() => ({
   hero: document.getElementById("hero").hidden ? null : document.getElementById("hero-name").textContent,
   tiles: [...document.querySelectorAll(".home-tile")].map((t) =>
@@ -85,8 +97,25 @@ for (const [kindA, kindB] of PAIRS) {
       eq(await saveByte(b), { live: save, stored: save }, "the download keeps the save");
       await mainMenu(b);
       assert.equal((await names(b)).hero, TITLE);
+
+      // A third device, the game only on Drive: the same zip with another
+      // ROM (Drive's digest tells them apart), Keep both. It goes beside it
+      // under the zip's name, numbered as its file.
+      const c = await rig.device(drive, "C", kindA);
+      await syncNow(c);
+      const asked = await addZip(c, { rom: otherRom(1), answer: "rom-clash-both" });
+      assert.match(asked, new RegExp("“" + TITLE + " \\(2\\)”"), "the question names it as its tile");
+      assert.equal(await c.page.evaluate(() => currentOriginalName), GAME2);
+      await mainMenu(c);
+      eq((await names(c)).tiles.sort(), [[GAME2, TITLE + " (2)"], [GAME, TITLE]]);
+
+      // Another zip, Replace: the game takes that zip's name.
+      await addZip(c, { name: "Other Pack.zip", rom: otherRom(2), answer: "rom-clash-replace" });
+      assert.equal(await c.page.evaluate(() => currentOriginalName), GAME);
+      await mainMenu(c);
+      eq((await names(c)).tiles.sort(), [[GAME2, TITLE + " (2)"], [GAME, "Other Pack"]]);
       // WebKit reports the requests a reload cuts off as errors.
-      const errors = [...a.errors, ...b.errors]
+      const errors = [...a.errors, ...b.errors, ...c.errors]
         .filter((e) => !e.includes("due to access control checks"));
       assert.deepEqual(errors, [], "no page errors: " + errors.join(" | "));
     });

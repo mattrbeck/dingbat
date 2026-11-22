@@ -329,7 +329,7 @@ struct RootView: View {
                 }
                 .sheet(isPresented: Binding(get: { model.romClash != nil },
                                             set: { if !$0 && model.romClash != nil { model.answerRomClash(nil) } })) {
-                    RomClashSheet(asked: model.romClash?.asked ?? "", numbered: model.romClash?.numbered ?? "")
+                    RomClashSheet(asked: model.romClash?.asked ?? "", beside: model.romClash?.beside ?? "")
                         .environment(\.palette, palette)
                 }
         }

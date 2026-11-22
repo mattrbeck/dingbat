@@ -239,6 +239,19 @@ the name now); the rename box still starts from the file's name. A dingbat
 export carries it in `info.json` (`title`), so adding the export back keeps
 the game's title rather than taking the export's file name.
 
+A zip whose ROM is named like a different game already here asks Replace or
+Keep both, as any file does, and the zip's name goes with the file either
+way: Replace gives the game the zip's name (a bare ROM's Replace drops it);
+Keep both titles the numbered game with it, numbered as its file is
+("Pokemon Collection (2)") when it would otherwise read as the game beside
+it (`titleBeside`), and the question names it so. A game moved aside for a
+different one on Drive (settleRomClashes) keeps its title.
+
+A title is outside input, as a name is (it comes from a file's name, an
+export's `info.json` or Drive's library): `titleOf` turns control
+characters into spaces, a lone surrogate into U+FFFD, and cuts it to 100
+UTF-16 units without splitting a character, wherever one is read.
+
 Games added from a zip before titles existed have none (the zip's name was
 never kept) and show the ROM's name until the zip is added again.
 

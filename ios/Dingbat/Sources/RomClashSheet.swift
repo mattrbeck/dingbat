@@ -7,7 +7,8 @@ import SwiftUI
 struct RomClashSheet: View {
     @Environment(\.palette) var palette
     let asked: String
-    let numbered: String
+    /// What the game kept beside it is shown as.
+    let beside: String
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -26,7 +27,7 @@ struct RomClashSheet: View {
                        "Use this file for “\(DriveSync.display(asked))”. Its save and save states stay with it.",
                        id: "rom-clash-replace") { AppModel.shared.answerRomClash(.replace) }
                 option("Keep both",
-                       "Add this one as “\(DriveSync.display(numbered))”. It starts with no save.",
+                       "Add this one as “\(beside)”. It starts with no save.",
                        id: "rom-clash-both") { AppModel.shared.answerRomClash(.both) }
             }
             Button("Cancel") { AppModel.shared.answerRomClash(nil) }

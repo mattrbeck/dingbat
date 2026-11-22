@@ -474,17 +474,20 @@ final class RomLibrary: ObservableObject {
 
     /// Bytes first, index second (web addRecentRom).
     @MainActor
-    func add(romData: Data, fileName asked: String, title: String? = nil) async throws -> RomEntry {
+    func add(romData: Data, fileName asked: String, title zipTitle: String? = nil) async throws -> RomEntry {
         guard Self.validName(asked) else {
             throw ImportError.unreadable("That file's name can't be used — rename it and try again")
         }
         var fileName = Self.claimName(asked) { nameTaken($0, by: romData) }
         var replace = false
+        // The title (a zip's) goes with the file, whichever name it takes.
+        var title = Lib.titleBeside(zipTitle, asked: asked, name: fileName,
+                                    askedShown: RomEntry(fileName: asked).name)
         // Asked only when the name is another game's and these bytes are not
         // already here under one of its numbered names (web placeRom).
         if fileName != asked, !RomEntry(fileName: fileName).isLocal {
-            switch await AppModel.shared.askRomClash(asked, fileName) {
-            case .replace: fileName = asked; replace = true
+            switch await AppModel.shared.askRomClash(asked, title ?? DriveSync.display(fileName)) {
+            case .replace: fileName = asked; replace = true; title = zipTitle
             case .both: break
             case nil: throw ImportError.declined
             }

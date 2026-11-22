@@ -184,7 +184,7 @@ enum Lib {
     static func bumped(name: String, ts: Double, imp: Double?, gen: Int,
                        prev: JSObject?, fresh: Bool, title: String?) -> JSObject {
         var o = entry(name: name, ts: ts, impFirst: imp, gen: gen)
-        o["title"] = (fresh ? titleOf(title) : prev?.string("title")).map { .string($0) }
+        o["title"] = titleOf(fresh ? title : prev?.string("title")).map { .string($0) }
         return o
     }
 
@@ -209,16 +209,44 @@ enum Lib {
 
     /// web titleOf: the name a game imported from a zip is shown under (the
     /// zip's), display only; every record stays under the entry's `name`.
+    /// It comes from a file's name, an export's info.json or Drive, so it is
+    /// outside input as a name is: a control character is a space, and it is
+    /// cut to `titleMax` UTF-16 units, never inside a character.
     static let titleMax = 100
     static func titleOf(_ t: String?) -> String? {
-        guard let t = t?.trimmingCharacters(in: .whitespacesAndNewlines), !t.isEmpty else { return nil }
-        let u = t.utf16
-        return u.count <= titleMax ? t : String(decoding: Array(u.prefix(titleMax)), as: UTF16.self)
+        guard let t else { return nil }
+        var spaced = String.UnicodeScalarView()
+        for c in t.unicodeScalars { spaced.append(isControl(c) ? " " : c) }
+        var out = String.UnicodeScalarView(), units = 0
+        for c in String(spaced).trimmingCharacters(in: jsSpace).unicodeScalars {
+            units += c.utf16.count
+            if units > titleMax { break }
+            out.append(c)
+        }
+        let r = String(out).trimmingCharacters(in: jsSpace)
+        return r.isEmpty ? nil : r
     }
+
+    /// What JavaScript's trim() takes off.
+    private static let jsSpace = CharacterSet.whitespacesAndNewlines.union(CharacterSet(charactersIn: "\u{FEFF}"))
 
     /// web stripExt: everything before the last dot ("" with none).
     static func stripExt(_ n: String) -> String {
         n.lastIndex(of: ".").map { String(n[..<$0]) } ?? ""
+    }
+
+    /// web fileTitle: the name without its extension.
+    static func fileTitle(_ n: String) -> String {
+        let s = stripExt(n)
+        return s.isEmpty ? n : s
+    }
+
+    /// web titleBeside: the title of a game going in under the numbered
+    /// `name` beside `asked`'s game (shown as `askedShown`), numbered as its
+    /// file was when it would read as that game's.
+    static func titleBeside(_ title: String?, asked: String, name: String, askedShown: String) -> String? {
+        guard let title, name != asked, title == askedShown else { return title }
+        return titleOf(title + fileTitle(name).dropFirst(fileTitle(asked).count))
     }
 
     /// The title an import from the zip `zipName` sets (web handleZipFile):

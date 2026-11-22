@@ -94,7 +94,7 @@ final class AppModel: ObservableObject {
     private var romWarnAnswer: CheckedContinuation<Bool, Never>?
     /// Which of two different files a name is for (web askRomClash).
     enum RomClashAnswer { case replace, both }
-    @Published var romClash: (asked: String, numbered: String)?
+    @Published var romClash: (asked: String, beside: String)?
     private var romClashAnswer: CheckedContinuation<RomClashAnswer?, Never>?
     /// A plain notice with OK (web alert()).
     @Published var notice: String?
@@ -412,9 +412,9 @@ final class AppModel: ObservableObject {
     }
 
     /// Replace (this file takes the name and the save that goes by it),
-    /// both (it goes in under `numbered`), or nil (nothing is added).
+    /// both (it goes in beside it, shown as `beside`), or nil (nothing is added).
     @MainActor
-    func askRomClash(_ asked: String, _ numbered: String) async -> RomClashAnswer? {
+    func askRomClash(_ asked: String, _ beside: String) async -> RomClashAnswer? {
         #if DEBUG
         // Dev hook for headless tests: `-answer-rom-clash replace|both|cancel`.
         let args = ProcessInfo.processInfo.arguments
@@ -425,7 +425,7 @@ final class AppModel: ObservableObject {
         romClashAnswer?.resume(returning: nil)
         return await withCheckedContinuation { cont in
             romClashAnswer = cont
-            romClash = (asked, numbered)
+            romClash = (asked, beside)
         }
     }
 

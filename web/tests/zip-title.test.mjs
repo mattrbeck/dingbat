@@ -6,7 +6,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import vm from "node:vm";
-import { loadApp, u8, eq, settle, gameTiles } from "./helpers.mjs";
+import { webcrypto } from "node:crypto";
+import { loadApp, u8, eq, settle, gameTiles, fakeFile } from "./helpers.mjs";
 import { makeDrive, makeClock, useClock } from "./drivefake.mjs";
 
 const ROM = "Pokemon - Emerald Version (USA).gba";
@@ -263,4 +264,134 @@ test("another device's pull shows the zip's name, and its download keeps it", as
   await drain();
   eq(d1.idb.get("recent").map((r) => [r.name, r.title]), [[ROM, "Pokemon Collection"]]);
   eq(d1.idb.get("save:" + ROM), u8(7, 3), "the save under the ROM's name");
+});
+
+// A zip whose ROM is named like a different game already here: the question
+// is asked, and `answer` is clicked. The Keep both line as it read.
+const dropAnswering = async (app, fileName, entries, answer) => {
+  const buf = await zipOf(app, entries);
+  const done = vm.runInContext("handleZipFile", app.context)({ name: fileName, arrayBuffer: async () => buf });
+  await drain();
+  const modal = app.document.getElementById("rom-clash-modal");
+  assert.ok(modal.classList.contains("open"), "asked which game the name is for");
+  const both = app.document.getElementById("rom-clash-both-sub").textContent;
+  app.document.getElementById(answer).click();
+  await done;
+  await drain();
+  return both;
+};
+const titles = (app) => app.idb.get("recent").map((r) => [r.name, r.title]).sort();
+const ROM2 = "Pokemon - Emerald Version (USA) (2).gba";
+const syncDevice = async (clock, drive) => {
+  const app = await loadApp();
+  app.sandbox.crypto = webcrypto;
+  useClock(app, clock);
+  app.setFetch(drive.fetch);
+  app.api.gdriveToken = "tok";
+  app.api.gdriveTokenExp = clock() + 3600e3;
+  app.api.syncState = {
+    queueUp: [], queueDel: [], queueRen: [], tomb: [], ren: [], delTs: {},
+    sigs: {}, rmt: {}, acct: "a1", parked: {}, connected: true, email: "e@x",
+  };
+  return app;
+};
+
+test("Replace from a zip: the game takes the zip's name; a bare ROM's Replace drops it", async () => {
+  const app = await boot();
+  await drop(app, ZIP, [{ name: ROM, data: gba(7) }]);
+  await dropAnswering(app, "GBA Pack.zip", [{ name: ROM, data: gba(8) }], "rom-clash-replace");
+  eq(app.idb.get("rom:" + ROM).data, gba(8));
+  eq(titles(app), [[ROM, "GBA Pack"]], "one game, under the new zip's name");
+  assert.equal(app.idb.get("recent")[0].gen, 1, "the next generation, as any Replace");
+  await app.api.refreshHomeRecent();
+  await drain();
+  assert.equal(caption(tileOf(app, ROM)), "GBA Pack");
+
+  app.api.handleRomFile(fakeFile(ROM, gba(9)));
+  await drain();
+  app.document.getElementById("rom-clash-replace").click();
+  await drain();
+  eq(app.idb.get("rom:" + ROM).data, gba(9));
+  eq(titles(app), [[ROM, undefined]], "the bare ROM has no zip's name");
+});
+
+test("Keep both from a zip: the new game has the zip's name, numbered if it would read as the other's", async () => {
+  const app = await boot();
+  await drop(app, ZIP, [{ name: ROM, data: gba(7) }]);
+  // The same zip name, another ROM: two tiles must not read the same.
+  const asked = await dropAnswering(app, ZIP, [{ name: ROM, data: gba(8) }], "rom-clash-both");
+  assert.match(asked, /“Pokemon Collection \(2\)”/, "the question names it as its tile will");
+  eq(titles(app), [[ROM2, "Pokemon Collection (2)"], [ROM, "Pokemon Collection"]]);
+  // Another zip's name stands as it is.
+  await dropAnswering(app, "GBA Pack.zip", [{ name: ROM, data: gba(9) }], "rom-clash-both");
+  eq(titles(app), [[ROM2, "Pokemon Collection (2)"], ["Pokemon - Emerald Version (USA) (3).gba", "GBA Pack"],
+                   [ROM, "Pokemon Collection"]]);
+  // The same file again is that game, with no question.
+  await drop(app, ZIP, [{ name: ROM, data: gba(8) }]);
+  assert.ok(!app.document.getElementById("rom-clash-modal").classList.contains("open"));
+  assert.equal(app.idb.get("recent").find((r) => r.name === ROM2).title, "Pokemon Collection (2)");
+  await app.api.refreshHomeRecent();
+  await drain();
+  assert.equal(caption(tileOf(app, ROM2)), "Pokemon Collection (2)");
+  assert.equal(caption(tileOf(app, ROM)), "Pokemon Collection");
+});
+
+// Two devices, each with a different "Game.gba": the one signing in second
+// moves its game to "Game (2).gba" (settleRomClashes), and its zip's name
+// goes with it, here, on Drive and on the other device.
+test("a game moved aside for a different game on Drive keeps its zip's name", async () => {
+  const clock = makeClock();
+  const drive = makeDrive({ clock });
+  const sync = async (app) => { await app.api.pullSync(); await drain(); await app.api.flushSync(); await drain(); };
+  const a = await syncDevice(clock, drive);
+  a.idb.set("recent", [{ name: "Game.gba", ts: 100, imp: 100, title: "Their Zip" }]);
+  a.idb.set("rom:Game.gba", { name: "Game.gba", data: u8(1, 1, 1, 0xea) });
+  await sync(a);
+
+  const b = await syncDevice(clock, drive);
+  b.idb.set("recent", [{ name: "Game.gba", ts: 200, imp: 200, title: "My Zip" }]);
+  b.idb.set("rom:Game.gba", { name: "Game.gba", data: u8(2, 2, 2, 2, 2, 0xea) });
+  await sync(b);
+  await sync(b);
+  eq(b.idb.get("rom:Game (2).gba").data, u8(2, 2, 2, 2, 2, 0xea), "moved to the numbered name");
+  assert.equal(b.idb.get("recent").find((r) => r.name === "Game (2).gba").title, "My Zip");
+  assert.equal(b.runIn(`displayName("Game (2).gba")`), "My Zip");
+  const onDrive = Object.fromEntries(drive.lib().recents.map((r) => [r.name, r.title]));
+  eq(onDrive, { "Game.gba": "Their Zip", "Game (2).gba": "My Zip" });
+
+  await sync(a);
+  assert.equal(a.runIn(`displayName("Game (2).gba")`), "My Zip", "the other device shows it so");
+  assert.equal(a.runIn(`displayName("Game.gba")`), "Their Zip");
+});
+
+test("a title from Drive is cleaned as a name is: controls, length, halves of a character", async () => {
+  const titleOf = vm.runInContext("titleOf", (await loadApp()).context);
+  assert.equal(titleOf(" \u0000Pokemon\nCollection\u0085 "), "Pokemon Collection");
+  assert.equal(titleOf("Bad\ud800Half"), "Bad�Half");
+  assert.equal(titleOf("\u0007\t"), null);
+  const smile = "\u{1F600}";
+  assert.equal(titleOf("Pokemon Collection " + smile.repeat(60)), "Pokemon Collection " + smile.repeat(40),
+               "cut between characters");
+
+  const clock = makeClock();
+  const odd = "\u001b[31m Pokemon\r\nCollection " + smile.repeat(60);
+  const drive = makeDrive({ clock, seed: {
+    library: { recents: [{ name: ROM, ts: 10, imp: 5, title: odd }], tomb: [], ren: [] },
+    ["rom:" + ROM]: gba(7),
+  } });
+  const app = await syncDevice(clock, drive);
+  app.idb.set("recent", []);
+  await app.api.pullSync();
+  await drain();
+  await app.api.refreshHomeRecent();
+  await drain();
+  const clean = "[31m Pokemon  Collection " + smile.repeat(37);
+  assert.equal(clean.length, 99);
+  assert.equal(caption(tileOf(app, ROM)), clean);
+  assert.equal(await app.api.downloadGame(ROM), true);
+  await drain();
+  eq(titles(app), [[ROM, clean]], "kept here cleaned");
+  await app.api.flushSync();
+  await drain();
+  assert.equal(drive.lib().recents[0].title, clean, "and written back cleaned");
 });

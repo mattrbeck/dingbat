@@ -7314,7 +7314,20 @@ const dbPutRoomy = async (key, value, keep, superseded = () => false) => {
 
 // name -> title, as the index last read or written had them (displayName).
 let gameTitles = new Map();
-const titleOf = (t) => (typeof t === "string" && t.trim() ? t.trim().slice(0, RENAME_MAX_LEN) : null);
+// A title comes from a file's name, an export's info.json or Drive, so it is
+// outside input as a name is: a control character is a space, a lone
+// surrogate U+FFFD, and it is cut to RENAME_MAX_LEN UTF-16 units, never
+// inside a character. iOS Lib.titleOf is the same.
+const titleOf = (t) => {
+  if (typeof t !== "string") return null;
+  let out = "";
+  for (let c of t.replace(/[\u0000-\u001f\u007f-\u009f]/g, " ").trim()) {
+    if (c.length === 1 && c >= "\ud800" && c <= "\udfff") c = "�";
+    if (out.length + c.length > RENAME_MAX_LEN) break;
+    out += c;
+  }
+  return out.trim() || null;
+};
 const noteTitles = (list) => {
   gameTitles = new Map((Array.isArray(list) ? list : [])
     .filter((r) => r?.name && titleOf(r.title)).map((r) => [r.name, titleOf(r.title)]));
@@ -7554,7 +7567,7 @@ const bumpRecentIndex = (name, { fresh = false, gen: atLeast = 0, next = false, 
   if (next && prev) gen += 1;
   let entry = withGen(imp ? { name, ts, imp } : { name, ts }, gen);
   // A play keeps the title; an import sets it, or drops it (a bare ROM).
-  let shown = fresh ? titleOf(title) : prev?.title;
+  let shown = titleOf(fresh ? title : prev?.title);
   if (shown) entry.title = shown;
   list.unshift(entry);
   await enforceRomBudget(list);
@@ -7652,6 +7665,12 @@ const numberedRomName = (name, n) => {
   return dot > 0 ? name.slice(0, dot) + " (" + n + ")" + name.slice(dot) : name + " (" + n + ")";
 };
 
+// The title of a game going in under the numbered `name` beside `asked`'s
+// game: numbered as its file was when it would read as that game's.
+const titleBeside = (title, asked, name) =>
+  title && name !== asked && title === displayName(asked)
+    ? titleOf(title + fileTitle(name).slice(fileTitle(asked).length)) : title;
+
 const sameRomBytes = (a, b) => {
   if (a.length !== b.length) return false;
   for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
@@ -7702,14 +7721,15 @@ const settleRomClash = (answer) => {
   releaseFocus(romClashModal);
   if (resolve) resolve(answer);
 };
-const askRomClash = (asked, numbered) => new Promise((resolve) => {
+const askRomClash = (asked, numbered, title = null) => new Promise((resolve) => {
   if (romClashResolve) settleRomClash(null); // a second file while one is asked about
   document.getElementById("rom-clash-title").textContent =
     "You already have a game named “" + displayName(asked) + "”";
   document.getElementById("rom-clash-replace-sub").textContent =
     "Use this file for “" + displayName(asked) + "”. Its save and save states stay with it.";
   document.getElementById("rom-clash-both-sub").textContent =
-    "Add this one as “" + displayName(numbered) + "”. It starts with no save.";
+    "Add this one as “" + (titleBeside(title, asked, numbered) || displayName(numbered)) +
+    "”. It starts with no save.";
   romClashResolve = resolve;
   romClashModal.classList.add("open");
   trapFocus(romClashModal);
@@ -7721,15 +7741,17 @@ romClashModal?.addEventListener("click", (e) => {
   if (backdropPress(e, romClashModal)) settleRomClash(null);
 });
 
-// Where a file the player is adding goes: { name, replace }, or null when
-// they backed out. Asked only when the name is another game's and these
+// Where a file the player is adding goes: { name, replace, title }, or null
+// when they backed out. Asked only when the name is another game's and these
 // bytes are not already in the library under one of its numbered names.
-const placeRom = async (asked, bytes) => {
+// `title` (a zip's) goes with the file, whichever name it takes.
+const placeRom = async (asked, bytes, title = null) => {
   let name = await claimRomName(asked, bytes);
-  if (name === asked || (await dbGet(romKey(name)).catch(() => null))?.data) return { name, replace: false };
-  let answer = await askRomClash(asked, name);
+  let beside = { name, replace: false, title: titleBeside(title, asked, name) };
+  if (name === asked || (await dbGet(romKey(name)).catch(() => null))?.data) return beside;
+  let answer = await askRomClash(asked, name, title);
   if (!answer) return null;
-  return answer === "replace" ? { name: asked, replace: true } : { name, replace: false };
+  return answer === "replace" ? { name: asked, replace: true, title } : beside;
 };
 
 const addRecentRom = async (name, bytes, art, { replace = false, title = null } = {}) => {
@@ -14192,10 +14214,10 @@ const handleZipFile = async (file) => {
   // initStorage (DOMContentLoaded) opens the database and reads the sync
   // state - the tombstones a re-imported game's generation is judged by.
   await storageReady;
-  const placed = await placeRom(innerName, romBytes);
+  const placed = await placeRom(innerName, romBytes, title);
   if (!placed) return;
   innerName = placed.name;
-  await addRecentRom(innerName, romBytes, art, { ...placed, title });
+  await addRecentRom(innerName, romBytes, art, placed);
   await ensureRuntimeReady(); // a zip dropped before the wasm runtime is up
   // In the library either way; booted only if nothing was opened since.
   if (gen !== loadGen) return;

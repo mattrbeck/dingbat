@@ -17,6 +17,9 @@ for c in cases {
         r = mergeLibrary(lib(c, "a"), lib(c, "b")).js.stringify()
     case "titleOf":
         r = Lib.titleOf(c["s"] as? String)
+    case "titleBeside":
+        r = Lib.titleBeside(c["title"] as? String, asked: c["asked"] as! String, name: c["name"] as! String,
+                            askedShown: c["shown"] as! String)
     case "zipTitle":
         r = Lib.zipTitle(zipName: c["zip"] as! String, romName: c["rom"] as! String,
                          isExport: c["isExport"] as! Bool, exportTitle: c["exportTitle"] as? String)
