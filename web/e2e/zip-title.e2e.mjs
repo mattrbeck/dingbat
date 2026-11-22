@@ -98,11 +98,12 @@ for (const [kindA, kindB] of PAIRS) {
       await mainMenu(b);
       assert.equal((await names(b)).hero, TITLE);
 
-      // A third device, the game only on Drive: the same zip with another
-      // ROM (Drive's digest tells them apart), Keep both. It goes beside it
-      // under the zip's name, numbered as its file.
+      // A third device, holding the game's file and no session of it: the
+      // same zip with another ROM, Keep both. It goes beside it under the
+      // zip's name, numbered as its file.
       const c = await rig.device(drive, "C", kindA);
       await syncNow(c);
+      assert.equal(await c.page.evaluate((g) => downloadGame(g), GAME), true);
       const asked = await addZip(c, { rom: otherRom(1), answer: "rom-clash-both" });
       assert.match(asked, new RegExp("“" + TITLE + " \\(2\\)”"), "the question names it as its tile");
       assert.equal(await c.page.evaluate(() => currentOriginalName), GAME2);
