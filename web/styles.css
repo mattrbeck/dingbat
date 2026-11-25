@@ -5891,6 +5891,33 @@ body.lib-has-games #home-notes {
   border-top: 1px solid var(--border);
 }
 
+/* --- General > About: links out of the app, drawn as its small buttons --- */
+.settings-pane .about-row {
+  flex-wrap: wrap;
+  row-gap: 8px;
+  margin: 14px 0 0;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+
+.about-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.about-links a {
+  display: inline-flex;
+  align-items: center;
+  text-decoration: none;
+}
+
+@media (pointer: coarse) {
+  .about-links a {
+    min-height: 44px;
+  }
+}
+
 /* --- Version string ------------------------------------------------------
    Two copies, one per layout (rail foot on desktop, fixed footer below the
    sheet's scroller); exactly one is ever displayed. */

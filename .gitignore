@@ -237,3 +237,7 @@ deps/
 
 # Where the GB/GBC sweep fetches its ROM sets (tools/gbfuzz/pick_roms.py)
 tools/gbfuzz/sources.local.json
+
+# Copied beside the app by deploy-pages.yml
+web/notices.txt
+web/licence.txt

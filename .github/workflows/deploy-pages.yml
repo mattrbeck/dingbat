@@ -136,6 +136,13 @@ jobs:
             exit 1
           fi
 
+      - name: Licence texts beside the app
+        # The licences of what the build contains ask to travel with it;
+        # Settings > General > About links here.
+        run: |
+          cp THIRD_PARTY_NOTICES.md web/notices.txt
+          cp LICENSE web/licence.txt
+
       - name: Find the live site
         id: pages
         uses: actions/configure-pages@v5
@@ -150,7 +157,8 @@ jobs:
         # probe busts the edge cache as sw.js's probeVersion does; on any
         # failure (the first deploy, an outage) the commit is the version.
         # status.json (announcements, required updates) is not the app: an
-        # edit to it deploys without moving the version.
+        # edit to it deploys without moving the version. Nor are the privacy
+        # page and the licence texts.
         # The build time is the version's commit time (UTC), carried in
         # build-id.txt so a reused version keeps it: status.json's required
         # updates compare it (index.js enforceRequired). A live build-id.txt
@@ -161,7 +169,8 @@ jobs:
               ! -path './bench/*' ! -path './e2e/*' ! -path './tests/*' \
               ! -path './types/*' ! -path './signaling/*' ! -path './node_modules/*' \
               ! -name '*.test.mjs' ! -name 'package.json' ! -name 'package-lock.json' \
-              ! -name 'serve.py' ! -name 'lattest.html' ! -name 'lattest-bridge.js' ! -name 'status.json' -print0 \
+              ! -name 'serve.py' ! -name 'lattest.html' ! -name 'lattest-bridge.js' ! -name 'status.json' \
+              ! -name 'privacy.html' ! -name 'notices.txt' ! -name 'licence.txt' -print0 \
             | LC_ALL=C sort -z | xargs -0 sha256sum | sha256sum | cut -c1-16)
           live=$(curl -fsS --max-time 30 \
             "${{ steps.pages.outputs.base_url }}/build-id.txt?probe=${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" || true)

@@ -538,7 +538,8 @@ private struct PaneContent: View {
                .toggle("DS support", .constant(false), badge: .highlyExperimental, locked: .advanced)]
         return [
             SSection("Advanced", advanced),
-            SSection("About", [.custom("version", VersionRow()), .nav("Acknowledgements", to: .acknowledgements)]),
+            SSection("About", [.custom("version", VersionRow()), .nav("Acknowledgements", to: .acknowledgements),
+                               .custom("privacy", PrivacyRow())]),
             SSection(id: "reset", [
                 .button("Reset All Settings", destructive: true, confirm: "Reset all settings?",
                         message: "Every setting goes back to its default. Your games and saves are kept.") {
@@ -768,6 +769,20 @@ private struct VersionRow: View {
             UIPasteboard.general.string = AppBuild.label
             AppModel.shared.toast("Copied " + AppBuild.label)
         }
+    }
+}
+
+/// The site's privacy page, in the browser (App Review asks for it in the app).
+private struct PrivacyRow: View {
+    static let url = URL(string: "https://dingbat.gg/privacy.html")!
+
+    var body: some View {
+        Button { UIApplication.shared.open(Self.url) } label: {
+            RowLine(label: "Privacy") { ValueText("dingbat.gg") }
+        }
+        .buttonStyle(.plain)
+        .accessibilityHint("Opens in the browser")
+        .padFocus("privacy") { UIApplication.shared.open(Self.url) }
     }
 }
 
