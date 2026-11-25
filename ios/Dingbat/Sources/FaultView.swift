@@ -52,12 +52,12 @@ struct FaultView: View {
     private var summary: String {
         if again && same {
             let at = String(format: "%.1f s", Double(dingbat_fault_frame()) / 59.73)
-            return "Same error, same moment: \(at) in. This game seems to reach a Dingbat bug here every time, so going back will likely end here again. Your in-game save is safe."
+            return "Same error, same moment: \(at) in. This game seems to reach a dingbat bug here every time, so going back will likely end here again. Your in-game save is safe."
         }
         if again {
-            return "Dingbat hit an internal error again and paused the game. Your in-game save is safe."
+            return "dingbat hit an internal error again and paused the game. Your in-game save is safe."
         }
-        return "Dingbat hit an internal error and paused the game. Your in-game save is safe."
+        return "dingbat hit an internal error and paused the game. Your in-game save is safe."
     }
 
     // MARK: the lead option

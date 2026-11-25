@@ -46,6 +46,7 @@ targets:
         NSMicrophoneUsageDescription: A DS game can listen through your microphone, only while you turn it on in its Screens panel.
         NSMotionUsageDescription: Tilt carts play by tilting your device.
         NSLocalNetworkUsageDescription: The link cable connects straight to a friend on the same Wi-Fi.
+        NSPhotoLibraryAddUsageDescription: Screenshots and clips you save go to your photo library.
         ITSAppUsesNonExemptEncryption: false
         # A game that plays with a controller: the App Store's controller
         # badge, and iOS Game Mode (Bluetooth latency, background work).

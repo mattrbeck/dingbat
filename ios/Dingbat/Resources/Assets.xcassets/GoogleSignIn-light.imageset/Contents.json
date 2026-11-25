@@ -1,5 +1,8 @@
 {
-  "images" : [ { "filename" : "google-signin-light.svg", "idiom" : "universal" } ],
-  "info" : { "author" : "xcode", "version" : 1 },
-  "properties" : { "preserves-vector-representation" : true }
+  "images" : [
+    { "filename" : "google-signin-light.png", "idiom" : "universal", "scale" : "1x" },
+    { "filename" : "google-signin-light@2x.png", "idiom" : "universal", "scale" : "2x" },
+    { "filename" : "google-signin-light@3x.png", "idiom" : "universal", "scale" : "3x" }
+  ],
+  "info" : { "author" : "xcode", "version" : 1 }
 }

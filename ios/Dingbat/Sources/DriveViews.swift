@@ -5,7 +5,8 @@
 import SwiftUI
 
 /// Google's official "Sign in with Google" button art (web
-/// google-signin-{dark,light}.svg, from Google's branding kit).
+/// google-signin-{dark,light}.svg, from Google's branding kit), as PNGs: the
+/// asset catalog draws none of the SVG's filters, so the G came out garbled.
 struct GoogleSignInButton: View {
     @Environment(\.palette) var palette
     @ObservedObject private var drive = DriveSync.shared
