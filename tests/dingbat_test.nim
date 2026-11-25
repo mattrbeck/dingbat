@@ -2170,6 +2170,20 @@ proc docboy_batch(list_path, out_path: string): int =
     inc idx
   0
 
+proc gba_console_text(emu: GBA): seq[string] =
+  ## The 30x20 visible cells of libgba's console as text, blank rows left
+  ## out. consoleDemoInit puts the map at screen base 4, one entry per
+  ## character, and the tile number is the character's code.
+  const MapBase = 4 * 0x800
+  for row in 0 ..< 20:
+    var line = ""
+    for col in 0 ..< 30:
+      let at = MapBase + (row * 32 + col) * 2
+      let tile = (int(emu.ppu.vram[at]) or (int(emu.ppu.vram[at + 1]) shl 8)) and 0x3FF
+      line.add(if tile in 32 .. 126: char(tile) else: '?')
+    line = line.strip(leading = false)
+    if line.len > 0: result.add(line)
+
 proc main() =
   var rom_path = ""
   var rom_path2 = ""
@@ -2190,6 +2204,7 @@ proc main() =
   var force_sgb = false    # --sgb: run the cart in a Super Game Boy
   var no_save = false      # --nosave: blank cart RAM and detach the .sav file
   var screen_check = false # --screen-check: panel settled + not blank (see below)
+  var console_text = false # --console: print the text of libgba's console (GBA)
   var ed_breakpoint = false  # --ed-breakpoint: 0xED ends a run (wilbertpol mooneye)
   var bb_breakpoint = false  # --bb-breakpoint: LD B,B always ends a run (AGE)
   var model_override = ""  # mooneye per-model boot table (--model=dmg0|mgb|sgb|sgb2|cgb0|agb...)
@@ -2277,6 +2292,8 @@ proc main() =
         no_save = true
       of "screen-check":
         screen_check = true
+      of "console":
+        console_text = true
       of "ed-breakpoint":
         ed_breakpoint = true
       of "bb-breakpoint":
@@ -2536,6 +2553,8 @@ proc main() =
       while i + 1 < fields.len and fields[i] != "DONE":
         echo "AGBEEG ", fields[i].replace(' ', '_'), " ", fields[i + 1]
         i += 2
+    if console_text:
+      for line in gba_console_text(emu): echo "CONSOLE ", line
     if mode == tmScreenshot and screenshot_path.len > 0:
       # Always colour on GBA: greyscale is a Game Boy notion (the DMG
       # screenshot suites compare against grey references), and a

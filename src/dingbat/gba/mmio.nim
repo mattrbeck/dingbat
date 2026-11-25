@@ -88,7 +88,11 @@ proc `[]=`*(mmio: MMIO; address: uint32; value: uint8) =
     write(mmio.waitcnt, value, io_addr and 1)
     mmio.gba.bus.write_waitcnt(mmio.waitcnt)
   of 0x300:
-    mmio.postflg = value and 1
+    # Bit 0 is set-only: a write of 0 leaves it set. nba-emu hw-test's
+    # haltcnt ROM writes a zero halfword here through CpuSet and expects to
+    # read 1; GBATEK says of the DS's POSTFLG that bit 0 "cannot be cleared
+    # (except by Reset) once when it is set".
+    mmio.postflg = mmio.postflg or (value and 1)
   of 0x301:
     # HALTCNT answers only to BIOS code; a byte write from ROM or RAM is
     # ignored (AGB SP, haltprobe: a `strb` from IWRAM does not halt;

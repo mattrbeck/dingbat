@@ -1,14 +1,16 @@
 # Dingbat Test Results
 
-*Generated: 2026-11-18 20:22:15 · commit 43bf0007 · game-boy-test-roms v7.0*
+*Generated: 2026-11-25 13:15:59 · commit ad6888eb · game-boy-test-roms v7.0*
 
 Device column: the hardware the row is scored on. `cart` = the cart header picks the device (DMG-ABC for a DMG cart, CPU CGB C for a CGB one); `DMG`/`CGB`/`SGB` = forced; a trailing token is a specific boot table/revision (`--model`); `—` = GBA, which has no device axis here. A row name ending `@<model>` is one ARM of a test whose name declares several machines: a ROM that states the devices it was verified on (AGE's `ei-halt-dmgC-cgbBCE`, mealybug's `_cgb_c`/`_cgb_d` capture pair, mooneye's `-GS` family) gets one row per revision rather than one row on whichever machine happened to be the default, so each revision is actually covered. A suite where every row passes has only its summary row — its per-row section comes back as soon as anything in it fails.
 
 ## Summary
 
-- **Total:** 1587
-- **Pass:** 1578
-- **Fail:** 9
+- **Total:** 1596
+- **Pass:** 1581
+- **Fail:** 15
+
+A row is one ROM, except in DocBoy (a manifest section), gambatte (a directory), dbsuite (a sub-suite), the mGBA suite (a section) and SingleStepTests (a vector file or opcode block): there a row holds many tests and is green only when all of them pass (SingleStepTests: when every failure is a known divergence). DocBoy's 9 red rows are 197 failing ROMs of 9186 ([results_docboy.md](results_docboy.md)).
 
 | Suite | Pass | Total | Status |
 |-------|------|-------|--------|
@@ -30,12 +32,13 @@ Device column: the hardware the row is scored on. `cart` = the cart header picks
 | Game Boy - Screenshot suites | 21 | 21 | 👌 |
 | Game Boy - Shootout ROMs | 15 | 15 | 👌 |
 | [Game Boy - SingleStepTests SM83](results_singlestep.md) | 20 | 20 | 👌 |
-| GBA - alyosha gba-tests | 125 | 125 | 👌 |
+| GBA - alyosha gba-tests | 123 | 123 | 👌 |
 | [GBA - dbsuite (AGS-001)](results_dbsuite.md) | 8 | 8 | 👌 |
 | GBA - FuzzARM | 5 | 5 | 👌 |
 | GBA - hwverified (AGS-001) | 12 | 12 | 👌 |
 | GBA - jsmolka gba-tests | 13 | 13 | 👌 |
 | [GBA - mGBA Test Suite](results_mgba_suite.md) | 13 | 13 | 👌 |
+| GBA - NBA hw-test | 5 | 11 | 👀 |
 | GBA - Other test ROMs | 13 | 13 | 👌 |
 | GBA - PeterLemon BIOS | 25 | 25 | 👌 |
 | [GBA - SingleStepTests ARM7TDMI](results_singlestep.md) | 45 | 45 | 👌 |
@@ -117,6 +120,22 @@ Device column: the hardware the row is scored on. `cart` = the cart header picks
 
 Each row is one section of a DocBoy manifest (`docboy/<manifest>/<section>`). See [detailed results](results_docboy.md) for individual test outcomes.
 
+## GBA - NBA hw-test (5/11)
+
+| Test | Device | Result |
+|------|--------|--------|
+| nba-hw-test/bus/128kb-boundary | — | 👀 failing on screen: LDM 0803FFF8, DMA INC 0801FFF8, DMA INC 0803FFF8, DMA DEC 07FFFFF8, DMA DEC 0801FFF0, DMA DEC 0803FFF0 |
+| nba-hw-test/dma/burst-into-tears | — | 👀 1/3 checks; failing: 1ST VALUE, 2ND VALUE |
+| nba-hw-test/dma/force-nseq-access | — | 👌 |
+| nba-hw-test/dma/latch | — | 👀 3/4 checks; failing: DMA LATCH 1 |
+| nba-hw-test/dma/start-delay | — | 👌 |
+| nba-hw-test/haltcnt | — | 👀 5/6 checks; failing: HALTCNT CPUSET DMA |
+| nba-hw-test/irq/irq-delay | — | 👀 2/3 checks; failing: IRQ TIME IWRAM |
+| nba-hw-test/ppu/vram-mirror | — | 👀 7/10 checks; failing: M3 10000h, M3 18000h, M3 CRC32 |
+| nba-hw-test/timer/reload | — | 👌 |
+| nba-hw-test/timer/start-stop | — | 👌 |
+| nba-hw-test/timer/tick-before-reload | — | 👌 |
+
 ## Deliberately not scored
 
 Everything skipped on purpose, with the reason and the builder that skips it. If a suite's row count looks short, the answer is here.
@@ -138,7 +157,10 @@ Everything skipped on purpose, with the reason and the builder that skips it. If
 - **mooneye/utils/ (bootrom_dumper, dump_boot_hwio)** — tools, not pass/fail tests. bootrom_dumper waits for a boot ROM to dump and can only time out (docs/dev/gb-failure-triage.md calls it unrecoverable); dump_boot_hwio ends in quit_dump_mem, which sets the success byte unconditionally, so its green row was a gate that could not fail. (build_mooneye_tests)
 - **mooneye-wilbertpol utils/, logic-analysis/** — tools and analysis captures, not pass/fail tests. (build_wilbertpol_tests)
 - **DocBoy: 645 rows its own manifests disable** — `"enabled": false`, so DocBoy's runner never runs them and states no verdict for them: 640 `double_speed/apu/ch4` and 2 `double_speed/apu/ch3` CGB rows, `mbc/huc3/huc3_tick` ("takes a long time (1 real minute)") and two `cgb_dmg_mode` `m3_lcdc_win_en_change_multiple_wx_*_signed_addressing_source` rows ("glitch is different, probably uses another memory bus"). (build_docboy_rows)
-- **alyosha `unsafe/prefetcher_branch_thumb_arm_2`** — its expected values were never produced by a console: the suite's own unsafe/README.md says the ROM "crashes on console due to the prefetcher being misaligned when switching from thumb to arm mode", and the author moved it out of `prefetcher/` (whose `_arm`, `_arm_3` and `_arm_4` siblings are scored) for that reason. The check it fails is that switch: TM0 after the Thumb `bx r2` at 0x0800019E into ARM code at 0x080001A4, a branch from an odd halfword, expected 0x53, read 0x4E here. Its first check, the ARM-to-Thumb branch before it, reads the expected 0x3A. (build_alyosha_tests)
+- **alyosha `unsafe/` (3)** — expected values no console produced. The suite's own unsafe/README.md: `prefetcher_branch_thumb_arm_2` "crashes on console due to the prefetcher being misaligned when switching from thumb to arm mode", and "fifo_dma_disable_jam and fifo_dma_disable_jam_2 also crash on console due to FIFO DMA being triggered but then disabled before it starts". Read here, the two FIFO ROMs print "All tests passed" and the prefetcher ROM fails its second check (TM0 after the Thumb `bx r2` at 0x0800019E into ARM code at 0x080001A4, a branch from an odd halfword: expected 0x53, read 0x4E); none of the three counts either way. (build_alyosha_tests)
+- **nba-hw-test: five picture ROMs** — `ppu/bgpd`, `ppu/bgx`, `ppu/dispcnt-latch`, `ppu/greenswap` and `ppu/sprite-hmosaic` print no verdict; each draws a picture and ships an `expected.png` that is a photograph of a console (bgpd, greenswap: 4000x3000) or a scaled capture with a window border (1083x724, 602x402, 2056x1480), not a 240x160 frame an exact comparison can use. (build_nba_hwtest_tests)
+- **nba-hw-test: two menu ROMs** — `ppu/ram-access-timing` and `ppu/status-irq-dma` wait at a menu for key presses, and the harness schedules presses for Game Boy runs only (`--press`). Not run: a coverage gap, not a judgment on the ROMs. (build_nba_hwtest_tests)
+- **nba-hw-test: archive/** — the suite's own archive/README.md: ROMs "replaced or deemed unfit for purpose", "not considered to be a part of the NBA hw-test suite anymore". (build_nba_hwtest_tests)
 - **DocBoy manifests: 717 vendored ROMs of other suites** — everything outside `docboy/` in its manifests (blargg, mooneye, gbmicrotest, mealybug, SameSuite, daid, magen, acid2, little-things-gb, hacktix, firstwhite, rtc3test, cpp, zoomten, tepples) but the 8 SameSuite ROMs DocBoy edited. Those suites are scored from their upstream releases in the sections above, each by its own author's verdict; DocBoy's entries re-check them against DocBoy's own frame dumps. The 8 edits (`samesuite/apu/channel_1/*-cgbE`, expectations rewritten for CPU CGB E) are DocBoy rows, scored but for `channel_1_sweep_restart_2-cgbE` (its own entry). (build_docboy_rows)
 - **DocBoy: the KEY1 switch's IME-set leaf (8)** — `{,double_speed_}stop_key1_joypad0_interrupt1_ime1_*_div_round1`: `EI; STOP` with a request pending; DocBoy wants the divider held 8 T. AGE `speed-switch/caution/spsw-interrupts-cgbE` (source header: "Verified: 2022-02-11 pass: CPU CGB E - CPU-CGB-06"), scored and passing here, runs the same sequence and needs 4 (`spsw_irq_leaf_hold_short`): with an 8 T hold all 8 DocBoy rows pass and exactly that AGE row breaks. The two ROMs disagree by one M-cycle. (AGE's own runner blacklists `speed-switch/caution`; its WARNING.md reports the author's CGB E unstable for a while after running those ROMs several times in a row.) Pan Docs' STOP chart does not settle it: the rendered `imgs/stop_diagram.svg` puts "The CPU glitches non-deterministically" on IME disabled, the older `imgs/gb_stop.png` in the same repo on IME enabled. The IME-clear leaf beside it IS scored. (build_docboy_rows, DocboyNotScored)
 - **DocBoy: a joypad interrupt on key release (3)** — `joypad_{buttons,dpad}_interrupt_release` want the interrupt when the key is let go, and `cpu/interactive_visual/stop_immediate_exit_joypad_interrupt` wants a release to end a STOP (its comment, the only one on bounce: "even on button release, because of switch bouncing"), while `joypad_keep_pressed_interrupt` wants exactly one interrupt for a held press. Pan Docs ("INT $60") raises it on a high-to-low edge; gambatte's hardware note (test/hwtests/jpadirq.txt) has transitions "multiple times per button press/release", so release bounce is real but its count varies. Here the two release rows read the fail value and the STOP row never reports ($FFF0 stays $00). (build_docboy_rows, DocboyNotScored)

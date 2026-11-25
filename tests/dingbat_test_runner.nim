@@ -51,6 +51,11 @@ type
                            # is scored on the verdict line it draws (read_verdict_text)
     agbeeg_check: string  # screenshot mode: pass iff the harness printed
                           # `AGBEEG <this> PASS` (the cartridge's CI port)
+    console_verdict: bool # screenshot mode: the ROM reports through libgba's
+                          # console; scored on the text it leaves there
+                          # (console_verdict_of)
+    console_checks: int   # console_verdict, for a ROM that prints no closing
+                          # line: how many checks it makes
     ed_breakpoint: bool   # opcode 0xED ends the run (wilbertpol mooneye fork)
     bb_breakpoint: bool   # LD B,B always ends the run, pass or fail (AGE)
     mbc30_screen: string  # mbc30test mode: which of the ROM's screens, rom|sram
@@ -287,6 +292,30 @@ proc read_verdict_text(ppm: seq[uint8]; glyphs: seq[(char, array[8, uint8])]): s
       best = text.strip()
   best
 
+proc console_verdict_of(lines: seq[string]; checks: int): tuple[passed: bool; detail: string] =
+  ## nba-emu/hw-test's lib/source/test.c: one "<name>: PASS <value>" or
+  ## "<name>: FAIL <value>" line per check, then "congratulations!" when all
+  ## passed, "pass:  N" and "total: M" otherwise. A ROM that prints no
+  ## closing line passes when `checks` lines read PASS and none FAIL; its
+  ## failures scroll the first lines away, so the detail names only the
+  ## failures still on screen.
+  var failed: seq[string]
+  var passes = 0
+  var pass_n, total_n = ""
+  for l in lines:
+    if l == "congratulations!": return (true, "")
+    if l.startsWith("pass:"): pass_n = l[5 .. ^1].strip()
+    elif l.startsWith("total:"): total_n = l[6 .. ^1].strip()
+    elif ": FAIL" in l: failed.add(l[0 ..< l.find(": FAIL")])
+    elif ": PASS" in l: inc passes
+  let names = failed.join(", ")
+  if pass_n.len > 0 and total_n.len > 0:
+    return (false, pass_n & "/" & total_n & " checks; failing: " & names)
+  if checks > 0:
+    if passes == checks and failed.len == 0: return (true, "")
+    return (false, "failing on screen: " & names)
+  (false, "no verdict on screen")
+
 # --bios: GBA screenshot tests run on this BIOS image instead of the HLE.
 var screenshot_bios = ""
 
@@ -326,9 +355,18 @@ proc run_test(test: TestDef; harness_path: string): TestResult =
       cmd.add(" --input=" & test.input.quoteShell)
     if screenshot_bios.len > 0 and test.rom_path.endsWith(".gba"):
       cmd.add(" --bios=" & screenshot_bios.quoteShell)
+    if test.console_verdict:
+      cmd.add(" --console")
     let (run_output, run_code) = execCmdEx(cmd, options = {poUsePath})
     if run_code != 0:
       return TestResult(name: test.name, passed: false, output: run_output.strip())
+    if test.console_verdict:
+      removeFile(tmp_ppm)
+      var text: seq[string]
+      for l in run_output.splitLines():
+        if l.startsWith("CONSOLE "): text.add(l[8 .. ^1])
+      let (passed, detail) = console_verdict_of(text, test.console_checks)
+      return TestResult(name: test.name, passed: passed, output: detail)
     if test.agbeeg_check.len > 0:
       removeFile(tmp_ppm)
       let line = "AGBEEG " & test.agbeeg_check & " "
@@ -1571,7 +1609,9 @@ proc build_alyosha_tests(alyosha, png183, jsmolka: string): seq[TestDef] =
   ## unless --bios: six halt/IRQ tests read differently on the real BIOS.
   const DrawOnly = ["Sprite_Disable_Midline", "Sprite_Disable_on_VRAM_Access",
                     "stripes_x_offset"]
-  const NoHardwareVerdict = ["unsafe/prefetcher_branch_thumb_arm_2"]
+  const NoHardwareVerdict = ["unsafe/prefetcher_branch_thumb_arm_2",
+                             "unsafe/fifo_dma_disable_jam",
+                             "unsafe/fifo_dma_disable_jam_2"]
   var seen: seq[string]
   for rom in walkDirRec(jsmolka):
     if rom.endsWith(".gba"): seen.add($secureHashFile(rom))
@@ -1729,6 +1769,42 @@ proc build_gba_misc_tests(): seq[TestDef] =
     no_save: true,
     expected_png: "tests/roms/semiobjwin_expected.png",
   ))
+
+# nba-emu/hw-test (BSD-3-Clause): GBA hardware tests, built ROMs in the
+# repository. Pinned to a commit on Codeberg, where the project moved in
+# 2026; each ROM is checked against the SHA-1 it had there.
+const NbaHwTestRev = "fbc99140e06f083c0a47612467cfbb02470e56dc"
+const NbaHwTestRoms = [
+  # (path, SHA-1, checks when the ROM prints no closing line)
+  ("bus/128kb-boundary", "b64c89cf379dc10151369511e52790fc94623617", 18),
+  ("dma/burst-into-tears", "9191fa47ef48a2a672751c4a81ab7fb4800da371", 0),
+  ("dma/force-nseq-access", "fd468aad0428c73c8d400df1b1989e3523009f15", 0),
+  ("dma/latch", "204f6ed5bb97e2b766b9dd486888a6d626366928", 0),
+  ("dma/start-delay", "def66784ae36eddf20e813d27f68843d41385e0f", 0),
+  ("haltcnt", "d91ece70fb59e53ffb92d94eccb5b3d504708751", 0),
+  ("irq/irq-delay", "2e6c61b9b31d62905d353f0482b2afe79f140abd", 0),
+  ("ppu/vram-mirror", "e76b52b46037e792fec61e21f654deb4e77546f0", 0),
+  ("timer/reload", "9e931cc45cd7701e97bb0601718aa9c88e865e92", 0),
+  ("timer/start-stop", "778a94262427df64b6707bc88075593132085034", 0),
+  ("timer/tick-before-reload", "3352a9a465e1a9f37546c2815bbc25d4827b158c", 0)]
+
+proc build_nba_hwtest_tests(): seq[TestDef] =
+  ## The self-checking ROMs, scored on the console text they print. The
+  ## values settle within a second of power-on; 600 frames is margin.
+  for (rel, sha, checks) in NbaHwTestRoms:
+    let stem = rel.splitPath().tail
+    result.add(TestDef(
+      name: "nba-hw-test/" & rel,
+      rom_path: ensure_rom_download(
+        &"https://codeberg.org/nba-emu/hw-test/raw/commit/{NbaHwTestRev}/{rel}/{stem}.gba",
+        "nba-hw-test-" & NbaHwTestRev[0 ..< 7] & "-" & stem & ".gba", sha),
+      mode: tmScreenshot,
+      timeout: 600,
+      color: true,
+      no_save: true,
+      console_verdict: true,
+      console_checks: checks,
+    ))
 
 proc build_hwverified_tests(): seq[TestDef] =
   ## This repo's own proof ROMs (tests/roms/hwverified), each carrying the
@@ -2014,16 +2090,29 @@ const NotScored: seq[(string, string)] = @[
     "`cgb_dmg_mode` `m3_lcdc_win_en_change_multiple_wx_*_signed_addressing_" &
     "source` rows (\"glitch is different, probably uses another memory " &
     "bus\"). (build_docboy_rows)"),
-  ("alyosha `unsafe/prefetcher_branch_thumb_arm_2`", "its expected values " &
-    "were never produced by a console: the suite's own unsafe/README.md " &
-    "says the ROM \"crashes on console due to the prefetcher being " &
-    "misaligned when switching from thumb to arm mode\", and the author " &
-    "moved it out of `prefetcher/` (whose `_arm`, `_arm_3` and `_arm_4` " &
-    "siblings are scored) for that reason. The check it fails is that " &
-    "switch: TM0 after the Thumb `bx r2` at 0x0800019E into ARM code at " &
-    "0x080001A4, a branch from an odd halfword, expected 0x53, read 0x4E " &
-    "here. Its first check, the ARM-to-Thumb branch before it, reads the " &
-    "expected 0x3A. (build_alyosha_tests)"),
+  ("alyosha `unsafe/` (3)", "expected values no console produced. The " &
+    "suite's own unsafe/README.md: `prefetcher_branch_thumb_arm_2` " &
+    "\"crashes on console due to the prefetcher being misaligned when " &
+    "switching from thumb to arm mode\", and \"fifo_dma_disable_jam and " &
+    "fifo_dma_disable_jam_2 also crash on console due to FIFO DMA being " &
+    "triggered but then disabled before it starts\". Read here, the two " &
+    "FIFO ROMs print \"All tests passed\" and the prefetcher ROM fails its " &
+    "second check (TM0 after the Thumb `bx r2` at 0x0800019E into ARM code " &
+    "at 0x080001A4, a branch from an odd halfword: expected 0x53, read " &
+    "0x4E); none of the three counts either way. (build_alyosha_tests)"),
+  ("nba-hw-test: five picture ROMs", "`ppu/bgpd`, `ppu/bgx`, " &
+    "`ppu/dispcnt-latch`, `ppu/greenswap` and `ppu/sprite-hmosaic` print no " &
+    "verdict; each draws a picture and ships an `expected.png` that is a " &
+    "photograph of a console (bgpd, greenswap: 4000x3000) or a scaled " &
+    "capture with a window border (1083x724, 602x402, 2056x1480), not a " &
+    "240x160 frame an exact comparison can use. (build_nba_hwtest_tests)"),
+  ("nba-hw-test: two menu ROMs", "`ppu/ram-access-timing` and " &
+    "`ppu/status-irq-dma` wait at a menu for key presses, and the harness " &
+    "schedules presses for Game Boy runs only (`--press`). Not run: a " &
+    "coverage gap, not a judgment on the ROMs. (build_nba_hwtest_tests)"),
+  ("nba-hw-test: archive/", "the suite's own archive/README.md: ROMs " &
+    "\"replaced or deemed unfit for purpose\", \"not considered to be a " &
+    "part of the NBA hw-test suite anymore\". (build_nba_hwtest_tests)"),
   ("DocBoy manifests: 717 vendored ROMs of other suites",
     "everything outside `docboy/` in its manifests (blargg, mooneye, " &
     "gbmicrotest, mealybug, SameSuite, daid, magen, acid2, " &
@@ -2166,7 +2255,8 @@ proc detail_page(suite_name: string): string =
   elif suite_name == "Game Boy - DocBoy": "results_docboy.md"
   else: ""
 
-proc generate_results_md(unordered: seq[SuiteResults]): string =
+proc generate_results_md(unordered: seq[SuiteResults];
+                         docboy_failing, docboy_roms: int): string =
   let suites = unordered.sortedByIt(results_rank(it.suite_name))
   var lines: seq[string]
   lines.add("# Dingbat Test Results")
@@ -2192,6 +2282,21 @@ proc generate_results_md(unordered: seq[SuiteResults]): string =
   lines.add("- **Total:** " & $total)
   lines.add("- **Pass:** " & $pass_count)
   lines.add("- **Fail:** " & $(total - pass_count))
+  lines.add("")
+  # The unit of the totals above: a red row of an aggregated suite is many
+  # ROMs, and the DocBoy count says how many.
+  var unit = "A row is one ROM, except in DocBoy (a manifest section), " &
+    "gambatte (a directory), dbsuite (a sub-suite), the mGBA suite (a " &
+    "section) and SingleStepTests (a vector file or opcode block): there " &
+    "a row holds many tests and is green only when all of them pass " &
+    "(SingleStepTests: when every failure is a known divergence)."
+  if docboy_roms > 0:
+    let red = suites.filterIt(it.suite_name == "Game Boy - DocBoy")
+                    .mapIt(it.results.countIt(not it.passed)).foldl(a + b, 0)
+    unit.add(" DocBoy's " & $red & " red rows are " & $docboy_failing &
+      " failing ROMs of " & $docboy_roms &
+      " ([results_docboy.md](results_docboy.md)).")
+  lines.add(unit)
   lines.add("")
   # The suite name links to its detail page; load_previous_results reads an
   # all-pass row here as "every row of this suite was green".
@@ -3594,6 +3699,8 @@ proc main() =
                              harness, no_previous, gba_regressions))
     gba_suites.add(run_suite("GBA - Other test ROMs", build_gba_misc_tests(),
                              harness, no_previous, gba_regressions))
+    gba_suites.add(run_suite("GBA - NBA hw-test", build_nba_hwtest_tests(),
+                             harness, no_previous, gba_regressions))
     gba_suites.add(run_suite("GBA - hwverified (AGS-001)", build_hwverified_tests(),
                              harness, no_previous, gba_regressions))
     var dbsuite_groups: seq[DbsuiteGroup]
@@ -3651,6 +3758,9 @@ proc main() =
                            harness, previous, regressions))
 
   all_suites.add(run_suite("GBA - Other test ROMs", build_gba_misc_tests(),
+                           harness, previous, regressions))
+
+  all_suites.add(run_suite("GBA - NBA hw-test", build_nba_hwtest_tests(),
                            harness, previous, regressions))
 
   all_suites.add(run_suite("GBA - hwverified (AGS-001)", build_hwverified_tests(),
@@ -3717,7 +3827,12 @@ proc main() =
     ensure_arm7tdmi_vectors(), previous, previous_counts, regressions, sst_detail))
 
   createDir(getCurrentDir() / "tests")
-  writeFile(results_path, generate_results_md(all_suites))
+  var docboy_pass, docboy_roms = 0
+  for g in docboy_groups:
+    docboy_pass += g.passes
+    docboy_roms += g.total
+  writeFile(results_path, generate_results_md(all_suites,
+    docboy_roms - docboy_pass, docboy_roms))
   let mgba_detail_path = getCurrentDir() / "tests" / "results_mgba_suite.md"
   writeFile(mgba_detail_path, generate_mgba_detail_md(mgba_detail))
   let dbsuite_detail_path = getCurrentDir() / "tests" / "results_dbsuite.md"

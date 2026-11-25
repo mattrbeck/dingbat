@@ -31,6 +31,8 @@ Options: `--timeout=<frames>`, `--frames=<warmup>`, `--screenshot=<path.ppm>`,
 `--max-fails=<n>` (fuzzarm), `--color`, `--dmg`, `--cgb`, `--sgb`, `--cgb-rev=<0|A|B|C|D|E>`,
 `--model=<dmg0|mgb|sgb|cgb0|...>` (boot table + `GbQuirks` revision), `--nosave`,
 `--ed-breakpoint`, `--bb-breakpoint`, `--screen-check`, `--bios=<path>`,
+`--console` (GBA: print the text of libgba's console, one `CONSOLE <row>` line per
+non-blank row, read from the tile map at screen base 4),
 `--press=<frame>:<btn>[+<btn>],...` (GB: hold the buttons from that frame for six frames,
 for ROMs with a menu; applied between frames, as the frontend does),
 `--serial-pass=<text>` / `--serial-fail=<text>` (serial mode: a ROM's own verdict text in
@@ -211,9 +213,20 @@ prefetcher, bus, FIFO, LDM, serial and timer timing ROMs. They are scored in scr
 mode on the verdict line the framework draws ("All tests passed" / "Failed test NNN" at
 y = 76, read with the font from the repo's own `lib/glyphs.asm`: `read_verdict_text` in
 the runner), because the r12 protocol misreads the LDM and halt ROMs. Copies of jsmolka's
-ROMs and the three draw-only ROMs are skipped, and so is `unsafe/prefetcher_branch_thumb_arm_2`,
-which the suite's own `unsafe/README.md` says crashes on a console, so its expected values
-never came off one (NotScored).
+ROMs and the three draw-only ROMs are skipped, and so are the three ROMs the suite's own
+`unsafe/README.md` says crash on a console (`prefetcher_branch_thumb_arm_2`,
+`fifo_dma_disable_jam`, `fifo_dma_disable_jam_2`): their expected values never came off
+one, whether dingbat meets them or not (NotScored).
+
+**nba-emu/hw-test** (BSD-3-Clause; pinned to a commit on Codeberg, each ROM by SHA-1,
+never committed). Its self-checking ROMs print one `<name>: PASS <value>` or
+`<name>: FAIL <value>` line per check through libgba's console and close with
+`congratulations!` or `pass: N` / `total: M`. The runner asks the harness for that text
+(`--console`) and scores one row per ROM, green only when every check passes; a red row
+names its failing checks. `bus/128kb-boundary` prints no closing line, so it passes when
+all 18 of its lines read PASS; when some fail, the first lines scroll off and the row
+names only the failures still on screen. The picture ROMs, the two menu-driven ROMs and
+`archive/` are not scored (NotScored says why).
 
 **PeterLemon BIOS, gba-rtc-test, Hades-Tests, SwpTestsGBA, AGBEEG** (screenshot mode,
 downloaded at pinned revisions or release SHA-1s, never committed). PeterLemon's BIOS ROMs
@@ -268,7 +281,7 @@ SHA is a re-baseline), MagenTests at `MagenRelease`, and ~30 shootout files at
 Flags: `--bios=<path>` (the mGBA suite and every GBA screenshot row run on that BIOS image
 instead of the HLE), `--apu` (runs only Blargg dmg_sound/cgb_sound + SameSuite APU and prints
 tallies without rewriting results files), `--suite=gba` (the same for every GBA suite: mGBA,
-jsmolka, FuzzARM, alyosha, PeterLemon, Other, SingleStepTests ARM7TDMI; about a
+jsmolka, FuzzARM, alyosha, PeterLemon, Other, NBA hw-test, SingleStepTests ARM7TDMI; about a
 minute), `--suite=singlestep` (both SingleStepTests sets, see below), `--suite=docboy`
 (the DocBoy suite alone, tallies only).
 
@@ -293,6 +306,7 @@ authority on device, exit condition and verdict.
 | gambatte | glyph OCR of the on-screen result | batched; one row per subdirectory |
 | DocBoy | HRAM `$FFF0` (1 pass / 2 fail) or framebuffer vs reference PNG, DocBoy's own runner rules | batched (`--mode=docboy`); one row per manifest section; see "The DocBoy suite" |
 | mGBA suite, jsmolka, FuzzARM | GBA | see above |
+| NBA hw-test | console text (`--console`) | one row per self-checking ROM; see above |
 | SingleStepTests SM83, ARM7TDMI | per-instruction state and bus vs the vectors | `./singlestep_test`; see "SingleStepTests" below |
 
 **The device each suite is scored on** (`Device` column in `results.md`): `cart` = the
