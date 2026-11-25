@@ -15,7 +15,7 @@ One line per document: what it is for and who reads it. Scores live only in
 ## Building and releasing
 
 - [building.md](building.md) — native, WebAssembly and Windows cross-builds. Contributors.
-- [../THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md) — licences of everything compiled into the binaries and the two derived models. Whoever ships a release.
+- [../THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md) — licences of everything compiled into the binaries and the code derived from other projects. Whoever ships a release.
 - [manual-verification.md](dev/manual-verification.md) — hands-on checks the harnesses cannot run (Drive, deployed https, devices). Whoever ships a release.
 
 # Developer reference
