@@ -234,3 +234,6 @@ tests/nds/src/**/*.elf
 # Built by .github/scripts/build-webrtc.sh (nimble webrtc)
 deps/
 /.fuzz/
+
+# Where the GB/GBC sweep fetches its ROM sets (tools/gbfuzz/pick_roms.py)
+tools/gbfuzz/sources.local.json

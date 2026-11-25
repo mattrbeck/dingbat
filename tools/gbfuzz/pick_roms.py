@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Rank the GB and GBC archives by popularity and extract the next batch.
 
-Four public archive.org sources, two naming conventions between them (see
-SOURCES). Two are enough to sweep from; the other two exist because no single
+Four ROM sets, two naming conventions between them (see SOURCES). Two are
+enough to sweep from; the other two exist because no single
 set is complete -- Pokemon Yellow, Double Dragon II/3, Mystical Ninja and the
 Arcade Classic series are all missing from the first pair and present in the
 second. A title is taken from whichever source has the most canonical dump.
@@ -14,23 +14,31 @@ score): no betas/protos/hacks, USA preferred, latest revision.
 
 Usage: pick_roms.py <workdir> <count> [--skip N] [--out selected_roms.json]
   workdir needs gb_zip_list.txt, gbc_zip_list.txt, GameBoy.zip
+  sources.local.json beside this file says where each set is (see SOURCES)
 """
 import json, os, re, subprocess, sys, urllib.parse, zipfile
 
-# name -> (list file, how to fetch one title). "item" downloads one file from an
-# archive.org item directly; "nested" pulls a single entry out of a zip stored in
-# an item, which archive.org serves without transferring the whole archive;
-# "local" reads the outer zip already on disk. Listings for the nested sources
-# come from `archive.org/download/<item>/<zip>/` (see fetch_lists.sh).
-SOURCES = {
-    'gb':   ('gb_zip_list.txt',   ('local',  'GameBoy.zip')),
-    'gbc':  ('gbc_zip_list.txt',  ('item',
-             'https://archive.org/download/theentireGAMEBOYCOLORcollection')),
-    'gb2':  ('alt_gb_list.txt',   ('nested',
-             'https://archive.org/download/gb_20251214/gb.zip')),
-    'gbc2': ('alt_gbc_list.txt',  ('nested',
-             'https://archive.org/download/GameBoyColor_201905/GameBoy Color.zip')),
-}
+# name -> (list file, how to fetch one title). "item" downloads one file from a
+# directory URL; "nested" pulls a single entry out of a zip behind a URL that
+# serves a zip's entries as paths; "local" reads the outer zip already on disk.
+# Where each set is stays out of the repo: sources.local.json beside this file
+# (git-ignored; $GBFUZZ_SOURCES names another) maps a set to [how, where], e.g.
+# {"gb": ["local", "GameBoy.zip"], "gbc": ["item", "https://host/dir"]}.
+LISTS = {'gb': 'gb_zip_list.txt', 'gbc': 'gbc_zip_list.txt',
+         'gb2': 'alt_gb_list.txt', 'gbc2': 'alt_gbc_list.txt'}
+
+
+def load_sources():
+    path = os.environ.get('GBFUZZ_SOURCES') or os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), 'sources.local.json')
+    try:
+        where = json.load(open(path))
+    except FileNotFoundError:
+        sys.exit(f'{path} is missing: it says where the ROM sets are (see SOURCES)')
+    return {name: (LISTS[name], tuple(where[name])) for name in LISTS if name in where}
+
+
+SOURCES = load_sources()
 
 # Ranked by sales and notability, GB and GBC interleaved. The tail leans on
 # titles that are known to stress a GB emulator (mid-frame scroll tricks, HDMA
