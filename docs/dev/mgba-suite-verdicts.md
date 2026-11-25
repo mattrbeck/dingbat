@@ -1,9 +1,8 @@
-# The mGBA suite's failing rows: per-row verdicts
+# The mGBA suite's rows that failed: per-row verdicts
 
-Current state is the Summary in `tests/results_mgba_suite.md` (every
-remaining failure is in "Misc. edge case"). This file says why each
-remaining row fails and what would close it, and records the verdicts on
-the rows that were closed so they are not re-derived.
+The suite is green, 6998/6998 (`tests/results_mgba_suite.md`). Every row
+that failed was in "Misc. edge case"; this file records why each failed
+and what closed it, so the verdicts are not re-derived.
 
 ## Reading the Misc section
 
@@ -59,7 +58,16 @@ the six `Flip` loops shift by 1 to 16 cycles each for the same reason.
 that pin only alongside constants re-measured on hardware with the newer
 toolchain.
 
-## `DMA Prefetch Break` — the one real Misc failure
+## `DMA Prefetch Break` — closed 2026-09-20
+
+The row passes, under the HLE BIOS and the real one. Two things closed it:
+the H-blank flag rises at cycle 1007, not GBATEK's 1006, and the DMAs follow
+it (AGB SP, `tests/roms/payloads/breakram.s`); and the fork resets libgba's
+interrupt table before each suite, since Misc run after the other suites
+returned from `VBlankIntrWait` 11 cycles late. That build is the ROM the
+runner pins now (`MgbaSuiteSha1`, `35d330ee...`), which supersedes the
+`da6f5c69...` build above. The rest of this section is the dig that led
+there.
 
 `out[0] = 0x10000000 + 4 x reads`: a 7-instruction Thumb ROM loop reads open
 bus until one read returns an HBlank DMA's last value instead of the

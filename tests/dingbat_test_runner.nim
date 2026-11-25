@@ -2108,7 +2108,7 @@ const NotScored: seq[(string, string)] = @[
     "suite in the tree reads cart RAM before writing it; mooneye's " &
     "`emulator-only/mbc1/ram_*` read it disabled ($FF, open bus) and " &
     "clear it first. dingbat keeps $00 for a cart with no save file; $FF " &
-    "stays a choice open to Matt (it would change every new save's first " &
+    "stays an open choice (it would change every new save's first " &
     "boot). (build_docboy_rows, DocboyNotScored)"),
   ("DocBoy: SameSuite `channel_1_sweep_restart_2` rewritten for CGB E (1)",
     "`cgb/samesuite/apu/channel_1/channel_1_sweep_restart_2-cgbE`: " &

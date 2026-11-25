@@ -191,9 +191,9 @@ rather than silently re-baselined. That build carries the upstream fixture fixes
 start" constants time compiler output, so the fork's `docker-build.sh` pins
 `devkitpro/devkitarm:20260221` — the image that was `latest` when they were measured.
 Built by any other gcc those eight rows disagree with their own expected values; built by
-that one they all pass. The single row left is "DMA Prefetch Break", which cannot pass as
-the core dispatches: its exit is a per-line lottery on a window narrower than an
-instruction (`docs/dev/mgba-suite-verdicts.md`).
+that one they all pass. The fork also resets libgba's interrupt table before each suite,
+which "DMA Prefetch Break" needs when the suites run back to back
+(`docs/dev/mgba-suite-verdicts.md`).
 
 ### jsmolka, FuzzARM, MagenTests
 
@@ -211,16 +211,14 @@ prefetcher, bus, FIFO, LDM, serial and timer timing ROMs. They are scored in scr
 mode on the verdict line the framework draws ("All tests passed" / "Failed test NNN" at
 y = 76, read with the font from the repo's own `lib/glyphs.asm`: `read_verdict_text` in
 the runner), because the r12 protocol misreads the LDM and halt ROMs. Copies of jsmolka's
-ROMs and the three draw-only ROMs are skipped, and so are `unsafe/prefetcher_branch_thumb_arm_2`,
+ROMs and the three draw-only ROMs are skipped, and so is `unsafe/prefetcher_branch_thumb_arm_2`,
 which the suite's own `unsafe/README.md` says crashes on a console, so its expected values
-never came off one, and `fifo_dma/fifo`, whose source marks its one failing check "gives
-unexpected results on hardware" (both NotScored). Many rows are red: they are the open GBA timing gaps, not
-harness faults.
+never came off one (NotScored).
 
 **PeterLemon BIOS, gba-rtc-test, Hades-Tests, SwpTestsGBA, AGBEEG** (screenshot mode,
 downloaded at pinned revisions or release SHA-1s, never committed). PeterLemon's BIOS ROMs
-ship the frame they draw as a PNG and are compared exactly; they run on the HLE BIOS, and
-the red rows show where its SWI cycle counts differ from the real BIOS's. ROMs that only
+ship the frame they draw as a PNG and are compared exactly; they run on the HLE BIOS, so
+a red row would show where its SWI cycle counts differ from the real BIOS's. ROMs that only
 print their verdicts are scored on a pinned hash of the all-pass frame, checked by eye when
 pinned; a ROM that has never drawn that frame here is `unpinned` and red until it does.
 SwpBusLocking's verdict is its backdrop colour (`pass_rgb`). AGBEEG reports each check
@@ -371,8 +369,6 @@ scores them INFO).
 - The regression key is the full name (`blargg/oam_bug/1-lcd_sync`); anything shorter
   collides across forks. A name absent from the baseline is not gated, so adding a suite
   means regenerating and committing `results.md` in the same change.
-- `magen/hblank_vram_dma` is baselined failing: dingbat runs the HBlank VRAM DMA while
-  the CPU is halted.
 - Parallel runners delete each other's gambatte shard output (`$TMPDIR/dingbat-gambatte`
   is wiped on entry) and the victim scores every unflushed row 0. Use a private `TMPDIR`.
 - `$DINGBAT_ROM_CACHE` reuses any present file by name, so a different build dropped at a
@@ -391,7 +387,7 @@ scores them INFO).
 
 ## The gambatte suite
 
-3,524 ROMs in the game-boy-test-roms bundle, expanding to 5,005 scored rows. Verdict
+3,524 ROMs in the game-boy-test-roms bundle, expanding to 5,213 scored rows. Verdict
 mechanism per the bundle's howto and gambatte's own test runner:
 
 - Every ROM runs exactly 15 LCD frames from the post-boot state, then the frame is read
