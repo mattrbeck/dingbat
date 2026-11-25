@@ -174,15 +174,16 @@ const closeNetModal = () => {
   releaseFocus(netModal);
 };
 
-// Liveness probe (page load, tab visible, modal open) so the link modal can
-// open straight onto the manual exchange when the server was last seen down.
-// Real dials also feed the flag.
+// Liveness probe, made when the link modal opens so it can turn to the manual
+// exchange when the server is down. Not at page load or on tab focus: every
+// probe is a TLS handshake on a small server, and most visits never link.
+// Real dials also feed the flag. `onDown` runs when this probe finds it down.
 let sigServerUp = null; // null = never probed; otherwise last known liveness
 let sigProbeAt = 0;
 const SIG_PROBE_MIN_INTERVAL = 30000;
 const SIG_PROBE_TIMEOUT = 4000; // a silent host is "down", same as an error
 
-const probeSignalServer = () => {
+const probeSignalServer = (onDown) => {
   const now = Date.now();
   if (now - sigProbeAt < SIG_PROBE_MIN_INTERVAL) return;
   sigProbeAt = now;
@@ -206,6 +207,7 @@ const probeSignalServer = () => {
     sigServerUp = false;
     log("netplay: probe " + NET_SIGNAL_URL + " timed out after " + ms(), "warn");
     try { ws.close(); } catch {}
+    onDown?.();
   }, SIG_PROBE_TIMEOUT);
   ws.onopen = () => {
     if (settled) return;
@@ -222,12 +224,9 @@ const probeSignalServer = () => {
     sigServerUp = false;
     clearTimeout(timer);
     log("netplay: probe " + NET_SIGNAL_URL + " errored after " + ms(), "warn");
+    onDown?.();
   };
 };
-probeSignalServer();
-document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "visible") probeSignalServer();
-});
 
 // True while the connect modal froze the running game (so cancel can thaw it).
 let netFrozeGame = false;
@@ -254,6 +253,13 @@ const openNetConnect = async (attach) => {
     log("netplay: last probe saw the server down — opening onto the manual exchange", "warn");
     probeSignalServer();
     manualEnter();
+  } else if (navigator.onLine) {
+    // Down, and still on code entry with no dial of its own under way (a dial
+    // that fails turns to the manual exchange itself).
+    const session = net;
+    probeSignalServer(() => {
+      if (net === session && !net.ws) manualEnter();
+    });
   }
   // Freeze the game for the whole of code entry, pairing and transfer: left
   // running, its own link handshake times out before the peer connects.

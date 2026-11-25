@@ -115,9 +115,13 @@ const setup = async (opts = {}) => {
 
   vm.runInContext(NET_SOURCE, app.context, { filename: "web/netplay.js" });
 
-  // Complete the module-scope liveness probe as "up".
-  assert.equal(sockets.length, 1, "module-scope liveness probe dialed once");
-  sockets[0].open();
+  // The page dials nothing on its own. The probe a first modal open makes is
+  // made here and answered "up", unless the test wants that open's own.
+  assert.equal(sockets.length, 0, "no dial at page load");
+  if (opts.probed !== false) {
+    vm.runInContext("probeSignalServer()", app.context);
+    sockets[0].open();
+  }
 
   const el = (id) => app.document.getElementById(id);
   const api = vm.runInContext(`({ openNetConnect, get net() { return net; }, pageId: NET_PAGE_ID })`, app.context);
@@ -258,6 +262,26 @@ test("a late WebKit error after a successful probe doesn't mark the server down"
   await api.openNetConnect(true);
   assert.equal(el("net-manual-view").hidden, true, "modal opens on the shared-code view");
   assert.equal(el("net-connect-view").hidden, false);
+});
+
+test("the first modal open probes the server; finding it down turns to the manual exchange", async () => {
+  const { el, api, sockets, flush } = await setup({ probed: false });
+  await api.openNetConnect(true);
+  assert.equal(sockets.length, 1, "the open's probe");
+  assert.equal(el("net-manual-view").hidden, true, "code entry until the probe answers");
+  sockets[0].onerror?.();
+  await flush();
+  assert.equal(el("net-manual-view").hidden, false, "manual exchange once it is known down");
+});
+
+test("a probe that fails after the player's own dial began leaves the dial to it", async () => {
+  const { el, sockets, connect, flush } = await setup({ probed: false });
+  connect("TESTX");
+  await flush();
+  assert.equal(sockets.length, 2, "the open's probe, then the dial");
+  sockets[0].onerror?.();
+  await flush();
+  assert.equal(el("net-manual-view").hidden, true, "the dial's own outcome decides");
 });
 
 test("the footer links toggle between the shared-code and manual views", async () => {
