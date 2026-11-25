@@ -803,6 +803,6 @@ const reaper = setInterval(() => {
 }, PING_INTERVAL_MS);
 reaper.unref(); // never keep the process alive just for the sweep
 
-server.listen(PORT, () => {
+server.listen(PORT, process.env.SIGNAL_BIND || undefined, () => {
   console.log(`dingbat signaling server listening on ws://localhost:${server.address().port}`);
 });

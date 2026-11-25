@@ -39,7 +39,9 @@
 ## (tools/formal/WebState/LinkRedial.lean).
 ##
 ## No TLS: a reverse proxy terminates wss:// and forwards plain ws://. The
-## request path is ignored, except /oauth (below) and /bye.
+## request path is ignored, except /oauth (below) and /bye. SIGNAL_BIND is the
+## address to listen on (default: every interface); behind a proxy on the same
+## host set it to 127.0.0.1, or the port answers the internet without TLS.
 ##
 ## Per-IP limits key on the direct peer address, except when that is localhost
 ## (reverse proxy): then the last X-Forwarded-For entry, the one the trusted
@@ -71,6 +73,7 @@ const
   MaxMsgBytes = 64 * 1024    # SDP + ICE are a few KB; anything bigger is abuse
   MaxConns = 2000            # total live sockets; reject the upgrade past this
   MaxRooms = 1000            # total live rooms; reject new-room rendezvous past this
+  AcceptRetryMs = 100        # pause after a failed accept
   MinCodeLen = 3             # short enough to say aloud, long enough to not collide
   # Per-IP quotas: codes are short and user-chosen (pairing is first-come), so
   # one address must not be able to sweep the code space or eat the global caps.
@@ -284,6 +287,9 @@ proc closeSock(c: Conn) =
   if c.ipCounted:
     c.ipCounted = false
     dropIp(ipConns, c.ip)
+  # A pair points at each other, and mm:arc frees no cycle: each side lets go
+  # of the other as it closes, or both Conns (and their SDP) stay for good.
+  c.peer = nil
   try: c.sock.close()
   except CatchableError: discard
 
@@ -461,6 +467,9 @@ proc originAllowed(origin: string): bool =
 
 proc httpReply(c: Conn, status, body, origin: string,
                extra = "") {.async.} =
+  # Closed while curl ran (the reaper): its descriptor may be another
+  # client's by now, and a token reply must not reach it.
+  if c.closed: return
   var head = "HTTP/1.1 " & status & "\r\nContent-Type: application/json\r\n" &
              "Cache-Control: no-store\r\n" & extra
   if origin.len > 0 and originAllowed(origin):
@@ -787,18 +796,29 @@ proc serve(port: Port) {.async.} =
   # (Nim 2.2.x / macOS).
   var server = newAsyncSocket(buffered = false)
   server.setSockOpt(OptReuseAddr, true)
-  server.bindAddr(port)
+  server.bindAddr(port, getEnv("SIGNAL_BIND"))
   server.listen()
   echo "dingbat signaling server listening on ws://localhost:", port.int
   asyncCheck reaper()
   while true:
-    let sock = await server.accept()
+    # An accept that fails (out of descriptors, a peer reset before accept)
+    # must not end the server: wait, so a full descriptor table is not a spin.
+    var sock: AsyncSocket
+    try:
+      sock = await server.accept()
+    except CatchableError:
+      await sleepAsync(AcceptRetryMs)
+      continue
     if conns.len >= MaxConns:
       sock.close()                          # shed load rather than grow unbounded
       continue
     # The level must be explicit: at the default SOL_SOCKET, TCP_NODELAY's
     # value decodes as SO_DEBUG, which is EPERM on Linux without CAP_NET_ADMIN.
-    sock.setSockOpt(OptNoDelay, true, level = cint(IPPROTO_TCP))
+    try:
+      sock.setSockOpt(OptNoDelay, true, level = cint(IPPROTO_TCP))
+    except CatchableError:                  # reset already
+      sock.close()
+      continue
     var peerIp = ""
     try: peerIp = sock.getPeerAddr()[0]
     except CatchableError: discard            # peer already gone; treated as "?"
